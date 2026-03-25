@@ -370,7 +370,7 @@ export async function createUserFromSSO(
 
     // Rest of the existing SSO logic for organizations...
     const organizations = await getOrganizationsBySsoDomain(emailDomain);
-    const roles = [];
+    let firstMatchedOrg: (typeof organizations)[number] | null = null;
 
     for (const org of organizations) {
       const { ssoDetails } = org;
@@ -386,7 +386,7 @@ export async function createUserFromSSO(
         const role = getRoleFromGroupId(ssoDetails, groups);
 
         if (role) {
-          roles.push(role);
+          firstMatchedOrg ??= org;
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -402,10 +402,9 @@ export async function createUserFromSSO(
       }
     }
 
-    // No matching roles — the user was still created with a personal
-    // workspace. Return with org: null so the OAuth callback can
-    // redirect them to the "pending assignment" page.
-    return { user, org: roles.length > 0 ? organizations[0] || null : null };
+    // Return the first org that actually matched the user's groups, or
+    // null so the OAuth callback redirects to the "pending assignment" page.
+    return { user, org: firstMatchedOrg };
   } catch (cause: any) {
     throw new ShelfError({
       cause,
@@ -568,7 +567,7 @@ export async function updateUserFromSSO(
     const existingUserOrganizations = user.userOrganizations;
 
     const transitions: UserOrgTransition[] = [];
-    const desiredRoles = [];
+    let firstMatchedOrg: (typeof domainOrganizations)[number] | null = null;
 
     for (const org of domainOrganizations) {
       const { ssoDetails } = org;
@@ -587,7 +586,7 @@ export async function updateUserFromSSO(
         );
 
         if (desiredRole) {
-          desiredRoles.push(desiredRole);
+          firstMatchedOrg ??= org;
         }
 
         if (existingOrgAccess) {
@@ -622,22 +621,9 @@ export async function updateUserFromSSO(
       }
     }
 
-    // Find the first SCIM-configured org to redirect to, or null if
-    // the user has no matching roles (they'll land on the pending page).
-    const firstScimOrg =
-      desiredRoles.length > 0
-        ? domainOrganizations.find(
-            (org) =>
-              org.ssoDetails &&
-              (org.ssoDetails.adminGroupId ||
-                org.ssoDetails.baseUserGroupId ||
-                org.ssoDetails.selfServiceGroupId)
-          ) || null
-        : null;
-
     return {
       user,
-      org: firstScimOrg,
+      org: firstMatchedOrg,
       transitions,
     };
   } catch (cause) {

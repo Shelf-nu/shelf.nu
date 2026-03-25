@@ -1,3 +1,12 @@
+/**
+ * SSO Pending Assignment page.
+ *
+ * Displayed when an SSO user has no team workspace assigned. This can
+ * happen on first login (no SCIM groups matched) or when all group
+ * access has been revoked. The loader re-checks for team orgs on each
+ * visit so the user is automatically redirected once an admin assigns
+ * them. Uses the `_welcome+` layout for a centered, standalone card.
+ */
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, redirect } from "react-router";
