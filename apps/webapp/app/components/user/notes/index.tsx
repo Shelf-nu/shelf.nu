@@ -80,6 +80,7 @@ export const UserNotes = ({
             ? {
                 firstName: user.firstName || "",
                 lastName: user.lastName || "",
+                displayName: user.displayName || "",
               }
             : undefined,
         }

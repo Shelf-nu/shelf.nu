@@ -97,9 +97,10 @@ export async function getTeamMemberNotes({
   organizationId: TeamMemberNote["organizationId"];
 }) {
   try {
-    // Verify the team member belongs to this workspace
+    /* Verify the team member belongs to this workspace.
+     * Filter out soft-deleted members for consistency with route-level checks. */
     const teamMember = await db.teamMember.findFirst({
-      where: { id: teamMemberId, organizationId },
+      where: { id: teamMemberId, organizationId, deletedAt: null },
       select: { id: true },
     });
 

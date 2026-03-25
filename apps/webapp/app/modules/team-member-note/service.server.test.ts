@@ -206,7 +206,7 @@ describe("team member note service", () => {
 
       /* Validates workspace membership via TeamMember lookup */
       expect(teamMemberFindFirstMock).toHaveBeenCalledWith({
-        where: { id: "tm-1", organizationId: "org-1" },
+        where: { id: "tm-1", organizationId: "org-1", deletedAt: null },
         select: { id: true },
       });
 
@@ -245,16 +245,15 @@ describe("team member note service", () => {
     it("re-throws ShelfError directly without wrapping", async () => {
       teamMemberFindFirstMock.mockResolvedValue(null);
 
-      try {
-        await getTeamMemberNotes({
+      await expect(
+        getTeamMemberNotes({
           teamMemberId: "tm-999",
           organizationId: "org-1",
-        });
-      } catch (error: any) {
-        /* The 404 ShelfError should be thrown as-is, not wrapped in another ShelfError */
-        expect(error.status).toBe(404);
-        expect(error.message).toBe("Team member not found in this workspace");
-      }
+        })
+      ).rejects.toMatchObject({
+        status: 404,
+        message: "Team member not found in this workspace",
+      });
     });
 
     it("throws ShelfError when database query fails", async () => {
@@ -316,18 +315,16 @@ describe("team member note service", () => {
       /* Simulates cross-workspace deletion attempt: note exists but not in org-other */
       teamMemberNoteDeleteManyMock.mockResolvedValue({ count: 0 });
 
-      try {
-        await deleteTeamMemberNote({
+      await expect(
+        deleteTeamMemberNote({
           id: "tmnote-1",
           userId: "admin-1",
           organizationId: "org-other",
-        });
-      } catch (error: any) {
-        expect(error.status).toBe(403);
-        expect(error.message).toBe(
-          "Note not found or you don't have permission to delete it."
-        );
-      }
+        })
+      ).rejects.toMatchObject({
+        status: 403,
+        message: "Note not found or you don't have permission to delete it.",
+      });
     });
 
     it("throws ShelfError when database operation fails", async () => {
