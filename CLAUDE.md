@@ -131,6 +131,7 @@ shelf/
 - **Server State**: Remix loaders/actions for data fetching and mutations
 - **Client State**: Jotai atoms for complex UI state
 - **URL State**: Search params for filters, pagination, and bookmarks
+- **Optimistic UI & nProgress**: When implementing optimistic UI with fetchers, add the fetcher key to the `excludeFetchers` array in `apps/webapp/app/hooks/use-nprogress.ts` so the global loading bar does not show for operations that already provide instant visual feedback.
 
 ### Data Layer
 

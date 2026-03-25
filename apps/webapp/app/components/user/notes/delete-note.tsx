@@ -30,11 +30,20 @@ import { useDisabled } from "~/hooks/use-disabled";
  * Delete button with confirmation dialog for a user note.
  *
  * @param props.noteId - The ID of the note to delete
+ * @param props.actionUrl - The form action URL. Defaults to the user profile note route
+ *   based on params.userId, but can be overridden for the /me route.
  */
-export const DeleteUserNote = ({ noteId }: { noteId: string }) => {
+export const DeleteUserNote = ({
+  noteId,
+  actionUrl,
+}: {
+  noteId: string;
+  actionUrl?: string;
+}) => {
   const fetcher = useFetcher();
   const params = useParams();
   const disabled = useDisabled(fetcher);
+  const action = actionUrl ?? `/settings/team/users/${params.userId}/note`;
 
   return (
     <AlertDialog>
@@ -71,10 +80,7 @@ export const DeleteUserNote = ({ noteId }: { noteId: string }) => {
             </Button>
           </AlertDialogCancel>
 
-          <fetcher.Form
-            method="delete"
-            action={`/settings/team/users/${params.userId}/note`}
-          >
+          <fetcher.Form method="delete" action={action}>
             <input type="hidden" name="noteId" value={noteId} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"

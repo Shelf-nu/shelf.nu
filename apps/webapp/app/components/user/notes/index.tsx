@@ -13,17 +13,19 @@
  * Features:
  * - Optimistic UI: shows a temporary note immediately while the server processes
  * - Permission-gated: create form and delete actions are conditionally rendered
+ * - Author-only delete: only the note author sees the delete action
  * - Empty state: displays a friendly message when no notes exist
  *
  * @see {@link file://./../../assets/notes/note.tsx} for the shared Note display component
- * @see {@link file://./../../../routes/_layout+/settings.team.users.$userId.notes.tsx} for the route loader
+ * @see {@link file://./../../../routes/_layout+/settings.team.users.$userId.notes.tsx} for the user profile route
+ * @see {@link file://./../../../routes/_layout+/me.notes.tsx} for the /me route
  * @see {@link file://./../../../modules/team-member-note/service.server.ts} for the data layer
  */
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher } from "react-router";
 import type { NoteWithUser } from "~/components/assets/notes/note";
 import { Note } from "~/components/assets/notes/note";
 import { useUserData } from "~/hooks/use-user-data";
-import type { loader } from "~/routes/_layout+/settings.team.users.$userId.notes";
+import type { TeamMemberNoteWithUser } from "~/modules/team-member-note/service.server";
 import { isFormProcessing } from "~/utils/form";
 import { UserNoteActionsDropdown } from "./actions-dropdown";
 import { NewUserNote } from "./new";
@@ -31,18 +33,22 @@ import { NewUserNote } from "./new";
 /**
  * Container component for displaying and managing user notes.
  *
+ * @param props.notes - The notes array from the route loader (typed from Prisma)
  * @param props.canCreate - Whether the current user can create notes (admin/owner only)
  * @param props.canDelete - Whether the current user can delete notes (admin/owner only)
+ * @param props.actionUrl - Override the action URL for create/delete (e.g., `/me/note`)
  */
 export const UserNotes = ({
+  notes,
   canCreate = true,
   canDelete = true,
+  actionUrl,
 }: {
+  notes: TeamMemberNoteWithUser[];
   canCreate?: boolean;
   canDelete?: boolean;
-} = {}) => {
-  const { notes } = useLoaderData<typeof loader>();
-
+  actionUrl?: string;
+}) => {
   /* Using user data for the optimistic Note component rendered on the frontend
    * before the server responds. This provides immediate visual feedback. */
   const user = useUserData();
@@ -81,10 +87,11 @@ export const UserNotes = ({
 
   return (
     <div className="relative">
-      {canCreate ? <NewUserNote fetcher={fetcher} /> : null}
+      {canCreate ? (
+        <NewUserNote fetcher={fetcher} actionUrl={actionUrl} />
+      ) : null}
       {hasNotes || optimisticNote ? (
         <ul className="notes-list mt-8 w-full">
-          {/* Render optimistic note using the same Note component */}
           {/* Optimistic note has a placeholder ID — don't render actions until the real note exists */}
           {optimisticNote && (
             <Note
@@ -93,18 +100,24 @@ export const UserNotes = ({
               actionsDropdown={undefined}
             />
           )}
-          {/* Render all existing notes */}
-          {(notes as NoteWithUser[]).map((note) => (
-            <Note
-              key={note.id}
-              note={note}
-              actionsDropdown={
-                canDelete ? (
-                  <UserNoteActionsDropdown noteId={note.id} />
-                ) : undefined
-              }
-            />
-          ))}
+          {/* Render all existing notes. Only show delete for notes authored by the current user. */}
+          {notes.map((note) => {
+            const isAuthor = canDelete && user?.id === note.userId;
+            return (
+              <Note
+                key={note.id}
+                note={note as unknown as NoteWithUser}
+                actionsDropdown={
+                  isAuthor ? (
+                    <UserNoteActionsDropdown
+                      noteId={note.id}
+                      actionUrl={actionUrl}
+                    />
+                  ) : undefined
+                }
+              />
+            );
+          })}
         </ul>
       ) : (
         <div className="flex h-[500px] items-center justify-center">

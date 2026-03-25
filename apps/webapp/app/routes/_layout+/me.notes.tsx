@@ -1,20 +1,18 @@
 /**
- * User Notes Tab Route — `/settings/team/users/:userId/notes`
+ * My Notes Tab Route — `/me/notes`
  *
- * Renders the "Notes" tab on the admin user profile page.
- * This tab is only visible to ADMIN and OWNER roles.
+ * Renders the "Notes" tab on the authenticated user's own profile page.
+ * This tab is only visible to ADMIN and OWNER roles, showing notes
+ * that other admins (or they themselves) have placed on their profile.
  *
- * The loader resolves the target user's TeamMember in the current workspace,
- * then fetches all workspace-scoped notes for that team member.
- * The component performs client-side permission checks to conditionally
- * render the create form and delete actions.
+ * Unlike the user profile route (`settings.team.users.$userId.notes.tsx`),
+ * this route uses the authenticated user's ID directly — no URL param needed.
  *
- * @see {@link file://./settings.team.users.$userId.note.tsx} for the create/delete action route
+ * @see {@link file://./me.note.tsx} for the create/delete action route
  * @see {@link file://./../../components/user/notes/index.tsx} for the UserNotes container component
  */
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
-import { z } from "zod";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -24,7 +22,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getTeamMemberNotes } from "~/modules/team-member-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { payload, error, getParams } from "~/utils/http.server";
+import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -32,20 +30,13 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
-const paramsSchema = z.object({ userId: z.string() });
-
 /**
- * Loads user notes scoped to the current workspace.
- * Resolves User ID → TeamMember ID, then fetches notes for that team member.
- * Server-side permission check ensures only ADMIN/OWNER can access.
+ * Loads notes for the authenticated user's own profile in the current workspace.
+ * Resolves the user's TeamMember, then fetches workspace-scoped notes.
  */
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  /** The user whose notes we're loading — NOT the authenticated admin */
-  const { userId: targetUserId } = getParams(params, paramsSchema, {
-    additionalData: { userId },
-  });
 
   try {
     const { organizationId } = await requirePermission({
@@ -55,19 +46,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    /* Resolve User → TeamMember for workspace-scoped note querying.
+    /* Resolve the authenticated user's TeamMember in this workspace.
      * Filter out soft-deleted team members to prevent stale lookups. */
     const teamMember = await db.teamMember.findFirst({
-      where: { userId: targetUserId, organizationId, deletedAt: null },
+      where: { userId, organizationId, deletedAt: null },
       select: { id: true },
     });
 
     if (!teamMember) {
       throw new ShelfError({
         cause: null,
-        message: "User not found in this workspace",
+        message: "You are not a member of this workspace",
         status: 404,
-        additionalData: { targetUserId, organizationId },
+        additionalData: { userId, organizationId },
         label: "Team Member Note",
       });
     }
@@ -86,7 +77,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
     });
   } catch (cause) {
-    const reason = makeShelfError(cause, { targetUserId, userId });
+    const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
   }
 }
@@ -96,15 +87,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  name: "$userId.notes",
+  name: "me.notes",
 };
 
 /**
- * User Notes tab page component.
- * Checks client-side permissions to determine which actions (create/delete)
- * the current admin can perform, then renders the UserNotes container.
+ * My Notes tab page component.
+ * Shows notes on the current user's own profile, with permission-gated actions.
  */
-export default function UserNotesPage() {
+export default function MyNotesPage() {
   const { notes } = useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
   const canReadNotes = userHasPermission({
@@ -132,6 +122,7 @@ export default function UserNotesPage() {
             notes={notes}
             canCreate={canCreateNotes}
             canDelete={canDeleteNotes}
+            actionUrl="/me/note"
           />
         </>
       ) : (
@@ -141,7 +132,7 @@ export default function UserNotesPage() {
               <NoPermissionsIcon />
             </div>
             <h5>Insufficient permissions</h5>
-            <p>You are not allowed to view user notes</p>
+            <p>You are not allowed to view notes</p>
           </div>
         </div>
       )}

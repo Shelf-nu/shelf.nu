@@ -26,18 +26,23 @@ const isEditingAtom = atom(false);
  *
  * @param props.fetcher - The React Router fetcher instance from the parent container,
  *   used for optimistic UI coordination
+ * @param props.actionUrl - The form action URL. Defaults to the user profile note route
+ *   based on params.userId, but can be overridden for the /me route.
  */
 export const NewUserNote = ({
   fetcher,
+  actionUrl,
 }: {
   fetcher: FetcherWithComponents<any>;
+  actionUrl?: string;
 }) => {
   const params = useParams();
+  const action = actionUrl ?? `/settings/team/users/${params.userId}/note`;
 
   return (
     <MarkdownNoteForm
       fetcher={fetcher}
-      action={`/settings/team/users/${params.userId}/note`}
+      action={action}
       formId="NewUserNoteForm"
       editingAtom={isEditingAtom}
     />
