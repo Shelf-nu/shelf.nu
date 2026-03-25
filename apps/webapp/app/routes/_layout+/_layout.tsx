@@ -144,10 +144,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizations,
       currentOrganization,
       cookieRefreshNeeded,
+      noVisibleOrganizations,
     } = await getSelectedOrganization({
       userId: authSession.userId,
       request,
     });
+
+    // SSO user with no team orgs — redirect to a friendly pending page
+    if (noVisibleOrganizations) {
+      return redirect("/sso-pending-assignment");
+    }
+
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering

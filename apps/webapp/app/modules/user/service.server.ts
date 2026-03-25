@@ -402,18 +402,10 @@ export async function createUserFromSSO(
       }
     }
 
-    if (roles.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "No groups assigned",
-        message:
-          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
-        label: "Auth",
-        additionalData: { roles, organizations, email, userId },
-      });
-    }
-
-    return { user, org: organizations[0] || null };
+    // No matching roles — the user was still created with a personal
+    // workspace. Return with org: null so the OAuth callback can
+    // redirect them to the "pending assignment" page.
+    return { user, org: roles.length > 0 ? organizations[0] || null : null };
   } catch (cause: any) {
     throw new ShelfError({
       cause,
@@ -630,28 +622,22 @@ export async function updateUserFromSSO(
       }
     }
 
-    if (desiredRoles.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "No groups assigned",
-        message:
-          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
-        label: "Auth",
-        additionalData: { desiredRoles, domainOrganizations, email, userId },
-      });
-    }
-
-    const firstScimOrg = domainOrganizations.find(
-      (org) =>
-        org.ssoDetails &&
-        (org.ssoDetails.adminGroupId ||
-          org.ssoDetails.baseUserGroupId ||
-          org.ssoDetails.selfServiceGroupId)
-    );
+    // Find the first SCIM-configured org to redirect to, or null if
+    // the user has no matching roles (they'll land on the pending page).
+    const firstScimOrg =
+      desiredRoles.length > 0
+        ? domainOrganizations.find(
+            (org) =>
+              org.ssoDetails &&
+              (org.ssoDetails.adminGroupId ||
+                org.ssoDetails.baseUserGroupId ||
+                org.ssoDetails.selfServiceGroupId)
+          ) || null
+        : null;
 
     return {
       user,
-      org: firstScimOrg || null,
+      org: firstScimOrg,
       transitions,
     };
   } catch (cause) {
