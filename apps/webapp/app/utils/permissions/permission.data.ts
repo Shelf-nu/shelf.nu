@@ -42,6 +42,7 @@ export enum PermissionEntity {
   assetReminders = "assetReminders",
   audit = "audit",
   auditNote = "auditNote",
+  teamMemberNote = "teamMemberNote",
   emailSettings = "emailSettings",
   userData = "user-data", // This is for the user to load their own data.
   update = "update",
@@ -91,6 +92,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.teamMemberNote]: [],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
       PermissionAction.read,
@@ -143,6 +145,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.scan]: [],
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
+    [PermissionEntity.teamMemberNote]: [],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
       PermissionAction.read,
@@ -271,6 +274,11 @@ export const Role2PermissionMap: {
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.teamMemberNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
       PermissionAction.delete,
     ],
     [PermissionEntity.emailSettings]: [
@@ -406,6 +414,11 @@ export const Role2PermissionMap: {
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.teamMemberNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
       PermissionAction.delete,
     ],
     [PermissionEntity.emailSettings]: [

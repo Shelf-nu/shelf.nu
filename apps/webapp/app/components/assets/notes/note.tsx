@@ -18,6 +18,8 @@ export type NoteWithUser = {
   user?: {
     firstName: string;
     lastName: string;
+    /** Optional display name for SSO users, used by resolveUserDisplayName */
+    displayName?: string;
   };
   /** Optional audit asset information for notes created on specific assets */
   auditAsset?: {

@@ -13,6 +13,7 @@ export function useNprogress() {
     "asset-index-settings-freeze-column",
     "updates-change",
     "add-note",
+    "add-user-note",
     "add-audit-note",
     "audit-scan-persist",
   ];
