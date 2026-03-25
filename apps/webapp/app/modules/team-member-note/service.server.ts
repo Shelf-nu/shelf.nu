@@ -121,6 +121,7 @@ export async function getTeamMemberNotes({
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },
@@ -193,7 +194,9 @@ export async function deleteTeamMemberNote({
   }
 }
 
-/** A TeamMemberNote with the author's firstName and lastName included */
+/** A TeamMemberNote with the author's name fields included (supports displayName for SSO users) */
 export type TeamMemberNoteWithUser = Prisma.TeamMemberNoteGetPayload<{
-  include: { user: { select: { firstName: true; lastName: true } } };
+  include: {
+    user: { select: { firstName: true; lastName: true; displayName: true } };
+  };
 }>;

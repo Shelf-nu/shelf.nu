@@ -219,6 +219,7 @@ describe("team member note service", () => {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
