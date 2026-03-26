@@ -5,6 +5,9 @@ import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
+import type { AuditContextType } from "./context-helpers.server";
+import { resolveAssetIdsForAudit } from "./context-helpers.server";
+
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import {
@@ -2209,4 +2212,166 @@ export async function removeAssetsFromAudit({
 
       return { removedCount: result.removedCount };
     });
+}
+
+/** Result returned from duplicating an audit session */
+export type DuplicateAuditResult = {
+  /** The newly created audit session */
+  newSession: AuditSession;
+  /** Number of assets that were dropped because they no longer exist */
+  droppedAssetCount: number;
+  /** Total number of assets in the original audit */
+  originalAssetCount: number;
+};
+
+/**
+ * Duplicates an audit session into a new PENDING audit.
+ * Copies name (with " (Copy)" suffix), description, and scopeMeta.
+ * Re-resolves assets from the original scope when targetId is available,
+ * otherwise copies asset IDs from the original AuditAsset records.
+ *
+ * @param auditSessionId - The ID of the audit to duplicate
+ * @param organizationId - The organization ID for scoping
+ * @param userId - The user performing the duplication (becomes creator)
+ * @returns The new audit session and info about any dropped assets
+ * @throws {ShelfError} If the audit is not found or all assets are gone
+ */
+export async function duplicateAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: string;
+  organizationId: string;
+  userId: string;
+}): Promise<DuplicateAuditResult> {
+  try {
+    // Fetch the original audit with its assets
+    const originalAudit = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      include: {
+        assets: {
+          select: { assetId: true },
+        },
+      },
+    });
+
+    if (!originalAudit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    const originalAssetCount = originalAudit.assets.length;
+
+    // Parse scopeMeta to check for context-based resolution
+    const scopeMeta =
+      typeof originalAudit.scopeMeta === "object" && originalAudit.scopeMeta
+        ? (originalAudit.scopeMeta as Record<string, unknown>)
+        : null;
+
+    const contextType = scopeMeta?.contextType as string | undefined;
+
+    let resolvedAssetIds: string[];
+
+    // If targetId exists and we have a recognized contextType, re-query current assets
+    if (
+      originalAudit.targetId &&
+      contextType &&
+      ["location", "kit", "user"].includes(contextType)
+    ) {
+      try {
+        resolvedAssetIds = await resolveAssetIdsForAudit({
+          organizationId,
+          contextType: contextType as AuditContextType,
+          contextId: originalAudit.targetId,
+          contextName: scopeMeta?.contextName as string | undefined,
+          includeChildLocations: false,
+        });
+      } catch {
+        // If the context entity itself is gone (e.g., location deleted),
+        // fall back to copying from original audit assets
+        resolvedAssetIds = await validateExistingAssetIds(
+          originalAudit.assets.map((a) => a.assetId),
+          organizationId
+        );
+      }
+    } else {
+      // Copy asset IDs from original AuditAsset records and validate they still exist
+      resolvedAssetIds = await validateExistingAssetIds(
+        originalAudit.assets.map((a) => a.assetId),
+        organizationId
+      );
+    }
+
+    const droppedAssetCount = originalAssetCount - resolvedAssetIds.length;
+
+    // If ALL assets are gone, throw an error
+    if (resolvedAssetIds.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "None of the original assets exist anymore. Cannot duplicate.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 400,
+      });
+    }
+
+    // Create the new audit session
+    const { session: newSession } = await createAuditSession({
+      name: `${originalAudit.name} (Copy)`,
+      description: originalAudit.description,
+      assetIds: resolvedAssetIds,
+      organizationId,
+      createdById: userId,
+      scopeMeta: scopeMeta
+        ? {
+            contextType: contextType ?? null,
+            contextName: (scopeMeta.contextName as string) ?? null,
+          }
+        : null,
+    });
+
+    return {
+      newSession,
+      droppedAssetCount,
+      originalAssetCount,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while duplicating the audit.",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: isLikeShelfError(cause) ? cause.status : 500,
+    });
+  }
+}
+
+/**
+ * Validates that the given asset IDs still exist in the organization.
+ * Returns only the IDs of assets that are still present.
+ */
+async function validateExistingAssetIds(
+  assetIds: string[],
+  organizationId: string
+): Promise<string[]> {
+  if (assetIds.length === 0) return [];
+
+  const existingAssets = await db.asset.findMany({
+    where: {
+      id: { in: assetIds },
+      organizationId,
+    },
+    select: { id: true },
+  });
+
+  return existingAssets.map((a) => a.id);
 }
