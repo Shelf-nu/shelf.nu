@@ -399,7 +399,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
           select: ORGANIZATION_SELECT_FIELDS,
         },
         user: {
-          select: { lastSelectedOrganizationId: true },
+          select: { lastSelectedOrganizationId: true, sso: true },
         },
       },
     });
