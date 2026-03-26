@@ -20,18 +20,32 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    // Verify the user is a member of the target organization
+    // Verify membership and pull the extra fields we need to check
+    // whether an SSO user is trying to switch to their personal workspace.
     const membership = await db.userOrganization.findUnique({
       where: {
         userId_organizationId: { userId, organizationId },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        user: { select: { sso: true } },
+        organization: { select: { type: true } },
+      },
     });
 
     if (!membership) {
       throw new ShelfError({
         cause: null,
         message: "You are not a member of this organization.",
+        status: 403,
+        label: "Organization",
+      });
+    }
+
+    if (membership.user.sso && membership.organization.type === "PERSONAL") {
+      throw new ShelfError({
+        cause: null,
+        message: "SSO users cannot access personal workspaces.",
         status: 403,
         label: "Organization",
       });
