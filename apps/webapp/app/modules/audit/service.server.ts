@@ -5,9 +5,6 @@ import type { AuditAssignment, AuditSession } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
-import type { AuditContextType } from "./context-helpers.server";
-import { resolveAssetIdsForAudit } from "./context-helpers.server";
-
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import {
@@ -23,6 +20,8 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
+import type { AuditContextType } from "./context-helpers.server";
+import { resolveAssetIdsForAudit } from "./context-helpers.server";
 import {
   sendAuditCancelledEmails,
   sendAuditCompletedEmail,
@@ -40,6 +39,7 @@ import {
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
 } from "./helpers.server";
+import { deleteAuditImage } from "./image.service.server";
 
 import type { AuditSchedulerData } from "./types";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -2314,8 +2314,7 @@ export async function duplicateAuditSession({
     if (resolvedAssetIds.length === 0) {
       throw new ShelfError({
         cause: null,
-        message:
-          "None of the original assets exist anymore. Cannot duplicate.",
+        message: "None of the original assets exist anymore. Cannot duplicate.",
         additionalData: { auditSessionId, organizationId },
         label,
         status: 400,
@@ -2374,4 +2373,128 @@ async function validateExistingAssetIds(
   });
 
   return existingAssets.map((a) => a.id);
+}
+
+/**
+ * Archives a completed or cancelled audit session.
+ * Only audits with COMPLETED or CANCELLED status can be archived.
+ */
+export async function archiveAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    const auditSession = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { id: true, status: true },
+    });
+
+    if (!auditSession) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    if (
+      auditSession.status !== AuditStatus.COMPLETED &&
+      auditSession.status !== AuditStatus.CANCELLED
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Only completed or cancelled audits can be archived.",
+        additionalData: { auditSessionId, currentStatus: auditSession.status },
+        label,
+        status: 400,
+      });
+    }
+
+    await db.auditSession.update({
+      where: { id: auditSessionId },
+      data: { status: AuditStatus.ARCHIVED },
+    });
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError ? cause.message : "Failed to archive audit session",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: isShelfError ? cause.status : 500,
+    });
+  }
+}
+
+/**
+ * Permanently deletes an archived audit session and all its associated data.
+ * Cleans up Supabase storage images before performing a hard delete.
+ */
+export async function deleteAuditSession({
+  auditSessionId,
+  organizationId,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: string;
+}): Promise<void> {
+  try {
+    const auditSession = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { id: true, status: true, images: { select: { id: true } } },
+    });
+
+    if (!auditSession) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    if (auditSession.status !== AuditStatus.ARCHIVED) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only archived audits can be deleted. Please archive the audit first.",
+        additionalData: { auditSessionId, currentStatus: auditSession.status },
+        label,
+        status: 400,
+      });
+    }
+
+    for (const image of auditSession.images) {
+      try {
+        await deleteAuditImage({ imageId: image.id, organizationId });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: `Failed to delete audit image ${image.id} from storage`,
+            additionalData: { imageId: image.id, auditSessionId },
+            label,
+          })
+        );
+      }
+    }
+
+    await db.auditSession.delete({ where: { id: auditSessionId } });
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError ? cause.message : "Failed to delete audit session",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: isShelfError ? cause.status : 500,
+    });
+  }
 }

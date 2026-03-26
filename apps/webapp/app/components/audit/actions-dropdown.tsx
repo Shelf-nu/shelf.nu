@@ -16,6 +16,7 @@ import type { loader, action } from "~/routes/_layout+/audits.$auditId";
 import { tw } from "~/utils/tw";
 import { AuditReceiptPDF } from "./audit-receipt-pdf";
 import { CancelAuditDialog } from "./cancel-audit-dialog";
+import { DeleteAuditDialog } from "./delete-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
@@ -30,6 +31,7 @@ const ConditionalActionsDropdown = () => {
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
   // Track auto-open so the email deep link only triggers once.
   const hasAutoOpenedReceiptRef = useRef(false);
@@ -37,11 +39,15 @@ const ConditionalActionsDropdown = () => {
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
+  const isArchived = session.status === AuditStatus.ARCHIVED;
   const isCreator = session.createdById === user?.id;
   const receiptRequested = searchParams.get("receipt") === "1";
 
   // Only admin/owner can edit audit details
   const canEditAudit = isAdminOrOwner && !isCompleted && !isCancelled;
+
+  // Only admin/owner can delete, only if archived
+  const canDeleteAudit = isAdminOrOwner && isArchived;
 
   // Only the creator can cancel an audit, and only if it's not already completed or cancelled
   const canCancelAudit = isCreator && !isCompleted && !isCancelled;
@@ -188,6 +194,23 @@ const ConditionalActionsDropdown = () => {
                   </Button>
                 </div>
               </When>
+              <When truthy={canDeleteAudit}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-error-600 hover:bg-slate-100 hover:text-error-700"
+                    width="full"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsDeleteDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">Delete</span>
+                  </Button>
+                </div>
+              </When>
+
               {/* PDF Download Button - Always visible for all users with audit read permission */}
               <div className="border-b px-0 py-1 md:p-0">
                 <Button
@@ -238,6 +261,15 @@ const ConditionalActionsDropdown = () => {
           open={isCancelDialogOpen}
           actionData={actionData}
           onClose={() => setIsCancelDialogOpen(false)}
+        />
+      </When>
+
+      <When truthy={isDeleteDialogOpen}>
+        <DeleteAuditDialog
+          auditId={session.id}
+          auditName={session.name}
+          open={isDeleteDialogOpen}
+          onClose={() => setIsDeleteDialogOpen(false)}
         />
       </When>
 
