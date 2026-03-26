@@ -115,14 +115,16 @@ Migration: enum addition only, no data backfill needed.
 
 ### Behavior
 
-| Aspect            | Detail                                                           |
-| ----------------- | ---------------------------------------------------------------- |
-| Prerequisite      | Audit must be `COMPLETED` (same rule as bookings)                |
-| Reversibility     | Not reversible (same as bookings — no "unarchive")               |
-| Main list default | Exclude `ARCHIVED` alongside `CANCELLED` (match booking pattern) |
-| Visibility        | Viewable via status filter dropdown                              |
-| Bulk archive      | Yes — follow the same bulk action pattern as bookings            |
-| Activity note     | Auto-create: _"[User] archived the audit"_                       |
+| Aspect            | Detail                                                                           |
+| ----------------- | -------------------------------------------------------------------------------- |
+| Prerequisite      | Audit must be `COMPLETED` (same rule as bookings)                                |
+| Reversibility     | Not reversible (same as bookings — no "unarchive")                               |
+| Main list default | Exclude `ARCHIVED` by default (cancelled audits remain visible — see note below) |
+| Visibility        | Viewable via status filter dropdown                                              |
+| Bulk archive      | Yes — follow the same bulk action pattern as bookings                            |
+| Activity note     | Auto-create: _"[User] archived the audit"_                                       |
+
+**Note on CANCELLED visibility:** Unlike bookings, which hide both `ARCHIVED` and `CANCELLED` by default, audits only hide `ARCHIVED`. Cancelled audits currently show in the main list and provide useful context (who cancelled, why). Changing this would be a silent behavior change for existing users. If we want to align with the booking pattern later, that's a separate, intentional decision.
 
 ### What stays the same after archiving
 
