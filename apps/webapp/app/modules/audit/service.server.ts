@@ -1597,9 +1597,11 @@ export async function getAuditsForOrganization(params: {
       ];
     }
 
-    // Add status filter
+    // Add status filter — exclude ARCHIVED by default when no filter is set
     if (status) {
       where.status = status;
+    } else {
+      where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
     const [audits, totalAudits] = await Promise.all([
