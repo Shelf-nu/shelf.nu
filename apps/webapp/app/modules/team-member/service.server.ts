@@ -763,3 +763,83 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
     });
   }
 }
+
+/**
+ * Fetches team members eligible for the notification recipients picker.
+ * Returns only admins/owners with linked user accounts (no NRMs).
+ *
+ * Used by booking form loaders to provide initial data for the
+ * `DynamicDropdown` component's `initialDataKey`.
+ */
+export async function getTeamMembersForNotify({
+  organizationId,
+  excludeTeamMemberIds,
+}: {
+  organizationId: string;
+  /** Team member IDs to exclude from results (e.g. members already
+   *  in the workspace-level "always notify" list). When not provided,
+   *  the function auto-fetches the always-notify list from BookingSettings
+   *  and excludes those members. */
+  excludeTeamMemberIds?: string[];
+}) {
+  try {
+    // Auto-fetch the always-notify team member IDs from booking settings
+    // so they can be excluded from the picker (they're already notified).
+    let idsToExclude = excludeTeamMemberIds;
+    if (!idsToExclude) {
+      const settings = await db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: {
+          alwaysNotifyTeamMembers: { select: { id: true } },
+        },
+      });
+      idsToExclude = settings?.alwaysNotifyTeamMembers.map((tm) => tm.id) ?? [];
+    }
+
+    // Two-step query: first get admin/owner user IDs, then fetch
+    // their team members. Needed because Prisma doesn't support nested
+    // relation filters in the `where` clause with `include`.
+    const adminUserOrgs = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: { hasSome: ["ADMIN", "OWNER"] },
+      },
+      select: { userId: true },
+    });
+    const adminUserIds = adminUserOrgs.map((uo) => uo.userId);
+
+    const teamMembersForNotify = await db.teamMember.findMany({
+      where: {
+        organizationId,
+        deletedAt: null,
+        userId: { in: adminUserIds },
+        ...(idsToExclude?.length ? { id: { notIn: idsToExclude } } : {}),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            email: true,
+            profilePicture: true,
+          },
+        },
+      },
+      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+    });
+
+    return {
+      teamMembersForNotify,
+      totalTeamMembersForNotify: teamMembersForNotify.length,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team members for notification picker",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}

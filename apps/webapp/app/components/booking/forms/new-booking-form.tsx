@@ -44,14 +44,8 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const {
-    teamMembers,
-    teamMembersForForm,
-    userId,
-    currentOrganization,
-    tags,
-    teamMembersForNotify,
-  } = useLoaderData<NewBookingLoaderReturnType>();
+  const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
+    useLoaderData<NewBookingLoaderReturnType>();
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
     value: tag.id,
@@ -192,7 +186,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               </Card>
               <Card className="field-card m-0 overflow-visible">
                 <NotificationRecipientsField
-                  teamMembers={teamMembersForNotify ?? []}
                   disabled={disabled}
                   isAdminOrOwner={isAdministratorOrOwner}
                   creatorName="You"

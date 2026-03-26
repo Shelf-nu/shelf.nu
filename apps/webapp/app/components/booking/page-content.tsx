@@ -52,13 +52,6 @@ export function BookingPageContent() {
               endDate: dateForDateTimeInputValue(new Date(booking.to)),
               custodianRef: custodian?.id || "", // We have an old bug that some users dont have a teamMember attached to them. This is a safety just so the UI doesnt break until we solve the data
               tags: booking.tags,
-              notificationRecipients: booking.notificationRecipients,
-              custodianName: custodian?.name || "",
-              creatorName: booking.creator
-                ? `${booking.creator.firstName || ""} ${
-                    booking.creator.lastName || ""
-                  }`.trim()
-                : undefined,
             }}
           />
         </Card>

@@ -1,26 +1,31 @@
 /**
- * Per-booking notification recipients field.
+ * Per-booking notification recipients field with live preview.
  *
  * Rendered inside the booking create/edit form. Allows admin/owner users to
  * add extra team members who should receive email notifications for this
  * specific booking. Non-admin users do not see this field (privacy gating).
  *
- * The component also renders a {@link NotificationPreview} that merges
- * workspace-level settings (custodian, creator, always-notify members) with
- * per-booking selections to give a complete picture of who will be notified.
+ * Uses {@link DynamicDropdown} with the `teamMember` model and
+ * `userWithAdminAndOwnerOnly` option, fetching data via the standard
+ * `/api/model-filters` endpoint with server-side search.
+ *
+ * The {@link NotificationPreview} updates dynamically as users are
+ * selected/deselected in the dropdown.
  *
  * @module
  */
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { ChevronDownIcon } from "lucide-react";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import FormRow from "~/components/forms/form-row";
-import MultiSelect from "~/components/multi-select/multi-select";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
 
 /**
- * Team member shape used by the notification recipients multi-select.
- * Includes the optional `user` relation for display-name resolution.
+ * Team member shape for pre-selected recipients (edit form).
+ * Must include `name` and optional `user` for display name resolution.
  */
 export type NotificationRecipientTeamMember = {
   id: string;
@@ -34,51 +39,32 @@ export type NotificationRecipientTeamMember = {
 };
 
 type NotificationRecipientsFieldProps = {
-  teamMembers: NotificationRecipientTeamMember[];
+  /** Pre-selected recipients (for editing existing bookings) */
   defaultSelected?: NotificationRecipientTeamMember[];
+  /** Whether the field is disabled (e.g. during submission) */
   disabled?: boolean;
+  /** Gates visibility; returns null when false */
   isAdminOrOwner: boolean;
-  /** Name of the custodian for this booking */
+  /** Display name of the booking custodian (always notified) */
   custodianName?: string;
-  /** Name of the creator, if different from custodian */
+  /** Display name of the booking creator (if different from custodian) */
   creatorName?: string;
-  /** Number of admins in the workspace (for the preview count) */
+  /** Number of workspace admins (shown in the preview footnote) */
   adminCount?: number;
 };
-
-/**
- * Derives a human-readable label for a team member.
- * Delegates to `resolveTeamMemberName` which uses `resolveUserDisplayName`
- * internally — respects displayName, falls back to firstName+lastName,
- * then to the team member's `name` field.
- */
-function formatTeamMemberLabel(tm: NotificationRecipientTeamMember): string {
-  return resolveTeamMemberName(tm);
-}
 
 /**
  * Per-booking notification recipients field with live preview.
  *
  * **Visibility:** Only rendered for admin/owner users. Returns `null` for
- * self-service/base users to prevent them from seeing who else is notified
- * (privacy requirement).
+ * self-service/base users to prevent them from seeing who else is notified.
  *
- * **Preview computation:** Uses `useBookingSettings()` to read workspace-level
- * notification configuration and merges it with per-booking selections to
- * produce a combined preview of all notification recipients and their reasons.
- *
- * @param teamMembers - All eligible team members for the multi-select
- * @param defaultSelected - Pre-selected recipients (for editing existing bookings)
- * @param disabled - Whether the field is disabled (e.g. during submission)
- * @param isAdminOrOwner - Gates visibility; returns null when false
- * @param custodianName - Display name of the booking custodian (always notified)
- * @param creatorName - Display name of the booking creator (if different from custodian)
- * @param adminCount - Number of workspace admins (shown in the preview footnote)
+ * **Dynamic preview:** The "Who will be notified" preview updates in real-time
+ * as users are selected/deselected in the dropdown.
  */
 export function NotificationRecipientsField({
-  teamMembers,
   defaultSelected,
-  disabled,
+  disabled: _disabled,
   isAdminOrOwner,
   custodianName,
   creatorName,
@@ -86,25 +72,70 @@ export function NotificationRecipientsField({
 }: NotificationRecipientsFieldProps) {
   const bookingSettings = useBookingSettings();
 
-  // Build the notification preview by merging all recipient sources.
-  // Each section is added in priority order with deduplication via `seen` set:
-  //   1. Custodian — always receives all notifications (system rule)
-  //   2. Creator — only if workspace setting is enabled and different from custodian
-  //   3. Always-notify members — from workspace-level settings
-  //   4. Per-booking recipients — from the multi-select (defaultSelected)
+  // Track selected IDs and a name map for the preview
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    defaultSelected?.map((tm) => tm.id) ?? []
+  );
+  const [selectedNameMap, setSelectedNameMap] = useState<Map<string, string>>(
+    () => {
+      const map = new Map<string, string>();
+      defaultSelected?.forEach((tm) =>
+        map.set(tm.id, resolveTeamMemberName(tm))
+      );
+      return map;
+    }
+  );
+
+  /** When DynamicDropdown selection changes, update IDs and resolve names */
+  const handleSelectionChange = useCallback((ids: string[]) => {
+    setSelectedIds(ids);
+    // Remove deselected members from the name map
+    setSelectedNameMap((prev) => {
+      const next = new Map(prev);
+      for (const key of prev.keys()) {
+        if (!ids.includes(key)) {
+          next.delete(key);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  /** Remove a per-booking recipient via the preview X button */
+  const handleRemoveRecipient = useCallback((tmId: string) => {
+    setSelectedIds((prev) => prev.filter((id) => id !== tmId));
+  }, []);
+
+  /** Render each item in the dropdown — also captures names for the preview */
+  const renderItem = useCallback(
+    (item: ModelFilterItem) => {
+      // Capture the resolved name so the preview can display it
+      const name = resolveTeamMemberName(item, true);
+      if (!selectedNameMap.has(item.id)) {
+        // Use a microtask to avoid setState during render
+        queueMicrotask(() => {
+          setSelectedNameMap((prev) => {
+            if (prev.has(item.id)) return prev;
+            const next = new Map(prev);
+            next.set(item.id, resolveTeamMemberName(item));
+            return next;
+          });
+        });
+      }
+      return name;
+    },
+    [selectedNameMap]
+  );
+
+  // Build the notification preview
   const previewRecipients = useMemo(() => {
-    const recipients: Array<{ name: string; reason: string }> = [];
-    // Deduplicate by stable team member ID (not display name) to avoid
-    // collapsing different people who share the same formatted name
+    const recipients: Array<{ id?: string; name: string; reason: string }> = [];
     const seenIds = new Set<string>();
 
-    // Custodian is always notified (this is a system-level guarantee)
-    // Uses name string as key since we don't have custodian's TM ID here
     if (custodianName) {
       recipients.push({ name: custodianName, reason: "custodian" });
     }
 
-    // Creator — only shown when the workspace setting `notifyBookingCreator` is on
     if (
       bookingSettings?.notifyBookingCreator &&
       creatorName &&
@@ -113,12 +144,11 @@ export function NotificationRecipientsField({
       recipients.push({ name: creatorName, reason: "creator" });
     }
 
-    // Always-notify team members — configured at the workspace level in Settings > Bookings
     if (bookingSettings?.alwaysNotifyTeamMembers) {
       for (const tm of bookingSettings.alwaysNotifyTeamMembers) {
         if (!seenIds.has(tm.id)) {
           recipients.push({
-            name: formatTeamMemberLabel(tm),
+            name: resolveTeamMemberName(tm),
             reason: "always_notify",
           });
           seenIds.add(tm.id);
@@ -126,61 +156,92 @@ export function NotificationRecipientsField({
       }
     }
 
-    // Per-booking recipients — manually added to this specific booking via the multi-select
-    if (defaultSelected) {
-      for (const tm of defaultSelected) {
-        if (seenIds.has(tm.id)) continue;
-        recipients.push({
-          name: formatTeamMemberLabel(tm),
-          reason: "booking_recipient",
-        });
-        seenIds.add(tm.id);
-      }
+    for (const tmId of selectedIds) {
+      if (seenIds.has(tmId)) continue;
+      recipients.push({
+        id: tmId,
+        name: selectedNameMap.get(tmId) ?? tmId,
+        reason: "booking_recipient",
+      });
+      seenIds.add(tmId);
     }
 
     return recipients;
-  }, [custodianName, creatorName, bookingSettings, defaultSelected]);
+  }, [
+    custodianName,
+    creatorName,
+    bookingSettings,
+    selectedIds,
+    selectedNameMap,
+  ]);
 
   if (!isAdminOrOwner) {
     return null;
   }
-
-  const items = teamMembers.map((tm) => ({
-    label: formatTeamMemberLabel(tm),
-    value: tm.id,
-  }));
-
-  const defaultItems = defaultSelected?.map((tm) => ({
-    label: formatTeamMemberLabel(tm),
-    value: tm.id,
-  }));
 
   return (
     <FormRow
       rowLabel="Notifications"
       className="mobile-styling-only border-b-0 p-0"
     >
-      <MultiSelect
-        className="w-full"
-        label="Additional notification recipients"
-        items={items}
-        defaultSelected={defaultItems}
-        labelKey="label"
-        valueKey="value"
-        name="notificationRecipientIds"
-        disabled={disabled}
-        placeholder="Search users..."
-      />
-      <p className="mt-2 text-[14px] text-gray-600">
-        These users will receive all email notifications for this booking.
-      </p>
-      <NotificationPreview
-        recipients={previewRecipients}
-        adminCount={adminCount ?? 0}
-        notifyAdminsOnNewBooking={
-          bookingSettings?.notifyAdminsOnNewBooking ?? true
-        }
-      />
+      <div className="w-full">
+        <DynamicDropdown
+          key={selectedIds.join(",")}
+          trigger={
+            <div className="flex h-10 w-full items-center justify-between rounded border border-gray-300 bg-white px-3 text-sm hover:bg-gray-50">
+              <span className="truncate text-gray-500">
+                {(() => {
+                  const count = previewRecipients.filter(
+                    (r) => r.reason === "booking_recipient"
+                  ).length;
+                  return count > 0
+                    ? `${count} user${count !== 1 ? "s" : ""} selected`
+                    : "Add notification recipients...";
+                })()}
+              </span>
+              <ChevronDownIcon className="size-4 shrink-0 text-gray-400" />
+            </div>
+          }
+          triggerWrapperClassName="w-full"
+          hideCounter
+          className="w-full"
+          style={{ width: "var(--radix-popover-trigger-width)" }}
+          model={{
+            name: "teamMember",
+            queryKey: "name",
+            deletedAt: null,
+            userWithAdminAndOwnerOnly: true,
+            usersOnly: true,
+          }}
+          initialDataKey="teamMembersForNotify"
+          countKey="totalTeamMembersForNotify"
+          selectionMode="none"
+          defaultValues={selectedIds}
+          onSelectionChange={handleSelectionChange}
+          renderItem={renderItem}
+          label="Notification recipients"
+          placeholder="Search team members..."
+        />
+
+        {/* Hidden input for form submission — comma-separated team member IDs */}
+        <input
+          type="hidden"
+          name="notificationRecipientIds"
+          value={selectedIds.join(",")}
+        />
+
+        <p className="mt-2 text-[14px] text-gray-600">
+          These users will receive all email notifications for this booking.
+        </p>
+        <NotificationPreview
+          recipients={previewRecipients}
+          adminCount={adminCount ?? 0}
+          notifyAdminsOnNewBooking={
+            bookingSettings?.notifyAdminsOnNewBooking ?? true
+          }
+          onRemoveRecipient={handleRemoveRecipient}
+        />
+      </div>
     </FormRow>
   );
 }

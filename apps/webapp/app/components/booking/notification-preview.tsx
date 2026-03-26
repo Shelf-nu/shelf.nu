@@ -1,5 +1,7 @@
 /** A single recipient entry for the notification preview. */
 type PreviewRecipient = {
+  /** Stable identifier for removable items (team member ID for booking_recipient) */
+  id?: string;
   name: string;
   /** One of the keys in {@link reasonLabels} (e.g. "custodian", "creator"). */
   reason: string;
@@ -9,6 +11,9 @@ type NotificationPreviewProps = {
   recipients: PreviewRecipient[];
   adminCount: number;
   notifyAdminsOnNewBooking: boolean;
+  /** Called when a per-booking recipient is removed via the X button.
+   *  Only booking_recipient items are removable. */
+  onRemoveRecipient?: (id: string) => void;
 };
 
 /**
@@ -37,6 +42,7 @@ export function NotificationPreview({
   recipients,
   adminCount,
   notifyAdminsOnNewBooking,
+  onRemoveRecipient,
 }: NotificationPreviewProps) {
   if (recipients.length === 0 && adminCount === 0) {
     return null;
@@ -50,13 +56,36 @@ export function NotificationPreview({
       <ul className="space-y-1">
         {recipients.map((r) => (
           <li
-            key={`${r.name}-${r.reason}`}
-            className="text-[13px] text-gray-600"
+            key={`${r.id || r.name}-${r.reason}`}
+            className="flex items-center justify-between text-[13px] text-gray-600"
           >
-            <span className="font-medium text-gray-700">{r.name}</span>
-            <span className="ml-1 text-gray-400">
-              — {reasonLabels[r.reason] || r.reason}
+            <span>
+              <span className="font-medium text-gray-700">{r.name}</span>
+              <span className="ml-1 text-gray-400">
+                — {reasonLabels[r.reason] || r.reason}
+              </span>
             </span>
+            {(r.reason === "booking_recipient" ||
+              r.reason === "always_notify") &&
+            r.id &&
+            onRemoveRecipient ? (
+              <button
+                type="button"
+                className="ml-2 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                onClick={() => onRemoveRecipient(r.id!)}
+                aria-label={`Remove ${r.name}`}
+              >
+                <svg
+                  className="size-3"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M3 3l6 6M9 3l-6 6" />
+                </svg>
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>

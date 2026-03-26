@@ -4630,6 +4630,9 @@ export async function duplicateBooking({
       id: bookingId,
       organizationId,
       request,
+      extraInclude: {
+        notificationRecipients: { select: { id: true } },
+      },
     });
     const hints = getHints(request);
 
@@ -4662,6 +4665,16 @@ export async function duplicateBooking({
         tags: {
           connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
         },
+        // Copy per-booking notification recipients from the original
+        ...(bookingToDuplicate.notificationRecipients?.length
+          ? {
+              notificationRecipients: {
+                connect: bookingToDuplicate.notificationRecipients.map(
+                  (tm: { id: string }) => ({ id: tm.id })
+                ),
+              },
+            }
+          : {}),
       },
     });
 

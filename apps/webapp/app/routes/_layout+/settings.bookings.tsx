@@ -28,12 +28,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
-import { db } from "~/database/db.server";
 import {
   getBookingSettingsForOrganization,
   updateAlwaysNotifyTeamMembers,
   updateBookingSettings,
 } from "~/modules/booking-settings/service.server";
+import { getTeamMembersForNotify } from "~/modules/team-member/service.server";
 import {
   createWorkingHoursOverride,
   deleteWorkingHoursOverride,
@@ -81,47 +81,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const [bookingSettings, workingHours, teamMembersForNotify] =
-      await Promise.all([
-        getBookingSettingsForOrganization(organizationId),
-        getWorkingHoursForOrganization(organizationId),
-        // Fetch team members eligible for the "always notify" picker.
-        // Only admins/owners are eligible — first get admin user IDs,
-        // then filter team members to those with matching linked users.
-        (async () => {
-          const adminUserOrgs = await db.userOrganization.findMany({
-            where: {
-              organizationId,
-              roles: {
-                hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-              },
-            },
-            select: { userId: true },
-          });
-          const adminUserIds = adminUserOrgs.map((uo) => uo.userId);
-          return db.teamMember.findMany({
-            where: {
-              organizationId,
-              deletedAt: null,
-              userId: { in: adminUserIds },
-            },
-            select: {
-              id: true,
-              name: true,
-              user: {
-                select: {
-                  id: true,
-                  email: true,
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                },
-              },
-            },
-            orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
-          });
-        })(),
-      ]);
+    const [bookingSettings, workingHours, notifyData] = await Promise.all([
+      getBookingSettingsForOrganization(organizationId),
+      getWorkingHoursForOrganization(organizationId),
+      getTeamMembersForNotify({ organizationId }),
+    ]);
 
     const header: HeaderData = {
       title: "Bookings settings",
@@ -132,7 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organization: currentOrganization,
       bookingSettings,
       workingHours,
-      teamMembersForNotify,
+      ...notifyData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -536,16 +500,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 export default function GeneralPage() {
-  const { workingHours, bookingSettings, teamMembersForNotify } =
-    useLoaderData<typeof loader>();
+  const { workingHours, bookingSettings } = useLoaderData<typeof loader>();
 
   return (
     <>
       {/* Email notification recipient settings */}
-      <NotificationSettings
-        bookingSettings={bookingSettings}
-        teamMembersForNotify={teamMembersForNotify}
-      />
+      <NotificationSettings bookingSettings={bookingSettings} />
 
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
