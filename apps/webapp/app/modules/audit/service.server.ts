@@ -16,8 +16,9 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { Logger } from "~/utils/logger";
-
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { resolveUserDisplayName } from "~/utils/user";
+
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
   sendAuditCancelledEmails,
@@ -46,6 +47,7 @@ export const AUDIT_LIST_INCLUDE = {
     select: {
       firstName: true,
       lastName: true,
+      displayName: true,
       email: true,
       profilePicture: true,
     },
@@ -56,6 +58,7 @@ export const AUDIT_LIST_INCLUDE = {
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
           email: true,
           profilePicture: true,
         },
@@ -118,6 +121,7 @@ export type GetAuditSessionResult = {
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       email: string;
       profilePicture: string | null;
     };
@@ -569,6 +573,7 @@ export async function getAuditSessionDetails({
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 email: true,
                 profilePicture: true,
               },
@@ -580,6 +585,7 @@ export async function getAuditSessionDetails({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             profilePicture: true,
           },
@@ -930,6 +936,7 @@ export async function getAssetsForAuditSession({
                     id: true,
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     email: true,
                     profilePicture: true,
                   },
@@ -1028,7 +1035,12 @@ export async function recordAuditScan(
     const [scannerUser, scannedAsset] = await Promise.all([
       db.user.findUnique({
         where: { id: userId },
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
       }),
       db.asset.findUnique({
         where: { id: assetId },
@@ -1451,6 +1463,7 @@ export async function completeAuditSession({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
         assignments: {
@@ -1460,6 +1473,7 @@ export async function completeAuditSession({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },
@@ -1495,6 +1509,7 @@ export async function completeAuditSession({
             email: completedAudit.createdBy.email,
             firstName: completedAudit.createdBy.firstName,
             lastName: completedAudit.createdBy.lastName,
+            displayName: completedAudit.createdBy.displayName,
           },
         });
       }
@@ -1722,6 +1737,7 @@ export async function cancelAuditSession({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
         organization: {
@@ -1738,6 +1754,7 @@ export async function cancelAuditSession({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },
@@ -1796,7 +1813,9 @@ export async function cancelAuditSession({
     // Create activity note for cancellation
     await db.auditNote.create({
       data: {
-        content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
+        content: `${resolveUserDisplayName(
+          auditSession.createdBy
+        )} cancelled the audit`,
         type: "UPDATE",
         userId,
         auditSessionId,
@@ -1858,6 +1877,7 @@ export async function getPendingAuditsForOrganization({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
       assignments: {
@@ -1866,6 +1886,7 @@ export async function getPendingAuditsForOrganization({
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },

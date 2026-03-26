@@ -131,6 +131,7 @@ shelf/
 - **Server State**: Remix loaders/actions for data fetching and mutations
 - **Client State**: Jotai atoms for complex UI state
 - **URL State**: Search params for filters, pagination, and bookmarks
+- **Optimistic UI & nProgress**: When implementing optimistic UI with fetchers, add the fetcher key to the `excludeFetchers` array in `apps/webapp/app/hooks/use-nprogress.ts` so the global loading bar does not show for operations that already provide instant visual feedback.
 
 ### Data Layer
 
@@ -306,6 +307,52 @@ All UI implementations must meet **WCAG 2.1 AA** as a minimum. This includes:
 - Use `aria-describedby` to link inputs to helper/error text
 - Meaningful alt text for images and icons
 - Focus indicators must be visible
+
+### Code Documentation (Required)
+
+All code must include inline documentation and JSDoc comments. This applies to every new file and every new export.
+
+**File-level documentation:**
+
+- Every file must start with a JSDoc block explaining its purpose, responsibilities, and how it fits into the broader system
+- Include `@see` references to related files (routes, services, components) where helpful
+
+**Function/component-level documentation:**
+
+- Every exported function, component, and type must have a JSDoc comment
+- Describe what it does, its parameters (`@param`), return values (`@returns`), and thrown errors (`@throws`)
+- For React components, document the props
+
+**Inline comments:**
+
+- Add inline comments to explain non-obvious logic, business rules, or important distinctions
+- Especially important: when a variable name could be confused (e.g., `userId` referring to different users in different contexts), add a clarifying comment
+- Explain "why" rather than "what" — the code shows what, comments explain why
+
+**Example:**
+
+```typescript
+/**
+ * User Note Service
+ *
+ * Handles CRUD operations for admin notes on user profiles.
+ * Notes are workspace-scoped: a note in Workspace A is invisible in Workspace B.
+ *
+ * @see {@link file://./../../routes/_layout+/settings.team.users.$userId.note.tsx}
+ */
+
+/** Arguments for creating a user note */
+type CreateUserNoteArgs = { ... };
+
+/**
+ * Creates a new note on a user's profile within a specific workspace.
+ *
+ * @param args - The note content, target user, organization, and optional author
+ * @returns The created UserNote record
+ * @throws {ShelfError} If the database operation fails
+ */
+export async function createUserNote(args: CreateUserNoteArgs) { ... }
+```
 
 ### Code Abstraction
 

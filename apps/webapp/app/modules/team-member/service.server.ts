@@ -8,6 +8,7 @@ import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -17,6 +18,7 @@ type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
       select: {
         firstName: true;
         lastName: true;
+        displayName: true;
         email: true;
       };
     };
@@ -279,6 +281,7 @@ export async function getTeamMemberForCustodianFilter({
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 email: true,
               },
             },
@@ -293,6 +296,7 @@ export async function getTeamMemberForCustodianFilter({
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 email: true,
               },
             },
@@ -317,10 +321,10 @@ export async function getTeamMemberForCustodianFilter({
 
       // Then sort alphabetically by name
       const aName = a?.user
-        ? `${a.user.firstName} ${a.user.lastName}`.toLowerCase()
+        ? resolveUserDisplayName(a.user).toLowerCase()
         : a.name.toLowerCase();
       const bName = b.user
-        ? `${b.user.firstName} ${b.user.lastName}`.toLowerCase()
+        ? resolveUserDisplayName(b.user).toLowerCase()
         : b.name.toLowerCase();
 
       return aName.localeCompare(bName);
@@ -394,6 +398,7 @@ export async function getTeamMemberForForm({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               email: true,
             },
           },
@@ -435,6 +440,7 @@ export async function getTeamMemberForForm({
                   id: true,
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   email: true,
                 },
               },
@@ -453,6 +459,7 @@ export async function getTeamMemberForForm({
                   id: true,
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   email: true,
                 },
               },

@@ -761,7 +761,12 @@ export async function releaseCustody({
           name: true,
           assets: { select: { id: true, title: true } },
           createdBy: {
-            select: { id: true, firstName: true, lastName: true },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            },
           },
           custody: { select: { custodian: { include: { user: true } } } },
         },
@@ -770,6 +775,7 @@ export async function releaseCustody({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -870,6 +876,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   profilePicture: true,
                 },
               },
@@ -1078,6 +1085,7 @@ export async function bulkAssignKitCustody({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
@@ -1085,7 +1093,14 @@ export async function bulkAssignKitCustody({
         select: {
           id: true,
           name: true,
-          user: { select: { id: true, firstName: true, lastName: true } },
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            },
+          },
         },
       }),
     ]);
@@ -1240,6 +1255,7 @@ export async function bulkReleaseKitCustody({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -1623,6 +1639,7 @@ export async function updateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const location = await db.location.findUnique({
@@ -1670,6 +1687,7 @@ export async function updateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const currentLocation = await db.location.findUnique({
@@ -1775,6 +1793,7 @@ export async function bulkUpdateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const location = await db.location.findUnique({
@@ -1817,6 +1836,7 @@ export async function bulkUpdateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
 
@@ -1856,6 +1876,7 @@ export async function bulkUpdateKitLocation({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const userLink = wrapUserLinkForNote({
@@ -1985,6 +2006,7 @@ export async function updateKitAssets({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const actor = wrapUserLinkForNote({
@@ -2018,6 +2040,7 @@ export async function updateKitAssets({
                       email: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -2164,6 +2187,7 @@ export async function updateKitAssets({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         await Promise.all(
@@ -2201,6 +2225,7 @@ export async function updateKitAssets({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             } satisfies Prisma.UserSelect,
           });
           await Promise.all(
@@ -2366,6 +2391,7 @@ export async function bulkRemoveAssetsFromKits({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const actor = wrapUserLinkForNote({
@@ -2398,7 +2424,12 @@ export async function bulkRemoveAssetsFromKits({
               select: {
                 name: true,
                 user: {
-                  select: { id: true, firstName: true, lastName: true },
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
                 },
               },
             },

@@ -6,6 +6,7 @@ export enum QueueNames {
   bookingQueue = "booking-queue",
   auditQueue = "audit-queue",
   assetsQueue = "assets-queue",
+  addonTrialQueue = "addon-trial-queue",
 }
 
 let scheduler!: PgBoss;

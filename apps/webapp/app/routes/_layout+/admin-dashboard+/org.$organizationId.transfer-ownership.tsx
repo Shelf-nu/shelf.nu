@@ -25,6 +25,7 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Transfer organization ownership") },
@@ -114,7 +115,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Ownership transferred",
-      message: `You have successfully transferred ownership of ${currentOrganization.name} to ${newOwner.firstName} ${newOwner.lastName}`,
+      message: `You have successfully transferred ownership of ${
+        currentOrganization.name
+      } to ${resolveUserDisplayName(newOwner)}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

@@ -12,6 +12,7 @@ import {
   isAssetPartiallyCheckedIn,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
 import { AssetImage } from "../assets/asset-image";
@@ -229,12 +230,10 @@ export default function ListAssetContent({
               <span className="text-sm text-gray-600">
                 {(() => {
                   const details = partialCheckinDetails[item.id];
-                  const firstName = details.checkedInBy.firstName || "";
-                  const lastName = details.checkedInBy.lastName || "";
 
                   return (
                     <UserBadge
-                      name={`${firstName} ${lastName}`}
+                      name={resolveUserDisplayName(details.checkedInBy)}
                       img={details.checkedInBy.profilePicture}
                     />
                   );

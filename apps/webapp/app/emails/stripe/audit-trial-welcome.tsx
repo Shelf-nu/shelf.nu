@@ -18,22 +18,28 @@ import { styles } from "../styles";
 
 interface AuditTrialWelcomeProps {
   firstName?: string | null;
+  displayName?: string | null;
   email: string;
   hasPaymentMethod?: boolean;
 }
 
 export const sendAuditTrialWelcomeEmail = async ({
   firstName,
+  displayName,
   email,
   hasPaymentMethod,
 }: AuditTrialWelcomeProps) => {
   try {
     const subject = "Your 7-day Audits trial is now active!";
+    const greeting = displayName || firstName;
     const html = await auditTrialWelcomeEmailHtml({
-      firstName,
+      firstName: greeting,
       hasPaymentMethod,
     });
-    const text = auditTrialWelcomeEmailText({ firstName, hasPaymentMethod });
+    const text = auditTrialWelcomeEmailText({
+      firstName: greeting,
+      hasPaymentMethod,
+    });
 
     void sendEmail({
       to: email,

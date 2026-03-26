@@ -16,6 +16,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -144,6 +145,8 @@ const QRScanner = () => {
 
   const { canUseBarcodes } = useBarcodePermissions();
 
+  const { triggerSuccess, triggerError } = useHapticFeedback();
+
   // Store the current action in a ref that's always up-to-date
   // This is required in order to handle the action correctly, even tho we use global state
   const actionRef = useRef(action);
@@ -189,6 +192,7 @@ const QRScanner = () => {
 
         // Handle error case (unsupported barcode type)
         if (error) {
+          triggerError();
           handleSetPaused(true);
           setErrorTitle(DEFAULT_ERROR_TITLE);
           setErrorMessage(error);
@@ -205,6 +209,7 @@ const QRScanner = () => {
         // Navigate to appropriate route based on code type
         if (type === "barcode") {
           if (!canUseBarcodes) {
+            triggerError();
             setErrorTitle("Barcode scanning disabled");
             setErrorMessage(
               "Your workspace does not support scanning barcodes. Contact your workspace owner to activate this feature or try scanning a Shelf QR code."
@@ -214,6 +219,7 @@ const QRScanner = () => {
             return;
           }
 
+          triggerSuccess();
           void navigate(`/barcode/${encodeURIComponent(value)}`);
           return;
         }
@@ -228,6 +234,7 @@ const QRScanner = () => {
 
           void resolveAssetIdFromSamId(options)
             .then((assetId) => {
+              triggerSuccess();
               setScanMessage("Redirecting to mapped asset...");
               void navigate(`/assets/${assetId}`);
             })
@@ -238,6 +245,7 @@ const QRScanner = () => {
                 false
               );
 
+              triggerError();
               setErrorTitle(reason.title || "SAM ID lookup failed");
               setErrorMessage(reason.message);
               setScanMessage("");
@@ -247,16 +255,29 @@ const QRScanner = () => {
           return;
         }
 
+        triggerSuccess();
         void navigate(`/qr/${value}`);
       } else if (
         ["Assign custody", "Release custody", "Update location"].includes(
           currentAction
         )
       ) {
+        if (error) {
+          triggerError();
+        } else {
+          triggerSuccess();
+        }
         addItem(value, error, type);
       }
     },
-    [addItem, navigate, handleSetPaused, canUseBarcodes]
+    [
+      addItem,
+      navigate,
+      handleSetPaused,
+      canUseBarcodes,
+      triggerSuccess,
+      triggerError,
+    ]
   );
 
   return (

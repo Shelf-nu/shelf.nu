@@ -9,6 +9,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
@@ -53,7 +54,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
     if (recipients.length > 0) {
       const custodian =
-        `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+        resolveUserDisplayName(booking.custodianUser) ||
         (booking.custodianTeamMember?.name as string);
 
       const subject = `🔔 Checkout reminder (${booking.name}) - shelf.nu`;
@@ -186,7 +187,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
   if (recipients.length > 0) {
     const custodian =
-      `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+      resolveUserDisplayName(booking.custodianUser) ||
       (booking.custodianTeamMember?.name as string);
 
     const subject = `⚠️ Overdue booking (${booking.name}) - shelf.nu`;

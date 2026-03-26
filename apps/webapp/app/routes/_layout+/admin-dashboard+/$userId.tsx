@@ -48,6 +48,7 @@ import {
   getStripePricesAndProducts,
   getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
@@ -80,6 +81,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         email: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         username: true,
         profilePicture: true,
         createdAt: true,
@@ -337,11 +339,12 @@ export const action = async ({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         await createStripeCustomer({
           email: user.email,
-          name: `${user.firstName} ${user.lastName}`,
+          name: resolveUserDisplayName(user),
           userId: user.id,
         });
         return payload(null);

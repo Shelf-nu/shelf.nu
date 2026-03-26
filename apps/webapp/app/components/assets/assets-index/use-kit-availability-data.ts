@@ -9,6 +9,7 @@ import { useHints } from "~/utils/client-hints";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { resolveUserDisplayName } from "~/utils/user";
 
 type Items = NonNullable<
   ReturnType<typeof useLoaderData<KitIndexLoaderData>>["items"]
@@ -62,7 +63,7 @@ export function useKitAvailabilityData(items: Items) {
       };
 
       const custodianName = bookingWithRelations?.custodianUser
-        ? `${bookingWithRelations.custodianUser.firstName} ${bookingWithRelations.custodianUser.lastName}`
+        ? resolveUserDisplayName(bookingWithRelations.custodianUser)
         : bookingWithRelations.custodianTeamMember?.name;
 
       let title = bookingWithRelations.name;

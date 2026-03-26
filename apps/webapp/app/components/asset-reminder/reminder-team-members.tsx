@@ -23,6 +23,7 @@ type ReminderTeamMembersProps = {
           id: true;
           firstName: true;
           lastName: true;
+          displayName: true;
           profilePicture: true;
         };
       };

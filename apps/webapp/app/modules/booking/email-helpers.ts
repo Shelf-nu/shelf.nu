@@ -8,6 +8,7 @@ import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { resolveUserDisplayName } from "~/utils/user";
 import { BOOKING_INCLUDE_FOR_EMAIL } from "./constants";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 
@@ -129,7 +130,7 @@ export async function sendCheckinReminder(
   if (recipients.length === 0) return;
 
   const custodian =
-    `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+    resolveUserDisplayName(booking.custodianUser) ||
     (booking.custodianTeamMember?.name as string);
 
   const subject = `🔔 Checkin reminder (${booking.name}) - shelf.nu`;
@@ -294,9 +295,10 @@ export async function sendBookingUpdatedEmail({
 
     if (!booking) return;
 
-    const custodian = booking.custodianUser
-      ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
-      : booking.custodianTeamMember?.name ?? "";
+    const custodian =
+      (resolveUserDisplayName(booking.custodianUser) ||
+        booking.custodianTeamMember?.name) ??
+      "";
 
     const subject = `📝 Booking updated (${booking.name}) - shelf.nu`;
 

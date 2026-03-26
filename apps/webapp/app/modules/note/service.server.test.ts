@@ -713,7 +713,12 @@ describe("note service", () => {
 
       expect(db.user.findUnique).toHaveBeenCalledWith({
         where: { id: "user-1" },
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
       });
 
       expect(db.note.createMany).toHaveBeenCalledWith({
@@ -833,7 +838,12 @@ describe("note service", () => {
 
       expect(db.user.findUnique).toHaveBeenCalledWith({
         where: { id: "user-1" },
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
       });
 
       expect(db.note.createMany).toHaveBeenCalledWith({

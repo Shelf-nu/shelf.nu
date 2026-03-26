@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import FormRow from "~/components/forms/form-row";
 import MultiSelect from "~/components/multi-select/multi-select";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
 
 /**
@@ -47,15 +48,12 @@ type NotificationRecipientsFieldProps = {
 
 /**
  * Derives a human-readable label for a team member.
- * Prefers the user's full name (firstName + lastName) when available,
- * falling back to the team member's `name` field for invited-but-not-yet-
- * registered members who only have a team member record.
+ * Delegates to `resolveTeamMemberName` which uses `resolveUserDisplayName`
+ * internally — respects displayName, falls back to firstName+lastName,
+ * then to the team member's `name` field.
  */
 function formatTeamMemberLabel(tm: NotificationRecipientTeamMember): string {
-  const fullName = [tm.user?.firstName, tm.user?.lastName]
-    .filter(Boolean)
-    .join(" ");
-  return fullName || tm.name;
+  return resolveTeamMemberName(tm);
 }
 
 /**

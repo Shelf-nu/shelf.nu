@@ -196,6 +196,7 @@ export async function createScanNote({
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const actor = wrapUserLinkForNote({

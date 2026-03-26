@@ -34,6 +34,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 const AUDIT_SORTING_OPTIONS = {
   name: "Name",
@@ -181,18 +182,14 @@ type AuditListItem = Prisma.AuditSessionGetPayload<{
 const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const { createdBy } = item;
   const creatorName =
-    createdBy?.firstName && createdBy?.lastName
-      ? `${createdBy.firstName} ${createdBy.lastName}`
-      : createdBy?.email || "Unknown";
+    resolveUserDisplayName(createdBy) || createdBy?.email || "Unknown";
   const creatorImg =
     createdBy?.profilePicture || "/static/images/default_pfp.jpg";
 
   // Get the first assignee to display
   const firstAssignment = item.assignments[0];
   const assigneeName = firstAssignment?.user
-    ? `${firstAssignment.user.firstName || ""} ${
-        firstAssignment.user.lastName || ""
-      }`.trim() ||
+    ? resolveUserDisplayName(firstAssignment.user) ||
       firstAssignment.user.email ||
       "Unknown"
     : null;

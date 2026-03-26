@@ -1,5 +1,6 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { DateS } from "../shared/date";
@@ -130,7 +131,7 @@ export function BookingStatistics({
           <span className="text-sm text-gray-500">Created by</span>
 
           <UserBadge
-            name={`${creator.firstName} ${creator.lastName}`}
+            name={resolveUserDisplayName(creator)}
             img={creator.profilePicture}
           />
         </div>

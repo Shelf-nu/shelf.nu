@@ -38,6 +38,7 @@ export interface AuditPdfDbResult {
         select: {
           firstName: true;
           lastName: true;
+          displayName: true;
           email: true;
           profilePicture: true;
         };
@@ -49,6 +50,7 @@ export interface AuditPdfDbResult {
               id: true;
               firstName: true;
               lastName: true;
+              displayName: true;
               email: true;
               profilePicture: true;
             };
@@ -122,6 +124,7 @@ export async function fetchAllAuditPdfRelatedData(
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             profilePicture: true,
           },
@@ -133,6 +136,7 @@ export async function fetchAllAuditPdfRelatedData(
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 email: true,
                 profilePicture: true,
               },
@@ -219,6 +223,7 @@ export async function fetchAllAuditPdfRelatedData(
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
           },
         },
