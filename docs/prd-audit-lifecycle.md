@@ -60,7 +60,7 @@ The `targetId` field already exists on `AuditSession` (schema line 1540). When c
 
 **Resolution logic:**
 
-```
+```text
 if targetId exists AND contextType is "tag" | "category" | "location":
   → re-query assets matching that tag/category/location in the org
 else:
@@ -227,7 +227,7 @@ For bulk delete of archived audits:
 
 ## Build Order
 
-```
+```text
 Feature 2 (Archive) → Feature 3 (Delete) → Feature 1 (Duplicate)
 ```
 
@@ -242,7 +242,7 @@ Feature 2 (Archive) → Feature 3 (Delete) → Feature 1 (Duplicate)
 
 ## Status Lifecycle (Updated)
 
-```
+```text
 PENDING → ACTIVE → COMPLETED → ARCHIVED → [DELETE]
                  ↘ CANCELLED
 
