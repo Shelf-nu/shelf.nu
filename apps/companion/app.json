@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Shelf",
+    "slug": "shelf-companion",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "shelf",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shelf.companion",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FF7809"
+      },
+      "package": "com.shelf.companion",
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FF7809",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets."
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-quick-actions",
+      "./plugins/swift-concurrency-fix"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}

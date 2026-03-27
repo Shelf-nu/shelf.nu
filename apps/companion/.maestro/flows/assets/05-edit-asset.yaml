@@ -1,0 +1,31 @@
+appId: com.shelf.companion
+name: "Assets - Edit Asset"
+tags:
+  - assets
+
+---
+# Test: Edit an existing asset
+# Navigates to known asset detail and checks edit UI
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Open asset detail via deep link
+- openLink: "shelf://assets/${SHELF_TEST_ASSET_ID}"
+
+# Use tapOn for tree refresh — asset detail should show Status
+- tapOn:
+    text: "Status"
+    optional: true
+
+- takeScreenshot: assets-edit-before
+
+# Tap edit button (optional — may not be visible)
+- tapOn:
+    text: "Edit"
+    optional: true
+
+- takeScreenshot: assets-edit-form

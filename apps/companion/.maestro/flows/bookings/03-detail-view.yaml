@@ -1,0 +1,24 @@
+appId: com.shelf.companion
+name: "Bookings - Detail View"
+tags:
+  - bookings
+
+---
+# Test: Booking detail view via deep link
+# Navigates directly to a known booking
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Open booking detail via deep link
+- openLink: "shelf://bookings/${SHELF_TEST_BOOKING_ID}"
+
+# Use tapOn on a detail element for tree refresh (optional — booking may not exist)
+- tapOn:
+    text: "Status"
+    optional: true
+
+- takeScreenshot: bookings-detail-view

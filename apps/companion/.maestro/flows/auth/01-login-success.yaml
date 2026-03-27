@@ -1,0 +1,29 @@
+appId: com.shelf.companion
+name: "Auth - Login Success"
+tags:
+  - auth
+  - smoke
+
+---
+# Test: Successful login with valid credentials
+# Verifies login flow and dashboard loads correctly
+
+- runFlow: ../../shared/login.yaml
+
+# Wait for dashboard data to load — tapOn retries reliably after runFlow
+# (extendedWaitUntil has a known stale-cache issue after runFlow on iOS)
+- tapOn:
+    text: "Quick Actions"
+
+# Verify dashboard KPI cards are visible (a11y labels include the value)
+- assertVisible: "Total Assets.*"
+- assertVisible: "My Custody.*"
+- assertVisible: "Categories.*"
+- assertVisible: "Locations.*"
+
+# Verify Quick Actions section and buttons
+- assertVisible: "Quick Actions"
+- assertVisible: "New Asset"
+- assertVisible: "Scan Code"
+
+- takeScreenshot: auth-login-success

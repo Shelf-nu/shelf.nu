@@ -1,0 +1,29 @@
+appId: com.shelf.companion
+---
+# Shared launch flow — gets to the login screen WITHOUT logging in
+# Used by tests that need to interact with the login/auth screens
+#
+# IMPORTANT: Run `xcrun simctl keychain booted reset` before this flow
+# to clear SecureStore auth tokens (clearState only clears AsyncStorage).
+
+- clearState
+- launchApp
+
+# Expo dev client launcher — tap the dev server to load the app
+- assertVisible: "http://localhost:8081"
+- tapOn: "http://localhost:8081"
+
+# Dismiss Expo developer menu overlays if they appear
+- tapOn:
+    text: "Continue"
+    optional: true
+# Swipe down to dismiss the dev tools bottom sheet
+- swipe:
+    direction: DOWN
+    duration: 500
+
+# Wait for Metro to bundle the JS and render the login screen
+- extendedWaitUntil:
+    visible:
+      id: "email-input"
+    timeout: 120000

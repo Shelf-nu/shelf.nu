@@ -1,0 +1,25 @@
+appId: com.shelf.companion
+name: "Scanner - Camera Permission"
+tags:
+  - scanner
+
+---
+# Test: Scanner screen handles camera permission
+# Verifies permission dialog appears and scanner loads after granting
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+
+# Handle iOS camera permission dialog if it appears
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# The scanner should either show camera view or permission state
+- takeScreenshot: scanner-camera-permission

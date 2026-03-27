@@ -1,0 +1,29 @@
+appId: com.shelf.companion
+name: "Dashboard - Pull to Refresh"
+tags:
+  - dashboard
+
+---
+# Test: Pull-to-refresh reloads dashboard data
+# Verifies swipe gesture triggers data reload
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Verify initial load
+- assertVisible: "Total Assets.*"
+
+# Pull to refresh (swipe down from middle of screen)
+- swipe:
+    direction: DOWN
+    duration: 500
+
+# Wait for refresh to complete — use tapOn for reliable detection
+- tapOn:
+    text: "Quick Actions"
+- assertVisible: "Total Assets.*"
+
+- takeScreenshot: dashboard-after-refresh

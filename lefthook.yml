@@ -25,6 +25,15 @@ pre-commit:
         - merge
         - rebase
 
+    eslint-companion:
+      priority: 2
+      glob: "apps/companion/**/*.{js,jsx,ts,tsx}"
+      root: "apps/companion/"
+      run: "npx expo lint"
+      skip:
+        - merge
+        - rebase
+
     prettier:
       priority: 3
       glob: "**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}"

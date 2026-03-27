@@ -18,6 +18,17 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 
 **IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
 
+### Companion App (Mobile)
+
+- `pnpm companion:dev` - Start Metro dev server (connects to existing build)
+- `pnpm companion:dev:clear` - Start Metro with cleared cache (after env changes)
+- `pnpm companion:build:ios` - Build native iOS + run on Simulator
+- `pnpm companion:build:ios:device` - Build native iOS + run on physical iPhone
+- `pnpm companion:build:android` - Build native Android + run on device/emulator
+- `pnpm companion:prebuild:clean` - Regenerate iOS native project from Expo config
+
+See `apps/companion/README.md` for full setup guide (LAN IPs, HTTP mode, device trust).
+
 ### Docs
 
 - `pnpm docs:dev` - Start docs dev server on port 5173
@@ -55,10 +66,11 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 
 ### Apps
 
-| Package         | Path           | Description                                                                                                           |
-| --------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `@shelf/webapp` | `apps/webapp/` | Remix web application — the main product. Contains routes, components, modules (business logic), and integrations.    |
-| `@shelf/docs`   | `apps/docs/`   | Developer documentation site (VitePress). Contains guides on local development, database triggers, architecture, etc. |
+| Package            | Path              | Description                                                                                                           |
+| ------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/webapp`    | `apps/webapp/`    | Remix web application — the main product. Contains routes, components, modules (business logic), and integrations.    |
+| `@shelf/companion` | `apps/companion/` | Expo/React Native mobile companion app. QR/barcode scanning, asset management, audits, bookings. Uses webapp API.     |
+| `@shelf/docs`      | `apps/docs/`      | Developer documentation site (VitePress). Contains guides on local development, database triggers, architecture, etc. |
 
 ### Packages
 
