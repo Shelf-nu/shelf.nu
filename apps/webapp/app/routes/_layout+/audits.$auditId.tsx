@@ -133,6 +133,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "archive-audit") {
+      // Only admin/owner can archive — UI gates this, but enforce server-side
+      // to prevent direct POST bypass by self-service/base roles
+      if (isSelfServiceOrBase) {
+        throw new ShelfError({
+          cause: null,
+          message: "You do not have permission to archive audits.",
+          additionalData: { userId, auditId },
+          label,
+          status: 403,
+        });
+      }
+
       await archiveAuditSession({
         auditSessionId: auditId,
         organizationId,
