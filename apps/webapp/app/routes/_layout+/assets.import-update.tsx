@@ -5,7 +5,7 @@ import type {
 } from "react-router";
 import { data, Link } from "react-router";
 import { z } from "zod";
-import { ImportUpdateContent } from "~/components/assets/import-update-content";
+import { ImportUpdateContent } from "~/components/assets/bulk-update";
 import Header from "~/components/layout/header";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";

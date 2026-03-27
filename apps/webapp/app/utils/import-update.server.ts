@@ -450,8 +450,17 @@ export function computeAssetDiffs({
       continue;
     }
 
-    // Check for duplicate IDs
-    const firstSeenRow = seenIds.get(assetId);
+    if (!existingAsset) {
+      failedRows.push({
+        rowNumber,
+        id: assetId,
+        reason: "Asset not found in your organization",
+      });
+      continue;
+    }
+
+    // Check for duplicate assets by canonical UUID (not CSV identifier string)
+    const firstSeenRow = seenIds.get(existingAsset.id);
     if (firstSeenRow !== undefined) {
       failedRows.push({
         rowNumber,
@@ -460,15 +469,24 @@ export function computeAssetDiffs({
       });
       continue;
     }
-    seenIds.set(assetId, rowNumber);
+    seenIds.set(existingAsset.id, rowNumber);
 
-    if (!existingAsset) {
-      failedRows.push({
-        rowNumber,
-        id: assetId,
-        reason: "Asset not found in your organization",
-      });
-      continue;
+    // Cross-check: if both identifier columns exist and have values,
+    // verify they point to the same asset to prevent accidental mismatch
+    if (headerAnalysis.fallbackId && fallbackAssets) {
+      const primaryValue = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
+      const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
+      if (primaryValue && fallbackValue) {
+        const fallbackAsset = fallbackAssets.get(fallbackValue);
+        if (fallbackAsset && fallbackAsset.id !== existingAsset.id) {
+          failedRows.push({
+            rowNumber,
+            id: assetId,
+            reason: `Identifier mismatch — Asset ID "${primaryValue}" and ID "${fallbackValue}" point to different assets`,
+          });
+          continue;
+        }
+      }
     }
 
     // Compute per-field diffs

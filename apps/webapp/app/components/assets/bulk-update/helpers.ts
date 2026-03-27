@@ -1,0 +1,112 @@
+// ---------------------------------------------------------------------------
+// Client-side CSV validation helpers for bulk update import
+// ---------------------------------------------------------------------------
+
+/** Identifier columns we accept, in order of preference */
+export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
+
+/** Maximum number of asset change rows to display in the preview */
+export const PREVIEW_DISPLAY_LIMIT = 50;
+
+export interface ClientValidation {
+  valid: boolean;
+  /** Which identifier column was found (null if none) */
+  idColumnFound: string | null;
+  headerCount: number;
+  rowCount: number;
+  warnings: string[];
+}
+
+/**
+ * Validates CSV text client-side before sending to the server.
+ * Checks for BOM, identifier columns, and basic structure.
+ */
+export function validateCsvClientSide(text: string): ClientValidation {
+  // Strip BOM that Excel adds to UTF-8 CSVs
+  const cleanText = text.replace(/^\uFEFF/, "");
+  const lines = cleanText.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return {
+      valid: false,
+      idColumnFound: null,
+      headerCount: 0,
+      rowCount: 0,
+      warnings: ["File appears to be empty."],
+    };
+  }
+
+  // Parse first line as headers (simple CSV split — handles most cases)
+  const headers = parseSimpleCsvLine(lines[0]);
+  const headerTrimmed = headers.map((h) => h.trim());
+
+  // Find best available identifier column (priority order)
+  const idColumnFound =
+    ACCEPTED_ID_COLUMNS.find((col) => headerTrimmed.includes(col)) ?? null;
+
+  const rowCount = Math.max(0, lines.length - 1);
+  const warnings: string[] = [];
+
+  if (!idColumnFound) {
+    warnings.push(
+      "No identifier column found. Your CSV needs an Asset ID or ID column to match rows to existing assets."
+    );
+  }
+
+  if (rowCount === 0) {
+    warnings.push("No data rows found — only a header row.");
+  }
+
+  return {
+    valid: !!idColumnFound && rowCount > 0,
+    idColumnFound,
+    headerCount: headerTrimmed.filter(Boolean).length,
+    rowCount,
+    warnings,
+  };
+}
+
+/**
+ * Simple CSV line parser for client-side validation.
+ * Handles quoted values and strips enclosing quotes.
+ */
+export function parseSimpleCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      // Handle escaped quotes ("") inside quoted fields
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((char === "," || char === ";") && !inQuotes) {
+      result.push(stripQuotes(current.trim()));
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(stripQuotes(current.trim()));
+  return result;
+}
+
+/** Strip enclosing double-quotes from a CSV value */
+function stripQuotes(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+/** Escape a value for CSV output — wraps in quotes if needed */
+export function escapeCsvValue(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}

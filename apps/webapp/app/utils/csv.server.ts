@@ -327,15 +327,66 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
-  // Pass both assets and columns to the build function
-  // Build column list: force-include `name` and `id` so every export
-  // has at least the asset name and a stable identifier for bulk-update.
-  // Deduplicate in case the user already has these columns visible.
+  const csvData = buildCsvExportDataFromAssets({
+    assets,
+    columns: settings.columns as Column[],
+    currentOrganization,
+    request,
+  });
+
+  // Join rows with CRLF as per CSV spec
+  return csvData.join("\r\n");
+}
+
+/**
+ * Exports assets from the Asset Index with `name` and `id` columns
+ * force-included so the bulk-update import always has a stable identifier.
+ */
+export async function exportAssetsForBulkUpdateCsv({
+  request,
+  assetIds,
+  settings,
+  currentOrganization,
+  assetIndexCurrentSearchParams,
+}: {
+  request: Request;
+  assetIds: string;
+  settings: AssetIndexSettings;
+  currentOrganization: Pick<
+    Organization,
+    "id" | "barcodesEnabled" | "currency"
+  >;
+  assetIndexCurrentSearchParams: string | null;
+}) {
+  const ids = assetIds.split(",");
+  const takeAll = ids.includes(ALL_SELECTED_KEY);
+
+  const filtersToUse =
+    takeAll && assetIndexCurrentSearchParams
+      ? assetIndexCurrentSearchParams
+      : (
+          await getAdvancedFiltersFromRequest(
+            request,
+            currentOrganization.id,
+            settings
+          )
+        ).filters;
+
+  const { assets } = await getAdvancedPaginatedAndFilterableAssets({
+    request,
+    organizationId: currentOrganization.id,
+    filters: filtersToUse,
+    settings,
+    takeAll,
+    assetIds: takeAll ? undefined : ids,
+    canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+  });
+
+  // Force-include `name` and `id` so bulk update always has identifiers
   const userColumns = (settings.columns ?? []) as Column[];
   const seenColumnNames = new Set<string>();
   const deduplicatedColumns: Column[] = [];
 
-  // Force-included columns first (guaranteed in every export)
   for (const forced of [
     { name: "name" as const, visible: true, position: 0 },
     { name: "id" as const, visible: true, position: 1 },
@@ -344,7 +395,6 @@ export async function exportAssetsFromIndexToCsv({
     deduplicatedColumns.push(forced);
   }
 
-  // Then user columns, skipping any we already force-included
   for (const col of userColumns) {
     if (!seenColumnNames.has(col.name)) {
       seenColumnNames.add(col.name);
@@ -359,7 +409,6 @@ export async function exportAssetsFromIndexToCsv({
     request,
   });
 
-  // Join rows with CRLF as per CSV spec
   return csvData.join("\r\n");
 }
 
