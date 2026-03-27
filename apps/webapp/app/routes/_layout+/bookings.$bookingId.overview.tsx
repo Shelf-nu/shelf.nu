@@ -758,23 +758,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints: getClientHint(request),
         });
 
-        // Sync per-booking notification recipients on save.
-        // Replaces the full set of recipients so removals are handled
-        // automatically. Only admin/owner users can modify recipients.
-        if (isAdminOrOwner) {
-          const recipientIdsRaw = formData.get("notificationRecipientIds") as
-            | string
-            | null;
-          const recipientIds = recipientIdsRaw
-            ? recipientIdsRaw.split(",").filter(Boolean)
-            : [];
-          await updateBookingNotificationRecipients({
-            bookingId: id,
-            organizationId,
-            teamMemberIds: recipientIds,
-          });
-        }
-
         sendNotification({
           title: "Booking saved",
           message: "Your booking has been saved successfully",
@@ -819,23 +802,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               zone: hints.timeZone,
             }).toJSDate()
           : undefined;
-
-        // Sync per-booking notification recipients BEFORE reserving so the
-        // reservation email (which triggers immediately) includes the correct
-        // set of recipients. This must happen before `reserveBooking()`.
-        if (isAdminOrOwner) {
-          const recipientIdsRaw = formData.get("notificationRecipientIds") as
-            | string
-            | null;
-          const recipientIds = recipientIdsRaw
-            ? recipientIdsRaw.split(",").filter(Boolean)
-            : [];
-          await updateBookingNotificationRecipients({
-            bookingId: id,
-            organizationId,
-            teamMemberIds: recipientIds,
-          });
-        }
 
         const booking = await reserveBooking({
           id,

@@ -295,6 +295,13 @@ export async function sendBookingUpdatedEmail({
 
     if (!booking) return;
 
+    // Don't send update emails for draft bookings — the booking hasn't
+    // been reserved yet, so emailing about changes is noise.
+    // Exception: custodian changes still send emails even in draft,
+    // because the new custodian needs to know they've been assigned
+    // and the old custodian needs to know they've been removed.
+    if (booking.status === "DRAFT" && !oldCustodianEmail) return;
+
     const custodian =
       (resolveUserDisplayName(booking.custodianUser) ||
         booking.custodianTeamMember?.name) ??
@@ -315,12 +322,15 @@ export async function sendBookingUpdatedEmail({
 
     const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
 
-    // Resolve all recipients
+    // Resolve all recipients.
+    // For custodian changes, skip editor exclusion so all configured
+    // recipients (always-notify, per-booking) are notified about the change.
+    const isCustodianChange = !!oldCustodianEmail;
     const recipients = await getBookingNotificationRecipients({
       booking,
       eventType: "UPDATE",
       organizationId,
-      editorUserId: userId,
+      editorUserId: isCustodianChange ? undefined : userId,
     });
 
     // Send to all resolved recipients

@@ -121,39 +121,44 @@ export default function ManageNotificationsDialog() {
   const previewRecipients = useMemo(() => {
     const recipients: Array<{ id?: string; name: string; reason: string }> = [];
     const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
 
     if (custodianName) {
       recipients.push({ name: custodianName, reason: "custodian" });
+      seenNames.add(custodianName);
     }
 
     if (
       bookingSettings?.notifyBookingCreator &&
       creatorName &&
-      creatorName !== custodianName
+      !seenNames.has(creatorName)
     ) {
       recipients.push({ name: creatorName, reason: "creator" });
+      seenNames.add(creatorName);
     }
 
     if (bookingSettings?.alwaysNotifyTeamMembers) {
       for (const tm of bookingSettings.alwaysNotifyTeamMembers) {
-        if (!seenIds.has(tm.id)) {
-          recipients.push({
-            name: resolveTeamMemberName(tm),
-            reason: "always_notify",
-          });
+        const name = resolveTeamMemberName(tm);
+        if (!seenIds.has(tm.id) && !seenNames.has(name)) {
+          recipients.push({ name, reason: "always_notify" });
           seenIds.add(tm.id);
+          seenNames.add(name);
         }
       }
     }
 
     for (const tmId of selectedIds) {
       if (seenIds.has(tmId)) continue;
+      const name = selectedNameMap.get(tmId) ?? tmId;
+      if (seenNames.has(name)) continue;
       recipients.push({
         id: tmId,
-        name: selectedNameMap.get(tmId) ?? tmId,
+        name,
         reason: "booking_recipient",
       });
       seenIds.add(tmId);
+      seenNames.add(name);
     }
 
     return recipients;

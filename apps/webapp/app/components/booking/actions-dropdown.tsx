@@ -35,8 +35,15 @@ interface Props {
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
-  const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatusHelpers(booking.status);
+  const {
+    isCompleted,
+    isOngoing,
+    isReserved,
+    isOverdue,
+    isDraft,
+    isArchived,
+    isCancelled,
+  } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
@@ -134,7 +141,14 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             </Button>
           </DropdownMenuItem>
 
-          <When truthy={!isBaseOrSelfService}>
+          <When
+            truthy={
+              !isBaseOrSelfService &&
+              !isCompleted &&
+              !isArchived &&
+              !isCancelled
+            }
+          >
             <ManageNotificationsDialog />
           </When>
 

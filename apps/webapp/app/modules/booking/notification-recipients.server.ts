@@ -203,9 +203,17 @@ export async function getBookingNotificationRecipients({
     // 7. Exclude the editor from immediate (non-scheduled) notifications.
     //    Scheduled jobs (reminders, overdue) have no human editor, so
     //    skipping this step ensures all relevant parties are notified.
+    //    Exception: the "creator" reason means the user explicitly opted in
+    //    via the workspace setting — don't exclude them even if they're the
+    //    editor, because the whole point is to stay informed about bookings
+    //    they create for others.
     if (editorUserId && !isScheduledJob) {
       for (const [email, recipient] of recipients) {
-        if (recipient.userId === editorUserId) {
+        if (
+          recipient.userId === editorUserId &&
+          recipient.reason !== "creator" &&
+          recipient.reason !== "custodian"
+        ) {
           recipients.delete(email);
         }
       }
