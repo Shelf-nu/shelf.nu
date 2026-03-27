@@ -36,7 +36,11 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
       !error404.isError404 &&
       window.env?.SENTRY_DSN
     ) {
-      setSentryEventId(Sentry.captureException(response));
+      setSentryEventId(
+        Sentry.captureException(response, {
+          tags: { source: "error-boundary" },
+        })
+      );
     }
   }, [response, error404.isError404]);
   if (error404.isError404) {
