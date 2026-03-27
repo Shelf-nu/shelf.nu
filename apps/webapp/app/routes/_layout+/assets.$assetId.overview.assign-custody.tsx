@@ -219,11 +219,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** In order to do it with a single query
-     * 1. We update the asset status
-     * 2. We create a new custody record for that specific asset
-     * 3. We link it to the custodian
+    /** Assign custody to an asset:
+     * 1. Clear any stale custody record (prevents P2002 unique constraint
+     *    if a previous release updated status but failed to delete custody)
+     * 2. Update the asset status to IN_CUSTODY
+     * 3. Create a new custody record linked to the custodian
      */
+    await db.custody.deleteMany({ where: { assetId } }).catch(() => {
+      /* no-op: custody may not exist, that's fine */
+    });
+
     const asset = await db.asset
       .update({
         where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,

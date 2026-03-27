@@ -69,6 +69,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         status: 404,
         additionalData: { targetUserId, organizationId },
         label: "Team Member Note",
+        shouldBeCaptured: false,
       });
     }
 

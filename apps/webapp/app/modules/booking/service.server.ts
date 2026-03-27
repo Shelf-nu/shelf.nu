@@ -2108,36 +2108,47 @@ export async function updateBookingAssets({
     // BOOKING ACTIVITY LOG: Log asset addition activity
     // Creates user-attributed note when assets are added to a booking
     // Skip note creation if kits are involved - kit notes are created separately
+    // Note creation is best-effort — the booking update already succeeded,
+    // so we log failures instead of throwing to prevent false error reports.
     if (!kitIds || kitIds.length === 0) {
-      // Fetch asset data to use proper wrapper for single assets
-      const assets = await db.asset.findMany({
-        where: { id: { in: assetIds }, organizationId },
-        select: { id: true, title: true },
-      });
+      try {
+        const assets = await db.asset.findMany({
+          where: { id: { in: assetIds }, organizationId },
+          select: { id: true, title: true },
+        });
 
-      const assetContent = wrapAssetsWithDataForNote(assets, "added");
+        const assetContent = wrapAssetsWithDataForNote(assets, "added");
 
-      if (userId) {
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-        await createSystemBookingNote({
-          bookingId: booking.id,
-          content: `${wrapUserLinkForNote(
-            user
-          )} added ${assetContent} to the booking.`,
-        });
-      } else {
-        // Fallback for backward compatibility when userId is not provided
-        await createSystemBookingNote({
-          bookingId: booking.id,
-          content: `${assetContent} added to the booking.`,
-        });
+        if (userId) {
+          const user = await getUserByID(userId, {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            } satisfies Prisma.UserSelect,
+          });
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            content: `${wrapUserLinkForNote(
+              user
+            )} added ${assetContent} to the booking.`,
+          });
+        } else {
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            content: `${assetContent} added to the booking.`,
+          });
+        }
+      } catch (noteError) {
+        Logger.error(
+          new ShelfError({
+            cause: noteError,
+            message: "Failed to create booking note after asset update",
+            label,
+            shouldBeCaptured: false,
+          })
+        );
       }
     }
 
