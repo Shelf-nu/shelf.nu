@@ -17,7 +17,6 @@ import { tw } from "~/utils/tw";
 import { ArchiveAuditDialog } from "./archive-audit-dialog";
 import { AuditReceiptPDF } from "./audit-receipt-pdf";
 import { CancelAuditDialog } from "./cancel-audit-dialog";
-import { DeleteAuditDialog } from "./delete-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
 import { Button } from "../shared/button";
 import When from "../when/when";
@@ -32,7 +31,6 @@ const ConditionalActionsDropdown = () => {
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
   // Track auto-open so the email deep link only triggers once.
@@ -49,18 +47,13 @@ const ConditionalActionsDropdown = () => {
   const canEditAudit =
     isAdminOrOwner && !isCompleted && !isCancelled && !isArchived;
 
-  // Only admin/owner can delete, only if archived
   // Admin/owner can archive only completed audits
   const canArchiveAudit = isAdminOrOwner && isCompleted;
-
-  const canDeleteAudit = isAdminOrOwner && isArchived;
 
   // Only the creator can cancel an audit, and only if it's not already completed or cancelled
   const canCancelAudit =
     isCreator && !isCompleted && !isCancelled && !isArchived;
 
-  // Admin/owner can duplicate completed or cancelled audits
-  const canDuplicateAudit = isAdminOrOwner && (isCompleted || isCancelled);
   function handleMenuClose() {
     setOpen(false);
   }
@@ -186,21 +179,6 @@ const ConditionalActionsDropdown = () => {
                 </div>
               </When>
 
-              <When truthy={canDuplicateAudit}>
-                <div className="border-b px-0 py-1 md:p-0">
-                  <Button
-                    variant="link"
-                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                    width="full"
-                    to={`/audits/${session.id}/duplicate`}
-                    onClick={handleMenuClose}
-                  >
-                    <span className="flex items-center gap-2">
-                      Duplicate audit
-                    </span>
-                  </Button>
-                </div>
-              </When>
               <When truthy={canArchiveAudit}>
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
@@ -214,23 +192,6 @@ const ConditionalActionsDropdown = () => {
                     }}
                   >
                     <span className="flex items-center gap-2">Archive</span>
-                  </Button>
-                </div>
-              </When>
-
-              <When truthy={canDeleteAudit}>
-                <div className="border-b px-0 py-1 md:p-0">
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="justify-start px-4 py-3 text-error-600 hover:bg-slate-100 hover:text-error-700"
-                    width="full"
-                    onClick={() => {
-                      handleMenuClose();
-                      setIsDeleteDialogOpen(true);
-                    }}
-                  >
-                    <span className="flex items-center gap-2">Delete</span>
                   </Button>
                 </div>
               </When>
@@ -285,15 +246,6 @@ const ConditionalActionsDropdown = () => {
           open={isCancelDialogOpen}
           actionData={actionData}
           onClose={() => setIsCancelDialogOpen(false)}
-        />
-      </When>
-
-      <When truthy={isDeleteDialogOpen}>
-        <DeleteAuditDialog
-          auditId={session.id}
-          auditName={session.name}
-          open={isDeleteDialogOpen}
-          onClose={() => setIsDeleteDialogOpen(false)}
         />
       </When>
 

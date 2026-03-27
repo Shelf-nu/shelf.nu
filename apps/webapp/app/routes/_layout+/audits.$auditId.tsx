@@ -6,13 +6,7 @@ import type {
   MetaFunction,
   LinksFunction,
 } from "react-router";
-import {
-  data,
-  redirect,
-  useLoaderData,
-  Outlet,
-  useMatches,
-} from "react-router";
+import { data, useLoaderData, Outlet, useMatches } from "react-router";
 import { z } from "zod";
 import { ActionsDropdown } from "~/components/audit/actions-dropdown";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
@@ -28,7 +22,6 @@ import {
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
-  deleteAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -147,15 +140,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       return payload({ success: true });
-    }
-
-    if (intent === "delete-audit") {
-      await deleteAuditSession({
-        auditSessionId: auditId,
-        organizationId,
-      });
-
-      return redirect("/audits");
     }
 
     throw new ShelfError({
