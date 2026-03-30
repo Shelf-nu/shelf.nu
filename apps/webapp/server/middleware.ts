@@ -170,6 +170,46 @@ export function refreshSession() {
 }
 
 /**
+ * Cross-domain signed-in marker cookie
+ *
+ * Sets a lightweight, non-sensitive cookie (`shelf_is_signed_in=1`) with
+ * `domain=.shelf.nu` so the marketing website can detect returning users
+ * and show "Go to app" instead of "Sign in / Sign up".
+ *
+ * The cookie contains no auth data — just a boolean signal.
+ * It's non-httpOnly so client-side JS on the website can read it.
+ *
+ * Requires `COOKIE_DOMAIN` env var (e.g. `.shelf.nu`) to enable cross-domain.
+ * Without it, the cookie scopes to the current origin only (fine for dev).
+ */
+export function setSignedInCookie() {
+  return createMiddleware(async (c, next) => {
+    await next();
+
+    const session = getSession<SessionData, FlashData>(c);
+    const auth = session.get(authSessionKey);
+    const cookieDomain = process.env.COOKIE_DOMAIN;
+    const isProduction = process.env.NODE_ENV === "production";
+
+    const parts: string[] = [];
+
+    if (auth) {
+      parts.push("shelf_is_signed_in=1");
+    } else {
+      parts.push("shelf_is_signed_in=");
+      parts.push("Max-Age=0");
+    }
+
+    parts.push("Path=/");
+    parts.push("SameSite=Lax");
+    if (cookieDomain) parts.push(`Domain=${cookieDomain}`);
+    if (isProduction) parts.push("Secure");
+
+    c.res.headers.append("Set-Cookie", parts.join("; "));
+  });
+}
+
+/**
  * Cache middleware
  *
  * @param seconds - The number of seconds to cache
