@@ -38,14 +38,16 @@ import {
 describe("auditTrialEndsSoonEmailText", () => {
   const trialEndDate = new Date("2026-03-24T00:00:00Z");
 
-  it("shows auto-continue message when hasPaymentMethod is true", () => {
+  it("shows auto-charge warning when hasPaymentMethod is true", () => {
     const text = auditTrialEndsSoonEmailText({
       firstName: "Alice",
       hasPaymentMethod: true,
       trialEndDate,
     });
-    expect(text).toContain("automatically continue");
-    expect(text).toContain("charged at the regular rate");
+    expect(text).toContain("ACTION REQUIRED");
+    expect(text).toContain(
+      "automatically charged at the regular subscription rate"
+    );
   });
 
   it("shows paused/add-payment message when hasPaymentMethod is false", () => {
@@ -94,7 +96,7 @@ describe("sendAuditTrialEndsSoonEmail", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "alice@example.com",
-        subject: "Your Audits trial is ending soon",
+        subject: "Your Audits trial ends in 3 days — auto-charge reminder",
       })
     );
   });

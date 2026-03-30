@@ -1561,7 +1561,7 @@ export async function updateAsset({
         const [user, customFieldsFromForm] = await Promise.all([
           db.user.findFirst({
             where: { id: userId },
-            select: { firstName: true, lastName: true },
+            select: { firstName: true, lastName: true, displayName: true },
           }),
           db.customField.findMany({
             where: {
@@ -2991,6 +2991,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   profilePicture: true,
                 },
               },
@@ -3466,6 +3467,7 @@ export async function bulkCheckOutAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
@@ -3477,6 +3479,7 @@ export async function bulkCheckOutAssets({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -3504,6 +3507,13 @@ export async function bulkCheckOutAssets({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      /** Clean up any stale custody records that may exist despite AVAILABLE status.
+       * This prevents P2002 unique constraint violations when a previous
+       * release/checkin updated status but failed to delete the custody row. */
+      await tx.custody.deleteMany({
+        where: { assetId: { in: assets.map((a) => a.id) } },
+      });
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({
@@ -3599,6 +3609,7 @@ export async function bulkCheckInAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -3722,6 +3733,7 @@ export async function bulkUpdateAssetLocation({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -4095,6 +4107,7 @@ export async function relinkAssetQrCode({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({

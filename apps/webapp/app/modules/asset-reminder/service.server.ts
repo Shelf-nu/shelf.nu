@@ -41,6 +41,7 @@ export async function createAssetReminder({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const assetReminder = await db.assetReminder.create({

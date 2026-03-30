@@ -9,6 +9,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
@@ -170,7 +171,9 @@ const BookingPDFPreview = ({
   const { booking, organization, assets, assetIdToQrCodeMap, totalValue } =
     pdfMeta;
   const custodianName = booking.custodianUser
-    ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName} <${booking.custodianUser.email}>`
+    ? `${resolveUserDisplayName(booking.custodianUser)} <${
+        booking.custodianUser.email
+      }>`
     : booking.custodianTeamMember?.name;
 
   /** Check if the `originalFrom` date is different from `from` date */

@@ -14,7 +14,10 @@ import { newBookingHeader } from "~/components/booking/new-booking-header";
 import Header from "~/components/layout/header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
-import { createBooking } from "~/modules/booking/service.server";
+import {
+  createBooking,
+  updateBookingNotificationRecipients,
+} from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
@@ -24,6 +27,7 @@ import {
 import {
   getTeamMember,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import styles from "~/styles/layout/bookings.new.css?url";
@@ -77,7 +81,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /**
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
-    const [teamMembersData, tagsData] = await Promise.all([
+    const [teamMembersData, tagsData, notifyData] = await Promise.all([
       getTeamMemberForForm({
         organizationId,
         userId,
@@ -89,6 +93,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getTagsForBookingTagsFilter({
         organizationId,
       }),
+      getTeamMembersForNotify({ organizationId }),
     ]);
 
     return data(
@@ -103,6 +108,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         teamMembersForForm: teamMembersData.teamMembers,
         assetIds: assetIds.length ? assetIds : undefined,
         ...tagsData,
+        ...notifyData,
       }),
       {
         headers: [
@@ -227,6 +233,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds: assetIds?.length ? assetIds : [],
       hints: getClientHint(request),
     });
+
+    // Parse per-booking notification recipient IDs from the form.
+    // The MultiSelect submits a comma-separated string of team member IDs.
+    // Only admin/owner users can set these; the field is hidden for
+    // self-service/base users, but we guard server-side as well.
+    const notificationRecipientIdsRaw = formData.get(
+      "notificationRecipientIds"
+    ) as string | null;
+    if (notificationRecipientIdsRaw && !isSelfServiceOrBase) {
+      const recipientIds = notificationRecipientIdsRaw
+        .split(",")
+        .filter(Boolean);
+      if (recipientIds.length > 0) {
+        await updateBookingNotificationRecipients({
+          bookingId: booking.id,
+          organizationId,
+          teamMemberIds: recipientIds,
+        });
+      }
+    }
 
     sendNotification({
       title: "Booking saved",

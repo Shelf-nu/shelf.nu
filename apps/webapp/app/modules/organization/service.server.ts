@@ -21,6 +21,7 @@ import {
   premiumIsEnabled,
   transferSubscriptionToCustomer,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -155,6 +156,7 @@ export async function createOrganization({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     });
 
@@ -183,7 +185,7 @@ export async function createOrganization({
        */
       members: {
         create: {
-          name: `${owner.firstName} ${owner.lastName} (Owner)`,
+          name: `${resolveUserDisplayName(owner)} (Owner)`,
           user: { connect: { id: owner.id } },
         },
       },
@@ -397,7 +399,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
           select: ORGANIZATION_SELECT_FIELDS,
         },
         user: {
-          select: { lastSelectedOrganizationId: true },
+          select: { lastSelectedOrganizationId: true, sso: true },
         },
       },
     });
@@ -440,6 +442,57 @@ export async function getOrganizationAdminsEmails({
       cause,
       message:
         "Something went wrong while fetching organization admins emails. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Returns admin and owner users for an organization with their full
+ * notification-relevant fields: `id`, `email`, `firstName`, `lastName`.
+ *
+ * This differs from `getOrganizationAdminsEmails()` (which returns only
+ * email strings) because the notification recipient resolver needs the
+ * `userId` to perform editor exclusion — if the admin performing an action
+ * is also in the recipient list, they should be filtered out so they don't
+ * email themselves. Returning bare email strings would not support that
+ * matching.
+ *
+ * @param organizationId - The organization to fetch admins for
+ * @returns Array of user objects with id, email, firstName, lastName
+ */
+export async function getOrganizationAdminsForNotification({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    const admins = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: {
+          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
+        },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return admins.map((a) => a.user);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
       additionalData: { organizationId },
       label,
     });
@@ -637,7 +690,13 @@ export async function getOrganizationAdmins({
       where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
       select: {
         user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            email: true,
+          },
         },
       },
     });
@@ -711,6 +770,7 @@ export async function transferOwnership({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             roles: true,
             customerId: true,
@@ -835,7 +895,7 @@ export async function transferOwnership({
           if (!newOwnerCustomerId) {
             newOwnerCustomerId = await createStripeCustomer({
               email: newOwnerUserOrg.user.email,
-              name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+              name: resolveUserDisplayName(newOwnerUserOrg.user),
               userId: newOwnerId,
             });
           }
@@ -894,7 +954,7 @@ export async function transferOwnership({
       subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
       to: newOwnerUserOrg.user.email,
       text: newOwnerEmailText({
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -905,8 +965,8 @@ export async function transferOwnership({
       subject: `🔁 You've Transferred Ownership of ${currentOrganization.name}`,
       to: currentOwnerUserOrg.user.email,
       text: previousOwnerEmailText({
-        previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        previousOwnerName: resolveUserDisplayName(currentOwnerUserOrg.user),
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -930,12 +990,12 @@ export async function transferOwnership({
 Workspace: ${currentOrganization.name}
 Workspace ID: ${currentOrganization.id}
 
-Previous Owner: ${currentOwnerUserOrg.user.firstName} ${
-          currentOwnerUserOrg.user.lastName
-        } (${currentOwnerUserOrg.user.email})
-New Owner: ${newOwnerUserOrg.user.firstName} ${
-          newOwnerUserOrg.user.lastName
-        } (${newOwnerUserOrg.user.email})
+Previous Owner: ${resolveUserDisplayName(currentOwnerUserOrg.user)} (${
+          currentOwnerUserOrg.user.email
+        })
+New Owner: ${resolveUserDisplayName(newOwnerUserOrg.user)} (${
+          newOwnerUserOrg.user.email
+        })
 
 Subscription transferred: ${subscriptionStatus}
 ${

@@ -24,6 +24,7 @@ export const KITS_INCLUDE_FIELDS = {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
               email: true,
             },
@@ -156,6 +157,7 @@ export const assetIndexFields = ({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -240,6 +242,7 @@ export const advancedAssetIndexFields = () => {
               select: {
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
                 email: true,
               },

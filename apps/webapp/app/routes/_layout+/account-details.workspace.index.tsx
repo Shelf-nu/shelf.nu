@@ -26,6 +26,7 @@ import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -45,6 +46,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         select: {
           firstName: true,
+          displayName: true,
+          sso: true,
           tier: true,
           userOrganizations: {
             include: {
@@ -62,6 +65,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -87,8 +91,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "Workspaces",
     };
 
-    /** Get the organization that are owned by the current uer */
-    const organizations = user.userOrganizations.map((r) => r.organization);
+    /** Get the organizations visible to this user.
+     * SSO users never see their personal workspace. */
+    const allOrganizations = user.userOrganizations.map((r) => r.organization);
+    const organizations = user.sso
+      ? allOrganizations.filter((o) => o.type !== "PERSONAL")
+      : allOrganizations;
     /** Get the tier limit */
     const tierLimit = await getUserTierLimit(userId);
 
@@ -278,7 +286,7 @@ const OrganizationRow = ({
       <Td>
         <UserBadge
           img={item.owner.profilePicture}
-          name={`${item.owner.firstName} ${item.owner.lastName}`}
+          name={resolveUserDisplayName(item.owner)}
         />
       </Td>
 

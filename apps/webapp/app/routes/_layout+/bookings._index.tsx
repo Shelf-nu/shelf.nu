@@ -39,6 +39,7 @@ import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -53,6 +54,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const bookingsSearchFieldTooltipText = `
 Search bookings based on different fields. Separate your keywords by a comma(,) to search with OR condition. Supported fields are: 
@@ -129,6 +131,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       teamMembersData,
       teamMembersForFormData,
       tags,
+      notifyData,
     ] = await Promise.all([
       getBookings({
         organizationId,
@@ -181,6 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
+      getTeamMembersForNotify({ organizationId }),
     ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
@@ -211,6 +215,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         teamMembersForForm:
           teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
         isSelfServiceOrBase,
+        ...notifyData,
         tags,
         totalTags: tags.length,
         searchFieldTooltip: {
@@ -400,6 +405,7 @@ const ListBookingsContent = ({
           id: true;
           firstName: true;
           lastName: true;
+          displayName: true;
           profilePicture: true;
         };
       };
@@ -514,7 +520,7 @@ const ListBookingsContent = ({
           teamMember={{
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
-              : `${item.custodianUser?.firstName} ${item.custodianUser?.lastName}`,
+              : resolveUserDisplayName(item.custodianUser),
             user: item?.custodianUser
               ? {
                   id: item?.custodianUser?.id,
@@ -534,9 +540,7 @@ const ListBookingsContent = ({
           img={
             item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
           }
-          name={`${item?.creator?.firstName || ""} ${
-            item?.creator?.lastName || ""
-          }`}
+          name={resolveUserDisplayName(item?.creator)}
         />
       </Td>
     </>

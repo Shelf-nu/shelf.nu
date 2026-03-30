@@ -11,14 +11,6 @@ if (window.env?.SENTRY_DSN) {
     tunnel: "/api/sentry-tunnel",
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
-    ignoreErrors: [
-      // Browser compatibility / extension errors
-      "feature named",
-      "Unexpected identifier 'https'",
-      "Unable to decode turbo-stream",
-      "Error in input stream",
-      /^false$/, // Non-Error promise rejection with value: false
-    ],
     beforeSendTransaction(event) {
       const spans = event.spans || [];
 
@@ -52,7 +44,32 @@ if (window.env?.SENTRY_DSN) {
       return event;
     },
     beforeSend(event) {
+      // Always send errors from the error boundary — these are user-visible
+      // crashes that must be searchable by the Error ID shown to the user.
+      // Sentry.captureException() returns the event ID synchronously before
+      // beforeSend runs, so filtering here would silently drop the event
+      // while the UI still displays the (now-orphaned) Error ID.
+      if (event.tags?.source === "error-boundary") {
+        return event;
+      }
+
       const message = event.exception?.values?.[0]?.value || "";
+
+      // Filter browser compatibility / extension errors (not actionable)
+      const ignoredPatterns = [
+        "feature named",
+        "Unexpected identifier 'https'",
+        "Unable to decode turbo-stream",
+        "Error in input stream",
+      ];
+      if (ignoredPatterns.some((pattern) => message.includes(pattern))) {
+        return null;
+      }
+
+      // Filter non-Error promise rejections with value: false
+      if (message === "false") {
+        return null;
+      }
 
       // Filter client-side network errors (not actionable)
       if (

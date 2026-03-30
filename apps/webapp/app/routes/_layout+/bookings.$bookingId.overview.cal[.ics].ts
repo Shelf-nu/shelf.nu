@@ -12,6 +12,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -56,11 +57,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     // Build custodian display name, falling through to team member
     // or "Unassigned" when the user record has no first/last name.
     const custodianName =
-      (booking.custodianUser
-        ? `${booking.custodianUser.firstName ?? ""} ${
-            booking.custodianUser.lastName ?? ""
-          }`.trim()
-        : null) ||
+      resolveUserDisplayName(booking.custodianUser) ||
       booking.custodianTeamMember?.name ||
       "Unassigned";
 
