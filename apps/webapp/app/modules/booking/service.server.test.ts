@@ -62,7 +62,14 @@ afterAll(() => {
 // why: testing booking service business logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // why: handles both callback-style and array-style $transaction
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callbackOrArray) =>
+        typeof callbackOrArray === "function"
+          ? callbackOrArray(db)
+          : Promise.all(callbackOrArray)
+      ),
     $executeRaw: vitest.fn().mockResolvedValue(0),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
@@ -1486,27 +1493,17 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
+    /** Transaction uses a lean update; heavy includes are fetched
+     * separately via findUniqueOrThrow after the transaction commits. */
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "booking-1" },
         data: { status: BookingStatus.ONGOING },
-        include: expect.objectContaining({
-          _count: { select: { assets: true } },
-          assets: true,
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: expect.objectContaining({
-            include: expect.objectContaining({
-              owner: expect.objectContaining({
-                select: { email: true },
-              }),
-            }),
-          }),
-        }),
+        select: { id: true },
       })
     );
 
-    expect(result).toEqual(checkedOutBooking);
+    expect(result).toEqual(mockBooking);
   });
 
   it("should throw error when assets have booking conflicts", async () => {

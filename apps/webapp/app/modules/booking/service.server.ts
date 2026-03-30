@@ -1243,65 +1243,70 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    /** Transaction contains only write operations to stay within the 5s
-     * timeout. The heavy read (includes for email/notes) is done after
-     * the transaction commits. This prevents P2028 timeouts on bookings
-     * with many assets. */
-    await db.$transaction(async (tx) => {
-      await Promise.all([
-        tx.asset.updateMany({
-          where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-          data: { status: AssetStatus.CHECKED_OUT },
-        }),
-        hasKits
-          ? tx.kit.updateMany({
-              where: { id: { in: kitIds } },
-              data: { status: KitStatus.CHECKED_OUT },
-            })
-          : Promise.resolve(),
-      ]);
-
-      await tx.booking.update({
+    /** Keep the transaction lean (writes only) to stay within the 5s
+     * timeout. The heavy read for the return payload is done after commit.
+     * This prevents P2028 timeouts on bookings with many assets.
+     *
+     * We use Prisma's array-form transaction so the independent writes
+     * execute in parallel instead of sequentially. */
+    const txOps = [
+      db.asset.updateMany({
+        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+        data: { status: AssetStatus.CHECKED_OUT },
+      }),
+      db.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
         select: { id: true },
-      });
-    });
+      }),
+    ];
 
-    /** Fetch full booking data with relations after the transaction
-     * so the heavy includes don't contribute to transaction duration. */
-    const updatedBooking = await db.booking.findUniqueOrThrow({
-      where: { id: bookingFound.id },
-      include: {
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-        assets: true,
-      },
-    });
+    if (hasKits) {
+      txOps.push(
+        db.kit.updateMany({
+          where: { id: { in: kitIds } },
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
+    }
+
+    await db.$transaction(txOps);
+
+    /** Use fields we already know for decision-making (notes, scheduling)
+     * rather than re-reading from the DB, to avoid observing concurrent
+     * mutations between the transaction commit and the read. */
+    const effectiveTo =
+      (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
+    const effectiveStatus =
+      (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
 
     // Create status transition note
     if (userId) {
       await createStatusTransitionNote({
-        bookingId: updatedBooking.id,
+        bookingId: bookingFound.id,
         fromStatus: BookingStatus.RESERVED,
-        toStatus: updatedBooking.status,
+        toStatus: effectiveStatus,
         userId,
-        custodianUserId: updatedBooking.custodianUserId || undefined,
+        custodianUserId: bookingFound.custodianUserId || undefined,
       });
     }
 
     /** Calculate the time difference between the booking.to and the current time */
-    const { hours } = calcTimeDifference(updatedBooking.to!, new Date());
+    const { hours } = calcTimeDifference(effectiveTo!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
 
     /** We cancel just in case there is something pending */
-    await cancelScheduler(updatedBooking);
+    await cancelScheduler(bookingFound);
 
     /**
      * If its expired that means its status will directly go to OVERDUE,
      * so we can cancel everything and don't schedule any more events
      * */
     if (isExpired) {
-      return updatedBooking;
+      return await db.booking.findUniqueOrThrow({
+        where: { id: bookingFound.id },
+        include: { ...BOOKING_INCLUDE_FOR_EMAIL, assets: true },
+      });
     }
 
     // For any checkout (early or not), what matters is time until check-in
@@ -1335,7 +1340,7 @@ export async function checkoutBooking({
        * the checkout reminder has not been sent yet
        * So we need to cancel it and manually schedule check-in reminder
        */
-      const when = new Date(updatedBooking.to!);
+      const when = new Date(effectiveTo!);
       when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
       await scheduleNextBookingJob({
         data: {
@@ -1347,7 +1352,11 @@ export async function checkoutBooking({
       });
     }
 
-    return updatedBooking;
+    /** Hydrate the full booking with relations for the return payload only. */
+    return await db.booking.findUniqueOrThrow({
+      where: { id: bookingFound.id },
+      include: { ...BOOKING_INCLUDE_FOR_EMAIL, assets: true },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
