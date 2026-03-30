@@ -1153,6 +1153,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "updateNotificationRecipients": {
+        if (isSelfServiceOrBase) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "You do not have permission to manage notification recipients.",
+            label: "Booking",
+            shouldBeCaptured: false,
+            status: 403,
+          });
+        }
+
         const recipientIdsRaw = formData.get(
           "notificationRecipientIds"
         ) as string;

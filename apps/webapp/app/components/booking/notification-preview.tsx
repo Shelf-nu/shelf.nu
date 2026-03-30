@@ -11,8 +11,8 @@ type NotificationPreviewProps = {
   recipients: PreviewRecipient[];
   adminCount: number;
   notifyAdminsOnNewBooking: boolean;
-  /** Called when a per-booking recipient is removed via the X button.
-   *  Only booking_recipient items are removable. */
+  /** Called when a removable recipient is removed via the X button.
+   *  Currently booking_recipient and always_notify items are removable. */
   onRemoveRecipient?: (id: string) => void;
 };
 

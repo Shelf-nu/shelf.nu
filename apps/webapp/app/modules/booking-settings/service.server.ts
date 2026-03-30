@@ -248,11 +248,22 @@ export async function updateAlwaysNotifyTeamMembers({
   teamMemberIds: string[];
 }) {
   try {
+    // Validate that all provided team member IDs belong to this organization,
+    // preventing cross-org data injection.
+    const validTeamMembers = await db.teamMember.findMany({
+      where: {
+        organizationId,
+        id: { in: teamMemberIds },
+      },
+      select: { id: true },
+    });
+    const validTeamMemberIds = validTeamMembers.map((m) => m.id);
+
     return await db.bookingSettings.update({
       where: { organizationId },
       data: {
         alwaysNotifyTeamMembers: {
-          set: teamMemberIds.map((id) => ({ id })),
+          set: validTeamMemberIds.map((id) => ({ id })),
         },
       },
       select: {

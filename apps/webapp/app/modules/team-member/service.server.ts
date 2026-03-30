@@ -785,18 +785,11 @@ export async function getTeamMembersForNotify({
   excludeTeamMemberIds?: string[];
 }) {
   try {
-    // Auto-fetch the always-notify team member IDs from booking settings
-    // so they can be excluded from the picker (they're already notified).
-    let idsToExclude = excludeTeamMemberIds;
-    if (!idsToExclude) {
-      const settings = await db.bookingSettings.findUnique({
-        where: { organizationId },
-        select: {
-          alwaysNotifyTeamMembers: { select: { id: true } },
-        },
-      });
-      idsToExclude = settings?.alwaysNotifyTeamMembers.map((tm) => tm.id) ?? [];
-    }
+    // Use explicitly passed exclude IDs, or default to an empty array.
+    // Callers that want to exclude always-notify members should pass them
+    // explicitly — we no longer auto-fetch from BookingSettings to avoid
+    // blocking the settings page from re-adding previously removed members.
+    const idsToExclude = excludeTeamMemberIds ?? [];
 
     // Two-step query: first get admin/owner user IDs, then fetch
     // their team members. Needed because Prisma doesn't support nested

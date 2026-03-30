@@ -4951,11 +4951,23 @@ export async function updateBookingNotificationRecipients({
   teamMemberIds: string[];
 }) {
   try {
+    // Validate that all provided team member IDs belong to this organization
+    // and have a valid email, preventing cross-org data injection.
+    const validTeamMembers = await db.teamMember.findMany({
+      where: {
+        id: { in: teamMemberIds },
+        organizationId,
+        user: { isNot: null },
+      },
+      select: { id: true },
+    });
+    const validTeamMemberIds = validTeamMembers.map((m) => m.id);
+
     return await db.booking.update({
       where: { id: bookingId, organizationId },
       data: {
         notificationRecipients: {
-          set: teamMemberIds.map((id) => ({ id })),
+          set: validTeamMemberIds.map((id) => ({ id })),
         },
       },
     });

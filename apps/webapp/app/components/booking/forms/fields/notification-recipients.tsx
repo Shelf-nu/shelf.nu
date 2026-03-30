@@ -193,7 +193,11 @@ export function NotificationRecipientsField({
         <DynamicDropdown
           key={selectedIds.join(",")}
           trigger={
-            <div className="flex h-10 w-full items-center justify-between rounded border border-gray-300 bg-white px-3 text-sm hover:bg-gray-50">
+            <div
+              className={`flex h-10 w-full items-center justify-between rounded border border-gray-300 bg-white px-3 text-sm hover:bg-gray-50${
+                _disabled ? " pointer-events-none opacity-50" : ""
+              }`}
+            >
               <span className="truncate text-gray-500">
                 {(() => {
                   const count = previewRecipients.filter(

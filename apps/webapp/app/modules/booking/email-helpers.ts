@@ -371,6 +371,8 @@ export async function sendBookingUpdatedEmail({
             assetCount: booking._count.assets,
             hints,
             changes,
+            recipientReason: "custodian",
+            recipientEmail: oldCustodianEmail,
           });
 
           sendEmail({
