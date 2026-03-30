@@ -337,19 +337,40 @@ describe("getBookingNotificationRecipients", () => {
     expect(matchingRecipients[0].reason).toBe("custodian");
   });
 
-  it("excludes editor from non-scheduled notifications", async () => {
+  it("excludes editor from non-scheduled notifications (but preserves custodian and creator)", async () => {
+    // Editor exclusion should remove always-notify and per-booking recipients
+    // but NOT the custodian or creator — they always receive emails
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      alwaysNotifyTeamMembers: [
+        {
+          id: "tm-editor",
+          name: "Editor User",
+          user: {
+            id: "editor-user-1",
+            email: "editor@example.com",
+            firstName: "Editor",
+            lastName: "User",
+            profilePicture: null,
+          },
+        },
+      ],
+    });
     const booking = buildMockBooking();
 
     const recipients = await getBookingNotificationRecipients({
       booking,
       eventType: "CHECKIN",
       organizationId: "org-1",
-      editorUserId: "custodian-user-1",
+      editorUserId: "editor-user-1",
       isScheduledJob: false,
     });
 
     const emails = recipients.map((r) => r.email);
-    expect(emails).not.toContain("custodian@example.com");
+    // Editor (always-notify) should be excluded
+    expect(emails).not.toContain("editor@example.com");
+    // Custodian should still be present even if they were the editor
+    expect(emails).toContain("custodian@example.com");
   });
 
   it("does not exclude editor for scheduled jobs", async () => {
