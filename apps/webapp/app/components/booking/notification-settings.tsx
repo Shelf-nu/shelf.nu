@@ -76,9 +76,12 @@ export function NotificationSettings({
   const adminsDisabled = useDisabled(adminsFetcher);
   const alwaysNotifyDisabled = useDisabled(alwaysNotifyFetcher);
 
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    bookingSettings.alwaysNotifyTeamMembers.map((tm) => tm.id)
-  );
+  // Track both current and initial selection to detect unsaved changes
+  const initialIds = bookingSettings.alwaysNotifyTeamMembers.map((tm) => tm.id);
+  const [selectedIds, setSelectedIds] = useState<string[]>(initialIds);
+  const hasUnsavedChanges =
+    selectedIds.length !== initialIds.length ||
+    selectedIds.some((id) => !initialIds.includes(id));
 
   // Name map for the preview — seeded from saved always-notify members,
   // updated as new members are selected in the dropdown
@@ -254,6 +257,16 @@ export function NotificationSettings({
               label="Always notify"
               placeholder="Search team members..."
             />
+
+            <p className="mt-1.5 text-[13px] text-gray-500">
+              Only administrators can be added.
+            </p>
+
+            {hasUnsavedChanges ? (
+              <p className="mt-1.5 text-[13px] font-medium text-warning-600">
+                You have unsaved changes.
+              </p>
+            ) : null}
 
             {/* Hidden input for form submission */}
             <input

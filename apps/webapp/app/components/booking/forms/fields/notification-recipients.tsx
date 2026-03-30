@@ -227,6 +227,9 @@ export function NotificationRecipientsField({
           label="Notification recipients"
           placeholder="Search team members..."
         />
+        <p className="mt-1.5 text-[13px] text-gray-500">
+          Only administrators can be added.
+        </p>
 
         {/* Hidden input for form submission — comma-separated team member IDs */}
         <input

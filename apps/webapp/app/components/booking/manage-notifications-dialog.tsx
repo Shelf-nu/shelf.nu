@@ -240,6 +240,9 @@ export default function ManageNotificationsDialog() {
                   label="Notification recipients"
                   placeholder="Search team members..."
                 />
+                <p className="mt-1.5 text-[13px] text-gray-500">
+                  Only administrators can be added.
+                </p>
               </div>
 
               <NotificationPreview
