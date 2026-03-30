@@ -67,6 +67,8 @@ export function setCookie(cookieValue: string): [string, string] {
 
 export const userPrefs = createCookie("user-prefs", {
   maxAge: 604_800, // one week
+  sameSite: "lax" as const,
+  domain: process.env.COOKIE_DOMAIN, // e.g. ".shelf.nu" — lets the marketing site detect signed-in users
 });
 
 export async function updateCookieWithPerPage(

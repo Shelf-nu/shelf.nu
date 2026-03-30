@@ -14,7 +14,6 @@ import {
   ensureHostHeaders,
   protect,
   refreshSession,
-  setSignedInCookie,
   urlShortener,
 } from "./middleware";
 import { runWithRequestCache } from "./request-cache.server";
@@ -128,13 +127,6 @@ export default createHonoServer<ServerEnv>({
      *
      */
     server.use("*", refreshSession());
-
-    /**
-     * Set cross-domain signed-in marker cookie for the marketing website.
-     * Runs after session + refresh so it reflects the final auth state,
-     * including logout and token expiry.
-     */
-    server.use("*", setSignedInCookie());
 
     /**
      * Add protected routes middleware
