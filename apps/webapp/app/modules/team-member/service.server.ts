@@ -778,17 +778,13 @@ export async function getTeamMembersForNotify({
   excludeTeamMemberIds,
 }: {
   organizationId: string;
-  /** Team member IDs to exclude from results (e.g. members already
-   *  in the workspace-level "always notify" list). When not provided,
-   *  the function auto-fetches the always-notify list from BookingSettings
-   *  and excludes those members. */
+  /** Team member IDs to exclude from results. Defaults to an empty
+   *  array when not provided — no automatic fetching occurs. Callers
+   *  must pass any IDs to exclude explicitly (e.g. always-notify
+   *  members or the custodian's team member ID). */
   excludeTeamMemberIds?: string[];
 }) {
   try {
-    // Use explicitly passed exclude IDs, or default to an empty array.
-    // Callers that want to exclude always-notify members should pass them
-    // explicitly — we no longer auto-fetch from BookingSettings to avoid
-    // blocking the settings page from re-adding previously removed members.
     const idsToExclude = excludeTeamMemberIds ?? [];
 
     // Two-step query: first get admin/owner user IDs, then fetch

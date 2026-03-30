@@ -322,15 +322,13 @@ export async function sendBookingUpdatedEmail({
 
     const text = bookingUpdatedEmailContent({ ...emailArgs, changes });
 
-    // Resolve all recipients.
-    // For custodian changes, skip editor exclusion so all configured
-    // recipients (always-notify, per-booking) are notified about the change.
-    const isCustodianChange = !!oldCustodianEmail;
+    // Resolve all recipients with editor exclusion.
+    // The old custodian (if changed) is handled separately below.
     const recipients = await getBookingNotificationRecipients({
       booking,
       eventType: "UPDATE",
       organizationId,
-      editorUserId: isCustodianChange ? undefined : userId,
+      editorUserId: userId,
     });
 
     // Send to all resolved recipients

@@ -147,23 +147,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
-          // Include per-booking notification recipients so the edit form can
-          // pre-populate the NotificationRecipientsField multi-select with
-          // previously selected team members.
-          notificationRecipients: {
-            select: {
-              id: true,
-              name: true,
-              user: {
-                select: {
-                  id: true,
-                  email: true,
-                  firstName: true,
-                  lastName: true,
+          // Only include notification recipients for admin/owner users.
+          // Self-service/base users don't need this data (they can't see or
+          // manage notification settings).
+          ...(isSelfServiceOrBase
+            ? {}
+            : {
+                notificationRecipients: {
+                  select: {
+                    id: true,
+                    name: true,
+                    user: {
+                      select: {
+                        id: true,
+                        email: true,
+                        firstName: true,
+                        lastName: true,
+                      },
+                    },
+                  },
                 },
-              },
-            },
-          },
+              }),
         },
       }),
       db.tag.findMany({
@@ -176,7 +180,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
-      getTeamMembersForNotify({ organizationId }),
+      // Only fetch notification team members for admin/owner users
+      isSelfServiceOrBase
+        ? Promise.resolve({
+            teamMembersForNotify: [],
+            totalTeamMembersForNotify: 0,
+          })
+        : getTeamMembersForNotify({ organizationId }),
     ]);
 
     // Exclude custodian from the notification recipients picker since
