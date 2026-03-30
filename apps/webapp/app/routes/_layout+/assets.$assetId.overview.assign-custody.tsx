@@ -219,31 +219,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** Assign custody to an asset:
+    /** Assign custody to an asset inside a transaction so that the
+     * stale-custody cleanup and the new assignment are atomic — if the
+     * update fails the delete is rolled back automatically.
      * 1. Clear any stale custody record (prevents P2002 unique constraint
      *    if a previous release updated status but failed to delete custody)
      * 2. Update the asset status to IN_CUSTODY
      * 3. Create a new custody record linked to the custodian
      */
-    await db.custody.deleteMany({ where: { assetId } }).catch(() => {
-      /* no-op: custody may not exist, that's fine */
-    });
+    const asset = await db
+      .$transaction(async (tx) => {
+        await tx.custody.deleteMany({ where: { assetId } });
 
-    const asset = await db.asset
-      .update({
-        where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,
-        data: {
-          status: AssetStatus.IN_CUSTODY,
-          custody: {
-            create: {
-              custodian: { connect: { id: custodianId } },
+        return tx.asset.update({
+          where: {
+            id: assetId,
+            organizationId,
+          } as Prisma.AssetWhereUniqueInput,
+          data: {
+            status: AssetStatus.IN_CUSTODY,
+            custody: {
+              create: {
+                custodian: { connect: { id: custodianId } },
+              },
             },
           },
-        },
-        select: {
-          id: true,
-          title: true,
-        },
+          select: {
+            id: true,
+            title: true,
+          },
+        });
       })
       .catch((cause) => {
         throw new ShelfError({
