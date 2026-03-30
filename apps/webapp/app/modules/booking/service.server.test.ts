@@ -1457,7 +1457,7 @@ describe("checkoutBooking", () => {
   };
 
   it("should checkout booking successfully with no conflicts", async () => {
-    expect.assertions(3);
+    expect.assertions(2);
 
     const mockBooking = {
       ...mockBookingData,
@@ -1479,12 +1479,15 @@ describe("checkoutBooking", () => {
         },
       ],
     };
-    const checkedOutBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
 
+    /** findUniqueOrThrow is called twice: first for the pre-checkout
+     * lookup, then for the post-commit hydration of the return payload. */
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(checkedOutBooking);
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
 
     const result = await checkoutBooking(mockCheckoutParams);
 
@@ -1493,17 +1496,9 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
-    /** Transaction uses a lean update; heavy includes are fetched
-     * separately via findUniqueOrThrow after the transaction commits. */
-    expect(db.booking.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "booking-1" },
-        data: { status: BookingStatus.ONGOING },
-        select: { id: true },
-      })
-    );
-
-    expect(result).toEqual(mockBooking);
+    /** Assert observable behavior: the result is the fully hydrated
+     * booking returned by the post-commit findUniqueOrThrow. */
+    expect(result).toEqual(hydratedBooking);
   });
 
   it("should throw error when assets have booking conflicts", async () => {

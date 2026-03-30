@@ -1247,8 +1247,9 @@ export async function checkoutBooking({
      * timeout. The heavy read for the return payload is done after commit.
      * This prevents P2028 timeouts on bookings with many assets.
      *
-     * We use Prisma's array-form transaction so the independent writes
-     * execute in parallel instead of sequentially. */
+     * Prisma's array-form $transaction executes queries sequentially
+     * within a single DB transaction — it doesn't parallelize, but keeps
+     * the transaction fast by avoiding heavy includes/reads. */
     const txOps = [
       db.asset.updateMany({
         where: { id: { in: bookingFound.assets.map((a) => a.id) } },
@@ -1284,7 +1285,7 @@ export async function checkoutBooking({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: bookingFound.id,
-        fromStatus: BookingStatus.RESERVED,
+        fromStatus: bookingFound.status,
         toStatus: effectiveStatus,
         userId,
         custodianUserId: bookingFound.custodianUserId || undefined,
