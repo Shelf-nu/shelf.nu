@@ -57,6 +57,8 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -69,6 +71,23 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(mockBookingSettingsData);
@@ -102,6 +121,8 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
       },
       select: {
@@ -114,6 +135,23 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(defaultSettings);
@@ -178,6 +216,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -210,6 +265,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -242,6 +314,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -274,6 +363,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -314,6 +420,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -348,6 +471,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -385,6 +525,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -417,6 +574,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);
@@ -522,6 +696,23 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
     expect(result).toEqual(updatedSettings);

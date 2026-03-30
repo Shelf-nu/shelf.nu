@@ -14,6 +14,7 @@ import {
   ExplicitCheckinSettings,
   ExplicitCheckinSettingsSchema,
 } from "~/components/booking/explicit-checkin-settings";
+import { NotificationSettings } from "~/components/booking/notification-settings";
 import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
@@ -29,8 +30,10 @@ import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-workin
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
 import {
   getBookingSettingsForOrganization,
+  updateAlwaysNotifyTeamMembers,
   updateBookingSettings,
 } from "~/modules/booking-settings/service.server";
+import { getTeamMembersForNotify } from "~/modules/team-member/service.server";
 import {
   createWorkingHoursOverride,
   deleteWorkingHoursOverride,
@@ -78,9 +81,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const [bookingSettings, workingHours] = await Promise.all([
+    const [bookingSettings, workingHours, notifyData] = await Promise.all([
       getBookingSettingsForOrganization(organizationId),
       getWorkingHoursForOrganization(organizationId),
+      getTeamMembersForNotify({ organizationId }),
     ]);
 
     const header: HeaderData = {
@@ -92,6 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organization: currentOrganization,
       bookingSettings,
       workingHours,
+      ...notifyData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -134,6 +139,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateAutoArchiveToggle",
         "updateAutoArchiveDays",
         "updateExplicitCheckin",
+        "updateNotifyBookingCreator",
+        "updateNotifyAdminsOnNewBooking",
+        "updateAlwaysNotifyTeamMembers",
         "toggle",
         "updateSchedule",
         "createOverride",
@@ -370,6 +378,73 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return data(payload({ success: true }), { status: 200 });
       }
 
+      // Toggle whether the booking creator receives email notifications for
+      // bookings they create on behalf of another person (custodian).
+      case "updateNotifyBookingCreator": {
+        const notifyBookingCreator =
+          formData.get("notifyBookingCreator") === "on";
+        await updateBookingSettings({
+          organizationId,
+          notifyBookingCreator,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message:
+            "Booking creator notification setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
+      // Toggle whether all workspace admins are notified when a new booking is
+      // reserved. Admins only receive the reservation notification, not
+      // subsequent lifecycle events (checkout, checkin, etc.).
+      case "updateNotifyAdminsOnNewBooking": {
+        const notifyAdminsOnNewBooking =
+          formData.get("notifyAdminsOnNewBooking") === "on";
+        await updateBookingSettings({
+          organizationId,
+          notifyAdminsOnNewBooking,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Admin notification setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
+      // Replace the set of team members who always receive all booking
+      // notifications for every booking in this workspace (e.g. office managers).
+      // The IDs arrive as a comma-separated string from the MultiSelect component.
+      case "updateAlwaysNotifyTeamMembers": {
+        const teamMemberIdsString = formData.get(
+          "alwaysNotifyTeamMemberIds"
+        ) as string;
+        const teamMemberIds = teamMemberIdsString
+          ? teamMemberIdsString.split(",").filter(Boolean)
+          : [];
+        await updateAlwaysNotifyTeamMembers({
+          organizationId,
+          teamMemberIds,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Always-notify users have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
       case "updateExplicitCheckin": {
         // Only workspace owners can change explicit check-in settings
         if (role !== OrganizationRoles.OWNER) {
@@ -429,6 +504,9 @@ export default function GeneralPage() {
 
   return (
     <>
+      {/* Email notification recipient settings */}
+      <NotificationSettings bookingSettings={bookingSettings} />
+
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
         header={{

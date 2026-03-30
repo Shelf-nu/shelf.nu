@@ -23,6 +23,7 @@ import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/par
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
+import type { BookingForEmail } from "~/emails/types";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -69,6 +70,7 @@ import {
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
+import type { ReservationEmailAsset } from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -84,6 +86,8 @@ import {
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
 } from "./helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import type { NotificationRecipient } from "./notification-recipients.server";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -97,11 +101,74 @@ import {
 } from "./utils.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
-import { getOrganizationAdminsEmails } from "../organization/service.server";
+
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
+
+/**
+ * Sends a booking email to all resolved notification recipients.
+ * Each recipient gets an individual email with personalized footer.
+ */
+/**
+ * Sends an individual personalized email to each resolved notification
+ * recipient. Each email includes a per-recipient footer that explains
+ * why the person received the notification (e.g., "you are the custodian",
+ * "you are an admin"), driven by `recipient.reason`.
+ *
+ * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
+ * blocking the booking flow on slow SMTP delivery.
+ *
+ * @param recipients - Pre-resolved list from `getBookingNotificationRecipients()`
+ * @param booking - The booking data used to render the email template
+ * @param subject - Email subject line
+ * @param textContent - Plain-text fallback content
+ * @param heading - Primary heading rendered in the HTML template
+ * @param hints - Client hints for date/time formatting
+ * @param templateProps - Additional props forwarded to the email template
+ */
+async function sendBookingEmailToAllRecipients({
+  recipients,
+  booking,
+  subject,
+  textContent,
+  heading,
+  hints,
+  templateProps,
+}: {
+  recipients: NotificationRecipient[];
+  booking: BookingForEmail;
+  subject: string;
+  textContent: string;
+  heading: string;
+  hints: ClientHint;
+  templateProps?: {
+    hideViewButton?: boolean;
+    cancellationReason?: string;
+    changes?: string[];
+    assets?: ReservationEmailAsset[];
+  };
+}) {
+  for (const recipient of recipients) {
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading,
+      assetCount: booking._count.assets,
+      hints,
+      recipientReason: recipient.reason,
+      recipientEmail: recipient.email,
+      ...templateProps,
+    });
+
+    sendEmail({
+      to: recipient.email,
+      subject,
+      text: textContent,
+      html,
+    });
+  }
+}
 
 async function cancelScheduler(
   booking: Pick<Booking, "id" | "activeSchedulerReference">
@@ -986,18 +1053,26 @@ export async function reserveBooking({
       });
     }
 
-    if (bookingFound.custodianUser?.email) {
+    // Resolve notification recipients and send emails.
+    // Pass isSelfServiceOrBase so admin broadcast only fires for
+    // reservations made by base/self-service users (pickup requests).
+    const recipients = await getBookingNotificationRecipients({
+      booking: bookingFound,
+      eventType: "RESERVATION",
+      organizationId,
+      editorUserId: userId,
+      isSelfServiceOrBase,
+    });
+
+    if (recipients.length > 0) {
       const custodian = bookingFound?.custodianUser
         ? resolveUserDisplayName(bookingFound.custodianUser)
         : bookingFound.custodianTeamMember?.name ?? "";
 
-      /** Prepare email content */
-      const subject = `✅ Booking reserved (${bookingFound.name}) - shelf.nu`;
-
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
         assetsCount: bookingFound._count.assets,
-        custodian: custodian,
+        custodian,
         from,
         to,
         hints,
@@ -1005,52 +1080,16 @@ export async function reserveBooking({
         customEmailFooter: bookingFound.organization.customEmailFooter,
       });
 
-      const html = await bookingUpdatesTemplateString({
+      await sendBookingEmailToAllRecipients({
+        recipients,
         booking: bookingFound,
+        subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
+        textContent: text,
         heading: `Booking reservation for ${custodian}`,
-        assetCount: bookingFound._count.assets,
         hints,
-        assets: bookingFound.assets,
-      });
-      /** END Prepare email content */
-
-      /**
-       * Here we need to check if the custodian has an OrganizationRole different than ADMIN
-       * and send email to the admin in case they are different
-       * */
-      if (isSelfServiceOrBase) {
-        const adminsEmails = await getOrganizationAdminsEmails({
-          organizationId,
-        });
-
-        const adminSubject = `Booking reservation request (${bookingFound.name}) by ${custodian} - shelf.nu`;
-
-        const adminHtml = await bookingUpdatesTemplateString({
-          booking: bookingFound,
-          heading: `Booking reservation request for ${custodian}`,
-          assetCount: bookingFound._count.assets,
-          hints,
-          isAdminEmail: true,
+        templateProps: {
           assets: bookingFound.assets,
-        });
-
-        sendEmail({
-          to: adminsEmails.join(","),
-          subject: adminSubject,
-          text,
-          /** We need to invoke this function separately for the admin email as the footer of emails is different */
-          html: adminHtml,
-        });
-      }
-
-      /**
-       * Notify the custodian that the booking is reserved
-       */
-      sendEmail({
-        to: bookingFound.custodianUser.email,
-        subject,
-        text,
-        html,
+        },
       });
     }
 
@@ -1263,13 +1302,12 @@ export async function checkoutBooking({
      * We also schedule the overdue handler for the booking
      */
     if (lessThanOneHourToCheckin) {
-      if (bookingFound.custodianUser?.email) {
-        await sendCheckinReminder(
-          bookingFound,
-          bookingFound._count.assets,
-          hints
-        );
-      }
+      await sendCheckinReminder(
+        bookingFound,
+        bookingFound._count.assets,
+        hints,
+        organizationId
+      );
 
       if (bookingFound.to) {
         const when = new Date(bookingFound.to);
@@ -1657,35 +1695,38 @@ export async function checkinBooking({
       });
     }
 
-    if (updatedBooking.custodianUser?.email) {
-      const custodian = updatedBooking?.custodianUser
-        ? resolveUserDisplayName(updatedBooking.custodianUser)
-        : updatedBooking.custodianTeamMember?.name ?? "";
+    // Resolve notification recipients and send personalized emails
+    const recipients = await getBookingNotificationRecipients({
+      booking: updatedBooking,
+      eventType: "CHECKIN",
+      organizationId: updatedBooking.organizationId,
+      editorUserId: userId,
+    });
 
-      const subject = `🎉 Booking completed (${updatedBooking.name}) - shelf.nu`;
+    if (recipients.length > 0) {
+      const custodian =
+        resolveUserDisplayName(updatedBooking.custodianUser) ||
+        updatedBooking.custodianTeamMember?.name ||
+        "";
+
       const text = completedBookingEmailContent({
         bookingName: updatedBooking.name,
         assetsCount: updatedBooking._count.assets,
-        custodian: custodian,
-        from: updatedBooking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
-        to: updatedBooking.to as Date,
+        custodian,
+        from: updatedBooking.from!,
+        to: updatedBooking.to!,
         bookingId: updatedBooking.id,
-        hints: hints,
+        hints,
         customEmailFooter: updatedBooking.organization.customEmailFooter,
       });
 
-      const html = await bookingUpdatesTemplateString({
+      await sendBookingEmailToAllRecipients({
+        recipients,
         booking: updatedBooking,
-        heading: `Your booking has been completed: "${updatedBooking.name}".`,
-        assetCount: updatedBooking._count.assets,
+        subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
+        textContent: text,
+        heading: `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
-      });
-
-      sendEmail({
-        to: updatedBooking.custodianUser.email,
-        subject,
-        text,
-        html,
       });
     }
 
@@ -2343,35 +2384,41 @@ export async function cancelBooking({
     /** Cancel any active schedulers */
     await cancelScheduler(booking);
 
-    if (booking.custodianUser?.email) {
-      const subject = `Booking canceled (${booking.name}) - shelf.nu`;
+    // Resolve notification recipients and send personalized emails
+    const recipients = await getBookingNotificationRecipients({
+      booking,
+      eventType: "CANCEL",
+      organizationId: booking.organizationId,
+      editorUserId: userId,
+    });
+
+    if (recipients.length > 0) {
+      const custodian = booking.custodianUser
+        ? resolveUserDisplayName(booking.custodianUser)
+        : booking.custodianTeamMember?.name ?? "";
+
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
-        custodian:
-          resolveUserDisplayName(booking.custodianUser) ||
-          (booking.custodianTeamMember?.name as string),
-        from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
-        to: booking.to as Date,
+        custodian,
+        from: booking.from!,
+        to: booking.to!,
         bookingId: booking.id,
         hints,
-        cancellationReason,
         customEmailFooter: booking.organization.customEmailFooter,
+        cancellationReason: cancellationReason || undefined,
       });
 
-      const html = await bookingUpdatesTemplateString({
-        booking: booking,
-        heading: `Your booking has been cancelled: "${booking.name}".`,
-        assetCount: booking._count.assets,
+      await sendBookingEmailToAllRecipients({
+        recipients,
+        booking,
+        subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
+        textContent: text,
+        heading: `Your booking has been cancelled: "${booking.name}"`,
         hints,
-        cancellationReason,
-      });
-
-      sendEmail({
-        to: booking.custodianUser.email,
-        subject,
-        text,
-        html,
+        templateProps: {
+          cancellationReason: cancellationReason || undefined,
+        },
       });
     }
 
@@ -2617,8 +2664,15 @@ export async function extendBooking({
       )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
 
-    /** Send extended booking email */
-    if (updatedBooking?.custodianUser?.email) {
+    // Resolve notification recipients and send personalized emails
+    const recipients = await getBookingNotificationRecipients({
+      booking: updatedBooking,
+      eventType: "EXTEND",
+      organizationId: updatedBooking.organizationId,
+      editorUserId: userId,
+    });
+
+    if (recipients.length > 0) {
       const custodian = updatedBooking?.custodianUser
         ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
@@ -2640,20 +2694,15 @@ export async function extendBooking({
         timeStyle: "short",
       });
 
-      const html = await bookingUpdatesTemplateString({
+      await sendBookingEmailToAllRecipients({
+        recipients,
         booking: updatedBooking,
+        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
+        textContent: text,
         heading: `Booking extended from ${format(booking.to)} to ${format(
           newEndDate
         )}`,
-        assetCount: updatedBooking._count.assets,
         hints,
-      });
-
-      sendEmail({
-        to: updatedBooking.custodianUser.email,
-        subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
-        text,
-        html,
       });
     }
 
@@ -2670,13 +2719,12 @@ export async function extendBooking({
      * reminder and we schedule the overdue handler.
      */
     if (hours < 1) {
-      if (updatedBooking?.custodianUser?.email) {
-        await sendCheckinReminder(
-          updatedBooking,
-          updatedBooking._count.assets,
-          hints
-        );
-      }
+      await sendCheckinReminder(
+        updatedBooking,
+        updatedBooking._count.assets,
+        hints,
+        updatedBooking.organizationId
+      );
 
       await scheduleNextBookingJob({
         data: {
@@ -3239,7 +3287,8 @@ export async function removeAssets({
 
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
-  hints: ClientHint
+  hints: ClientHint,
+  userId?: string
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -3292,34 +3341,40 @@ export async function deleteBooking(
       },
     });
 
-    const email = b.custodianUser?.email;
-    if (email) {
-      const subject = `🗑️ Booking deleted (${b.name}) - shelf.nu`;
+    // Resolve notification recipients and send personalized emails
+    const recipients = await getBookingNotificationRecipients({
+      booking: b,
+      eventType: "DELETE",
+      organizationId,
+      editorUserId: userId,
+    });
+
+    if (recipients.length > 0) {
+      const custodian = b.custodianUser
+        ? resolveUserDisplayName(b.custodianUser)
+        : b.custodianTeamMember?.name ?? "";
+
       const text = deletedBookingEmailContent({
         bookingName: b.name,
         assetsCount: b._count.assets,
-        custodian:
-          resolveUserDisplayName(b.custodianUser) ||
-          (b.custodianTeamMember?.name as string),
-        from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+        custodian,
+        from: b.from as Date,
         to: b.to as Date,
         bookingId: b.id,
-        hints: hints,
+        hints,
         customEmailFooter: b.organization.customEmailFooter,
       });
-      const html = await bookingUpdatesTemplateString({
-        booking: b,
-        heading: `Your booking has been deleted: "${b.name}".`,
-        assetCount: b._count.assets,
-        hints,
-        hideViewButton: true,
-      });
 
-      sendEmail({
-        to: email,
-        subject,
-        text,
-        html,
+      await sendBookingEmailToAllRecipients({
+        recipients,
+        booking: b,
+        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+        textContent: text,
+        heading: `Your booking has been deleted: "${b.name}"`,
+        hints,
+        templateProps: {
+          hideViewButton: true,
+        },
       });
     }
 
@@ -3754,10 +3809,7 @@ export async function bulkDeleteBookings({
       db.booking.findMany({
         where,
         include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: { include: { owner: { select: { email: true } } } },
-          _count: { select: { assets: true } },
+          ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: { select: { id: true, kitId: true } },
         },
       }),
@@ -3770,11 +3822,6 @@ export async function bulkDeleteBookings({
         } satisfies Prisma.UserSelect,
       }),
     ]);
-
-    /** We have to send mails to custodianUsers */
-    const bookingsToSendEmail = bookings.filter(
-      (booking) => !!booking.custodianUser?.email
-    );
 
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
@@ -3837,32 +3884,44 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    const emailConfigs = await Promise.all(
-      bookingsToSendEmail.map(async (b) => ({
-        to: b.custodianUser?.email ?? "",
-        subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-        text: deletedBookingEmailContent({
+    // Resolve notification recipients and send personalized emails for each deleted booking
+    for (const b of bookings) {
+      const recipients = await getBookingNotificationRecipients({
+        booking: b,
+        eventType: "DELETE",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian =
+          resolveUserDisplayName(b.custodianUser) ||
+          b.custodianTeamMember?.name ||
+          "";
+
+        const text = deletedBookingEmailContent({
           bookingName: b.name,
           assetsCount: b.assets.length,
-          custodian:
-            resolveUserDisplayName(b.custodianUser) ||
-            (b.custodianTeamMember?.name as string),
+          custodian,
           from: b.from as Date,
           to: b.to as Date,
           bookingId: b.id,
           hints,
-        }),
-        html: await bookingUpdatesTemplateString({
-          booking: b,
-          heading: `Your booking as been deleted: "${b.name}"`,
-          assetCount: b.assets.length,
-          hints,
-          hideViewButton: true,
-        }),
-      }))
-    );
+        });
 
-    return emailConfigs.map(sendEmail);
+        await sendBookingEmailToAllRecipients({
+          recipients,
+          booking: b,
+          subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
+          textContent: text,
+          heading: `Your booking has been deleted: "${b.name}"`,
+          hints,
+          templateProps: {
+            hideViewButton: true,
+          },
+        });
+      }
+    }
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -3988,10 +4047,7 @@ export async function bulkCancelBookings({
       db.booking.findMany({
         where,
         include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: { include: { owner: { select: { email: true } } } },
-          _count: { select: { assets: true } },
+          ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: { select: { id: true, kitId: true } },
         },
       }),
@@ -4030,11 +4086,6 @@ export async function bulkCancelBookings({
         },
       });
     }
-
-    /** We have to send mails to custodianUsers */
-    const bookingsToSendEmail = bookings.filter(
-      (booking) => !!booking.custodianUser?.email
-    );
 
     /** We have to make all the assets and kits available if the booking as ongoing or overdue */
     const ongoingOrOverdueBookings = bookings.filter(
@@ -4111,38 +4162,42 @@ export async function bulkCancelBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
-    /** Sending cancellation emails */
-    await Promise.all(
-      bookingsToSendEmail.map(async (b) => {
-        const subject = `❌ Booking cancelled (${b.name}) - shelf.nu`;
+    // Resolve notification recipients and send personalized cancellation emails
+    for (const b of bookings) {
+      const recipients = await getBookingNotificationRecipients({
+        booking: b,
+        eventType: "CANCEL",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian =
+          resolveUserDisplayName(b.custodianUser) ||
+          b.custodianTeamMember?.name ||
+          "";
+
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
           assetsCount: b._count.assets,
-          custodian:
-            resolveUserDisplayName(b.custodianUser) ||
-            (b.custodianTeamMember?.name as string),
-          from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+          custodian,
+          from: b.from as Date,
           to: b.to as Date,
           bookingId: b.id,
-          hints: hints,
+          hints,
           customEmailFooter: b.organization.customEmailFooter,
         });
 
-        const html = await bookingUpdatesTemplateString({
+        await sendBookingEmailToAllRecipients({
+          recipients,
           booking: b,
-          heading: `Your booking has been cancelled: "${b.name}".`,
-          assetCount: b._count.assets,
+          subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
+          textContent: text,
+          heading: `Your booking has been cancelled: "${b.name}"`,
           hints,
         });
-
-        return sendEmail({
-          to: b.custodianUser?.email ?? "",
-          subject,
-          text,
-          html,
-        });
-      })
-    );
+      }
+    }
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 
@@ -4586,6 +4641,9 @@ export async function duplicateBooking({
       id: bookingId,
       organizationId,
       request,
+      extraInclude: {
+        notificationRecipients: { select: { id: true } },
+      },
     });
     const hints = getHints(request);
 
@@ -4618,6 +4676,16 @@ export async function duplicateBooking({
         tags: {
           connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
         },
+        // Copy per-booking notification recipients from the original
+        ...(bookingToDuplicate.notificationRecipients?.length
+          ? {
+              notificationRecipients: {
+                connect: bookingToDuplicate.notificationRecipients.map(
+                  (tm: { id: string }) => ({ id: tm.id })
+                ),
+              },
+            }
+          : {}),
       },
     });
 
@@ -4855,6 +4923,60 @@ export async function getOngoingBookingForAsset({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while getting ongoing booking for asset.",
+    });
+  }
+}
+
+/**
+ * Replaces the per-booking notification recipients with the given team
+ * member IDs. Uses Prisma's `set` operation, so the caller must provide
+ * the complete desired list — any previously connected team members not
+ * in `teamMemberIds` will be disconnected.
+ *
+ * These per-booking recipients are resolved in step 6 of
+ * `getBookingNotificationRecipients()` and receive emails with the
+ * `"booking_recipient"` reason label.
+ *
+ * @param bookingId - The booking to update
+ * @param organizationId - Scoping to ensure the booking belongs to this org
+ * @param teamMemberIds - Complete list of team member IDs. Pass `[]` to clear.
+ */
+export async function updateBookingNotificationRecipients({
+  bookingId,
+  organizationId,
+  teamMemberIds,
+}: {
+  bookingId: string;
+  organizationId: string;
+  teamMemberIds: string[];
+}) {
+  try {
+    // Validate that all provided team member IDs belong to this organization
+    // and have a valid email, preventing cross-org data injection.
+    const validTeamMembers = await db.teamMember.findMany({
+      where: {
+        id: { in: teamMemberIds },
+        organizationId,
+        user: { isNot: null },
+      },
+      select: { id: true },
+    });
+    const validTeamMemberIds = validTeamMembers.map((m) => m.id);
+
+    return await db.booking.update({
+      where: { id: bookingId, organizationId },
+      data: {
+        notificationRecipients: {
+          set: validTeamMemberIds.map((id) => ({ id })),
+        },
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update booking notification recipients",
+      additionalData: { bookingId, organizationId, teamMemberIds },
+      label,
     });
   }
 }

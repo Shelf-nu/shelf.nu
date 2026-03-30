@@ -765,3 +765,72 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
     });
   }
 }
+
+/**
+ * Fetches team members eligible for the notification recipients picker.
+ * Returns only admins/owners with linked user accounts (no NRMs).
+ *
+ * Used by booking form loaders to provide initial data for the
+ * `DynamicDropdown` component's `initialDataKey`.
+ */
+export async function getTeamMembersForNotify({
+  organizationId,
+  excludeTeamMemberIds,
+}: {
+  organizationId: string;
+  /** Team member IDs to exclude from results. Defaults to an empty
+   *  array when not provided — no automatic fetching occurs. Callers
+   *  must pass any IDs to exclude explicitly (e.g. always-notify
+   *  members or the custodian's team member ID). */
+  excludeTeamMemberIds?: string[];
+}) {
+  try {
+    const idsToExclude = excludeTeamMemberIds ?? [];
+
+    // Two-step query: first get admin/owner user IDs, then fetch
+    // their team members. Needed because Prisma doesn't support nested
+    // relation filters in the `where` clause with `include`.
+    const adminUserOrgs = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: { hasSome: ["ADMIN", "OWNER"] },
+      },
+      select: { userId: true },
+    });
+    const adminUserIds = adminUserOrgs.map((uo) => uo.userId);
+
+    const teamMembersForNotify = await db.teamMember.findMany({
+      where: {
+        organizationId,
+        deletedAt: null,
+        userId: { in: adminUserIds },
+        ...(idsToExclude?.length ? { id: { notIn: idsToExclude } } : {}),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            email: true,
+            profilePicture: true,
+          },
+        },
+      },
+      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+    });
+
+    return {
+      teamMembersForNotify,
+      totalTeamMembersForNotify: teamMembersForNotify.length,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team members for notification picker",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
