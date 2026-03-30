@@ -3507,6 +3507,13 @@ export async function bulkCheckOutAssets({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      /** Clean up any stale custody records that may exist despite AVAILABLE status.
+       * This prevents P2002 unique constraint violations when a previous
+       * release/checkin updated status but failed to delete the custody row. */
+      await tx.custody.deleteMany({
+        where: { assetId: { in: assets.map((a) => a.id) } },
+      });
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({

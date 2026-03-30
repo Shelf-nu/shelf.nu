@@ -746,13 +746,15 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
         })
     );
 
-    /** If there are broken ones, log them so we know what is going on. If this keeps on appearing in the logs that means its an ongoing issue and the cause should be found. */
-    Logger.error(
+    /** Log auto-fixed empty names as a warning (not error) since the fix is
+     * applied successfully. Using Logger.warn avoids sending to Sentry. */
+    Logger.warn(
       new ShelfError({
         cause: null,
-        message: "Team members with empty names found",
+        message: "Team members with empty names found and auto-fixed",
         additionalData: { teamMembersWithEmptyNames },
         label,
+        shouldBeCaptured: false,
       })
     );
   } catch (cause) {
