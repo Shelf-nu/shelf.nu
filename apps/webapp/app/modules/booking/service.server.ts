@@ -1204,30 +1204,39 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    const updatedBooking = await db.$transaction(async (tx) => {
-      /* Updating the status of all assets inside booking */
-      await tx.asset.updateMany({
-        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
+    /** Transaction contains only write operations to stay within the 5s
+     * timeout. The heavy read (includes for email/notes) is done after
+     * the transaction commits. This prevents P2028 timeouts on bookings
+     * with many assets. */
+    await db.$transaction(async (tx) => {
+      await Promise.all([
+        tx.asset.updateMany({
+          where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+          data: { status: AssetStatus.CHECKED_OUT },
+        }),
+        hasKits
+          ? tx.kit.updateMany({
+              where: { id: { in: kitIds } },
+              data: { status: KitStatus.CHECKED_OUT },
+            })
+          : Promise.resolve(),
+      ]);
 
-      /** If there are any kits associated with the booking, then update their status */
-      if (hasKits) {
-        await tx.kit.updateMany({
-          where: { id: { in: kitIds } },
-          data: { status: KitStatus.CHECKED_OUT },
-        });
-      }
-
-      /** Finally update the booking */
-      return tx.booking.update({
+      await tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
-        include: {
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: true,
-        },
+        select: { id: true },
       });
+    });
+
+    /** Fetch full booking data with relations after the transaction
+     * so the heavy includes don't contribute to transaction duration. */
+    const updatedBooking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingFound.id },
+      include: {
+        ...BOOKING_INCLUDE_FOR_EMAIL,
+        assets: true,
+      },
     });
 
     // Create status transition note

@@ -845,6 +845,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
             label: "Booking",
+            shouldBeCaptured: false,
           });
         }
         if (
@@ -858,6 +859,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
             label: "Booking",
+            shouldBeCaptured: false,
           });
         }
 
