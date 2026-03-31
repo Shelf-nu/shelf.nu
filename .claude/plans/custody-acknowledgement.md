@@ -34,6 +34,9 @@ model Custody {
   acceptanceUserAgent       String?                   // Browser user-agent (ephemeral — deleted with custody)
   assignedBy                User?     @relation("custodyAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   assignedByUserId          String?                   // Who assigned custody (for admin notification routing, SetNull on user delete)
+  // NOTE: Requires inverse relation on User model:
+  //   custodyAssignments Custody[] @relation("custodyAssigner")
+  // Same pattern needed for KitCustody if assignedBy is added there.
   // Fallback: if assignedByUserId is null (user deleted), admin notifications
   // route to the organization owner instead (org.userId is always present)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
@@ -189,14 +192,25 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// STRICTLY persist-before-sign, atomic to prevent concurrent races:
-// 1. In a single transaction:
-//    a. SELECT * FROM "Custody" WHERE "acknowledgementBatchId" = batchId FOR UPDATE
-//       (locks actual rows — prevents concurrent resend from proceeding until this tx completes)
-//    b. Compute MAX(tokenVersion) from the locked rows in application code
-//    c. UPDATE all locked rows SET "tokenVersion" = MAX + 1, "lastTokenRotatedAt" = now()
-// 2. Only AFTER transaction commits: sign JWT with { batchId, purpose: "custody-ack-batch", ver: MAX+1 }
-// 30-day expiry. Row-level FOR UPDATE lock serializes concurrent resend requests.
+// STRICTLY persist-before-sign, single atomic UPDATE (no separate SELECT):
+// 1. Single SQL statement:
+//    UPDATE "Custody"
+//    SET "tokenVersion" = (SELECT MAX("tokenVersion") + 1 FROM "Custody" WHERE "acknowledgementBatchId" = batchId),
+//        "lastTokenRotatedAt" = NOW()
+//    WHERE "acknowledgementBatchId" = batchId
+//    RETURNING "tokenVersion"
+// 2. Read returned tokenVersion (all rows now share the same value)
+// 3. Sign JWT with { batchId, purpose: "custody-ack-batch", ver: newVersion }
+// 30-day expiry. Single atomic UPDATE — no transaction needed, no app-side MAX computation.
+```
+
+```typescript
+export async function generateKitCustodyAcknowledgementToken(kitCustodyId: string): Promise<string>
+// STRICTLY persist-before-sign:
+// 1. Atomically increment KitCustody.tokenVersion via UPDATE ... RETURNING
+// 2. Also update all child Custody records to same version (single UPDATE with subquery)
+// 3. Sign JWT with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+// 30-day expiry.
 ```
 
 **Token security:**
@@ -749,8 +763,13 @@ Accepts `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId
 
 **Three rotation paths** (matching the three token purposes):
 
-**Single custody resend:**
+**Single custody resend** (only for custodies NOT in a batch or kit):
 ```typescript
+// GUARD: reject if custody belongs to a batch or kit — must use batch/kit resend path instead
+const custody = await db.custody.findUnique({ where: { id: custodyId }, select: { acknowledgementBatchId: true, asset: { select: { kitId: true } } } });
+if (custody?.acknowledgementBatchId) throw new ShelfError({ message: "This asset is part of a bulk assignment. Use batch resend." });
+if (custody?.asset?.kitId) throw new ShelfError({ message: "This asset is part of a kit. Use kit resend." });
+
 const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
   UPDATE "Custody"
   SET "tokenVersion" = "tokenVersion" + 1,
@@ -758,6 +777,7 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
       "updatedAt" = NOW()
   WHERE "id" = ${custodyId}
     AND "requiresAcceptance" = true
+    AND "acknowledgementBatchId" IS NULL
     AND "acceptedAt" IS NULL AND "declinedAt" IS NULL
     AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
   RETURNING "tokenVersion"
@@ -797,7 +817,7 @@ All paths: atomic `UPDATE ... RETURNING`, cooldown via `lastTokenRotatedAt` with
 
 ### 12.1 Enable for qualifying tiers
 
-The feature is **included in Plus and Team plans** — not a separate addon purchase.
+The feature is **included in Plus and Team plans** — not a separate add-on purchase.
 
 When a user subscribes to Plus or Team (or already has an active subscription), set `custodyAcknowledgementEnabled = true` on their organization. This can be done:
 
@@ -811,7 +831,7 @@ When a Free tier user encounters the "Require acknowledgement" checkbox:
 - Link to the subscription/upgrade page
 - Use the `CUSTODY_ACKNOWLEDGEMENT_ADDON` copy from `addon-copy.ts`
 
-No separate Stripe product, no trial flow, no addon management page needed for v1. The feature just comes with the plan.
+No separate Stripe product, no trial flow, no add-on management page needed for v1. The feature just comes with the plan.
 
 ---
 
