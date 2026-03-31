@@ -144,7 +144,7 @@ The boolean `custodyAcknowledgementEnabled` on the Organization model is just a 
 - **Sell as separate add-on** → Wire to Stripe like barcodes/audits (v2 if needed).
 - **Give to everyone** → Set `ENABLE_PREMIUM_FEATURES=false` and the check is bypassed.
 
-For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe addon product needed — just set the flag when the user's tier qualifies.
+For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe add-on product needed — just set the flag when the user's tier qualifies.
 
 ### 2.6 JWT token — separate CUSTODY_TOKEN_SECRET
 
@@ -266,12 +266,13 @@ export async function recordCustodyAcknowledgement({
   ip,
   userAgent,
   organizationId,
-}: RecordAcknowledgementParams): Promise<Custody>
+}: RecordAcknowledgementParams): Promise<{ transitioned: boolean; custody: Custody }>
 // Conditional update — only transitions from PENDING state:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
 // If no rows updated → custody was already accepted or declined (idempotent: return current state)
 // Sets: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
-// Returns updated custody with asset + custodian data
+// Returns { transitioned: true, custody } if state changed, { transitioned: false, custody } if already settled
+// Callers MUST check `transitioned` before creating notes or enqueuing emails — prevents duplicates on retry/refresh
 ```
 
 **State transition invariants:**
@@ -757,7 +758,7 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
     AND "requiresAcceptance" = true
     AND "acceptedAt" IS NULL
     AND "declinedAt" IS NULL
-    AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < ${sixtySecondsAgo})
+    AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
   RETURNING "tokenVersion"
 `;
 if (!updated) {
