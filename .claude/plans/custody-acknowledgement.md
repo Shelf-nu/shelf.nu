@@ -27,12 +27,16 @@ model Custody {
   assetId String @unique
 
   // Acknowledgement fields
-  requiresAcceptance  Boolean   @default(false) // Was acknowledgement requested?
-  acceptedAt          DateTime?                 // When custodian acknowledged
-  acceptanceMethod    String?                   // "email_link" | "in_app" | "manual_link"
-  acceptanceIp        String?                   // IP address at time of acknowledgement
-  acceptanceUserAgent String?                   // Browser user-agent string
-  assignedByUserId    String?                   // Who assigned custody (for admin notification routing)
+  requiresAcceptance        Boolean   @default(false) // Was acknowledgement requested?
+  acceptedAt                DateTime?                 // When custodian acknowledged
+  acceptanceMethod          String?                   // "email_link" | "in_app" | "manual_link"
+  acceptanceIp              String?                   // IP address (ephemeral — deleted with custody on release)
+  acceptanceUserAgent       String?                   // Browser user-agent (ephemeral — deleted with custody)
+  assignedByUserId          String?                   // Who assigned custody (for admin notification routing)
+  declinedAt                DateTime?                 // When custodian reported they don't have the item
+  declineReason             String?                   // Optional reason from custodian
+  tokenIssuedAt             DateTime?                 // When the current token was issued (for invalidation on resend)
+  acknowledgementBatchId    String?                   // Groups multiple custody records for bulk acknowledgement
 
   // DateTime
   createdAt DateTime @default(now())
@@ -142,16 +146,30 @@ No new env var. We reuse `INVITE_TOKEN_SECRET` but include `purpose: "custody-ac
 
 ```typescript
 export function generateCustodyAcknowledgementToken(custodyId: string): string
-// Signs JWT with { id: custodyId, purpose: "custody-ack" }
-// No expiry for v1 (token validity = custody record existence)
+// Signs JWT with { id: custodyId, purpose: "custody-ack", iat: now }
+// 30-day expiry (exp claim)
+// Updates custody.tokenIssuedAt = now (invalidates any previous token)
 ```
+
+```typescript
+export function generateBatchAcknowledgementToken(batchId: string): string
+// Signs JWT with { batchId, purpose: "custody-ack-batch", iat: now }
+// 30-day expiry. Used for bulk assign (multiple assets, one link)
+```
+
+**Token security:**
+- 30-day expiry via JWT `exp` claim
+- On resend: new token generated, `tokenIssuedAt` updated on custody record — old tokens rejected by comparing JWT `iat` < `tokenIssuedAt`
+- Token's decoded `id` is the **sole authority** for DB operations — URL param `custodyId` is for routing only, never trusted over the token
+- `purpose` field prevents cross-use with invite tokens
 
 ### 3.2 Token verification
 
 ```typescript
 export function verifyCustodyAcknowledgementToken(token: string): { id: string }
-// Verifies JWT, checks purpose === "custody-ack"
+// Verifies JWT signature + expiry, checks purpose === "custody-ack"
 // Returns custody ID
+// Caller MUST also check custody.tokenIssuedAt <= token.iat to reject rotated tokens
 ```
 
 ### 3.3 Record acknowledgement
@@ -168,20 +186,7 @@ export async function recordCustodyAcknowledgement({
 // Returns updated custody with asset + custodian data
 ```
 
-### 3.4 Record decline
-
-```typescript
-export async function recordCustodyDecline({
-  custodyId,
-  reason,
-  organizationId,
-}: RecordDeclineParams): Promise<void>
-// Does NOT change custody status
-// Creates activity log note: "Custodian reported they don't have this item"
-// Sends notification email to assigning admin
-```
-
-### 3.5 Send acknowledgement email
+### 3.4 Send acknowledgement email
 
 ```typescript
 export async function sendCustodyAcknowledgementEmail({
@@ -197,7 +202,23 @@ export async function sendCustodyAcknowledgementEmail({
 // try/catch + Logger.error + ShelfError pattern
 ```
 
-### 3.6 Create acknowledgement activity note
+### 3.6 Record decline
+
+Updated from 3.4 — decline now **persists state** on the Custody record:
+
+```typescript
+export async function recordCustodyDecline({
+  custodyId,
+  reason,
+  organizationId,
+}: RecordDeclineParams): Promise<void>
+// Updates custody: declinedAt = now(), declineReason = reason
+// Does NOT change asset status or delete custody
+// Creates activity log note
+// Sends notification email to assigning admin
+```
+
+### 3.7 Create acknowledgement activity note
 
 ```typescript
 export function createAcknowledgementNote({
@@ -206,12 +227,15 @@ export function createAcknowledgementNote({
   custodianName,
   method,
   timestamp,
-  ip,
 }: CreateAckNoteParams): Promise<Note>
-// Creates rich UPDATE note with ALL legal details inline
-// "Jane Smith acknowledged receipt on March 31, 2026 at 2:47 PM via email link (IP: x.x.x.x)"
-// This note IS the permanent legal record (survives custody hard-delete)
+// Creates rich UPDATE note with legal summary (no raw PII)
+// "Jane Smith acknowledged receipt on March 31, 2026 at 2:47 PM via email link"
+// Raw IP + user-agent stored only on the Custody record's ephemeral fields
+// (deleted when custody is released — data minimization by design)
+// This note IS the permanent human-readable record (survives custody hard-delete)
 ```
+
+**Privacy approach:** Raw IP and user-agent are stored on the Custody model's structured fields for operational use while custody is active. The activity note contains only a summary (custodian name, timestamp, method) — no raw PII. When custody is released and the record deleted, the ephemeral evidence is purged automatically. The note survives as the permanent record without privacy concerns.
 
 ---
 
@@ -260,18 +284,35 @@ Following the pattern from `app/emails/stripe/audit-trial-welcome.tsx` per CLAUD
 
 **File:** `apps/webapp/server/index.ts` (publicPaths array)
 
-Add: `"/accept-custody/:path*"`
+Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 
-### 5.2 Loader
+### 5.2 Auth model — two explicit modes
 
-1. Extract `custodyId` from params, `token` from search params
-2. Verify JWT token via `verifyCustodyAcknowledgementToken(token)`
-3. Fetch custody record with asset details (title, mainImage, category, sequentialId, organization name)
-4. If custody doesn't exist → render "This custody assignment has been released"
-5. If already accepted → render "Already acknowledged" confirmation
-6. Return asset details + custody info to component
+**Public token mode** (this route — no session required):
+- Token is the authority. No login needed.
+- Extract `token` from search params, verify JWT
+- The decoded `id` from the token is the **sole key** for all DB operations — ignore the URL `custodyId` param for data access (use it only for routing)
+- Also verify `custody.tokenIssuedAt <= token.iat` to reject rotated/old tokens
+- Works for non-registered members, logged-out users, anyone with the link
 
-### 5.3 Action
+**In-app mode** (Phase 10 route — session required):
+- User must be logged in
+- Verify that the requesting user's TeamMember ID matches `custody.teamMemberId`
+- No token needed — session identity is the authority
+- Works for BASE, SELF_SERVICE, ADMIN users acknowledging their own custody
+
+### 5.3 Loader
+
+1. Extract `token` from search params
+2. Verify JWT token via `verifyCustodyAcknowledgementToken(token)` — get `custodyId` from decoded token
+3. Fetch custody record using decoded `custodyId` with asset details (title, mainImage, category, sequentialId, organization name)
+4. Verify `custody.tokenIssuedAt <= token.iat` (reject old/rotated tokens)
+5. If custody doesn't exist → render "This custody assignment has been released"
+6. If already accepted → render "Already acknowledged" confirmation
+7. If declined → render "Already reported" confirmation
+8. Return asset details + custody info to component
+
+### 5.4 Action
 
 Handle two intents:
 
@@ -293,7 +334,7 @@ Handle two intents:
 
 ### 5.4 Component (the brand moment page)
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │  [Shelf Logo]                            │
 │                                          │
@@ -322,7 +363,7 @@ Handle two intents:
 ```
 
 After acknowledgement:
-```
+```text
 ┌──────────────────────────────────────────┐
 │  [Shelf Logo]                            │
 │                                          │
@@ -380,8 +421,10 @@ Same changes as 6.1 but:
 
 - Accept `requiresAcceptance` parameter
 - Pass through to custody creation
-- One email per custodian (bulk assign goes to one custodian)
-- Token covers all assets in the batch
+- Generate a `acknowledgementBatchId` (cuid) and set it on all Custody records in the batch
+- Generate a batch token via `generateBatchAcknowledgementToken(batchId)`
+- One email per custodian with one link covering all assets
+- Acceptance page for batch: queries all custodies with matching `acknowledgementBatchId`, shows list, one "Acknowledge All" click updates all records in transaction
 
 ### 6.4 Assign custody schema
 
@@ -431,15 +474,20 @@ assignedByUserId?: string | null;
 
 After the existing "Since {date}" line:
 
-- If `requiresAcceptance && !acceptedAt`:
-  ```
+- If `requiresAcceptance && !acceptedAt && !declinedAt`:
+  ```text
   Awaiting acknowledgement
   [Copy link] · [Resend email]  (conditional on custodian having email)
   ```
 
 - If `requiresAcceptance && acceptedAt`:
-  ```
+  ```text
   Acknowledged {date}
+  ```
+
+- If `requiresAcceptance && declinedAt`:
+  ```text
+  Disputed {date}
   ```
 
 ### 8.3 Copy link button
@@ -484,7 +532,9 @@ Include `requiresAcceptance`, `acceptedAt` in the custody select when loading as
 ### 9.4 Filter support
 
 Add acknowledgement status as a filterable field in advanced mode filters.
-Values: "All", "Pending", "Acknowledged", "Not required"
+Values: "All", "Pending", "Acknowledged", "Disputed", "Not required"
+
+The "Disputed" state is now queryable via `custody.declinedAt IS NOT NULL`.
 
 ---
 
@@ -495,7 +545,7 @@ Values: "All", "Pending", "Acknowledged", "Not required"
 **New file:** `apps/webapp/app/components/custody/acknowledgement-banner.tsx`
 
 A dismissible banner shown at the top of the assets list:
-```
+```text
 You have {count} items awaiting your acknowledgement. [Review & Acknowledge]
 ```
 
@@ -508,14 +558,16 @@ Page listing all of the current user's pending acknowledgements.
 - "Acknowledge" button per item + "Acknowledge All" button
 - Uses `recordCustodyAcknowledgement()` with method "in_app"
 
-### 10.3 Permission bypass for acknowledgement
+### 10.3 Permission bypass for acknowledgement (in-app mode)
+
+The in-app acknowledge route uses **session-based auth** (see Phase 5.2 for the two auth modes).
 
 The acknowledge action needs to work for BASE and SELF_SERVICE users who are the custodian.
 This is NOT a general custody permission — it's: "you can acknowledge YOUR OWN custody."
 
-In the in-app acknowledge route and the public route action:
-- Check that the requesting user's TeamMember ID matches the custody's teamMemberId
-- No role-based permission check needed for acknowledging your own custody
+- Verify that the requesting user's TeamMember ID matches `custody.teamMemberId`
+- No role-based permission check needed — custodian identity is the authority
+- The public token route (Phase 5) does NOT enforce this check — the token IS the authority there
 
 ### 10.4 Layout integration
 
@@ -531,9 +583,11 @@ Pass to the banner component.
 **New file:** `apps/webapp/app/routes/api+/custody.acknowledgement.ts`
 
 Handles:
-- `POST` with intent `resend-email`: Re-generates token, re-sends email
-- `POST` with intent `copy-link`: Returns the signed URL for clipboard copy
+- `POST` with intent `resend-email`: Generates **new** token (rotates — updates `tokenIssuedAt`, invalidating old link), re-sends email
+- `POST` with intent `copy-link`: Generates **new** token (rotates), returns the signed URL for clipboard copy
 - Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only)
+
+Token rotation on every resend/copy ensures old links stop working, limiting exposure window.
 
 ---
 
@@ -615,13 +669,18 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Decision | Rationale |
 |----------|-----------|
 | No new AssetStatus | IN_CUSTODY set immediately. Acknowledgement is evidence, not a gate. Avoids ripple through dozens of status checks. |
-| Activity note = permanent legal record | Custody records are hard-deleted on release. Rich note with timestamp/IP/method survives. |
+| Activity note = permanent record (no raw PII) | Custody records hard-deleted on release. Note stores summary (name, timestamp, method). Raw IP/UA only on ephemeral Custody fields — auto-purged on release. |
+| 30-day token expiry + rotation on resend | Limits exposure window. `tokenIssuedAt` on Custody rejects old tokens after resend. |
+| Token is sole authority (not URL param) | Decoded JWT `id` used for all DB lookups. URL `custodyId` is routing only. Prevents mismatch attacks. |
+| Two auth modes: public token vs in-app session | Public route: token = authority, no login needed. In-app route: session + teamMember match = authority. Clear separation. |
+| Batch key for bulk acknowledgement | `acknowledgementBatchId` groups custody records. One token covers the batch. Resend/copy-link target the batch reliably. |
+| Persisted decline state | `declinedAt` + `declineReason` on Custody makes "Disputed" queryable and filterable. |
+| Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Reuse INVITE_TOKEN_SECRET | JWT includes `purpose: "custody-ack"` to prevent cross-use. No new env var. |
-| String field for acceptanceMethod | Avoids Prisma enum migration for each new method. Validated at app layer. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
 | Self-assignment hides checkbox | Can't corroborate receipt from the person who assigned. |
-| One email per custodian for bulk | Not spammy. One acknowledge-all click. |
+| One email per custodian for bulk | Not spammy. One acknowledge-all click via batch token. |
 | Kit acknowledgement cascades | One click updates KitCustody + all child Custody records in transaction. |
-| BASE users can acknowledge own custody | Permission bypass: if you ARE the custodian, you can acknowledge. Not a general custody permission. |
+| BASE users can acknowledge own custody | Permission bypass in in-app mode: if you ARE the custodian, you can acknowledge. Not a general custody permission. |
 | Non-registered members get copy-link only | No email field on TeamMember. Admin copies link, sends manually. |
 | Column hidden by default | Opt-in visibility. Admins who use the feature toggle it on. |
