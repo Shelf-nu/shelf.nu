@@ -132,9 +132,16 @@ The boolean `custodyAcknowledgementEnabled` on the Organization model is just a 
 
 For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe addon product needed — just set the flag when the user's tier qualifies.
 
-### 2.6 JWT token — reuse INVITE_TOKEN_SECRET
+### 2.6 JWT token — separate CUSTODY_TOKEN_SECRET
 
-No new env var. We reuse `INVITE_TOKEN_SECRET` but include `purpose: "custody-ack"` in the JWT payload to prevent cross-use with invite tokens.
+**New env var: `CUSTODY_TOKEN_SECRET`** — a dedicated secret for custody acknowledgement tokens.
+
+We do NOT reuse `INVITE_TOKEN_SECRET` because the invite verification path (`accept-invite.$inviteId.tsx:110-112`) does not validate a `purpose` claim. Sharing secrets would allow custody tokens to pass invite verification — a token confusion vulnerability. Separate secrets eliminate this risk entirely.
+
+Add to `apps/webapp/app/utils/env.ts`:
+```typescript
+export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", { isSecret: true });
+```
 
 ---
 
@@ -145,31 +152,55 @@ No new env var. We reuse `INVITE_TOKEN_SECRET` but include `purpose: "custody-ac
 ### 3.1 Token generation
 
 ```typescript
-export function generateCustodyAcknowledgementToken(custodyId: string): string
-// Signs JWT with { id: custodyId, purpose: "custody-ack", iat: now }
+export async function generateCustodyAcknowledgementToken(custodyId: string): Promise<string>
+// Signs JWT with { id: custodyId, purpose: "custody-ack" } using CUSTODY_TOKEN_SECRET
 // 30-day expiry (exp claim)
-// Updates custody.tokenIssuedAt = now (invalidates any previous token)
+// Updates custody.tokenIssuedAt = now() in DB (invalidates any previous token)
 ```
 
 ```typescript
 export function generateBatchAcknowledgementToken(batchId: string): string
-// Signs JWT with { batchId, purpose: "custody-ack-batch", iat: now }
+// Signs JWT with { batchId, purpose: "custody-ack-batch" } using CUSTODY_TOKEN_SECRET
 // 30-day expiry. Used for bulk assign (multiple assets, one link)
+// Updates tokenIssuedAt on ALL custody records in the batch
 ```
 
 **Token security:**
+- Signed with dedicated `CUSTODY_TOKEN_SECRET` (not shared with invite tokens)
 - 30-day expiry via JWT `exp` claim
-- On resend: new token generated, `tokenIssuedAt` updated on custody record — old tokens rejected by comparing JWT `iat` < `tokenIssuedAt`
-- Token's decoded `id` is the **sole authority** for DB operations — URL param `custodyId` is for routing only, never trusted over the token
-- `purpose` field prevents cross-use with invite tokens
+- On resend: new token generated, `tokenIssuedAt` updated on custody record — old tokens rejected
+- Token's decoded `id` is the **sole authority** for DB operations — URL param is for routing only
+- `purpose` field provides defense-in-depth
 
-### 3.2 Token verification
+### 3.2 Token verification (single custody)
 
 ```typescript
-export function verifyCustodyAcknowledgementToken(token: string): { id: string }
-// Verifies JWT signature + expiry, checks purpose === "custody-ack"
-// Returns custody ID
-// Caller MUST also check custody.tokenIssuedAt <= token.iat to reject rotated tokens
+export async function verifyCustodyAcknowledgementToken(
+  token: string,
+  db: PrismaClient
+): Promise<{ id: string; iat: number }>
+// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
+// 2. Checks purpose === "custody-ack"
+// 3. Fetches custody record, validates tokenIssuedAt <= token.iat (rejects rotated tokens)
+// 4. Throws ShelfError("Token expired") on exp failure
+// 5. Throws ShelfError("Token revoked") if iat < tokenIssuedAt
+// 6. Throws ShelfError("Custody not found") if record doesn't exist
+// Returns custody ID and iat
+// Token rotation check is INSIDE this function — callers cannot forget it
+```
+
+### 3.3 Token verification (batch)
+
+```typescript
+export async function verifyBatchAcknowledgementToken(
+  token: string,
+  db: PrismaClient
+): Promise<{ batchId: string; custodies: CustodyWithAsset[] }>
+// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
+// 2. Checks purpose === "custody-ack-batch"
+// 3. Fetches all custody records with matching acknowledgementBatchId
+// 4. Throws if no records found
+// Returns batchId + full custody list with asset details
 ```
 
 ### 3.3 Record acknowledgement
@@ -236,6 +267,33 @@ export function createAcknowledgementNote({
 ```
 
 **Privacy approach:** Raw IP and user-agent are stored on the Custody model's structured fields for operational use while custody is active. The activity note contains only a summary (custodian name, timestamp, method) — no raw PII. When custody is released and the record deleted, the ephemeral evidence is purged automatically. The note survives as the permanent record without privacy concerns.
+
+### 3.8 PII retention and cleanup
+
+For custodies that are never released (permanent assignments, abandoned assets), raw PII would persist indefinitely. To prevent this:
+
+```typescript
+export async function cleanupExpiredAcknowledgementPII(): Promise<void>
+// Scheduled job (daily via pg-boss)
+// Finds custodies where acceptedAt is > 2 years ago AND acceptanceIp is not null
+// Sets acceptanceIp = null, acceptanceUserAgent = null
+// Preserves acceptedAt, acceptanceMethod (non-PII summary data)
+```
+
+Add to the acknowledgement email template: brief privacy notice that IP and browser info are recorded for security purposes and retained for a maximum of 2 years.
+
+### 3.9 Error handling specification
+
+The acceptance route must handle these error states explicitly:
+
+| Error | Cause | User message |
+|-------|-------|-------------|
+| Token expired | 30-day `exp` claim exceeded | "This link has expired. Contact your admin for a new one." |
+| Token revoked | `iat < tokenIssuedAt` (admin resent) | "This link is no longer valid. A newer link was sent." |
+| Custody not found | Released between page load and click | "This custody assignment has been released." |
+| Already acknowledged | `acceptedAt` is set | Show confirmation with existing date. |
+| Already declined | `declinedAt` is set | Show "already reported" confirmation. |
+| Prisma P2025 | Race condition on acknowledge action | "This custody has been released and can no longer be acknowledged." |
 
 ---
 
@@ -304,13 +362,14 @@ Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 ### 5.3 Loader
 
 1. Extract `token` from search params
-2. Verify JWT token via `verifyCustodyAcknowledgementToken(token)` — get `custodyId` from decoded token
-3. Fetch custody record using decoded `custodyId` with asset details (title, mainImage, category, sequentialId, organization name)
-4. Verify `custody.tokenIssuedAt <= token.iat` (reject old/rotated tokens)
-5. If custody doesn't exist → render "This custody assignment has been released"
-6. If already accepted → render "Already acknowledged" confirmation
-7. If declined → render "Already reported" confirmation
-8. Return asset details + custody info to component
+2. Decode token (without full verification) to check `purpose` field
+3. **Branch on token type:**
+   - `purpose === "custody-ack"` → Single flow: call `verifyCustodyAcknowledgementToken(token, db)` (handles signature, expiry, rotation check internally)
+   - `purpose === "custody-ack-batch"` → Batch flow: call `verifyBatchAcknowledgementToken(token, db)` — returns all custodies in the batch with asset details
+4. Handle error states (see 3.9 error handling table): expired, revoked, not found
+5. If already accepted → render "Already acknowledged" confirmation
+6. If declined → render "Already reported" confirmation
+7. Return asset details + custody info (single or batch list) to component
 
 ### 5.4 Action
 
@@ -565,9 +624,15 @@ The in-app acknowledge route uses **session-based auth** (see Phase 5.2 for the 
 The acknowledge action needs to work for BASE and SELF_SERVICE users who are the custodian.
 This is NOT a general custody permission — it's: "you can acknowledge YOUR OWN custody."
 
-- Verify that the requesting user's TeamMember ID matches `custody.teamMemberId`
-- No role-based permission check needed — custodian identity is the authority
-- The public token route (Phase 5) does NOT enforce this check — the token IS the authority there
+**Organization-scoped verification (prevents cross-org attacks):**
+1. Get `organizationId` from session context (current workspace)
+2. Find the current user's TeamMember within that org: `db.teamMember.findFirst({ where: { userId, organizationId } })`
+3. When querying pending custodies: scope via `asset: { organizationId }` AND `teamMemberId: currentTeamMember.id`
+4. When acknowledging: verify `custody.teamMemberId === currentTeamMember.id` AND `custody.asset.organizationId === organizationId`
+
+This ensures users cannot acknowledge custodies from other organizations, even if they're a custodian there too.
+
+- The public token route (Phase 5) does NOT enforce org scoping — the token IS the authority there
 
 ### 10.4 Layout integration
 
@@ -676,7 +741,10 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Batch key for bulk acknowledgement | `acknowledgementBatchId` groups custody records. One token covers the batch. Resend/copy-link target the batch reliably. |
 | Persisted decline state | `declinedAt` + `declineReason` on Custody makes "Disputed" queryable and filterable. |
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
-| Reuse INVITE_TOKEN_SECRET | JWT includes `purpose: "custody-ack"` to prevent cross-use. No new env var. |
+| Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
+| Token rotation inside verifier | `verifyCustodyAcknowledgementToken()` checks `tokenIssuedAt` internally — callers cannot forget. |
+| PII auto-cleanup after 2 years | Scheduled job nulls IP/UA on old custodies. Covers never-released assignments. |
+| Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
 | Self-assignment hides checkbox | Can't corroborate receipt from the person who assigned. |
 | One email per custodian for bulk | Not spammy. One acknowledge-all click via batch token. |
