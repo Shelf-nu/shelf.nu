@@ -38,7 +38,7 @@ model Custody {
   // route to the organization owner instead (org.userId is always present)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
   declineReason             String?                   // Optional reason from custodian
-  tokenIssuedAt             DateTime?                 // When the current token was issued (for invalidation on resend)
+  tokenVersion              Int       @default(0)      // Monotonic counter — incremented on each resend/rotation. Embedded in JWT, compared on verify.
   acknowledgementBatchId    String?                   // Groups multiple custody records for bulk acknowledgement
 
   // DateTime
@@ -156,24 +156,23 @@ export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", { isSecret: t
 
 ```typescript
 export async function generateCustodyAcknowledgementToken(custodyId: string): Promise<string>
-// Signs JWT with { id: custodyId, purpose: "custody-ack" } using CUSTODY_TOKEN_SECRET
+// Signs JWT with { id: custodyId, purpose: "custody-ack", ver: custody.tokenVersion } using CUSTODY_TOKEN_SECRET
 // 30-day expiry (exp claim)
-// Updates custody.tokenIssuedAt = now() in DB (invalidates any previous token)
+// Increments custody.tokenVersion in DB (invalidates any previous token — no same-second race)
 ```
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// 1. Updates tokenIssuedAt on ALL custody records in the batch (DB write FIRST)
-// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch" }
+// 1. Increments tokenVersion on ALL custody records in the batch (DB write FIRST)
+// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch", ver }
 // 30-day expiry. Used for bulk assign (multiple assets, one link)
-// Persist-before-sign order eliminates the revocation window where old tokens
-// could still validate before the tokenIssuedAt write lands.
+// Persist-before-sign order eliminates the revocation window.
 ```
 
 **Token security:**
 - Signed with dedicated `CUSTODY_TOKEN_SECRET` (not shared with invite tokens)
 - 30-day expiry via JWT `exp` claim
-- On resend: new token generated, `tokenIssuedAt` updated on custody record — old tokens rejected
+- On resend: `tokenVersion` incremented, new token embeds new version — old tokens rejected (integer comparison, no timestamp precision issues)
 - Token's decoded `id` is the **sole authority** for DB operations — URL param is for routing only
 - `purpose` field provides defense-in-depth
 
@@ -187,10 +186,9 @@ export async function verifyCustodyAcknowledgementToken(
 // 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
 // 2. Checks purpose === "custody-ack"
 // 3. Fetches custody record
-// 4. Normalizes time units: converts Prisma DateTime to Unix seconds
-//    via Math.floor(tokenIssuedAt.getTime() / 1000) before comparing to JWT iat (RFC 7519 = seconds)
+// 4. Compares JWT `ver` claim against custody.tokenVersion (integer equality — no timestamp precision issues)
 // 5. Throws ShelfError("Token expired") on exp failure
-// 6. Throws ShelfError("Token revoked") if tokenIssuedAtSeconds > token.iat
+// 6. Throws ShelfError("Token revoked") if token.ver !== custody.tokenVersion
 // 6. Throws ShelfError("Custody not found") if record doesn't exist
 // Returns custody ID and iat
 // Token rotation check is INSIDE this function — callers cannot forget it
@@ -209,7 +207,7 @@ export async function verifyBatchAcknowledgementToken(
 // 4. Enforces single-custodian membership: all records must have same teamMemberId
 //    (prevents cross-custody acknowledgement if batch was somehow corrupted)
 // 5. Validates token rotation on EVERY custody record in the batch:
-//    converts each custody.tokenIssuedAt to Unix seconds, rejects if any tokenIssuedAtSeconds > token.iat
+//    compares each custody.tokenVersion against token.ver (integer equality)
 // 6. Throws if no records found, mixed custodians, or any rotation check fails
 // Returns batchId + full custody list with asset details
 ```
@@ -224,7 +222,7 @@ export async function verifyKitCustodyAcknowledgementToken(
 // 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
 // 2. Checks purpose === "custody-ack-kit"
 // 3. Fetches KitCustody record (NOT Custody) with kit + all child assets + custodian
-// 4. Validates tokenIssuedAt rotation check
+// 4. Validates tokenVersion rotation check (integer equality)
 // 5. Throws if KitCustody not found
 // Returns kitCustodyId + full kit custody with child asset details
 ```
@@ -329,7 +327,7 @@ The acceptance route must handle these error states explicitly:
 | Error | Cause | User message |
 |-------|-------|-------------|
 | Token expired | 30-day `exp` claim exceeded | "This link has expired. Contact your admin for a new one." |
-| Token revoked | `iat < tokenIssuedAt` (admin resent) | "This link is no longer valid. A newer link was sent." |
+| Token revoked | `token.ver !== custody.tokenVersion` (admin resent) | "This link is no longer valid. A newer link was sent." |
 | Custody not found | Released between page load and click | "This custody assignment has been released." |
 | Already acknowledged | `acceptedAt` is set | Show confirmation with existing date. |
 | Already declined | `declinedAt` is set | Show "already reported" confirmation. |
@@ -387,7 +385,7 @@ Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 **Token-in-URL leak mitigations:**
 Tokens are passed as query params (`?token=...`), which are prone to leakage via referrer headers, browser history, server logs, and analytics. Mitigations:
 - Set `Referrer-Policy: no-referrer` on the acceptance page response headers (prevents token leaking to external resources)
-- Ensure server access logs do NOT log query strings for this route (or redact `token=` param)
+- **Modify `apps/webapp/server/logger.ts`**: The current middleware logs full query strings via `getQueryStrings(c.req.raw.url)`. Add redaction for the `token` param on `/accept-custody` routes (replace value with `[REDACTED]`). **This is an implementation step, not just guidance.**
 - The 30-day expiry + rotation on resend limits the window of exposure
 - After acknowledgement, the token becomes useless (idempotent, already-accepted state)
 
@@ -397,7 +395,7 @@ Tokens are passed as query params (`?token=...`), which are prone to leakage via
 - Token is the authority. No login needed.
 - Extract `token` from search params, verify JWT
 - The decoded `id` from the token is the **sole key** for all DB operations — ignore the URL `custodyId` param for data access (use it only for routing)
-- Also verify `custody.tokenIssuedAt <= token.iat` to reject rotated/old tokens
+- Also verify `token.ver === custody.tokenVersion` to reject rotated/old tokens
 - Works for non-registered members, logged-out users, anyone with the link
 
 **In-app mode** (Phase 10 route — session required):
@@ -709,7 +707,7 @@ Pass to the banner component.
 **New file:** `apps/webapp/app/routes/api+/custody.acknowledgement.ts`
 
 Handles:
-- `POST` with intent `resend-email`: Generates **new** token (rotates — updates `tokenIssuedAt`, invalidating old link), re-sends email
+- `POST` with intent `resend-email`: Increments `tokenVersion`, generates **new** token with new version, re-sends email
 - `POST` with intent `copy-link`: Generates **new** token (rotates), returns the signed URL for clipboard copy
 - Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only)
 
@@ -717,23 +715,23 @@ Token rotation on every resend/copy ensures old links stop working, limiting exp
 
 **Rate limiting (atomic):** Enforce a per-custody cooldown via a single conditional DB update — not a read-then-write (TOCTOU-safe):
 ```typescript
-// Single atomic operation — cooldown + rotation in one query:
+// Single atomic operation — cooldown + version increment in one query:
 const result = await db.custody.updateMany({
   where: {
     id: custodyId,
     OR: [
-      { tokenIssuedAt: null },
-      { tokenIssuedAt: { lt: sixtySecondsAgo } },
+      { updatedAt: { lt: sixtySecondsAgo } },
+      { tokenVersion: 0 }, // never resent before
     ],
   },
-  data: { tokenIssuedAt: now() },
+  data: { tokenVersion: { increment: 1 } },
 });
 if (result.count === 0) {
   throw new ShelfError({ message: "Please wait before resending." });
 }
-// Only generate new token + send email if the update succeeded
+// Only generate new token (with new version) + send email if update succeeded
 ```
-This prevents concurrent requests from both passing the cooldown check.
+This prevents concurrent requests from both passing the cooldown check. Uses `updatedAt` (auto-set by Prisma on update) as the cooldown timestamp.
 
 ---
 
@@ -773,7 +771,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 9. `apps/webapp/app/routes/api+/custody.acknowledgement.ts` — Resend/copy-link API
 10. `packages/database/prisma/migrations/[ts]_add_custody_acknowledgement/migration.sql`
 
-### Modified files (16):
+### Modified files (17):
 1. `packages/database/prisma/schema.prisma` — Custody, KitCustody, Organization models
 2. `apps/webapp/server/index.ts` — Add public path
 3. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.assign-custody.tsx` — Checkbox + email logic
@@ -790,6 +788,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 14. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.release-custody.tsx` — Pending note
 15. `apps/webapp/app/utils/roles.server.ts` — Return `canUseCustodyAcknowledgement`
 16. `apps/webapp/app/config/addon-copy.ts` — Upsell copy
+17. `apps/webapp/server/logger.ts` — Redact token query param on acceptance routes
 
 ---
 
@@ -816,7 +815,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 |----------|-----------|
 | No new AssetStatus | IN_CUSTODY set immediately. Acknowledgement is evidence, not a gate. Avoids ripple through dozens of status checks. |
 | Activity note = permanent record (no raw PII) | Custody records hard-deleted on release. Note stores summary (name, timestamp, method). Raw IP/UA only on ephemeral Custody fields — auto-purged on release. |
-| 30-day token expiry + rotation on resend | Limits exposure window. `tokenIssuedAt` on Custody rejects old tokens after resend. |
+| 30-day token expiry + monotonic version rotation | `tokenVersion` integer incremented on resend. JWT embeds `ver` claim. Integer equality check — no timestamp precision issues. |
 | Token is sole authority (not URL param) | Decoded JWT `id` used for all DB lookups. URL `custodyId` is routing only. Prevents mismatch attacks. |
 | Two auth modes: public token vs in-app session | Public route: token = authority, no login needed. In-app route: session + teamMember match = authority. Clear separation. |
 | Batch key for bulk acknowledgement (per-custodian) | `acknowledgementBatchId` groups custody records scoped to a single custodian. Verifier enforces single `teamMemberId` membership — rejects mixed batches. One token covers the batch. |
@@ -824,11 +823,11 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
 | Three token purposes | `custody-ack` (single), `custody-ack-batch` (bulk), `custody-ack-kit` (kit) — each with dedicated verifier fetching from the correct model. |
-| Token rotation inside verifier | `verify*Token()` functions check `tokenIssuedAt` internally — callers cannot forget. |
+| Token rotation inside verifier | `verify*Token()` functions check `tokenVersion` internally — callers cannot forget. |
 | Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
 | Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
 | Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
-| Atomic resend cooldown | Single conditional `updateMany` with `tokenIssuedAt < 60s ago` — TOCTOU-safe, no read-then-write. |
+| Atomic resend cooldown | Single conditional `updateMany` with `updatedAt < 60s ago` + version increment — TOCTOU-safe. |
 | PII cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes have no PII. Cron job is trivial to add later if needed. |
 | Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
