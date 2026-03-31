@@ -15,7 +15,7 @@ import {
   updateUserFromSSO,
 } from "~/modules/user/service.server";
 import { DISABLE_SSO } from "./env";
-import { ShelfError } from "./error";
+import { isLikeShelfError, ShelfError } from "./error";
 import { isValidDomain } from "./misc";
 
 /**
@@ -81,6 +81,7 @@ export async function resolveUserAndOrgForSsoCallback({
           message:
             "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
           label: "Auth",
+          shouldBeCaptured: false,
         });
       }
 
@@ -118,6 +119,7 @@ export async function resolveUserAndOrgForSsoCallback({
         domain: authSession.email.split("@")[1],
       },
       label: "Auth",
+      shouldBeCaptured: isLikeShelfError(cause) ? cause.shouldBeCaptured : true,
     });
   }
 }
