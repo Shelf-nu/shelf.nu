@@ -163,9 +163,11 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// Signs JWT with { batchId, purpose: "custody-ack-batch" } using CUSTODY_TOKEN_SECRET
+// 1. Updates tokenIssuedAt on ALL custody records in the batch (DB write FIRST)
+// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch" }
 // 30-day expiry. Used for bulk assign (multiple assets, one link)
-// Updates tokenIssuedAt on ALL custody records in the batch (async DB write)
+// Persist-before-sign order eliminates the revocation window where old tokens
+// could still validate before the tokenIssuedAt write lands.
 ```
 
 **Token security:**
@@ -381,6 +383,13 @@ Following the pattern from `app/emails/stripe/audit-trial-welcome.tsx` per CLAUD
 **File:** `apps/webapp/server/index.ts` (publicPaths array)
 
 Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
+
+**Token-in-URL leak mitigations:**
+Tokens are passed as query params (`?token=...`), which are prone to leakage via referrer headers, browser history, server logs, and analytics. Mitigations:
+- Set `Referrer-Policy: no-referrer` on the acceptance page response headers (prevents token leaking to external resources)
+- Ensure server access logs do NOT log query strings for this route (or redact `token=` param)
+- The 30-day expiry + rotation on resend limits the window of exposure
+- After acknowledgement, the token becomes useless (idempotent, already-accepted state)
 
 ### 5.2 Auth model — two explicit modes
 
