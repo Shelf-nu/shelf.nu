@@ -455,16 +455,22 @@ Handle two intents:
 
 **`acknowledge`:**
 1. Verify token again (full verification including rotation check)
-2. **DB transaction:** Call `recordCustodyAcknowledgement()` with IP + user-agent AND create acknowledgement activity note atomically
-3. If kit custody → cascade `acceptedAt` to all child custody records + create notes for each asset (same transaction)
-4. **After commit:** Enqueue notification emails via pg-boss (`sendEmail()` already uses pg-boss with 15 retries). Admin + custodian emails are enqueued, not sent inline — if the queue fails, DB state is correct and emails can be retried independently.
-5. Render success state
+2. **DB transaction:** Call `recordCustodyAcknowledgement()` — returns `{ transitioned, custody }`
+3. **Only if `transitioned === true`:**
+   - Create acknowledgement activity note (inside same transaction or immediately after)
+   - If kit custody → cascade `acceptedAt` to all child custody records + create notes for each asset
+   - **After commit:** Enqueue admin + custodian notification emails via pg-boss
+4. If `transitioned === false` → no notes, no emails (idempotent retry — just render current state)
+5. Render success state (shows acknowledgement date regardless of whether this request caused the transition)
 
 **`decline`:**
 1. Verify token (full verification)
-2. **DB transaction:** Call `recordCustodyDecline()` + create decline activity note atomically
-3. **After commit:** Enqueue admin alert email via pg-boss
-4. Render "reported" confirmation
+2. **DB transaction:** Call `recordCustodyDecline()` — returns `{ declined, custody }`
+3. **Only if `declined === true`:**
+   - Create decline activity note
+   - **After commit:** Enqueue admin alert email via pg-boss
+4. If `declined === false` → no notes, no emails (idempotent)
+5. Render "reported" confirmation
 
 **Why enqueue after commit:** Mixing DB mutations and email sends in one request path risks partial success (DB committed but email lost). The existing `sendEmail()` function already uses pg-boss as an outbox with retry — we just need to call it AFTER the transaction commits, not inside it.
 
@@ -529,7 +535,8 @@ After acknowledgement:
 
 **Action changes:**
 - Parse new `requiresAcceptance` boolean from form data (add to schema)
-- If `requiresAcceptance`:
+- **Server-side gating:** If `requiresAcceptance` is true, call `validateCustodyAcknowledgementEnabled(currentOrganization)` — throws 403 if feature not enabled. This prevents free-tier users from bypassing UI-only restrictions via crafted form data.
+- If `requiresAcceptance` and feature is enabled:
   - Include `requiresAcceptance: true` and `assignedByUserId: userId` in custody create
   - Generate JWT token
   - If custodian has user with email → send acknowledgement email
@@ -738,17 +745,12 @@ Pass to the banner component.
 
 **New file:** `apps/webapp/app/routes/api+/custody.acknowledgement.ts`
 
-Handles:
-- `POST` with intent `resend-email`: Increments `tokenVersion`, generates **new** token with new version, re-sends email
-- `POST` with intent `copy-link`: Generates **new** token (rotates), returns the signed URL for clipboard copy
-- Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only)
+Accepts `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId` (kit). Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only).
 
-Token rotation on every resend/copy ensures old links stop working, limiting exposure window.
+**Three rotation paths** (matching the three token purposes):
 
-**Rate limiting (atomic):** Enforce a per-custody cooldown via a single conditional DB update — not a read-then-write (TOCTOU-safe):
+**Single custody resend:**
 ```typescript
-// Single atomic operation — cooldown + version increment + state guard.
-// Uses raw SQL to atomically increment AND return the new version in one query:
 const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
   UPDATE "Custody"
   SET "tokenVersion" = "tokenVersion" + 1,
@@ -756,18 +758,38 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
       "updatedAt" = NOW()
   WHERE "id" = ${custodyId}
     AND "requiresAcceptance" = true
-    AND "acceptedAt" IS NULL
-    AND "declinedAt" IS NULL
+    AND "acceptedAt" IS NULL AND "declinedAt" IS NULL
     AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
   RETURNING "tokenVersion"
 `;
-if (!updated) {
-  throw new ShelfError({ message: "Cannot resend: cooldown active or custody no longer pending." });
-}
-const newVersion = updated.tokenVersion;
-// Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion }
+// Sign with { id: custodyId, purpose: "custody-ack", ver: updated.tokenVersion }
 ```
-Uses `UPDATE ... RETURNING` to atomically increment + retrieve the new version in a single query. No gap between increment and read. Guards against cooldown abuse, terminal states, and non-ack custody. `lastTokenRotatedAt` is dedicated — not coupled to `updatedAt`.
+
+**Batch resend** (rotates ALL rows in batch atomically):
+```typescript
+// Lock all batch rows, rotate together, return uniform version
+const rows = await db.$queryRaw`
+  UPDATE "Custody"
+  SET "tokenVersion" = (
+    SELECT MAX("tokenVersion") + 1 FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId}
+  ),
+  "lastTokenRotatedAt" = NOW(), "updatedAt" = NOW()
+  WHERE "acknowledgementBatchId" = ${batchId}
+    AND "requiresAcceptance" = true
+    AND "acceptedAt" IS NULL AND "declinedAt" IS NULL
+    AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
+  RETURNING "tokenVersion"
+`;
+// Sign with { batchId, purpose: "custody-ack-batch", ver: rows[0].tokenVersion }
+```
+
+**Kit resend** (rotates KitCustody + all child Custody rows):
+```typescript
+// Transaction: rotate KitCustody + all child Custody records together
+// Sign with { kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+```
+
+All paths: atomic `UPDATE ... RETURNING`, cooldown via `lastTokenRotatedAt` with DB time (`NOW() - INTERVAL`), state guards. Batch/kit resend rotates the **entire group** — never a single row from a group, which would desynchronize versions and break batch/kit verification.
 
 ---
 
