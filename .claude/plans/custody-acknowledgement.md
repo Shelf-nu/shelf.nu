@@ -162,10 +162,10 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 ```
 
 ```typescript
-export function generateBatchAcknowledgementToken(batchId: string): string
+export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
 // Signs JWT with { batchId, purpose: "custody-ack-batch" } using CUSTODY_TOKEN_SECRET
 // 30-day expiry. Used for bulk assign (multiple assets, one link)
-// Updates tokenIssuedAt on ALL custody records in the batch
+// Updates tokenIssuedAt on ALL custody records in the batch (async DB write)
 ```
 
 **Token security:**
@@ -212,7 +212,22 @@ export async function verifyBatchAcknowledgementToken(
 // Returns batchId + full custody list with asset details
 ```
 
-### 3.3 Record acknowledgement
+### 3.3b Token verification (kit custody)
+
+```typescript
+export async function verifyKitCustodyAcknowledgementToken(
+  token: string,
+  db: PrismaClient
+): Promise<{ kitCustodyId: string; kitCustody: KitCustodyWithAssets }>
+// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
+// 2. Checks purpose === "custody-ack-kit"
+// 3. Fetches KitCustody record (NOT Custody) with kit + all child assets + custodian
+// 4. Validates tokenIssuedAt rotation check
+// 5. Throws if KitCustody not found
+// Returns kitCustodyId + full kit custody with child asset details
+```
+
+### 3.4 Record acknowledgement
 
 ```typescript
 export async function recordCustodyAcknowledgement({
@@ -235,7 +250,7 @@ export async function recordCustodyAcknowledgement({
 - If the row was already transitioned, the operation is **idempotent** — returns the existing state without error
 - This eliminates the need for an explicit status enum; the state is derived: pending (`both null`), acknowledged (`acceptedAt set`), declined (`declinedAt set`)
 
-### 3.4 Send acknowledgement email
+### 3.5 Send acknowledgement email
 
 ```typescript
 export async function sendCustodyAcknowledgementEmail({
@@ -253,19 +268,24 @@ export async function sendCustodyAcknowledgementEmail({
 
 ### 3.6 Record decline
 
-Updated from 3.4 — decline now **persists state** on the Custody record:
+Decline uses the **same conditional/idempotent guard** as acknowledge:
 
 ```typescript
 export async function recordCustodyDecline({
   custodyId,
   reason,
   organizationId,
-}: RecordDeclineParams): Promise<void>
-// Updates custody: declinedAt = now(), declineReason = reason
+}: RecordDeclineParams): Promise<{ declined: boolean; custody: Custody }>
+// Conditional update — only transitions from PENDING state:
+//   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
+// If no rows updated → already accepted or declined (idempotent: return current state)
+// Sets: declinedAt = now(), declineReason = reason
 // Does NOT change asset status or delete custody
-// Creates activity log note
-// Sends notification email to assigning admin
+// Does NOT send emails — that is the route action's responsibility (after DB commit)
+// Returns { declined: true/false, custody } so caller knows if transition happened
 ```
+
+**Important — single owner for email side effects:** The `recordCustodyDecline()` function is side-effect-free (DB only). The route action (Phase 5.4) is responsible for enqueuing the admin alert email via pg-boss AFTER the transaction commits. This prevents duplicate emails.
 
 ### 3.7 Create acknowledgement activity note
 
@@ -381,9 +401,10 @@ Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 
 1. Extract `token` from search params
 2. Decode token (without full verification) to check `purpose` field
-3. **Branch on token type:**
-   - `purpose === "custody-ack"` → Single flow: call `verifyCustodyAcknowledgementToken(token, db)` (handles signature, expiry, rotation check internally)
-   - `purpose === "custody-ack-batch"` → Batch flow: call `verifyBatchAcknowledgementToken(token, db)` — returns all custodies in the batch with asset details
+3. **Branch on token purpose:**
+   - `purpose === "custody-ack"` → Single flow: `verifyCustodyAcknowledgementToken(token, db)`
+   - `purpose === "custody-ack-batch"` → Batch flow: `verifyBatchAcknowledgementToken(token, db)` — returns all custodies
+   - `purpose === "custody-ack-kit"` → Kit flow: `verifyKitCustodyAcknowledgementToken(token, db)` — returns kit + child assets
 4. Handle error states (see 3.9 error handling table): expired, revoked, not found
 5. If already accepted → render "Already acknowledged" confirmation
 6. If declined → render "Already reported" confirmation
@@ -488,7 +509,8 @@ After acknowledgement:
 Same changes as 6.1 but:
 - Checkbox applies to KitCustody AND all child Custody records
 - One email/link for the kit (not per-asset)
-- Token references the KitCustody ID
+- Token uses `purpose: "custody-ack-kit"` with the KitCustody ID (distinct from single-custody and batch purposes)
+- Requires a dedicated `verifyKitCustodyAcknowledgementToken()` that fetches from `KitCustody` (not `Custody`) and returns kit + child custodies
 
 ### 6.3 Bulk assign custody
 
@@ -507,7 +529,15 @@ Same changes as 6.1 but:
 
 **File:** `apps/webapp/app/modules/custody/schema.ts`
 
-Add `requiresAcceptance: z.boolean().optional().default(false)` to `AssignCustodySchema`.
+Add to `AssignCustodySchema`:
+```typescript
+requiresAcceptance: z
+  .union([z.boolean(), z.literal("on")])
+  .transform((val) => val === true || val === "on")
+  .optional()
+  .default(false),
+```
+**Why coercion:** `parseData` receives `FormData` values as strings. A checked HTML checkbox arrives as `"on"`, not `true`. The `z.boolean()` alone would reject valid submissions. This follows the same pattern used by the column visibility schema in `asset-index-settings/helpers.ts`.
 
 ---
 
@@ -547,6 +577,7 @@ Add to the custody type:
 ```typescript
 requiresAcceptance?: boolean;
 acceptedAt?: Date | string | null;
+declinedAt?: Date | string | null;
 assignedByUserId?: string | null;
 ```
 
@@ -607,7 +638,7 @@ Render:
 
 **File:** `apps/webapp/app/routes/_layout+/assets._index.tsx` (and the advanced mode loader)
 
-Include `requiresAcceptance`, `acceptedAt` in the custody select when loading assets.
+Include `requiresAcceptance`, `acceptedAt`, and `declinedAt` in the custody select when loading assets. All three fields are needed to derive the acknowledgement status (pending vs acknowledged vs disputed vs not required).
 
 ### 9.4 Filter support
 
@@ -675,7 +706,25 @@ Handles:
 
 Token rotation on every resend/copy ensures old links stop working, limiting exposure window.
 
-**Rate limiting:** Enforce a per-custody cooldown (e.g., 1 resend per 60 seconds) to prevent abuse from compromised admin sessions or excessive link churn. Return a clear error: "Please wait before resending. Last sent X seconds ago." Check `tokenIssuedAt` timestamp — if less than 60 seconds ago, reject.
+**Rate limiting (atomic):** Enforce a per-custody cooldown via a single conditional DB update — not a read-then-write (TOCTOU-safe):
+```typescript
+// Single atomic operation — cooldown + rotation in one query:
+const result = await db.custody.updateMany({
+  where: {
+    id: custodyId,
+    OR: [
+      { tokenIssuedAt: null },
+      { tokenIssuedAt: { lt: sixtySecondsAgo } },
+    ],
+  },
+  data: { tokenIssuedAt: now() },
+});
+if (result.count === 0) {
+  throw new ShelfError({ message: "Please wait before resending." });
+}
+// Only generate new token + send email if the update succeeded
+```
+This prevents concurrent requests from both passing the cooldown check.
 
 ---
 
@@ -765,7 +814,12 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Persisted decline state | `declinedAt` + `declineReason` on Custody makes "Disputed" queryable and filterable. |
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
-| Token rotation inside verifier | `verifyCustodyAcknowledgementToken()` checks `tokenIssuedAt` internally — callers cannot forget. |
+| Three token purposes | `custody-ack` (single), `custody-ack-batch` (bulk), `custody-ack-kit` (kit) — each with dedicated verifier fetching from the correct model. |
+| Token rotation inside verifier | `verify*Token()` functions check `tokenIssuedAt` internally — callers cannot forget. |
+| Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
+| Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
+| Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
+| Atomic resend cooldown | Single conditional `updateMany` with `tokenIssuedAt < 60s ago` — TOCTOU-safe, no read-then-write. |
 | PII auto-cleanup after 2 years | Scheduled job nulls IP/UA on old custodies. Covers never-released assignments. |
 | Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
