@@ -201,10 +201,11 @@ export async function verifyBatchAcknowledgementToken(
 // 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
 // 2. Checks purpose === "custody-ack-batch"
 // 3. Fetches all custody records with matching acknowledgementBatchId
-// 4. Validates token rotation on EVERY custody record in the batch:
+// 4. Enforces single-custodian membership: all records must have same teamMemberId
+//    (prevents cross-custody acknowledgement if batch was somehow corrupted)
+// 5. Validates token rotation on EVERY custody record in the batch:
 //    converts each custody.tokenIssuedAt to Unix seconds, rejects if any tokenIssuedAtSeconds > token.iat
-//    (resend/copy-link updates tokenIssuedAt on all records in batch, invalidating old batch tokens)
-// 5. Throws if no records found or if any rotation check fails
+// 6. Throws if no records found, mixed custodians, or any rotation check fails
 // Returns batchId + full custody list with asset details
 ```
 
@@ -485,9 +486,10 @@ Same changes as 6.1 but:
 - Accept `requiresAcceptance` parameter
 - Pass through to custody creation
 - Generate a `acknowledgementBatchId` (cuid) and set it on all Custody records in the batch
+- Batch is always **per-custodian** — bulk assign already goes to one custodian, but the batch verifier enforces single-`teamMemberId` membership (rejects if records have mixed custodians)
 - Generate a batch token via `generateBatchAcknowledgementToken(batchId)`
 - One email per custodian with one link covering all assets
-- Acceptance page for batch: queries all custodies with matching `acknowledgementBatchId`, shows list, one "Acknowledge All" click updates all records in transaction
+- Acceptance page for batch: queries all custodies with matching `acknowledgementBatchId`, verifies all belong to same custodian, shows list, one "Acknowledge All" click updates all records in transaction
 
 ### 6.4 Assign custody schema
 
@@ -657,6 +659,8 @@ Handles:
 - Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only)
 
 Token rotation on every resend/copy ensures old links stop working, limiting exposure window.
+
+**Rate limiting:** Enforce a per-custody cooldown (e.g., 1 resend per 60 seconds) to prevent abuse from compromised admin sessions or excessive link churn. Return a clear error: "Please wait before resending. Last sent X seconds ago." Check `tokenIssuedAt` timestamp — if less than 60 seconds ago, reject.
 
 ---
 
