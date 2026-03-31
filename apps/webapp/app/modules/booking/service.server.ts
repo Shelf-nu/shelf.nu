@@ -1273,13 +1273,22 @@ export async function checkoutBooking({
 
     await db.$transaction(txOps);
 
-    /** Use fields we already know for decision-making (notes, scheduling)
-     * rather than re-reading from the DB, to avoid observing concurrent
-     * mutations between the transaction commit and the read. */
+    /** Build an effective snapshot by merging bookingFound with any fields
+     * modified by dataToUpdate (adjusted dates, status). This avoids
+     * re-reading from the DB and ensures downstream logic (notes, emails,
+     * scheduling) uses the correct post-checkout values. */
+    const effectiveFrom =
+      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
+    const effectiveBooking = {
+      ...bookingFound,
+      from: effectiveFrom,
+      to: effectiveTo,
+      status: effectiveStatus,
+    };
 
     // Create status transition note
     if (userId) {
@@ -1318,14 +1327,14 @@ export async function checkoutBooking({
      */
     if (lessThanOneHourToCheckin) {
       await sendCheckinReminder(
-        bookingFound,
+        effectiveBooking,
         bookingFound._count.assets,
         hints,
         organizationId
       );
 
-      if (bookingFound.to) {
-        const when = new Date(bookingFound.to);
+      if (effectiveTo) {
+        const when = new Date(effectiveTo);
         await scheduleNextBookingJob({
           data: {
             id: bookingFound.id,
