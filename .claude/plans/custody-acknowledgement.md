@@ -50,6 +50,17 @@ model Custody {
 }
 ```
 
+**DB CHECK constraint** (in migration SQL, not expressible in Prisma schema):
+```sql
+ALTER TABLE "Custody" ADD CONSTRAINT "custody_accept_decline_exclusive"
+  CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
+
+ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_accept_decline_exclusive"
+  CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
+```
+This enforces mutual exclusivity at the database layer — defense-in-depth beyond application logic.
+```
+
 ### 1.2 KitCustody model — add same acknowledgement fields
 
 Add identical fields to `KitCustody` for kit-level acknowledgement.
@@ -156,17 +167,22 @@ export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", { isSecret: t
 
 ```typescript
 export async function generateCustodyAcknowledgementToken(custodyId: string): Promise<string>
-// Signs JWT with { id: custodyId, purpose: "custody-ack", ver: custody.tokenVersion } using CUSTODY_TOKEN_SECRET
+// STRICTLY persist-before-sign:
+// 1. Atomically increment tokenVersion and read back new value:
+//    UPDATE "Custody" SET "tokenVersion" = "tokenVersion" + 1 WHERE id = custodyId RETURNING "tokenVersion"
+// 2. Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion } using CUSTODY_TOKEN_SECRET
 // 30-day expiry (exp claim)
-// Increments custody.tokenVersion in DB (invalidates any previous token — no same-second race)
+// The increment-then-sign order guarantees the token is never self-invalidated.
 ```
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// 1. Reads MAX(tokenVersion) across all batch records, then SETs all to MAX + 1 (normalizes divergent versions)
-// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch", ver: MAX+1 }
-// 30-day expiry. Used for bulk assign (multiple assets, one link)
-// SET (not increment) ensures all rows share the same version even if some were individually resent before.
+// STRICTLY persist-before-sign, atomic to prevent concurrent races:
+// 1. In a single transaction:
+//    a. SELECT MAX("tokenVersion") FROM "Custody" WHERE "acknowledgementBatchId" = batchId FOR UPDATE (row-level lock)
+//    b. UPDATE all batch rows SET "tokenVersion" = MAX + 1
+// 2. Only AFTER transaction commits: sign JWT with { batchId, purpose: "custody-ack-batch", ver: MAX+1 }
+// 30-day expiry. FOR UPDATE lock prevents concurrent resend requests from minting tokens with same version.
 ```
 
 **Token security:**
