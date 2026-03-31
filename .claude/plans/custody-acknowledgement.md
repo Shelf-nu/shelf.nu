@@ -37,7 +37,7 @@ model Custody {
   // Fallback: if assignedByUserId is null (user deleted), admin notifications
   // route to the organization owner instead (org.userId is always present)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
-  declineReason             String?                   // Optional reason from custodian
+  declineReason             String?   @db.VarChar(500)  // Optional reason from custodian (trimmed, max 500 chars)
   tokenVersion              Int       @default(0)      // Monotonic counter — incremented on each resend/rotation. Embedded in JWT, compared on verify.
   lastTokenRotatedAt        DateTime?                 // When token was last rotated (dedicated cooldown field, not coupled to updatedAt)
   acknowledgementBatchId    String?                   // Groups multiple custody records for bulk acknowledgement
@@ -154,7 +154,15 @@ We do NOT reuse `INVITE_TOKEN_SECRET` because the invite verification path (`acc
 
 Add to `apps/webapp/app/utils/env.ts`:
 ```typescript
-export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", { isSecret: true });
+// Lazy — only required when the feature is actually used (token sign/verify callsites).
+// Does NOT crash server startup if unset, allowing phased rollout.
+export const CUSTODY_TOKEN_SECRET = process.env.CUSTODY_TOKEN_SECRET;
+```
+At token sign/verify callsites, assert presence:
+```typescript
+if (!CUSTODY_TOKEN_SECRET) {
+  throw new ShelfError({ message: "CUSTODY_TOKEN_SECRET is not configured." });
+}
 ```
 
 ---
@@ -297,7 +305,8 @@ export async function recordCustodyDecline({
 // Conditional update — only transitions from PENDING state:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
 // If no rows updated → already accepted or declined (idempotent: return current state)
-// Sets: declinedAt = now(), declineReason = reason
+// Validates reason: z.string().trim().max(500).optional()
+// Sets: declinedAt = now(), declineReason = sanitized reason
 // Does NOT change asset status or delete custody
 // Does NOT send emails — that is the route action's responsibility (after DB commit)
 // Returns { declined: true/false, custody } so caller knows if transition happened
@@ -733,10 +742,13 @@ Token rotation on every resend/copy ensures old links stop working, limiting exp
 
 **Rate limiting (atomic):** Enforce a per-custody cooldown via a single conditional DB update — not a read-then-write (TOCTOU-safe):
 ```typescript
-// Single atomic operation — cooldown + version increment in one query:
+// Single atomic operation — cooldown + version increment + state guard:
 const result = await db.custody.updateMany({
   where: {
     id: custodyId,
+    requiresAcceptance: true,       // must be an ack-enabled custody
+    acceptedAt: null,               // not already acknowledged
+    declinedAt: null,               // not already declined
     OR: [
       { lastTokenRotatedAt: null },                    // never rotated
       { lastTokenRotatedAt: { lt: sixtySecondsAgo } }, // 60s cooldown
@@ -748,11 +760,12 @@ const result = await db.custody.updateMany({
   },
 });
 if (result.count === 0) {
-  throw new ShelfError({ message: "Please wait before resending." });
+  // Could be: cooldown active, already accepted/declined, or not ack-enabled
+  throw new ShelfError({ message: "Cannot resend: either cooldown active or custody is no longer pending." });
 }
 // Only generate new token (with new version) + send email if update succeeded
 ```
-Uses dedicated `lastTokenRotatedAt` field — not coupled to `updatedAt` which can be triggered by unrelated custody writes.
+Guards against: cooldown abuse, resending for already-accepted/declined custody, and resending for non-ack custody. Uses dedicated `lastTokenRotatedAt` — not coupled to `updatedAt`.
 
 ---
 
