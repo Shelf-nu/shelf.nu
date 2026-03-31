@@ -163,10 +163,10 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// 1. Increments tokenVersion on ALL custody records in the batch (DB write FIRST)
-// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch", ver }
+// 1. Reads MAX(tokenVersion) across all batch records, then SETs all to MAX + 1 (normalizes divergent versions)
+// 2. Only AFTER the DB write succeeds: signs JWT with { batchId, purpose: "custody-ack-batch", ver: MAX+1 }
 // 30-day expiry. Used for bulk assign (multiple assets, one link)
-// Persist-before-sign order eliminates the revocation window.
+// SET (not increment) ensures all rows share the same version even if some were individually resent before.
 ```
 
 **Token security:**
@@ -207,7 +207,7 @@ export async function verifyBatchAcknowledgementToken(
 // 4. Enforces single-custodian membership: all records must have same teamMemberId
 //    (prevents cross-custody acknowledgement if batch was somehow corrupted)
 // 5. Validates token rotation on EVERY custody record in the batch:
-//    compares each custody.tokenVersion against token.ver (integer equality)
+//    verifies ALL custody.tokenVersion === token.ver (uniform after SET normalization)
 // 6. Throws if no records found, mixed custodians, or any rotation check fails
 // Returns batchId + full custody list with asset details
 ```
@@ -719,10 +719,7 @@ Token rotation on every resend/copy ensures old links stop working, limiting exp
 const result = await db.custody.updateMany({
   where: {
     id: custodyId,
-    OR: [
-      { updatedAt: { lt: sixtySecondsAgo } },
-      { tokenVersion: 0 }, // never resent before
-    ],
+    updatedAt: { lt: sixtySecondsAgo }, // 60s cooldown since last rotation
   },
   data: { tokenVersion: { increment: 1 } },
 });
@@ -731,7 +728,7 @@ if (result.count === 0) {
 }
 // Only generate new token (with new version) + send email if update succeeded
 ```
-This prevents concurrent requests from both passing the cooldown check. Uses `updatedAt` (auto-set by Prisma on update) as the cooldown timestamp.
+Uses `updatedAt` (auto-set by Prisma on every update) as the cooldown reference. No special-casing for `tokenVersion: 0` — by the time resend is called, initial token generation has already set version ≥ 1.
 
 ---
 
