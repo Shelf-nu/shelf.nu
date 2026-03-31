@@ -34,6 +34,8 @@ model Custody {
   acceptanceUserAgent       String?                   // Browser user-agent (ephemeral — deleted with custody)
   assignedBy                User?     @relation("custodyAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   assignedByUserId          String?                   // Who assigned custody (for admin notification routing, SetNull on user delete)
+  // Fallback: if assignedByUserId is null (user deleted), admin notifications
+  // route to the organization owner instead (org.userId is always present)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
   declineReason             String?                   // Optional reason from custodian
   tokenIssuedAt             DateTime?                 // When the current token was issued (for invalidation on resend)
@@ -220,9 +222,18 @@ export async function recordCustodyAcknowledgement({
   userAgent,
   organizationId,
 }: RecordAcknowledgementParams): Promise<Custody>
-// Updates custody: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
+// Conditional update — only transitions from PENDING state:
+//   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
+// If no rows updated → custody was already accepted or declined (idempotent: return current state)
+// Sets: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
 // Returns updated custody with asset + custodian data
 ```
+
+**State transition invariants:**
+- `acceptedAt` and `declinedAt` are **mutually exclusive** — a custody cannot be both accepted and declined
+- All state transitions use conditional WHERE clauses (`acceptedAt IS NULL AND declinedAt IS NULL`) to prevent races
+- If the row was already transitioned, the operation is **idempotent** — returns the existing state without error
+- This eliminates the need for an explicit status enum; the state is derived: pending (`both null`), acknowledged (`acceptedAt set`), declined (`declinedAt set`)
 
 ### 3.4 Send acknowledgement email
 
@@ -506,8 +517,11 @@ Add `requiresAcceptance: z.boolean().optional().default(false)` to `AssignCustod
 
 **File:** `apps/webapp/app/routes/_layout+/assets.$assetId.overview.release-custody.tsx`
 
-Before releasing, check if `requiresAcceptance` was true and `acceptedAt` is null.
-If so, include in the release note: "released {custodian}'s custody (acknowledgement was pending)"
+Before releasing, check the acknowledgement state and include it in the release note:
+- `requiresAcceptance && !acceptedAt && !declinedAt` → "released {custodian}'s custody (acknowledgement was pending)"
+- `requiresAcceptance && declinedAt` → "released {custodian}'s custody (custody was disputed)"
+- `requiresAcceptance && acceptedAt` → "released {custodian}'s custody (was acknowledged on {date})"
+- `!requiresAcceptance` → existing behavior, no acknowledgement mention
 
 ### 7.2 Bulk release
 
