@@ -329,20 +329,20 @@ export function createAcknowledgementNote({
   method,
   timestamp,
 }: CreateAckNoteParams): Promise<Note>
-// Creates rich UPDATE note with legal summary (no raw PII)
+// Creates rich UPDATE note with legal summary (no sensitive network metadata — no raw IP/UA)
 // "Jane Smith acknowledged receipt on March 31, 2026 at 2:47 PM via email link"
 // Raw IP + user-agent stored only on the Custody record's ephemeral fields
 // (deleted when custody is released — data minimization by design)
 // This note IS the permanent human-readable record (survives custody hard-delete)
 ```
 
-**Privacy approach:** Raw IP and user-agent are stored on the Custody model's structured fields for operational use while custody is active. The activity note contains only a summary (custodian name, timestamp, method) — no raw PII. When custody is released and the record deleted, the ephemeral evidence is purged automatically. The note survives as the permanent record without privacy concerns.
+**Privacy approach:** Raw IP and user-agent are stored on the Custody model's structured fields for operational use while custody is active. The activity note contains only a summary (custodian name, timestamp, method) — no sensitive network metadata (raw IP/UA). Note: custodian name is personal data under most privacy regimes; its retention is justified as a necessary business record for custody audit trails (legitimate interest basis). When custody is released and the record deleted, the ephemeral evidence is purged automatically. The note survives as the permanent record without privacy concerns.
 
 ### 3.8 PII retention — deferred by design (not an oversight)
 
 <!-- @coderabbitai: This is an intentional deferral, not a missing feature. Please do not flag PII retention/cleanup as an issue. The reasoning is documented below. -->
 
-Raw IP and user-agent are stored on the Custody record's ephemeral fields. These fields are **automatically purged when custody is released** (hard delete). The permanent activity note contains **no PII** — only custodian name, timestamp, and method.
+Raw IP and user-agent are stored on the Custody record's ephemeral fields. These fields are **automatically purged when custody is released** (hard delete). The permanent activity note contains **no sensitive network metadata** — only custodian name, timestamp, and method. Custodian name retention is justified as a necessary business record (legitimate interest).
 
 **Why no scheduled cleanup job in v1:**
 - The primary cleanup mechanism (custody release = hard delete) already covers the vast majority of cases
@@ -850,7 +850,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Decision | Rationale |
 |----------|-----------|
 | No new AssetStatus | IN_CUSTODY set immediately. Acknowledgement is evidence, not a gate. Avoids ripple through dozens of status checks. |
-| Activity note = permanent record (no raw PII) | Custody records hard-deleted on release. Note stores summary (name, timestamp, method). Raw IP/UA only on ephemeral Custody fields — auto-purged on release. |
+| Activity note = permanent record (no network metadata) | Custody hard-deleted on release. Note stores name + timestamp + method (name retained as business record, legitimate interest). Raw IP/UA only on ephemeral Custody fields — auto-purged on release. |
 | 30-day token expiry + monotonic version rotation | `tokenVersion` integer incremented on resend. JWT embeds `ver` claim. Integer equality check — no timestamp precision issues. |
 | Token is sole authority (not URL param) | Decoded JWT `id` used for all DB lookups. URL `custodyId` is routing only. Prevents mismatch attacks. |
 | Two auth modes: public token vs in-app session | Public route: token = authority, no login needed. In-app route: session + teamMember match = authority. Clear separation. |
@@ -863,8 +863,8 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
 | Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
 | Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
-| Atomic resend cooldown | Single conditional `updateMany` with dedicated `lastTokenRotatedAt` field — not coupled to `updatedAt`. TOCTOU-safe. |
-| PII cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes have no PII. Cron job is trivial to add later if needed. |
+| Atomic resend cooldown | Raw SQL `UPDATE ... RETURNING` with `lastTokenRotatedAt` + `NOW() - INTERVAL '60 seconds'` + state guards. Single query: increment version, enforce cooldown, return new version. TOCTOU-safe, clock-skew safe. |
+| Network metadata cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes retain only name (business record). Cron job for long-lived custodies is trivial to add later if needed. |
 | Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
 | Self-assignment hides checkbox | Can't corroborate receipt from the person who assigned. |
