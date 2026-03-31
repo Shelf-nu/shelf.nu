@@ -39,6 +39,7 @@ model Custody {
   declinedAt                DateTime?                 // When custodian reported they don't have the item
   declineReason             String?                   // Optional reason from custodian
   tokenVersion              Int       @default(0)      // Monotonic counter — incremented on each resend/rotation. Embedded in JWT, compared on verify.
+  lastTokenRotatedAt        DateTime?                 // When token was last rotated (dedicated cooldown field, not coupled to updatedAt)
   acknowledgementBatchId    String?                   // Groups multiple custody records for bulk acknowledgement
 
   // DateTime
@@ -59,7 +60,6 @@ ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_accept_decline_exclusive"
   CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
 ```
 This enforces mutual exclusivity at the database layer — defense-in-depth beyond application logic.
-```
 
 ### 1.2 KitCustody model — add same acknowledgement fields
 
@@ -179,10 +179,12 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
 // STRICTLY persist-before-sign, atomic to prevent concurrent races:
 // 1. In a single transaction:
-//    a. SELECT MAX("tokenVersion") FROM "Custody" WHERE "acknowledgementBatchId" = batchId FOR UPDATE (row-level lock)
-//    b. UPDATE all batch rows SET "tokenVersion" = MAX + 1
+//    a. SELECT * FROM "Custody" WHERE "acknowledgementBatchId" = batchId FOR UPDATE
+//       (locks actual rows — prevents concurrent resend from proceeding until this tx completes)
+//    b. Compute MAX(tokenVersion) from the locked rows in application code
+//    c. UPDATE all locked rows SET "tokenVersion" = MAX + 1, "lastTokenRotatedAt" = now()
 // 2. Only AFTER transaction commits: sign JWT with { batchId, purpose: "custody-ack-batch", ver: MAX+1 }
-// 30-day expiry. FOR UPDATE lock prevents concurrent resend requests from minting tokens with same version.
+// 30-day expiry. Row-level FOR UPDATE lock serializes concurrent resend requests.
 ```
 
 **Token security:**
@@ -735,16 +737,22 @@ Token rotation on every resend/copy ensures old links stop working, limiting exp
 const result = await db.custody.updateMany({
   where: {
     id: custodyId,
-    updatedAt: { lt: sixtySecondsAgo }, // 60s cooldown since last rotation
+    OR: [
+      { lastTokenRotatedAt: null },                    // never rotated
+      { lastTokenRotatedAt: { lt: sixtySecondsAgo } }, // 60s cooldown
+    ],
   },
-  data: { tokenVersion: { increment: 1 } },
+  data: {
+    tokenVersion: { increment: 1 },
+    lastTokenRotatedAt: new Date(),
+  },
 });
 if (result.count === 0) {
   throw new ShelfError({ message: "Please wait before resending." });
 }
 // Only generate new token (with new version) + send email if update succeeded
 ```
-Uses `updatedAt` (auto-set by Prisma on every update) as the cooldown reference. No special-casing for `tokenVersion: 0` — by the time resend is called, initial token generation has already set version ≥ 1.
+Uses dedicated `lastTokenRotatedAt` field — not coupled to `updatedAt` which can be triggered by unrelated custody writes.
 
 ---
 
@@ -840,7 +848,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
 | Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
 | Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
-| Atomic resend cooldown | Single conditional `updateMany` with `updatedAt < 60s ago` + version increment — TOCTOU-safe. |
+| Atomic resend cooldown | Single conditional `updateMany` with dedicated `lastTokenRotatedAt` field — not coupled to `updatedAt`. TOCTOU-safe. |
 | PII cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes have no PII. Cron job is trivial to add later if needed. |
 | Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
