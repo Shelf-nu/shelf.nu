@@ -51,6 +51,13 @@ model Custody {
 
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   @@index([teamMemberId])
+  @@index([acknowledgementBatchId])  // Batch lookups/updates in verification and resend
+
+  // Additional partial indexes (in migration SQL, not Prisma):
+  // CREATE INDEX idx_custody_pending_ack ON "Custody" ("teamMemberId")
+  //   WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
+  // CREATE INDEX idx_custody_batch_pending ON "Custody" ("acknowledgementBatchId")
+  //   WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
 }
 ```
 
@@ -453,11 +460,14 @@ Tokens are passed as query params (`?token=...`), which are prone to leakage via
 ### 5.3 Loader
 
 1. Extract `token` from search params
-2. Decode token (without full verification) to check `purpose` field
-3. **Branch on token purpose:**
-   - `purpose === "custody-ack"` → Single flow: `verifyCustodyAcknowledgementToken(token, db)`
-   - `purpose === "custody-ack-batch"` → Batch flow: `verifyBatchAcknowledgementToken(token, db)` — returns all custodies
-   - `purpose === "custody-ack-kit"` → Kit flow: `verifyKitCustodyAcknowledgementToken(token, db)` — returns kit + child assets
+2. **Verify signature first, then branch on purpose.** Do NOT use `jwt.decode()` — unverified payloads can be forged.
+   - Call `jwt.verify(token, CUSTODY_TOKEN_SECRET)` once to validate signature + expiry
+   - Read `purpose` from the VERIFIED payload
+3. **Branch on verified purpose:**
+   - `purpose === "custody-ack"` → Single flow: `verifyCustodyAcknowledgementToken(verifiedPayload, db)` (version check + DB fetch)
+   - `purpose === "custody-ack-batch"` → Batch flow: `verifyBatchAcknowledgementToken(verifiedPayload, db)`
+   - `purpose === "custody-ack-kit"` → Kit flow: `verifyKitCustodyAcknowledgementToken(verifiedPayload, db)`
+   - Unknown purpose → reject with error
 4. Handle error states (see 3.9 error handling table): expired, revoked, not found
 5. If already accepted → render "Already acknowledged" confirmation
 6. If declined → render "Already reported" confirmation
@@ -785,9 +795,11 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
 // Sign with { id: custodyId, purpose: "custody-ack", ver: updated.tokenVersion }
 ```
 
-**Batch resend** (rotates ALL rows in batch atomically):
+**Batch resend** (rotates ALL rows in batch — including already-accepted/declined):
 ```typescript
-// Lock all batch rows, rotate together, return uniform version
+// Rotate ALL rows regardless of state. The verifier checks version on ALL rows,
+// so if one was accepted and keeps the old version, the new batch token breaks.
+// Cooldown check uses MIN(lastTokenRotatedAt) across the batch.
 const rows = await db.$queryRaw`
   UPDATE "Custody"
   SET "tokenVersion" = (
@@ -796,8 +808,13 @@ const rows = await db.$queryRaw`
   "lastTokenRotatedAt" = NOW(), "updatedAt" = NOW()
   WHERE "acknowledgementBatchId" = ${batchId}
     AND "requiresAcceptance" = true
-    AND "acceptedAt" IS NULL AND "declinedAt" IS NULL
-    AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
+    AND (
+      (SELECT MIN("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+      IS NULL
+      OR
+      (SELECT MIN("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+      < NOW() - INTERVAL '60 seconds'
+    )
   RETURNING "tokenVersion"
 `;
 // Sign with { batchId, purpose: "custody-ack-batch", ver: rows[0].tokenVersion }
