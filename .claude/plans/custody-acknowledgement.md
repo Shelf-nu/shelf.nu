@@ -117,7 +117,18 @@ export const CUSTODY_ACKNOWLEDGEMENT_ADDON = {
 };
 ```
 
-### 2.5 JWT token — reuse INVITE_TOKEN_SECRET
+### 2.5 How feature gating works in practice
+
+The boolean `custodyAcknowledgementEnabled` on the Organization model is just a **switch**. How it gets flipped on is a business decision:
+
+- **Include in Plus/Team by default** → Set to `true` when they subscribe. No extra purchase.
+- **Block for Free tier** → Leave `false`. Show upsell prompting upgrade.
+- **Sell as separate addon** → Wire to Stripe like barcodes/audits (v2 if needed).
+- **Give to everyone** → Set `ENABLE_PREMIUM_FEATURES=false` and the check is bypassed.
+
+For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe addon product needed — just set the flag when the user's tier qualifies.
+
+### 2.6 JWT token — reuse INVITE_TOKEN_SECRET
 
 No new env var. We reuse `INVITE_TOKEN_SECRET` but include `purpose: "custody-ack"` in the JWT payload to prevent cross-use with invite tokens.
 
@@ -526,22 +537,25 @@ Handles:
 
 ---
 
-## Phase 12: Organization Settings UI (v1 — feature toggle only)
+## Phase 12: Tier-Based Feature Enablement
 
-### 12.1 Settings route
+### 12.1 Enable for qualifying tiers
 
-**File:** `apps/webapp/app/routes/_layout+/settings.general.tsx`
+The feature is **included in Plus and Team plans** — not a separate addon purchase.
 
-Add the custody acknowledgement toggle to the existing settings page, following the barcodes/audits addon pattern. This is just the on/off toggle managed via Stripe subscription, NOT a default checkbox setting.
+When a user subscribes to Plus or Team (or already has an active subscription), set `custodyAcknowledgementEnabled = true` on their organization. This can be done:
 
-### 12.2 Addon page / trial / Stripe integration
+- In the existing Stripe webhook handler that processes subscription changes
+- Or via a one-time migration for existing Plus/Team orgs
 
-Follow the exact pattern from `app/modules/audit/addon.server.ts`:
-- Trial checkout session
-- Subscription management
-- Webhook handlers for enable/disable
+### 12.2 Upsell for Free tier
 
-**Note:** If the team prefers to ship v1 without Stripe integration, the feature can be enabled via a direct DB toggle (like `barcodesEnabled` before Stripe was integrated). Stripe integration can come in v1.1.
+When a Free tier user encounters the "Require acknowledgement" checkbox:
+- Show a locked/disabled state with an upgrade prompt
+- Link to the subscription/upgrade page
+- Use the `CUSTODY_ACKNOWLEDGEMENT_ADDON` copy from `addon-copy.ts`
+
+No separate Stripe product, no trial flow, no addon management page needed for v1. The feature just comes with the plan.
 
 ---
 
@@ -604,7 +618,7 @@ Follow the exact pattern from `app/modules/audit/addon.server.ts`:
 | Activity note = permanent legal record | Custody records are hard-deleted on release. Rich note with timestamp/IP/method survives. |
 | Reuse INVITE_TOKEN_SECRET | JWT includes `purpose: "custody-ack"` to prevent cross-use. No new env var. |
 | String field for acceptanceMethod | Avoids Prisma enum migration for each new method. Validated at app layer. |
-| Feature gated per-org (addon pattern) | Follows barcode/audit pattern. Free users see upsell. |
+| Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
 | Self-assignment hides checkbox | Can't corroborate receipt from the person who assigned. |
 | One email per custodian for bulk | Not spammy. One acknowledge-all click. |
 | Kit acknowledgement cascades | One click updates KitCustody + all child Custody records in transaction. |
