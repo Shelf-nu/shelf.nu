@@ -103,7 +103,7 @@ export const canUseCustodyAcknowledgement = (org: { custodyAcknowledgementEnable
 
 Add `canUseCustodyAcknowledgement` to the return object, following the `canUseBarcodes`/`canUseAudits` pattern.
 
-### 2.4 Addon copy for upsell UI
+### 2.4 Add-on copy for upsell UI
 
 **File:** `apps/webapp/app/config/addon-copy.ts`
 
@@ -127,7 +127,7 @@ The boolean `custodyAcknowledgementEnabled` on the Organization model is just a 
 
 - **Include in Plus/Team by default** → Set to `true` when they subscribe. No extra purchase.
 - **Block for Free tier** → Leave `false`. Show upsell prompting upgrade.
-- **Sell as separate addon** → Wire to Stripe like barcodes/audits (v2 if needed).
+- **Sell as separate add-on** → Wire to Stripe like barcodes/audits (v2 if needed).
 - **Give to everyone** → Set `ENABLE_PREMIUM_FEATURES=false` and the check is bypassed.
 
 For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe addon product needed — just set the flag when the user's tier qualifies.
@@ -181,9 +181,11 @@ export async function verifyCustodyAcknowledgementToken(
 ): Promise<{ id: string; iat: number }>
 // 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
 // 2. Checks purpose === "custody-ack"
-// 3. Fetches custody record, validates tokenIssuedAt <= token.iat (rejects rotated tokens)
-// 4. Throws ShelfError("Token expired") on exp failure
-// 5. Throws ShelfError("Token revoked") if iat < tokenIssuedAt
+// 3. Fetches custody record
+// 4. Normalizes time units: converts Prisma DateTime to Unix seconds
+//    via Math.floor(tokenIssuedAt.getTime() / 1000) before comparing to JWT iat (RFC 7519 = seconds)
+// 5. Throws ShelfError("Token expired") on exp failure
+// 6. Throws ShelfError("Token revoked") if tokenIssuedAtSeconds > token.iat
 // 6. Throws ShelfError("Custody not found") if record doesn't exist
 // Returns custody ID and iat
 // Token rotation check is INSIDE this function — callers cannot forget it
@@ -199,7 +201,10 @@ export async function verifyBatchAcknowledgementToken(
 // 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
 // 2. Checks purpose === "custody-ack-batch"
 // 3. Fetches all custody records with matching acknowledgementBatchId
-// 4. Throws if no records found
+// 4. Validates token rotation on EVERY custody record in the batch:
+//    converts each custody.tokenIssuedAt to Unix seconds, rejects if any tokenIssuedAtSeconds > token.iat
+//    (resend/copy-link updates tokenIssuedAt on all records in batch, invalidating old batch tokens)
+// 5. Throws if no records found or if any rotation check fails
 // Returns batchId + full custody list with asset details
 ```
 
@@ -376,20 +381,19 @@ Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 Handle two intents:
 
 **`acknowledge`:**
-1. Verify token again
-2. Call `recordCustodyAcknowledgement()` with IP + user-agent from request
-3. Create acknowledgement activity note (rich, legal-weight)
-4. If kit custody → cascade `acceptedAt` to all child custody records + create notes for each asset
-5. Send admin notification email
-6. Send custodian confirmation email
-7. Render success state
+1. Verify token again (full verification including rotation check)
+2. **DB transaction:** Call `recordCustodyAcknowledgement()` with IP + user-agent AND create acknowledgement activity note atomically
+3. If kit custody → cascade `acceptedAt` to all child custody records + create notes for each asset (same transaction)
+4. **After commit:** Enqueue notification emails via pg-boss (`sendEmail()` already uses pg-boss with 15 retries). Admin + custodian emails are enqueued, not sent inline — if the queue fails, DB state is correct and emails can be retried independently.
+5. Render success state
 
 **`decline`:**
-1. Verify token
-2. Call `recordCustodyDecline()` with optional reason
-3. Create decline activity note
-4. Send admin alert email
-5. Render "reported" confirmation
+1. Verify token (full verification)
+2. **DB transaction:** Call `recordCustodyDecline()` + create decline activity note atomically
+3. **After commit:** Enqueue admin alert email via pg-boss
+4. Render "reported" confirmation
+
+**Why enqueue after commit:** Mixing DB mutations and email sends in one request path risks partial success (DB committed but email lost). The existing `sendEmail()` function already uses pg-boss as an outbox with retry — we just need to call it AFTER the transaction commits, not inside it.
 
 ### 5.4 Component (the brand moment page)
 
