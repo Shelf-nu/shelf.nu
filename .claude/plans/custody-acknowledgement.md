@@ -154,9 +154,12 @@ We do NOT reuse `INVITE_TOKEN_SECRET` because the invite verification path (`acc
 
 Add to `apps/webapp/app/utils/env.ts`:
 ```typescript
-// Lazy — only required when the feature is actually used (token sign/verify callsites).
-// Does NOT crash server startup if unset, allowing phased rollout.
-export const CUSTODY_TOKEN_SECRET = process.env.CUSTODY_TOKEN_SECRET;
+// Optional at startup — only required when acknowledgement feature is used.
+// Follows same pattern as other secrets but won't crash startup if unset.
+export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", {
+  isSecret: true,
+  isOptional: true,
+});
 ```
 At token sign/verify callsites, assert presence:
 ```typescript
@@ -164,6 +167,7 @@ if (!CUSTODY_TOKEN_SECRET) {
   throw new ShelfError({ message: "CUSTODY_TOKEN_SECRET is not configured." });
 }
 ```
+If `getEnv` does not support `isOptional`, add it following the existing pattern — a single boolean that returns `undefined` instead of throwing on missing value.
 
 ---
 
@@ -742,30 +746,27 @@ Token rotation on every resend/copy ensures old links stop working, limiting exp
 
 **Rate limiting (atomic):** Enforce a per-custody cooldown via a single conditional DB update — not a read-then-write (TOCTOU-safe):
 ```typescript
-// Single atomic operation — cooldown + version increment + state guard:
-const result = await db.custody.updateMany({
-  where: {
-    id: custodyId,
-    requiresAcceptance: true,       // must be an ack-enabled custody
-    acceptedAt: null,               // not already acknowledged
-    declinedAt: null,               // not already declined
-    OR: [
-      { lastTokenRotatedAt: null },                    // never rotated
-      { lastTokenRotatedAt: { lt: sixtySecondsAgo } }, // 60s cooldown
-    ],
-  },
-  data: {
-    tokenVersion: { increment: 1 },
-    lastTokenRotatedAt: new Date(),
-  },
-});
-if (result.count === 0) {
-  // Could be: cooldown active, already accepted/declined, or not ack-enabled
-  throw new ShelfError({ message: "Cannot resend: either cooldown active or custody is no longer pending." });
+// Single atomic operation — cooldown + version increment + state guard.
+// Uses raw SQL to atomically increment AND return the new version in one query:
+const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
+  UPDATE "Custody"
+  SET "tokenVersion" = "tokenVersion" + 1,
+      "lastTokenRotatedAt" = NOW(),
+      "updatedAt" = NOW()
+  WHERE "id" = ${custodyId}
+    AND "requiresAcceptance" = true
+    AND "acceptedAt" IS NULL
+    AND "declinedAt" IS NULL
+    AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < ${sixtySecondsAgo})
+  RETURNING "tokenVersion"
+`;
+if (!updated) {
+  throw new ShelfError({ message: "Cannot resend: cooldown active or custody no longer pending." });
 }
-// Only generate new token (with new version) + send email if update succeeded
+const newVersion = updated.tokenVersion;
+// Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion }
 ```
-Guards against: cooldown abuse, resending for already-accepted/declined custody, and resending for non-ack custody. Uses dedicated `lastTokenRotatedAt` — not coupled to `updatedAt`.
+Uses `UPDATE ... RETURNING` to atomically increment + retrieve the new version in a single query. No gap between increment and read. Guards against cooldown abuse, terminal states, and non-ack custody. `lastTokenRotatedAt` is dedicated — not coupled to `updatedAt`.
 
 ---
 
