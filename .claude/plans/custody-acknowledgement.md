@@ -171,12 +171,17 @@ export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", {
   isOptional: true,
 });
 ```
-At token sign/verify callsites, assert presence:
+**Two-layer validation:**
+
+1. **Feature enablement guard:** When `custodyAcknowledgementEnabled` is set to `true` on an org (via Stripe webhook or admin toggle), validate that `CUSTODY_TOKEN_SECRET` is configured. If not, reject the enablement with a clear error: "Cannot enable custody acknowledgement: CUSTODY_TOKEN_SECRET is not configured." This prevents orgs from entering a broken state.
+
+2. **Callsite guard (defense-in-depth):** At token sign/verify callsites, assert presence:
 ```typescript
 if (!CUSTODY_TOKEN_SECRET) {
   throw new ShelfError({ message: "CUSTODY_TOKEN_SECRET is not configured." });
 }
 ```
+
 If `getEnv` does not support `isOptional`, add it following the existing pattern — a single boolean that returns `undefined` instead of throwing on missing value.
 
 ---
@@ -206,8 +211,9 @@ export async function generateBatchAcknowledgementToken(batchId: string): Promis
 //        "lastTokenRotatedAt" = NOW()
 //    WHERE "acknowledgementBatchId" = batchId
 //    RETURNING "tokenVersion"
-// 2. Read returned tokenVersion (all rows now share the same value)
-// 3. Sign JWT with { batchId, purpose: "custody-ack-batch", ver: newVersion }
+// 2. Guard: if zero rows returned, throw ShelfError("Batch not found or already fully processed")
+// 3. Read returned tokenVersion from rows[0] (all rows now share the same value)
+// 4. Sign JWT with { batchId, purpose: "custody-ack-batch", ver: newVersion }
 // 30-day expiry. Single atomic UPDATE — no transaction needed, no app-side MAX computation.
 ```
 
@@ -817,6 +823,7 @@ const rows = await db.$queryRaw`
     )
   RETURNING "tokenVersion"
 `;
+if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown active." });
 // Sign with { batchId, purpose: "custody-ack-batch", ver: rows[0].tokenVersion }
 ```
 
