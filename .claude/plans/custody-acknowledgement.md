@@ -32,7 +32,8 @@ model Custody {
   acceptanceMethod          String?                   // "email_link" | "in_app" | "manual_link"
   acceptanceIp              String?                   // IP address (ephemeral — deleted with custody on release)
   acceptanceUserAgent       String?                   // Browser user-agent (ephemeral — deleted with custody)
-  assignedByUserId          String?                   // Who assigned custody (for admin notification routing)
+  assignedBy                User?     @relation("custodyAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  assignedByUserId          String?                   // Who assigned custody (for admin notification routing, SetNull on user delete)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
   declineReason             String?                   // Optional reason from custodian
   tokenIssuedAt             DateTime?                 // When the current token was issued (for invalidation on resend)
@@ -746,7 +747,7 @@ No separate Stripe product, no trial flow, no addon management page needed for v
 | 30-day token expiry + rotation on resend | Limits exposure window. `tokenIssuedAt` on Custody rejects old tokens after resend. |
 | Token is sole authority (not URL param) | Decoded JWT `id` used for all DB lookups. URL `custodyId` is routing only. Prevents mismatch attacks. |
 | Two auth modes: public token vs in-app session | Public route: token = authority, no login needed. In-app route: session + teamMember match = authority. Clear separation. |
-| Batch key for bulk acknowledgement | `acknowledgementBatchId` groups custody records. One token covers the batch. Resend/copy-link target the batch reliably. |
+| Batch key for bulk acknowledgement (per-custodian) | `acknowledgementBatchId` groups custody records scoped to a single custodian. Verifier enforces single `teamMemberId` membership — rejects mixed batches. One token covers the batch. |
 | Persisted decline state | `declinedAt` + `declineReason` on Custody makes "Disputed" queryable and filterable. |
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
