@@ -3,7 +3,7 @@
 > **Status:** Draft / RFC
 > **Authors:** Shelf team
 > **Created:** 2026-02-17
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-03-31
 
 ---
 
@@ -357,14 +357,18 @@ This is gradual and opt-in. Organizations don't need to group everything at once
 
 These items were discussed during the team call and in Carlos's PR review. They are now resolved.
 
-| #   | Question                                                       | Decision                                                                                                                                                          |
-| --- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **How should book-by-model handle partial availability?**      | Allow partial checkout. Notify the user of unavailable items and let them adjust the booking before proceeding.                                                   |
-| 2   | **Should Asset Models have their own listing page?**           | Both: a dedicated Models listing page AND grouping in the asset index. Users can browse models directly or see model-grouped assets in the main list.             |
-| 3   | **Do we need a consumption dashboard in the initial release?** | Defer to a follow-up release. Focus on core quantity tracking, custody, and booking features first.                                                               |
-| 4   | **Unit conversion**                                            | Single unit per asset (no conversion). Each quantity-tracked asset uses one unit of measure. Revisit if users request conversion support.                         |
-| 5   | **Custom field defaults from models**                          | Not in the initial release. Models will not carry custom field defaults — the complexity is too high for v1. Models provide category and valuation defaults only. |
-| 6   | **How detailed should the audit trail be?**                    | Full attribution: every quantity change records per-custodian, per-booking, and per-location context. See the updated `ConsumptionLog` model in Part 2.           |
+| #   | Question                                                       | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **How should book-by-model handle partial availability?**      | Allow partial checkout. Notify the user of unavailable items and let them adjust the booking before proceeding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 2   | **Should Asset Models have their own listing page?**           | Both: a dedicated Models listing page AND grouping in the asset index. Users can browse models directly or see model-grouped assets in the main list.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 3   | **Do we need a consumption dashboard in the initial release?** | Defer to a follow-up release. Focus on core quantity tracking, custody, and booking features first.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 4   | **Unit conversion**                                            | Single unit per asset (no conversion). Each quantity-tracked asset uses one unit of measure. Revisit if users request conversion support.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 5   | **Custom field defaults from models**                          | Not in the initial release. Models will not carry custom field defaults — the complexity is too high for v1. Models provide category and valuation defaults only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 6   | **How detailed should the audit trail be?**                    | Full attribution: every quantity change records per-custodian, per-booking, and per-location context. See the updated `ConsumptionLog` model in Part 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 7   | **Should `availableQuantity` be stored or computed?**          | Computed at the service layer, not stored. Prisma has no native computed fields that can aggregate relations. Compute as `quantity - sum(custody.quantity) - sum(bookingAsset.quantity)` in service functions. Avoids sync/drift issues entirely.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 8   | **Custody unique constraint for individual assets**            | Use a PostgreSQL partial unique index via raw SQL migration: `CREATE UNIQUE INDEX ... ON "Custody" ("assetId") WHERE asset.type = 'INDIVIDUAL'`. This provides database-level enforcement for individual assets while allowing multiple custodians for quantity-tracked assets. Application logic remains as a secondary guard.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 9   | **ConsumptionLog quantity sign convention**                    | `quantity` is always a positive integer. The `ConsumptionCategory` enum determines the direction (CHECKOUT/LOSS = subtract, RETURN/RESTOCK = add). This avoids ambiguity where a sign and category could conflict.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 10  | **BookingAsset pivot migration strategy**                      | Use a **rename strategy** instead of copy-and-drop. The implicit `_AssetToBooking` table (146k+ rows) will be renamed to `BookingAsset` via `ALTER TABLE RENAME` and `ALTER COLUMN RENAME` (metadata-only operations in PostgreSQL — zero data movement). New columns (`id`, `quantity`) are added in place. This avoids the risk of data loss from copying 146k rows. The migration is deferred to Phase 3 when quantity-aware bookings are actually needed. In Phase 1, the `BookingAsset` model is created in the schema alongside the existing implicit M2M, which remains untouched. Prisma's `--create-only` flag will be used to write the migration SQL manually rather than letting Prisma auto-generate a destructive drop-and-recreate. |
 
 ---
 
@@ -372,11 +376,14 @@ These items were discussed during the team call and in Carlos's PR review. They 
 
 New questions that emerged from the review and team discussion.
 
-| #   | Question                                                 | Context                                                                                                                                                                      |
-| --- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Default scan action for quantity-tracked QR**          | When scanning a quantity-tracked asset's QR, should the default action be: View details, Quick adjust, or Start checkout? (Raised by Carlos)                                 |
-| 2   | **Communication flow when assets become unavailable**    | Between booking creation and checkout, availability can change. What notification/workflow should the user see when they arrive to check out and some items are unavailable? |
-| 3   | **Naming: "Asset Model" vs "Asset Type" vs other terms** | What label is clearest for users? "Model" is accurate for grouped individual assets (e.g., Dell Latitude 5550) but may confuse users who think of "model" differently.       |
+| #   | Question                                                 | Context                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Default scan action for quantity-tracked QR**          | When scanning a quantity-tracked asset's QR, should the default action be: View details, Quick adjust, or Start checkout? (Raised by Carlos)                                                                                                                                                                                                                                                                                                                                           |
+| 2   | **Communication flow when assets become unavailable**    | Between booking creation and checkout, availability can change. What notification/workflow should the user see when they arrive to check out and some items are unavailable?                                                                                                                                                                                                                                                                                                           |
+| 3   | **Naming: "Asset Model" vs "Asset Type" vs other terms** | What label is clearest for users? "Model" is accurate for grouped individual assets (e.g., Dell Latitude 5550) but may confuse users who think of "model" differently.                                                                                                                                                                                                                                                                                                                 |
+| 4   | **Concurrency strategy for quantity operations**         | Multiple users adjusting stock simultaneously (especially via QR quick-adjust) can cause race conditions. Needs a strategy: optimistic locking, database-level transactions with row locks, or serialized writes. Must be resolved before Phase 2 implementation.                                                                                                                                                                                                                      |
+| 5   | **BookingAsset schema for book-by-model**                | The current design overloads `assetId` with a "placeholder" for model-level bookings. Analysis shows 40+ code locations assume `assetId` is always a concrete asset. Options: (a) add `assetModelId` to `BookingAsset` alongside `assetId`, (b) use a separate `ModelBooking` table, (c) only create `BookingAsset` rows at scan-to-assign time. Needs detailed design before Phase 3. See [Design Note: BookingAsset and Book-by-Model](#design-note-bookingasset-and-book-by-model). |
+| 6   | **Split/merge data implications**                        | Splitting a quantity-tracked asset into two records requires decisions about in-flight bookings, custody records, and consumption log attribution. Needs detailed design before Phase 4.                                                                                                                                                                                                                                                                                               |
 
 ---
 
@@ -392,6 +399,7 @@ New questions that emerged from the review and team discussion.
 2. **AssetModel is independent of Category.** An Asset has both a Category (broad organizational grouping like "Electronics") and an optional AssetModel (specific template like "Dell Latitude 5550"). They serve different purposes.
 3. **Quantity-tracked records are per-location.** When a quantity-tracked asset needs to exist in multiple locations, it is split into separate records. Each record has its own quantity. This keeps the `Asset → Location` relationship singular.
 4. **Custody and booking extend with quantities.** Instead of replacing the one-to-one custody model, quantity-aware custody uses a composite unique constraint. Bookings gain a quantity field on an explicit pivot table.
+5. **Permissions follow existing role model.** Quantity operations (quick-adjust, restock, custody assignment) use the same role-based permission checks as existing asset operations. No new permission types are introduced in v1.
 
 ---
 
@@ -425,7 +433,6 @@ model Asset {
 
   // Quantity-tracked fields (null for INDIVIDUAL assets)
   quantity          Int?            // Total quantity at this location
-  availableQuantity Int?            // Currently available (not in custody/booked)
   minQuantity       Int?            // Low-stock alert threshold
   consumptionType   ConsumptionType? // How consumption is tracked
   unitOfMeasure     String?         // e.g., "pcs", "boxes", "liters"
@@ -436,7 +443,7 @@ model Asset {
 
 - `type` defaults to `INDIVIDUAL`, so existing assets require no data migration.
 - Quantity-tracked fields are nullable to avoid cluttering individual assets.
-- `availableQuantity` is maintained by the system: `quantity - (in_custody + booked)`.
+- **`availableQuantity` is not stored.** It is computed at the service layer as `quantity - sum(custody.quantity) - sum(bookingAsset.quantity)`. See Decision #7.
 - `unitOfMeasure` is a freeform string to support any unit without a fixed enum.
 
 ### New Model: AssetModel
@@ -498,7 +505,9 @@ model Custody {
 
 **Key change:** The current `assetId @unique` constraint enforces one custodian per asset. For quantity-tracked assets, we need to allow multiple custodians to hold different quantities. The new constraint is `@@unique([assetId, teamMemberId])` — one record per asset+custodian pair.
 
-For `INDIVIDUAL` assets, application logic continues to enforce single-custodian behavior (only one Custody row allowed). For `QUANTITY_TRACKED` assets, multiple Custody rows are permitted, each with a quantity.
+For `INDIVIDUAL` assets, a **partial unique index** at the database level enforces single-custodian behavior: `CREATE UNIQUE INDEX "Custody_assetId_individual_unique" ON "Custody" ("assetId") WHERE ...` (conditioned on the asset's type being `INDIVIDUAL`). This provides a hard database-level guardrail. Application logic serves as a secondary guard. See Decision #8.
+
+For `QUANTITY_TRACKED` assets, multiple Custody rows are permitted, each with a quantity.
 
 ### New Model: BookingAsset (explicit pivot)
 
@@ -525,7 +534,8 @@ model BookingAsset {
 
 - For `INDIVIDUAL` assets, `quantity` is always 1.
 - For `QUANTITY_TRACKED` assets, `quantity` is the number reserved/checked-out.
-- For book-by-model bookings, `assetId` initially points to a placeholder or the model's representative asset, and `assignedAssetId` is populated at checkout when specific units are scanned.
+
+> **⚠ Design pending (Open Question #5):** The book-by-model schema needs further design. The current `assetId` field is assumed to always reference a concrete asset across 40+ code locations (conflict detection, PDF generation, status updates, partial check-in). Overloading it with a placeholder breaks these assumptions. Three options are being evaluated — see Open Question #5 for details. This will be resolved before Phase 3 implementation.
 
 ### New Model: ConsumptionLog
 
@@ -536,7 +546,7 @@ model ConsumptionLog {
                                      onDelete: Cascade)
   assetId       String
   category      ConsumptionCategory // What kind of event this is
-  quantity      Int                 // Positive = consumed/removed, negative = restocked/returned
+  quantity      Int                 // Always positive. Direction determined by category (see Decision #9)
   note          String?
   performedBy   User                @relation(fields: [userId], references: [id])
   userId        String
@@ -591,7 +601,6 @@ All existing assets default to `type: INDIVIDUAL`. No data changes required. The
 ALTER TABLE "Asset" ADD COLUMN "type" "AssetType" DEFAULT 'INDIVIDUAL';
 ALTER TABLE "Asset" ADD COLUMN "assetModelId" TEXT;
 ALTER TABLE "Asset" ADD COLUMN "quantity" INTEGER;
-ALTER TABLE "Asset" ADD COLUMN "availableQuantity" INTEGER;
 ALTER TABLE "Asset" ADD COLUMN "minQuantity" INTEGER;
 ALTER TABLE "Asset" ADD COLUMN "consumptionType" "ConsumptionType";
 ALTER TABLE "Asset" ADD COLUMN "unitOfMeasure" TEXT;
@@ -606,13 +615,37 @@ The `Custody` table migration removes the `@unique` constraint on `assetId` and 
 
 Existing custody records remain valid (they have `quantity: 1` and the new unique constraint holds since each asset currently has at most one custodian).
 
-### Booking Pivot Migration
+### Booking Pivot Migration (Phase 3 — Rename Strategy)
 
-The implicit `_AssetToBooking` join table is replaced with the explicit `BookingAsset` model. Migration must:
+The implicit `_AssetToBooking` join table (146k+ rows) is converted to the explicit `BookingAsset` model using a **rename strategy** — no data is copied or moved. See Decision #10.
 
-1. Create `BookingAsset` table
-2. Copy existing rows from `_AssetToBooking` with `quantity: 1`
-3. Drop `_AssetToBooking`
+This migration happens in Phase 3 (not Phase 1). In Phase 1, the `BookingAsset` model coexists alongside the implicit M2M in the schema.
+
+Phase 3 migration steps:
+
+```sql
+-- 1. Rename table (instant, metadata-only)
+ALTER TABLE "_AssetToBooking" RENAME TO "BookingAsset";
+
+-- 2. Rename columns (instant, metadata-only)
+ALTER TABLE "BookingAsset" RENAME COLUMN "A" TO "assetId";
+ALTER TABLE "BookingAsset" RENAME COLUMN "B" TO "bookingId";
+
+-- 3. Add new columns
+ALTER TABLE "BookingAsset" ADD COLUMN "quantity" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "BookingAsset" ADD COLUMN "id" TEXT;
+
+-- 4. Backfill IDs for existing rows
+UPDATE "BookingAsset" SET "id" = gen_random_uuid()::text WHERE "id" IS NULL;
+ALTER TABLE "BookingAsset" ALTER COLUMN "id" SET NOT NULL;
+ALTER TABLE "BookingAsset" ADD PRIMARY KEY ("id");
+
+-- 5. Rename existing indexes
+ALTER INDEX "_AssetToBooking_AB_unique" RENAME TO "BookingAsset_bookingId_assetId_key";
+ALTER INDEX "_AssetToBooking_B_index" RENAME TO "BookingAsset_bookingId_idx";
+```
+
+This migration must be written manually using Prisma's `--create-only` flag to prevent Prisma from auto-generating a destructive drop-and-recreate.
 
 ### API Backwards Compatibility
 
@@ -632,8 +665,7 @@ All phases ship together as one release. This ordering reflects build dependenci
 - Add new fields to `Asset` model
 - Create `AssetModel` model (no custom field defaults — deferred per Decision #5)
 - Create `ConsumptionLog` model (with full attribution fields)
-- Create `BookingAsset` explicit pivot table
-- Run data migration for existing assets and bookings
+- Create `BookingAsset` model in schema (coexists with implicit M2M — no data migration yet, see Decision #10)
 - Update asset creation form with tracking method selection
 - Update asset detail page to show quantity fields for quantity-tracked assets
 - Add AssetModel CRUD (create, edit, delete)
@@ -642,6 +674,8 @@ All phases ship together as one release. This ordering reflects build dependenci
 ### Phase 2: Quantity-tracked Operations
 
 **Goal:** Quantity-aware checkout, custody, and consumption.
+
+**Prerequisites:** Open Question #4 (concurrency strategy) must be resolved before starting this phase.
 
 - Quantity-aware custody: assign/release partial quantities
 - Modify Custody model (remove unique constraint, add quantity)
@@ -656,6 +690,9 @@ All phases ship together as one release. This ordering reflects build dependenci
 
 **Goal:** Quantity-aware bookings and book-by-model.
 
+**Prerequisites:** Open Questions #2 (availability communication) and #5 (BookingAsset schema for book-by-model) must be resolved before starting this phase.
+
+- **Migrate `_AssetToBooking` → `BookingAsset`** using rename strategy (Decision #10) — rewire 18 raw SQL queries and ~60 Prisma relation usages
 - Quantity-tracked booking: reserve quantity N of a quantity-tracked asset
 - Quantity on `BookingAsset` pivot
 - Availability formula enforcement (`Available = Total − In custody − Reserved`)
@@ -669,9 +706,11 @@ All phases ship together as one release. This ordering reflects build dependenci
 
 **Goal:** Remaining integrations and polish.
 
+**Prerequisites:** Open Question #6 (split/merge data implications) must be resolved before implementing the split/merge feature.
+
 - Kit integration: quantity-tracked items in kits
 - Kit checkout/check-in with quantity handling
-- Location split and merge for quantity-tracked assets
+- Location split and merge for quantity-tracked assets (**pending design — see Open Question #6**)
 - Model grouping tool (bulk assign existing assets to a model)
 - QR code handling for quantity-tracked assets and model groups
 - Asset list: group-by-model view

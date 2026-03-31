@@ -1,5 +1,6 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
+import { AssetType, ConsumptionType } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
 import type { Tag } from "react-tag-autocomplete";
@@ -26,6 +27,13 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../forms/select";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -43,6 +51,7 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
+import When from "../when/when";
 
 export const NewAssetFormSchema = z.object({
   title: z
@@ -68,6 +77,13 @@ export const NewAssetFormSchema = z.object({
     .optional()
     .transform((val) => val === "true"),
   redirectTo: z.string().optional(),
+
+  // Tracking method & quantity fields
+  type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
+  quantity: z.coerce.number().int().positive().optional(),
+  minQuantity: z.coerce.number().int().nonnegative().optional(),
+  consumptionType: z.nativeEnum(ConsumptionType).optional(),
+  unitOfMeasure: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -85,6 +101,11 @@ type Props = Partial<
     | "locationId"
     | "description"
     | "valuation"
+    | "type"
+    | "quantity"
+    | "minQuantity"
+    | "consumptionType"
+    | "unitOfMeasure"
   >
 > & {
   qrId?: Qr["id"] | null;
@@ -104,6 +125,11 @@ export const AssetForm = ({
   locationId,
   description,
   valuation,
+  type: assetType,
+  quantity,
+  minQuantity,
+  consumptionType,
+  unitOfMeasure,
   qrId,
   tags,
   barcodes,
@@ -176,6 +202,14 @@ export const AssetForm = ({
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
   const isKitAsset = Boolean(asset?.kit);
   const locationDisabled = disabled || isKitAsset;
+
+  /** Whether we are in edit mode (asset already exists). */
+  const isEditMode = Boolean(id);
+  /** Track the selected asset type for conditional field rendering. */
+  const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
+    assetType ?? AssetType.INDIVIDUAL
+  );
+  const isQuantityTracked = selectedAssetType === AssetType.QUANTITY_TRACKED;
   const mainImageError =
     actionData?.errors?.mainImage?.message ??
     (actionData?.error?.additionalData?.field === "mainImage"
@@ -224,6 +258,47 @@ export const AssetForm = ({
             <Actions disabled={disabled} referer={referer} />
           </div>
         </div>
+
+        <FormRow
+          rowLabel={"Tracking method"}
+          className="border-b-0 pb-[10px]"
+          subHeading={
+            isEditMode
+              ? "Tracking method cannot be changed after creation."
+              : "Choose how this asset is tracked. This cannot be changed later."
+          }
+          required={true}
+        >
+          <input type="hidden" name="type" value={selectedAssetType} />
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={
+                selectedAssetType === AssetType.INDIVIDUAL
+                  ? "primary"
+                  : "secondary"
+              }
+              size="sm"
+              disabled={disabled || isEditMode}
+              onClick={() => setSelectedAssetType(AssetType.INDIVIDUAL)}
+            >
+              Individual
+            </Button>
+            <Button
+              type="button"
+              variant={
+                selectedAssetType === AssetType.QUANTITY_TRACKED
+                  ? "primary"
+                  : "secondary"
+              }
+              size="sm"
+              disabled={disabled || isEditMode}
+              onClick={() => setSelectedAssetType(AssetType.QUANTITY_TRACKED)}
+            >
+              Tracked by quantity
+            </Button>
+          </div>
+        </FormRow>
 
         <FormRow
           rowLabel={"Name"}
@@ -562,6 +637,98 @@ export const AssetForm = ({
             </span>
           </div>
         </FormRow>
+
+        <When truthy={isQuantityTracked}>
+          <div className="border-b pb-5">
+            <div className="mb-4">
+              <h2 className="mb-1 text-[18px] font-semibold">
+                Quantity tracking
+              </h2>
+              <p>Configure how quantities are tracked for this asset.</p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <FormRow
+                rowLabel="Quantity"
+                className="border-b-0 pb-[10px]"
+                required={true}
+              >
+                <Input
+                  type="number"
+                  label="Quantity"
+                  hideLabel
+                  name="quantity"
+                  disabled={disabled}
+                  min={1}
+                  step={1}
+                  className="w-full"
+                  defaultValue={quantity ?? ""}
+                  required={true}
+                  error={zo.errors.quantity()?.message}
+                />
+              </FormRow>
+
+              <FormRow
+                rowLabel="Unit of measure"
+                className="border-b-0 pb-[10px]"
+                subHeading="What unit are these counted in?"
+              >
+                <Input
+                  label="Unit of measure"
+                  hideLabel
+                  name="unitOfMeasure"
+                  disabled={disabled}
+                  className="w-full"
+                  placeholder="e.g., pcs, boxes, liters"
+                  defaultValue={unitOfMeasure ?? ""}
+                />
+              </FormRow>
+
+              <FormRow
+                rowLabel="Behavior mode"
+                className="border-b-0 pb-[10px]"
+                subHeading="What happens after checkout?"
+                required={true}
+              >
+                <Select
+                  name="consumptionType"
+                  defaultValue={consumptionType ?? ""}
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select behavior mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ConsumptionType.ONE_WAY}>
+                      Used up (one-way) — consumed and not returned
+                    </SelectItem>
+                    <SelectItem value={ConsumptionType.TWO_WAY}>
+                      Returnable (two-way) — checked out and returned
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormRow>
+
+              <FormRow
+                rowLabel="Min quantity"
+                className="border-b-0 pb-[10px]"
+                subHeading="Get alerted when stock drops below this level."
+              >
+                <Input
+                  type="number"
+                  label="Min quantity"
+                  hideLabel
+                  name="minQuantity"
+                  disabled={disabled}
+                  min={0}
+                  step={1}
+                  className="w-full"
+                  defaultValue={minQuantity ?? ""}
+                />
+              </FormRow>
+            </div>
+          </div>
+        </When>
 
         {canUseBarcodes ? (
           <FormRow

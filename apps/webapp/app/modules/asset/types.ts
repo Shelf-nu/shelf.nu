@@ -52,6 +52,10 @@ export interface UpdateAssetPayload {
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
   request: Request;
+  quantity?: Asset["quantity"];
+  minQuantity?: Asset["minQuantity"];
+  consumptionType?: Asset["consumptionType"];
+  unitOfMeasure?: Asset["unitOfMeasure"];
 }
 
 export interface CreateAssetFromContentImportPayload
@@ -142,6 +146,7 @@ export type AdvancedIndexAsset = Pick<
   | "locationId"
   | "organizationId"
   | "status"
+  | "type"
   | "valuation"
   | "availableToBook"
   | "kitId"

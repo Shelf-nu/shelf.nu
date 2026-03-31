@@ -205,6 +205,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       valuation,
       addAnother,
       redirectTo,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     } = parsedData;
 
     /** This checks if tags are passed and build the  */
@@ -229,6 +233,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       valuation,
       organizationId,
       request,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     });
 
     sendNotification({

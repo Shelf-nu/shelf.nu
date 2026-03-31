@@ -165,6 +165,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       newLocationId,
       valuation,
       addAnother,
+      type,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     } = payload;
 
     /** This checks if tags are passed and build the  */
@@ -187,6 +192,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       valuation,
       customFieldsValues,
       barcodes,
+      type,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     });
 
     const actor = wrapUserLinkForNote({

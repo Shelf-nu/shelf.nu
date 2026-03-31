@@ -1,5 +1,5 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import { AssetStatus, AssetType, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -402,6 +402,67 @@ export default function AssetOverview() {
                     </div>
                   </div>
                 </li>
+              ) : null}
+
+              {asset?.assetModel ? (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Asset Model
+                  </span>
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                    <Button
+                      to={`/asset-models/${asset.assetModel.id}/edit`}
+                      variant="link-gray"
+                      className="text-gray-600 underline"
+                    >
+                      {asset.assetModel.name}
+                    </Button>
+                  </div>
+                </li>
+              ) : null}
+              {asset?.type === AssetType.QUANTITY_TRACKED ? (
+                <>
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                      Tracking method
+                    </span>
+                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                      <Badge color="#6366f1" withDot={false}>
+                        Tracked by quantity
+                      </Badge>
+                    </div>
+                  </li>
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                      Quantity
+                    </span>
+                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                      {asset.quantity ?? 0}
+                      {asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""}
+                    </div>
+                  </li>
+                  {asset.minQuantity != null ? (
+                    <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                      <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                        Min quantity
+                      </span>
+                      <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                        {asset.minQuantity}
+                        {asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""}
+                      </div>
+                    </li>
+                  ) : null}
+                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                      Behavior mode
+                    </span>
+                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                      {asset.consumptionType === "ONE_WAY"
+                        ? "Used up (one-way)"
+                        : "Returnable (two-way)"}
+                    </div>
+                  </li>
+                </>
               ) : null}
 
               {(() => {

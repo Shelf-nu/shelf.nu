@@ -5,6 +5,7 @@ import {
   BellIcon,
   BoxesIcon,
   CalendarRangeIcon,
+  CopyIcon,
   ChartLineIcon,
   ClipboardCheckIcon,
   HomeIcon,
@@ -128,6 +129,13 @@ export function useSidebarNavItems() {
       title: "Categories",
       to: "/categories",
       Icon: BoxesIcon,
+      hidden: isBaseOrSelfService,
+    },
+    {
+      type: "child",
+      title: "Asset Models",
+      to: "/asset-models",
+      Icon: CopyIcon,
       hidden: isBaseOrSelfService,
     },
 

@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
-import { CustomFieldType } from "@prisma/client";
+import { AssetType, CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
@@ -172,13 +172,20 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div className="min-w-0 flex-1 truncate">
-                <Link
-                  to={item.id}
-                  className="truncate font-medium underline hover:text-gray-600"
-                  title={item.title}
-                >
-                  {item.title}
-                </Link>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    to={item.id}
+                    className="truncate font-medium underline hover:text-gray-600"
+                    title={item.title}
+                  >
+                    {item.title}
+                  </Link>
+                  {item.type === AssetType.QUANTITY_TRACKED ? (
+                    <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                      QTY
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
           }
