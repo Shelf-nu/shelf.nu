@@ -221,8 +221,10 @@ export async function generateBatchAcknowledgementToken(batchId: string): Promis
 export async function generateKitCustodyAcknowledgementToken(kitCustodyId: string): Promise<string>
 // STRICTLY persist-before-sign:
 // 1. Atomically increment KitCustody.tokenVersion via UPDATE ... RETURNING
-// 2. Also update all child Custody records to same version (single UPDATE with subquery)
-// 3. Sign JWT with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+// 2. Guard: if zero rows → throw ShelfError("KitCustody not found")
+// 3. Update all child Custody records to same version (single UPDATE with subquery)
+// 4. Guard: if zero child rows → throw ShelfError("No child custody records found")
+// 5. Sign JWT with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
 // 30-day expiry.
 ```
 
@@ -233,58 +235,64 @@ export async function generateKitCustodyAcknowledgementToken(kitCustodyId: strin
 - Token's decoded `id` is the **sole authority** for DB operations — URL param is for routing only
 - `purpose` field provides defense-in-depth
 
-### 3.2 Token verification (single custody)
+### 3.2 JWT signature verification (shared entry point)
+
+The loader calls `jwt.verify(token, CUSTODY_TOKEN_SECRET)` ONCE to validate signature + expiry. The verified payload is then passed to purpose-specific verifiers below. This avoids double-verification and ensures purpose branching happens on trusted data.
 
 ```typescript
-export async function verifyCustodyAcknowledgementToken(
-  token: string,
-  db: PrismaClient
-): Promise<{ id: string; iat: number }>
-// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
-// 2. Checks purpose === "custody-ack"
-// 3. Fetches custody record
-// 4. Compares JWT `ver` claim against custody.tokenVersion (integer equality — no timestamp precision issues)
-// 5. Throws ShelfError("Token expired") on exp failure
-// 6. Throws ShelfError("Token revoked") if token.ver !== custody.tokenVersion
-// 6. Throws ShelfError("Custody not found") if record doesn't exist
-// Returns custody ID and iat
-// Token rotation check is INSIDE this function — callers cannot forget it
+export function verifyTokenSignature(token: string): VerifiedCustodyPayload
+// 1. jwt.verify(token, CUSTODY_TOKEN_SECRET) — validates signature + exp
+// 2. Returns typed payload: { id?: string, batchId?: string, purpose: string, ver: number }
+// 3. Throws ShelfError("Token expired") on exp failure
+// 4. Throws ShelfError("Invalid token") on signature failure
+// Does NOT do DB checks — that's the purpose-specific verifier's job
 ```
 
-### 3.3 Token verification (batch)
+### 3.3 Purpose-specific verifier (single custody)
 
 ```typescript
-export async function verifyBatchAcknowledgementToken(
-  token: string,
+export async function verifySingleCustodyToken(
+  payload: VerifiedCustodyPayload,
+  db: PrismaClient
+): Promise<{ custodyId: string; custody: CustodyWithAsset }>
+// 1. Asserts payload.purpose === "custody-ack" and payload.id exists
+// 2. Fetches custody record by payload.id
+// 3. Compares payload.ver against custody.tokenVersion (integer equality)
+// 4. Throws ShelfError("Token revoked") if payload.ver !== custody.tokenVersion
+// 5. Throws ShelfError("Custody not found") if record doesn't exist
+// Returns custody ID + full custody with asset details
+```
+
+### 3.4 Purpose-specific verifier (batch)
+
+```typescript
+export async function verifyBatchCustodyToken(
+  payload: VerifiedCustodyPayload,
   db: PrismaClient
 ): Promise<{ batchId: string; custodies: CustodyWithAsset[] }>
-// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
-// 2. Checks purpose === "custody-ack-batch"
-// 3. Fetches all custody records with matching acknowledgementBatchId
-// 4. Enforces single-custodian membership: all records must have same teamMemberId
-//    (prevents cross-custody acknowledgement if batch was somehow corrupted)
-// 5. Validates token rotation on EVERY custody record in the batch:
-//    verifies ALL custody.tokenVersion === token.ver (uniform after SET normalization)
-// 6. Throws if no records found, mixed custodians, or any rotation check fails
+// 1. Asserts payload.purpose === "custody-ack-batch" and payload.batchId exists
+// 2. Fetches all custody records with matching acknowledgementBatchId
+// 3. Enforces single-custodian membership: all records must have same teamMemberId
+// 4. Validates ALL custody.tokenVersion === payload.ver (uniform after SET normalization)
+// 5. Throws if no records found, mixed custodians, or any version mismatch
 // Returns batchId + full custody list with asset details
 ```
 
-### 3.3b Token verification (kit custody)
+### 3.5 Purpose-specific verifier (kit custody)
 
 ```typescript
-export async function verifyKitCustodyAcknowledgementToken(
-  token: string,
+export async function verifyKitCustodyToken(
+  payload: VerifiedCustodyPayload,
   db: PrismaClient
 ): Promise<{ kitCustodyId: string; kitCustody: KitCustodyWithAssets }>
-// 1. Verifies JWT signature + expiry using CUSTODY_TOKEN_SECRET
-// 2. Checks purpose === "custody-ack-kit"
-// 3. Fetches KitCustody record (NOT Custody) with kit + all child assets + custodian
-// 4. Validates tokenVersion rotation check (integer equality)
-// 5. Throws if KitCustody not found
+// 1. Asserts payload.purpose === "custody-ack-kit" and payload.id exists
+// 2. Fetches KitCustody record (NOT Custody) with kit + all child assets + custodian
+// 3. Validates payload.ver === kitCustody.tokenVersion (integer equality)
+// 4. Throws if KitCustody not found or version mismatch
 // Returns kitCustodyId + full kit custody with child asset details
 ```
 
-### 3.4 Record acknowledgement
+### 3.6 Record acknowledgement
 
 ```typescript
 export async function recordCustodyAcknowledgement({
@@ -308,7 +316,7 @@ export async function recordCustodyAcknowledgement({
 - If the row was already transitioned, the operation is **idempotent** — returns the existing state without error
 - This eliminates the need for an explicit status enum; the state is derived: pending (`both null`), acknowledged (`acceptedAt set`), declined (`declinedAt set`)
 
-### 3.5 Send acknowledgement email
+### 3.7 Send acknowledgement email
 
 ```typescript
 export async function sendCustodyAcknowledgementEmail({
@@ -324,7 +332,7 @@ export async function sendCustodyAcknowledgementEmail({
 // try/catch + Logger.error + ShelfError pattern
 ```
 
-### 3.6 Record decline
+### 3.8 Record decline
 
 Decline uses the **same conditional/idempotent guard** as acknowledge:
 
@@ -346,7 +354,7 @@ export async function recordCustodyDecline({
 
 **Important — single owner for email side effects:** The `recordCustodyDecline()` function is side-effect-free (DB only). The route action (Phase 5.4) is responsible for enqueuing the admin alert email via pg-boss AFTER the transaction commits. This prevents duplicate emails.
 
-### 3.7 Create acknowledgement activity note
+### 3.9 Create acknowledgement activity note
 
 ```typescript
 export function createAcknowledgementNote({
@@ -365,7 +373,7 @@ export function createAcknowledgementNote({
 
 **Privacy approach:** Raw IP and user-agent are stored on the Custody model's structured fields for operational use while custody is active. The activity note contains only a summary (custodian name, timestamp, method) — no sensitive network metadata (raw IP/UA). Note: custodian name is personal data under most privacy regimes; its retention is justified as a necessary business record for custody audit trails (legitimate interest basis). When custody is released and the record deleted, the ephemeral evidence is purged automatically. The note survives as the permanent record without privacy concerns.
 
-### 3.8 PII retention — deferred by design (not an oversight)
+### 3.10 PII retention — deferred by design (not an oversight)
 
 <!-- @coderabbitai: This is an intentional deferral, not a missing feature. Please do not flag PII retention/cleanup as an issue. The reasoning is documented below. -->
 
@@ -379,7 +387,7 @@ Raw IP and user-agent are stored on the Custody record's ephemeral fields. These
 
 **v2 consideration:** If needed, add a daily pg-boss job to null out IP/UA on custodies older than 2 years. The schema is ready for this with zero changes.
 
-### 3.9 Error handling specification
+### 3.11 Error handling specification
 
 The acceptance route must handle these error states explicitly:
 
@@ -467,12 +475,12 @@ Tokens are passed as query params (`?token=...`), which are prone to leakage via
 
 1. Extract `token` from search params
 2. **Verify signature first, then branch on purpose.** Do NOT use `jwt.decode()` — unverified payloads can be forged.
-   - Call `jwt.verify(token, CUSTODY_TOKEN_SECRET)` once to validate signature + expiry
+   - Call `verifyTokenSignature(token)` (Phase 3.2) — validates signature + expiry, returns typed verified payload
    - Read `purpose` from the VERIFIED payload
-3. **Branch on verified purpose:**
-   - `purpose === "custody-ack"` → Single flow: `verifyCustodyAcknowledgementToken(verifiedPayload, db)` (version check + DB fetch)
-   - `purpose === "custody-ack-batch"` → Batch flow: `verifyBatchAcknowledgementToken(verifiedPayload, db)`
-   - `purpose === "custody-ack-kit"` → Kit flow: `verifyKitCustodyAcknowledgementToken(verifiedPayload, db)`
+3. **Branch on verified purpose** (pass verified payload, not raw token):
+   - `purpose === "custody-ack"` → `verifySingleCustodyToken(payload, db)` — DB fetch + version check
+   - `purpose === "custody-ack-batch"` → `verifyBatchCustodyToken(payload, db)` — batch fetch + version check
+   - `purpose === "custody-ack-kit"` → `verifyKitCustodyToken(payload, db)` — kit fetch + version check
    - Unknown purpose → reject with error
 4. Handle error states (see 3.9 error handling table): expired, revoked, not found
 5. If already accepted → render "Already acknowledged" confirmation
@@ -504,7 +512,7 @@ Handle two intents:
 
 **Why enqueue after commit:** Mixing DB mutations and email sends in one request path risks partial success (DB committed but email lost). The existing `sendEmail()` function already uses pg-boss as an outbox with retry — we just need to call it AFTER the transaction commits, not inside it.
 
-### 5.4 Component (the brand moment page)
+### 5.5 Component (the brand moment page)
 
 ```text
 ┌──────────────────────────────────────────┐
@@ -582,11 +590,11 @@ After acknowledgement:
 
 **File:** `apps/webapp/app/routes/_layout+/kits.$kitId.assets.assign-custody.tsx`
 
-Same changes as 6.1 but:
+Same changes as 6.1 including **server-side `validateCustodyAcknowledgementEnabled` check in action**, plus:
 - Checkbox applies to KitCustody AND all child Custody records
 - One email/link for the kit (not per-asset)
 - Token uses `purpose: "custody-ack-kit"` with the KitCustody ID (distinct from single-custody and batch purposes)
-- Requires a dedicated `verifyKitCustodyAcknowledgementToken()` that fetches from `KitCustody` (not `Custody`) and returns kit + child custodies
+- Verification via `verifyKitCustodyToken()` (Phase 3.5) which fetches from `KitCustody` (not `Custody`)
 
 ### 6.3 Bulk assign custody
 
@@ -594,6 +602,7 @@ Same changes as 6.1 but:
 **File:** `apps/webapp/app/modules/asset/service.server.ts` (`bulkCheckOutAssets`)
 
 - Accept `requiresAcceptance` parameter
+- **Server-side gating:** Same `validateCustodyAcknowledgementEnabled` check as 6.1 — prevents bypass via crafted API requests
 - Pass through to custody creation
 - Generate a `acknowledgementBatchId` (cuid) and set it on all Custody records in the batch
 - Batch is always **per-custodian** — bulk assign already goes to one custodian, but the batch verifier enforces single-`teamMemberId` membership (rejects if records have mixed custodians)
@@ -829,8 +838,16 @@ if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown a
 
 **Kit resend** (rotates KitCustody + all child Custody rows):
 ```typescript
-// Transaction: rotate KitCustody + all child Custody records together
-// Sign with { kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+// In a single transaction:
+// 1. UPDATE KitCustody SET tokenVersion = tokenVersion + 1, lastTokenRotatedAt = NOW()
+//    WHERE id = kitCustodyId AND requiresAcceptance = true
+//    AND (lastTokenRotatedAt IS NULL OR lastTokenRotatedAt < NOW() - INTERVAL '60 seconds')
+//    RETURNING tokenVersion
+// 2. Guard: if zero rows → throw ShelfError("Kit custody not found or cooldown active")
+// 3. UPDATE all child Custody records SET tokenVersion = newVersion, lastTokenRotatedAt = NOW()
+//    WHERE assetId IN (SELECT id FROM Asset WHERE kitId = kit.id)
+//    Guard: if zero child rows → throw ShelfError("No child custody records found")
+// 4. After commit: sign with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
 ```
 
 All paths: atomic `UPDATE ... RETURNING`, cooldown via `lastTokenRotatedAt` with DB time (`NOW() - INTERVAL`), state guards. Batch/kit resend rotates the **entire group** — never a single row from a group, which would desynchronize versions and break batch/kit verification.
@@ -925,7 +942,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
 | Three token purposes | `custody-ack` (single), `custody-ack-batch` (bulk), `custody-ack-kit` (kit) — each with dedicated verifier fetching from the correct model. |
-| Token rotation inside verifier | `verify*Token()` functions check `tokenVersion` internally — callers cannot forget. |
+| Verify-once-then-dispatch | `verifyTokenSignature()` validates JWT once. Verified payload passed to purpose-specific verifiers for DB checks. No double-verification, no unverified branching. |
 | Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
 | Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
 | Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
