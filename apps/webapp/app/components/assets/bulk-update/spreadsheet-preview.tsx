@@ -5,7 +5,7 @@
  *
  * @see {@link file://./preview-display.tsx} Parent component
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { AssetChangePreview } from "~/utils/import-update.server";
 
 // ---------------------------------------------------------------------------
@@ -33,12 +33,10 @@ export function SpreadsheetPreview({
     col: string;
   } | null>(null);
   const [tooltipAbove, setTooltipAbove] = useState(true);
-  const cellRef = useRef<HTMLTableCellElement | null>(null);
 
   /** Measure available space above the cell to decide tooltip placement */
   const handleCellHover = useCallback(
     (assetIdx: number, col: string, el: HTMLTableCellElement) => {
-      cellRef.current = el;
       const rect = el.getBoundingClientRect();
       // Flip below if less than 80px above the cell
       setTooltipAbove(rect.top > 80);
@@ -121,6 +119,9 @@ export function SpreadsheetPreview({
                       <td
                         key={col}
                         tabIndex={0}
+                        aria-describedby={
+                          isHovered ? `tooltip-${assetIdx}-${col}` : undefined
+                        }
                         className={`relative cursor-default border-r px-3 py-1.5 ${
                           hasWarning ? "bg-red-50" : "bg-blue-50"
                         }`}
@@ -152,6 +153,8 @@ export function SpreadsheetPreview({
                         {/* Tooltip on hover with full values */}
                         {isHovered && (
                           <div
+                            id={`tooltip-${assetIdx}-${col}`}
+                            role="tooltip"
                             className={`absolute left-1/2 z-30 w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-white px-3 py-2 text-xs shadow-lg ${
                               tooltipAbove
                                 ? "bottom-full mb-2"
