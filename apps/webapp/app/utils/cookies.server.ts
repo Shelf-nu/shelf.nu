@@ -78,7 +78,7 @@ export const userPrefs = createCookie("user-prefs", {
  * with the same name (one host-only, one domain-scoped) for up to 7 days.
  *
  * Safe to call on every request — it's a no-op once the old cookie is gone.
- * Can be removed after rollout (≥ 1 week post-deploy).
+ * @TODO Can be removed after rollout (≥ 1 week post-deploy).
  */
 export function expireHostOnlyUserPrefsCookie(): [string, string] {
   return ["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"];
