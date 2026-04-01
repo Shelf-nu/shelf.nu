@@ -368,36 +368,32 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 }
 
 function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  /**
+   * Cast the column to float for comparison. This handles both Float columns
+   * (valuation) and Int columns (quantity) uniformly, and avoids the
+   * "operator does not exist: integer = text" error from Prisma's
+   * parameterized queries sending values as text.
+   */
+  const col = Prisma.raw(filter.name);
+  const val = Number(filter.value);
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float = ${val}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float != ${val}`;
     case "gt":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float > ${val}`;
     case "lt":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float < ${val}`;
     case "gte":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" >= ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float >= ${val}`;
     case "lte":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" <= ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float <= ${val}`;
     case "between": {
       const [min, max] = filter.value as [number, number];
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" BETWEEN ${min} AND ${max}`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float BETWEEN ${Number(
+        min
+      )} AND ${Number(max)}`;
     }
     default:
       return whereClause;
@@ -475,6 +471,23 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       default:
         return whereClause;
     }
+  }
+
+  // Handle asset type enum (Individual vs Quantity Tracked)
+  if (filter.name === "type") {
+    switch (filter.operator) {
+      case "is": {
+        whereClause = Prisma.sql`${whereClause} AND a."type" = ${filter.value}::public."AssetType"`;
+        break;
+      }
+      case "isNot": {
+        whereClause = Prisma.sql`${whereClause} AND a."type" != ${filter.value}::public."AssetType"`;
+        break;
+      }
+      default:
+        break;
+    }
+    return whereClause;
   }
 
   // Handle custody enums by delegating to specialized function
@@ -632,6 +645,56 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           SELECT 1 FROM public."Location"
           WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
         )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
+
+  // Add asset model handling using asset's assetModelId
+  if (filter.name === "assetModel") {
+    switch (filter.operator) {
+      case "is":
+        if (filter.value === "without-model") {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NULL`;
+        }
+        return Prisma.sql`${whereClause} AND a."assetModelId" = ${filter.value}`;
+
+      case "isNot":
+        if (filter.value === "without-model") {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NOT NULL`;
+        }
+        return Prisma.sql`${whereClause} AND (a."assetModelId" IS NULL OR a."assetModelId" != ${filter.value})`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        const hasWithoutModel = values.includes("without-model");
+        const modelIds = values.filter((v) => v !== "without-model");
+
+        if (hasWithoutModel && modelIds.length > 0) {
+          const modelIdsArray = Prisma.join(
+            modelIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
+          return Prisma.sql`${whereClause} AND (a."assetModelId" IS NULL OR a."assetModelId" = ANY(ARRAY[${modelIdsArray}]::text[]))`;
+        } else if (hasWithoutModel) {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NULL`;
+        } else if (modelIds.length > 0) {
+          const modelIdsArray = Prisma.join(
+            modelIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
+          return Prisma.sql`${whereClause} AND a."assetModelId" = ANY(ARRAY[${modelIdsArray}]::text[])`;
+        }
+        return whereClause;
       }
 
       default:
@@ -1671,6 +1734,8 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."availableToBook" AS "assetAvailableToBook",
       a."kitId" AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
+      a."assetModelId" AS "assetModelId",
+      am.name AS "assetModelName",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -1785,6 +1850,7 @@ export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
   LEFT JOIN public."Kit" k ON a."kitId" = k.id
   LEFT JOIN public."Category" c ON a."categoryId" = c.id
+  LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
   LEFT JOIN public."Location" l ON a."locationId" = l.id
   LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
   LEFT JOIN public."Tag" t ON att."B" = t.id
@@ -1837,6 +1903,8 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'thumbnailImage', aq."assetThumbnailImage",
           'mainImageExpiration', aq."assetMainImageExpiration",
           'categoryId', aq."assetCategoryId",
+          'assetModelId', aq."assetModelId",
+          'assetModelName', aq."assetModelName",
           'locationId', aq."assetLocationId",
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",

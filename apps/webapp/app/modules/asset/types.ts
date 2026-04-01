@@ -156,6 +156,8 @@ export type AdvancedIndexAsset = Pick<
   | "kitId"
 > & {
   qrId: string; // QR code will always be available
+  assetModelId?: string | null;
+  assetModelName?: string | null;
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name" | "color">[];

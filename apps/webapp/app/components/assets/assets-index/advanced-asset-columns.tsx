@@ -323,6 +323,26 @@ export function AdvancedIndexColumn({
     case "barcode_EAN13":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "type":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.type === AssetType.QUANTITY_TRACKED ? (
+            <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+              QTY
+            </span>
+          ) : (
+            "Individual"
+          )}
+        </Td>
+      );
+
+    case "assetModel":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.assetModelName ? item.assetModelName : <EmptyTableValue />}
+        </Td>
+      );
+
     case "quantity":
       return (
         <Td className="w-full max-w-none whitespace-nowrap">

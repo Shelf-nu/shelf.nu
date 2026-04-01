@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { Category, Location } from "@prisma/client";
+import type { AssetModel, Category, Location } from "@prisma/client";
+import AssetModelForm from "../asset-model/form";
 import NewCategoryForm from "../category/new-category-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { LocationForm } from "../location/form";
@@ -14,8 +15,8 @@ type InlineEntityCreationDialogProps = {
   title: string;
   /** Label for the button that opens the dialog */
   buttonLabel: string;
-  /** Type of entity to create (location or category) */
-  type: "location" | "category";
+  /** Type of entity to create (location, category, or assetModel) */
+  type: "location" | "category" | "assetModel";
   /** Callback invoked when an entity is successfully created */
   onCreated?: (
     entity:
@@ -29,6 +30,12 @@ type InlineEntityCreationDialogProps = {
       | {
           type: "category";
           entity: Pick<Category, "id" | "name" | "color"> & {
+            description?: string | null;
+          };
+        }
+      | {
+          type: "assetModel";
+          entity: Pick<AssetModel, "id" | "name"> & {
             description?: string | null;
           };
         }
@@ -124,6 +131,23 @@ export default function InlineEntityCreationDialog({
 
                   handleClose();
                 }}
+              />
+            </When>
+
+            {/* Asset model creation form */}
+            <When truthy={type === "assetModel"}>
+              <AssetModelForm
+                onSuccess={(data) => {
+                  if (data?.assetModel) {
+                    onCreated?.({
+                      type: "assetModel",
+                      entity: data.assetModel,
+                    } as any);
+                  }
+                  setOpen(false);
+                }}
+                onCancel={() => setOpen(false)}
+                apiUrl="/settings/asset-models/new"
               />
             </When>
 

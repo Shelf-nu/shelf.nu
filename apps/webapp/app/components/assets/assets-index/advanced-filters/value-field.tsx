@@ -150,12 +150,16 @@ export function ValueField({
     }
 
     if (filter.type === "enum" && filter.value === "") {
-      const options =
-        filter.name === "status"
-          ? Object.values(AssetStatus)
-          : customFields.find((field) => field?.name === filter.name.slice(3))
-              ?.options || [];
-      setFilter(options[0]); // Set default value to first option when enum field is selected
+      if (filter.name === "type") {
+        setFilter("INDIVIDUAL"); // Default to INDIVIDUAL for asset type filter
+      } else {
+        const options =
+          filter.name === "status"
+            ? Object.values(AssetStatus)
+            : customFields.find((field) => field?.name === filter.name.slice(3))
+                ?.options || [];
+        setFilter(options[0]); // Set default value to first option when enum field is selected
+      }
     }
   }, [customFields, filter.name, filter.type, filter.value, setFilter]);
 
@@ -1106,6 +1110,119 @@ function CategoryEnumField({
   );
 }
 
+/** Component that handles asset model selection for both single and multi-select scenarios */
+function AssetModelEnumField({
+  value,
+  handleChange,
+  multiSelect,
+  name,
+  disabled = false,
+}: Omit<EnumFieldProps, "options">) {
+  const data = useLoaderData<AssetIndexLoaderData>();
+
+  // Parse the existing value to get selected asset model IDs
+  const selectedIds = useMemo(() => {
+    if (!value) return [];
+    if (multiSelect && typeof value === "string") {
+      return value.split(",").map((v) => v.trim());
+    }
+    return [value];
+  }, [value, multiSelect]);
+
+  /** Common props for both DynamicSelect and DynamicDropdown */
+  const commonProps = {
+    model: {
+      name: "assetModel" as const,
+      queryKey: "name",
+    },
+    transformItem: (item: any) => ({
+      ...item,
+      id: item.id === "without-model" ? "without-model" : item.id,
+    }),
+    renderItem: (item: any) => <span>{item.name}</span>,
+    initialDataKey: "assetModels",
+    countKey: "totalAssetModels",
+    label: "Filter by asset model",
+    hideLabel: true,
+    hideCounter: true,
+    placeholder: "Search asset models",
+    withoutValueItem: {
+      id: "without-model",
+      name: "No model",
+    },
+    disabled,
+  };
+
+  // For multi-select (containsAny operator), use DynamicDropdown
+  if (multiSelect) {
+    return (
+      <DynamicDropdown
+        {...commonProps}
+        name={name}
+        trigger={
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full justify-start font-normal [&_span]:w-full [&_span]:max-w-full [&_span]:truncate"
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={tw(
+                  "text-left",
+                  selectedIds.length <= 0 && "text-gray-500"
+                )}
+              >
+                {disabled
+                  ? "Select a column first"
+                  : selectedIds.length > 0
+                  ? selectedIds
+                      .map((id) => {
+                        if (id === "without-model") {
+                          return "No model";
+                        }
+                        const model = (data as any).assetModels?.find(
+                          (m: any) => m.id === id
+                        );
+                        return model?.name || "";
+                      })
+                      .join(", ")
+                  : "Select asset model"}
+              </span>
+              <ChevronRight className="mr-1 inline-block rotate-90" />
+            </div>
+          </Button>
+        }
+        triggerWrapperClassName="w-full"
+        className="z-[999999]"
+        selectionMode="none"
+        defaultValues={selectedIds}
+        onSelectionChange={(selectedModelIds) => {
+          handleChange(selectedModelIds.join(","));
+        }}
+      />
+    );
+  }
+
+  // For single select (is/isNot operators), use DynamicSelect
+  return (
+    <DynamicSelect
+      {...commonProps}
+      fieldName={name}
+      placeholder={disabled ? "Select a column first" : "Select asset model"}
+      defaultValue={value as string}
+      onChange={(selectedId) => {
+        if (selectedId !== undefined) {
+          handleChange(selectedId);
+        }
+      }}
+      closeOnSelect={true}
+      triggerWrapperClassName="w-full text-gray-700"
+      className="z-[999999]"
+      contentLabel="Asset model"
+    />
+  );
+}
+
 /** Component that handles location selection for both single and multi-select scenarios */
 function LocationEnumField({
   value,
@@ -1600,6 +1717,125 @@ function TagsField({
 }
 
 /**
+ * Fixed enum field for the asset tracking type (INDIVIDUAL vs QUANTITY_TRACKED).
+ * Uses a simple Popover-based select with two hardcoded options.
+ */
+function TrackingTypeEnumField({
+  value,
+  handleChange,
+  name,
+  disabled = false,
+}: {
+  value: string;
+  handleChange: (value: string) => void;
+  name?: string;
+  disabled?: boolean;
+}) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+
+  const options = [
+    { id: "INDIVIDUAL", label: "Individual" },
+    { id: "QUANTITY_TRACKED", label: "Tracked by quantity" },
+  ];
+
+  /** Find the label for the currently selected value */
+  const selectedLabel =
+    options.find((opt) => opt.id === value)?.label || "Select type";
+
+  useEffect(() => {
+    if (isPopoverOpen) {
+      const currentIndex = options.findIndex((opt) => opt.id === value);
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPopoverOpen, value]);
+
+  const handleSelect = (optionValue: string) => {
+    handleChange(optionValue);
+    setIsPopoverOpen(false);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < options.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        handleSelect(options[selectedIndex].id);
+        break;
+      case "Escape":
+        event.preventDefault();
+        setIsPopoverOpen(false);
+        break;
+    }
+  };
+
+  return (
+    <>
+      <input type="hidden" value={value} name={name} />
+      <Popover
+        open={isPopoverOpen && !disabled}
+        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full justify-start truncate whitespace-nowrap font-normal [&_span]:max-w-full [&_span]:truncate"
+            disabled={disabled}
+          >
+            <ChevronRight className="ml-[2px] inline-block rotate-90" />
+            <span className="ml-2">
+              {disabled ? "Select a column first" : selectedLabel}
+            </span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className={tw(
+              "z-[999999] mt-2 max-h-[400px] min-w-[100px] overflow-scroll rounded-md border border-gray-200 bg-white"
+            )}
+            onKeyDown={handleKeyDown}
+          >
+            {options.map((option, index) => (
+              <div
+                key={option.id}
+                className={tw(
+                  "flex items-center justify-between px-4 py-2 text-[14px] font-medium text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                  selectedIndex === index && "bg-gray-50"
+                )}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleSelect(option.id)}
+                onKeyDown={handleActivationKeyPress(() =>
+                  handleSelect(option.id)
+                )}
+              >
+                <span>{option.label}</span>
+                {value === option.id && (
+                  <CheckIcon className="size-4 text-primary" />
+                )}
+              </div>
+            ))}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </>
+  );
+}
+
+/**
  * Component that determines which enum field to render based on field name
  */
 function ValueEnumField({
@@ -1649,6 +1885,21 @@ function ValueEnumField({
     );
   }
 
+  if (fieldName === "assetModel") {
+    return (
+      <>
+        <AssetModelEnumField
+          value={value}
+          handleChange={handleChange}
+          multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
   // Apply the same pattern to all other enum fields
   if (fieldName === "location") {
     return (
@@ -1687,6 +1938,20 @@ function ValueEnumField({
           value={value}
           handleChange={handleChange}
           multiSelect={multiSelect}
+          name={name}
+          disabled={disabled}
+        />
+        {error && <div className="mt-1 text-[12px] text-red-500">{error}</div>}
+      </>
+    );
+  }
+
+  if (fieldName === "type") {
+    return (
+      <>
+        <TrackingTypeEnumField
+          value={value}
+          handleChange={handleChange}
           name={name}
           disabled={disabled}
         />

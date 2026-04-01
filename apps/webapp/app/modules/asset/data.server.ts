@@ -39,6 +39,7 @@ import { getAllSelectedValuesFromFilters } from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
+import { getAssetModels } from "../asset-model/service.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -397,6 +398,7 @@ export async function advancedModeLoader({
     bookings,
     totalBookings,
     advNotifyData,
+    assetModelsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -472,7 +474,19 @@ export async function advancedModeLoader({
       },
     }),
     getTeamMembersForNotify({ organizationId }),
+
+    // Asset models for filter dropdown
+    getAssetModels({
+      organizationId,
+      page: 1,
+      perPage:
+        searchParams.has("getAll") && hasGetAllValue(searchParams, "assetModel")
+          ? 10000
+          : 12,
+    }),
   ]);
+
+  const { assetModels, totalAssetModels } = assetModelsData;
 
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
@@ -571,6 +585,8 @@ export async function advancedModeLoader({
       tagsData,
       bookings,
       totalBookings,
+      assetModels,
+      totalAssetModels,
       // Saved filter presets
       savedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,

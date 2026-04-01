@@ -567,6 +567,59 @@ export const AssetForm = ({
         </div>
 
         <FormRow
+          rowLabel="Asset Model"
+          subHeading={
+            <p>
+              Assign a model to group similar assets together.{" "}
+              <Button
+                to="/settings/asset-models/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create asset models
+              </Button>
+            </p>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <DynamicSelect
+            disabled={disabled}
+            defaultValue={assetModelId ?? undefined}
+            fieldName="assetModelId"
+            model={{ name: "assetModel", queryKey: "name" }}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+            placeholder="Select asset model"
+            contentLabel="Asset Models"
+            label="Asset Model"
+            hideLabel
+            initialDataKey="assetModels"
+            countKey="totalAssetModels"
+            closeOnSelect
+            selectionMode="set"
+            allowClear={true}
+            onChange={handleAssetModelChange}
+            extraContent={({ onItemCreated, closePopover }) => (
+              <InlineEntityCreationDialog
+                title="Create new asset model"
+                type="assetModel"
+                buttonLabel="Create new asset model"
+                onCreated={(created) => {
+                  if (created?.type !== "assetModel") return;
+                  const model = created.entity;
+                  onItemCreated({
+                    id: model.id,
+                    name: model.name,
+                    metadata: { ...model },
+                  });
+                  closePopover();
+                }}
+              />
+            )}
+          />
+        </FormRow>
+
+        <FormRow
           rowLabel="Category"
           subHeading={
             <p>
@@ -619,42 +672,6 @@ export const AssetForm = ({
                 }}
               />
             )}
-          />
-        </FormRow>
-
-        <FormRow
-          rowLabel="Asset Model"
-          subHeading={
-            <p>
-              Assign a model to group similar assets together.{" "}
-              <Button
-                to="/settings/asset-models/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create asset models
-              </Button>
-            </p>
-          }
-          className="border-b-0 pb-[10px]"
-        >
-          <DynamicSelect
-            disabled={disabled}
-            defaultValue={assetModelId ?? undefined}
-            fieldName="assetModelId"
-            model={{ name: "assetModel", queryKey: "name" }}
-            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            placeholder="Select asset model"
-            contentLabel="Asset Models"
-            label="Asset Model"
-            hideLabel
-            initialDataKey="assetModels"
-            countKey="totalAssetModels"
-            closeOnSelect
-            selectionMode="set"
-            allowClear={true}
-            onChange={handleAssetModelChange}
           />
         </FormRow>
 
