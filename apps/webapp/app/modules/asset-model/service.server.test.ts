@@ -161,7 +161,7 @@ describe("getAssetModels", () => {
     );
   });
 
-  it("applies search filter on name (case-insensitive)", async () => {
+  it("applies search filter on name and description (case-insensitive)", async () => {
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue([]);
     // @ts-expect-error mock setup
@@ -176,7 +176,10 @@ describe("getAssetModels", () => {
       expect.objectContaining({
         where: {
           organizationId: "org-123",
-          name: { contains: "latitude", mode: "insensitive" },
+          OR: [
+            { name: { contains: "latitude", mode: "insensitive" } },
+            { description: { contains: "latitude", mode: "insensitive" } },
+          ],
         },
       })
     );

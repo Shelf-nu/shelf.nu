@@ -5,7 +5,6 @@ import {
   BellIcon,
   BoxesIcon,
   CalendarRangeIcon,
-  CopyIcon,
   ChartLineIcon,
   ClipboardCheckIcon,
   HomeIcon,
@@ -133,14 +132,6 @@ export function useSidebarNavItems() {
     },
     {
       type: "child",
-      title: "Asset Models",
-      to: "/asset-models",
-      Icon: CopyIcon,
-      hidden: isBaseOrSelfService,
-    },
-
-    {
-      type: "child",
       title: "Tags",
       to: "/tags",
       Icon: TagsIcon,
@@ -229,6 +220,10 @@ export function useSidebarNavItems() {
         {
           title: "Custom fields",
           to: "/settings/custom-fields",
+        },
+        {
+          title: "Asset models",
+          to: "/settings/asset-models",
         },
       ],
     },

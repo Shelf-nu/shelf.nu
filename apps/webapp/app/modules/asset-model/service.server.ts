@@ -68,10 +68,10 @@ export async function getAssetModels(params: {
     const where: Prisma.AssetModelWhereInput = { organizationId };
 
     if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+      ];
     }
 
     const [assetModels, totalAssetModels] = await Promise.all([

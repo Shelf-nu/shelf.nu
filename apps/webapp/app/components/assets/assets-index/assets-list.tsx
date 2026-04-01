@@ -93,6 +93,7 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
+      <Th>Quantity</Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -304,6 +305,18 @@ export const ListAssetContent = ({
               childCount: location._count?.children ?? 0,
             }}
           />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      {/* Quantity */}
+      <Td>
+        {item.type === "QUANTITY_TRACKED" && item.quantity != null ? (
+          <span>
+            {item.quantity}
+            {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
+          </span>
         ) : (
           <EmptyTableValue />
         )}

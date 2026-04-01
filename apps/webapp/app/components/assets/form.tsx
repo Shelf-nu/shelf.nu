@@ -1,8 +1,20 @@
 import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverPortal,
+  PopoverContent,
+} from "@radix-ui/react-popover";
 import { useAtom, useAtomValue } from "jotai";
-import { useActionData, useLoaderData, useNavigation } from "react-router";
+import {
+  useActionData,
+  useLoaderData,
+  useLocation,
+  useNavigate,
+  useNavigation,
+} from "react-router";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -27,13 +39,6 @@ import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -61,6 +66,7 @@ export const NewAssetFormSchema = z.object({
 
   description: z.string().transform((val) => val.trim()),
   category: z.string(),
+  assetModelId: z.string().optional(),
   newLocationId: z.string().optional(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
    * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
@@ -80,9 +86,21 @@ export const NewAssetFormSchema = z.object({
 
   // Tracking method & quantity fields
   type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
-  quantity: z.coerce.number().int().positive().optional(),
-  minQuantity: z.coerce.number().int().nonnegative().optional(),
-  consumptionType: z.nativeEnum(ConsumptionType).optional(),
+  quantity: z.coerce
+    .number({ invalid_type_error: "Quantity must be a number" })
+    .int("Quantity must be a whole number")
+    .positive("Quantity is required and must be at least 1")
+    .optional(),
+  minQuantity: z.coerce
+    .number({ invalid_type_error: "Min quantity must be a number" })
+    .int("Min quantity must be a whole number")
+    .nonnegative("Min quantity cannot be negative")
+    .optional(),
+  consumptionType: z
+    .nativeEnum(ConsumptionType, {
+      errorMap: () => ({ message: "Please select a consumption type" }),
+    })
+    .optional(),
   unitOfMeasure: z.string().optional(),
 });
 
@@ -98,6 +116,7 @@ type Props = Partial<
     | "mainImage"
     | "mainImageExpiration"
     | "categoryId"
+    | "assetModelId"
     | "locationId"
     | "description"
     | "valuation"
@@ -122,6 +141,7 @@ export const AssetForm = ({
   mainImage,
   mainImageExpiration,
   categoryId,
+  assetModelId,
   locationId,
   description,
   valuation,
@@ -210,6 +230,42 @@ export const AssetForm = ({
     assetType ?? AssetType.INDIVIDUAL
   );
   const isQuantityTracked = selectedAssetType === AssetType.QUANTITY_TRACKED;
+  const [consumptionTypeError, setConsumptionTypeError] = useState<
+    string | undefined
+  >();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /** Asset models from the loader, used to look up defaults on selection. */
+  const assetModelsData = useLoaderData<{
+    assetModels?: Array<{ id: string; defaultCategoryId?: string | null }>;
+  }>()?.assetModels;
+
+  /**
+   * When a model is selected, apply its default category by updating
+   * the search params. When cleared, remove the category param.
+   * This triggers a revalidation so the Category DynamicSelect
+   * picks up the new default.
+   */
+  const handleAssetModelChange = (modelId: string | undefined) => {
+    const params = new URLSearchParams(location.search);
+
+    if (!modelId) {
+      // Model was cleared — remove the category param
+      params.delete("category");
+    } else if (assetModelsData) {
+      const model = assetModelsData.find((m) => m.id === modelId);
+      if (model?.defaultCategoryId) {
+        params.set("category", model.defaultCategoryId);
+      }
+    }
+
+    void navigate(`${location.pathname}?${params.toString()}`, {
+      preventScrollReset: true,
+      replace: true,
+    });
+  };
+
   const mainImageError =
     actionData?.errors?.mainImage?.message ??
     (actionData?.error?.additionalData?.field === "mainImage"
@@ -237,6 +293,19 @@ export const AssetForm = ({
           // Check for barcode validation errors
           const hasBarcodeErrors = barcodesInputRef.current?.hasErrors();
 
+          // Validate consumption type for quantity-tracked assets
+          if (isQuantityTracked) {
+            const formData = new FormData(e.currentTarget);
+            if (!formData.get("consumptionType")) {
+              setConsumptionTypeError("Please select a consumption type");
+              e.preventDefault();
+              e.stopPropagation();
+              return false;
+            } else {
+              setConsumptionTypeError(undefined);
+            }
+          }
+
           // If there are barcode errors, prevent submission
           // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
@@ -260,47 +329,6 @@ export const AssetForm = ({
         </div>
 
         <FormRow
-          rowLabel={"Tracking method"}
-          className="border-b-0 pb-[10px]"
-          subHeading={
-            isEditMode
-              ? "Tracking method cannot be changed after creation."
-              : "Choose how this asset is tracked. This cannot be changed later."
-          }
-          required={true}
-        >
-          <input type="hidden" name="type" value={selectedAssetType} />
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant={
-                selectedAssetType === AssetType.INDIVIDUAL
-                  ? "primary"
-                  : "secondary"
-              }
-              size="sm"
-              disabled={disabled || isEditMode}
-              onClick={() => setSelectedAssetType(AssetType.INDIVIDUAL)}
-            >
-              Individual
-            </Button>
-            <Button
-              type="button"
-              variant={
-                selectedAssetType === AssetType.QUANTITY_TRACKED
-                  ? "primary"
-                  : "secondary"
-              }
-              size="sm"
-              disabled={disabled || isEditMode}
-              onClick={() => setSelectedAssetType(AssetType.QUANTITY_TRACKED)}
-            >
-              Tracked by quantity
-            </Button>
-          </div>
-        </FormRow>
-
-        <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px]"
           required={true}
@@ -320,6 +348,100 @@ export const AssetForm = ({
             required={true}
           />
         </FormRow>
+
+        <FormRow
+          rowLabel={"Tracking method"}
+          className="border-b-0 pb-[10px]"
+          subHeading={
+            isEditMode
+              ? "Tracking method cannot be changed after creation."
+              : "Choose how this asset is tracked. This cannot be changed later."
+          }
+          required={true}
+        >
+          <input type="hidden" name="type" value={selectedAssetType} />
+          <TrackingMethodCards
+            selectedAssetType={selectedAssetType}
+            onSelect={setSelectedAssetType}
+            disabled={disabled || isEditMode}
+            isEditMode={isEditMode}
+          />
+        </FormRow>
+
+        <When truthy={isQuantityTracked}>
+          <div className="flex flex-col gap-2">
+            <FormRow
+              rowLabel="Quantity"
+              className="border-b-0 pb-[10px]"
+              subHeading="Total number of items in this pool."
+              required={true}
+            >
+              <Input
+                type="number"
+                label="Quantity"
+                hideLabel
+                name="quantity"
+                disabled={disabled}
+                min={1}
+                step={1}
+                className="w-full"
+                defaultValue={quantity ?? ""}
+                required={true}
+                error={zo.errors.quantity()?.message}
+              />
+            </FormRow>
+
+            <FormRow
+              rowLabel="Unit of measure"
+              className="border-b-0 pb-[10px]"
+              subHeading="Label for the unit (e.g. pcs, boxes, liters)."
+            >
+              <Input
+                label="Unit of measure"
+                hideLabel
+                name="unitOfMeasure"
+                disabled={disabled}
+                className="w-full"
+                placeholder="e.g., pcs, boxes, liters"
+                defaultValue={unitOfMeasure ?? ""}
+              />
+            </FormRow>
+
+            <FormRow
+              rowLabel="Min quantity"
+              className="border-b-0 pb-[10px]"
+              subHeading="Low-stock alert threshold. You will be notified when available quantity falls to or below this number."
+            >
+              <Input
+                type="number"
+                label="Min quantity"
+                hideLabel
+                name="minQuantity"
+                disabled={disabled}
+                min={0}
+                step={1}
+                className="w-full"
+                defaultValue={minQuantity ?? ""}
+              />
+            </FormRow>
+
+            <FormRow
+              rowLabel="Consumption type"
+              className="border-b-0 pb-[10px]"
+              subHeading={
+                'Choose "Used up (one-way)" for items that are consumed and not returned, or "Returnable (two-way)" for items that are checked out and returned.'
+              }
+              required={true}
+            >
+              <ConsumptionTypeSelect
+                defaultValue={consumptionType ?? undefined}
+                disabled={disabled}
+                error={consumptionTypeError}
+                onSelect={() => setConsumptionTypeError(undefined)}
+              />
+            </FormRow>
+          </div>
+        </When>
 
         <FormRow
           rowLabel={"Asset ID"}
@@ -453,7 +575,11 @@ export const AssetForm = ({
         >
           <DynamicSelect
             disabled={disabled}
-            defaultValue={categoryId ?? undefined}
+            defaultValue={
+              new URLSearchParams(location.search).get("category") ||
+              categoryId ||
+              undefined
+            }
             model={{ name: "category", queryKey: "name" }}
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             contentLabel="Categories"
@@ -482,6 +608,42 @@ export const AssetForm = ({
                 }}
               />
             )}
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel="Asset Model"
+          subHeading={
+            <p>
+              Assign a model to group similar assets together.{" "}
+              <Button
+                to="/settings/asset-models/new"
+                variant="link-gray"
+                className="text-gray-600 underline"
+                target="_blank"
+              >
+                Create asset models
+              </Button>
+            </p>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <DynamicSelect
+            disabled={disabled}
+            defaultValue={assetModelId ?? undefined}
+            fieldName="assetModelId"
+            model={{ name: "assetModel", queryKey: "name" }}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+            placeholder="Select asset model"
+            contentLabel="Asset Models"
+            label="Asset Model"
+            hideLabel
+            initialDataKey="assetModels"
+            countKey="totalAssetModels"
+            closeOnSelect
+            selectionMode="set"
+            allowClear={true}
+            onChange={handleAssetModelChange}
           />
         </FormRow>
 
@@ -638,98 +800,6 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        <When truthy={isQuantityTracked}>
-          <div className="border-b pb-5">
-            <div className="mb-4">
-              <h2 className="mb-1 text-[18px] font-semibold">
-                Quantity tracking
-              </h2>
-              <p>Configure how quantities are tracked for this asset.</p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <FormRow
-                rowLabel="Quantity"
-                className="border-b-0 pb-[10px]"
-                required={true}
-              >
-                <Input
-                  type="number"
-                  label="Quantity"
-                  hideLabel
-                  name="quantity"
-                  disabled={disabled}
-                  min={1}
-                  step={1}
-                  className="w-full"
-                  defaultValue={quantity ?? ""}
-                  required={true}
-                  error={zo.errors.quantity()?.message}
-                />
-              </FormRow>
-
-              <FormRow
-                rowLabel="Unit of measure"
-                className="border-b-0 pb-[10px]"
-                subHeading="What unit are these counted in?"
-              >
-                <Input
-                  label="Unit of measure"
-                  hideLabel
-                  name="unitOfMeasure"
-                  disabled={disabled}
-                  className="w-full"
-                  placeholder="e.g., pcs, boxes, liters"
-                  defaultValue={unitOfMeasure ?? ""}
-                />
-              </FormRow>
-
-              <FormRow
-                rowLabel="Behavior mode"
-                className="border-b-0 pb-[10px]"
-                subHeading="What happens after checkout?"
-                required={true}
-              >
-                <Select
-                  name="consumptionType"
-                  defaultValue={consumptionType ?? ""}
-                  disabled={disabled}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select behavior mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ConsumptionType.ONE_WAY}>
-                      Used up (one-way) — consumed and not returned
-                    </SelectItem>
-                    <SelectItem value={ConsumptionType.TWO_WAY}>
-                      Returnable (two-way) — checked out and returned
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </FormRow>
-
-              <FormRow
-                rowLabel="Min quantity"
-                className="border-b-0 pb-[10px]"
-                subHeading="Get alerted when stock drops below this level."
-              >
-                <Input
-                  type="number"
-                  label="Min quantity"
-                  hideLabel
-                  name="minQuantity"
-                  disabled={disabled}
-                  min={0}
-                  step={1}
-                  className="w-full"
-                  defaultValue={minQuantity ?? ""}
-                />
-              </FormRow>
-            </div>
-          </div>
-        </When>
-
         {canUseBarcodes ? (
           <FormRow
             rowLabel={"Barcodes"}
@@ -808,3 +878,213 @@ const AddAnother = ({ disabled }: { disabled: boolean }) => (
     </Tooltip>
   </TooltipProvider>
 );
+
+/** Radio card options for the tracking method selector. */
+const TRACKING_OPTIONS = [
+  {
+    value: AssetType.INDIVIDUAL,
+    title: "Individually tracked",
+    description:
+      "Each item gets its own QR code, custody record, and booking entry. Best for unique or high-value items.",
+  },
+  {
+    value: AssetType.QUANTITY_TRACKED,
+    title: "Tracked by quantity",
+    description:
+      "A single record represents a pool of identical items. Custody and bookings are managed by numeric quantity.",
+  },
+] as const;
+
+/**
+ * Styled radio-card selector for choosing the asset tracking method.
+ * Renders two stacked cards with radio circle, title, and description.
+ * When disabled (edit mode), wraps in a tooltip explaining the restriction.
+ */
+function TrackingMethodCards({
+  selectedAssetType,
+  onSelect,
+  disabled,
+  isEditMode,
+}: {
+  selectedAssetType: AssetType;
+  onSelect: (type: AssetType) => void;
+  disabled: boolean;
+  isEditMode: boolean;
+}) {
+  const cards = (
+    <div className="flex flex-col gap-2">
+      {TRACKING_OPTIONS.map((option) => {
+        const isSelected = selectedAssetType === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(option.value)}
+            className={tw(
+              "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+              isSelected
+                ? "border-primary-500 bg-primary-25"
+                : "border-gray-200 bg-white hover:border-gray-300",
+              disabled && "cursor-not-allowed opacity-50"
+            )}
+          >
+            {/* Radio circle indicator */}
+            <span
+              className={tw(
+                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2",
+                isSelected ? "border-primary-500" : "border-gray-300"
+              )}
+            >
+              {isSelected && (
+                <span className="size-2 rounded-full bg-primary-500" />
+              )}
+            </span>
+            <div className="flex flex-col">
+              <span className="text-[14px] font-medium text-gray-900">
+                {option.title}
+              </span>
+              <span className="text-[13px] text-gray-600">
+                {option.description}
+              </span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  /* In edit mode, wrap the cards in a tooltip explaining the restriction. */
+  if (isEditMode) {
+    return (
+      <TooltipProvider delayDuration={100}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>{cards}</div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p className="text-sm">
+              Tracking method cannot be changed after creation.
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return cards;
+}
+
+/** Label + description pairs for consumption type options. */
+const CONSUMPTION_OPTIONS = [
+  {
+    value: ConsumptionType.ONE_WAY,
+    label: "Used up (one-way) — consumed and not returned",
+  },
+  {
+    value: ConsumptionType.TWO_WAY,
+    label: "Returnable (two-way) — checked out and returned",
+  },
+] as const;
+
+/**
+ * Popover-based select for picking the consumption type.
+ * Follows the pattern from field-selector.tsx using @radix-ui/react-popover
+ * instead of the deprecated DropdownMenu / Select components.
+ */
+/** Popover-based select for consumption type, following the field-selector pattern. */
+function ConsumptionTypeSelect({
+  defaultValue,
+  disabled,
+  error,
+  onSelect,
+}: {
+  defaultValue?: ConsumptionType;
+  disabled: boolean;
+  error?: string;
+  /** Called when a value is selected — used to clear external error state. */
+  onSelect?: () => void;
+}) {
+  const [selected, setSelected] = useState<ConsumptionType | undefined>(
+    defaultValue
+  );
+  const [open, setOpen] = useState(false);
+
+  const selectedLabel =
+    CONSUMPTION_OPTIONS.find((o) => o.value === selected)?.label ??
+    "Select consumption type";
+
+  return (
+    <div className="w-full">
+      {selected ? (
+        <input type="hidden" name="consumptionType" value={selected} />
+      ) : null}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            className={tw(
+              "flex w-full items-center justify-between rounded border bg-white px-3 py-2.5 text-left text-[14px]",
+              "focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25",
+              selected ? "text-gray-900" : "text-gray-500",
+              error ? "border-error-300" : "border-gray-300",
+              disabled && "cursor-not-allowed opacity-50"
+            )}
+          >
+            <span className="truncate">{selectedLabel}</span>
+            <svg
+              className="size-4 shrink-0 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="start"
+            className="z-[999999] mt-1 w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-md"
+          >
+            {CONSUMPTION_OPTIONS.map((option) => (
+              <div
+                key={option.value}
+                role="option"
+                aria-selected={selected === option.value}
+                tabIndex={0}
+                className={tw(
+                  "cursor-pointer px-3 py-2 text-[14px] text-gray-700 hover:bg-gray-50",
+                  selected === option.value &&
+                    "bg-gray-50 font-medium text-gray-900"
+                )}
+                onClick={() => {
+                  setSelected(option.value);
+                  setOpen(false);
+                  onSelect?.();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected(option.value);
+                    setOpen(false);
+                    onSelect?.();
+                  }
+                }}
+              >
+                {option.label}
+              </div>
+            ))}
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+      {error ? <p className="mt-1 text-sm text-error-500">{error}</p> : null}
+    </div>
+  );
+}

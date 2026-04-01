@@ -323,6 +323,19 @@ export function AdvancedIndexColumn({
     case "barcode_EAN13":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "quantity":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.type === AssetType.QUANTITY_TRACKED && item.quantity != null ? (
+            `${item.quantity}${
+              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
+            }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 

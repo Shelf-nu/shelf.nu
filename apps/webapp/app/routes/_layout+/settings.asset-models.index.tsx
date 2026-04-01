@@ -1,42 +1,31 @@
+/**
+ * Route: Asset Models Index
+ *
+ * Displays the paginated list of asset models with search and bulk actions.
+ *
+ * @see {@link file://./settings.asset-models.tsx} Parent layout
+ */
 import type { AssetModel, Category } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "react-router";
-import { data, Link, Outlet } from "react-router";
-import { z } from "zod";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { data } from "react-router";
 import AssetModelQuickActions from "~/components/asset-model/asset-model-quick-actions";
 import AssetModelBulkActionsDropdown from "~/components/asset-model/bulk-actions-dropdown";
-import { ErrorContent } from "~/components/errors";
-import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
-import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  deleteAssetModel,
-  getAssetModels,
-} from "~/modules/asset-model/service.server";
+import { getAssetModels } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  payload,
-  error,
-  getCurrentSearchParams,
-  parseData,
-} from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
@@ -71,6 +60,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const header: HeaderData = {
       title: "Asset Models",
+      subHeading:
+        "Asset models are templates for grouping similar assets. Use them to define default values and track groups of identical items like laptop models or equipment types.",
     };
     const modelName = {
       singular: "asset model",
@@ -102,55 +93,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-
-  try {
-    const { organizationId } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.assetModel,
-      action: PermissionAction.delete,
-    });
-
-    const { id } = parseData(
-      await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
-      {
-        additionalData: { userId },
-      }
-    );
-
-    await deleteAssetModel({ id, organizationId });
-
-    sendNotification({
-      title: "Asset model deleted",
-      message: "Your asset model has been deleted successfully",
-      icon: { name: "trash", variant: "error" },
-      senderId: userId,
-    });
-
-    return payload({ success: true });
-  } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
-    return data(error(reason), { status: reason.status });
-  }
-}
-
-export const handle = {
-  breadcrumb: () => <Link to="/asset-models">Asset Models</Link>,
-};
-export const ErrorBoundary = () => <ErrorContent />;
-
-export default function AssetModelsPage() {
+export default function AssetModelsIndexPage() {
   const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
-      <Header>
+      <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
+        <div>
+          <h2 className="text-lg text-gray-900">Asset Models</h2>
+          <p className="text-sm text-gray-600">
+            Asset models are templates for grouping similar assets. Use them to
+            define default values and track groups of identical items.
+          </p>
+        </div>
         <Button
           to="new"
           role="link"
@@ -159,29 +114,26 @@ export default function AssetModelsPage() {
         >
           New asset model
         </Button>
-      </Header>
-      <ListContentWrapper>
-        <Filters />
-        <Outlet />
-        <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <AssetModelBulkActionsDropdown />
-          }
-          ItemComponent={AssetModelItem}
-          headerChildren={
-            <>
-              <Th>Description</Th>
-              <Th>Default category</Th>
-              <Th>Assets</Th>
-              <Th>Actions</Th>
-            </>
-          }
-        />
-      </ListContentWrapper>
+      </div>
+      <List
+        bulkActions={
+          isBaseOrSelfService ? undefined : <AssetModelBulkActionsDropdown />
+        }
+        ItemComponent={AssetModelItem}
+        headerChildren={
+          <>
+            <Th>Description</Th>
+            <Th>Default category</Th>
+            <Th>Assets</Th>
+            <Th>Actions</Th>
+          </>
+        }
+      />
     </>
   );
 }
 
+/** Renders a single row in the asset models list table. */
 const AssetModelItem = ({
   item,
 }: {

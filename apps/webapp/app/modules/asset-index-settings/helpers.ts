@@ -25,6 +25,7 @@ export const fixedFields = [
   "custody",
   "upcomingReminder",
   "actions",
+  "quantity",
   "upcomingBookings",
 ] as const;
 
@@ -74,6 +75,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_DataMatrix: "DataMatrix",
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
+  quantity: "Quantity",
   upcomingBookings: "Upcoming Bookings",
 };
 
@@ -95,6 +97,7 @@ export const defaultFields: Column[] = [
   { name: "upcomingReminder", visible: true, position: 14 },
   { name: "actions", visible: true, position: 15 },
   { name: "upcomingBookings", visible: true, position: 16 },
+  { name: "quantity", visible: false, position: 17 },
 ];
 
 // Generate barcode columns when barcodes are enabled

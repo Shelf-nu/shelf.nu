@@ -485,6 +485,14 @@ export const buildCsvExportDataFromAssets = ({
             break;
           }
 
+          case "quantity":
+            value =
+              asset.type === "QUANTITY_TRACKED" && asset.quantity != null
+                ? `${asset.quantity}${
+                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
+                  }`
+                : "";
+            break;
           case "actions":
             value = "";
             break;

@@ -10,6 +10,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import { UnlockBarcodesBanner } from "~/components/barcode/unlock-barcodes-banner";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -411,7 +412,7 @@ export default function AssetOverview() {
                   </span>
                   <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     <Button
-                      to={`/asset-models/${asset.assetModel.id}/edit`}
+                      to={`/settings/asset-models/${asset.assetModel.id}/edit`}
                       variant="link-gray"
                       className="text-gray-600 underline"
                     >
@@ -420,51 +421,6 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
-              {asset?.type === AssetType.QUANTITY_TRACKED ? (
-                <>
-                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                      Tracking method
-                    </span>
-                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                      <Badge color="#6366f1" withDot={false}>
-                        Tracked by quantity
-                      </Badge>
-                    </div>
-                  </li>
-                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                      Quantity
-                    </span>
-                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                      {asset.quantity ?? 0}
-                      {asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""}
-                    </div>
-                  </li>
-                  {asset.minQuantity != null ? (
-                    <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                      <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                        Min quantity
-                      </span>
-                      <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                        {asset.minQuantity}
-                        {asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""}
-                      </div>
-                    </li>
-                  ) : null}
-                  <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
-                    <span className="w-1/4 text-[14px] font-medium text-gray-900">
-                      Behavior mode
-                    </span>
-                    <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                      {asset.consumptionType === "ONE_WAY"
-                        ? "Used up (one-way)"
-                        : "Returnable (two-way)"}
-                    </div>
-                  </li>
-                </>
-              ) : null}
-
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
                 const barcodeCount =
@@ -688,6 +644,15 @@ export default function AssetOverview() {
               currentUserId: userId,
             })}
           />
+
+          {asset?.type === AssetType.QUANTITY_TRACKED ? (
+            <QuantityOverviewCard
+              quantity={asset.quantity ?? null}
+              unitOfMeasure={asset.unitOfMeasure ?? null}
+              minQuantity={asset.minQuantity ?? null}
+              consumptionType={asset.consumptionType ?? null}
+            />
+          ) : null}
 
           {asset && (
             <CodePreview

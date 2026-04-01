@@ -954,6 +954,7 @@ export async function createAsset({
   minQuantity,
   consumptionType,
   unitOfMeasure,
+  assetModelId,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -975,6 +976,7 @@ export async function createAsset({
   minQuantity?: Asset["minQuantity"];
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
+  assetModelId?: string;
 }) {
   // Server-side validation for quantity-tracked assets
   if (type === "QUANTITY_TRACKED") {
@@ -1082,6 +1084,17 @@ export async function createAsset({
           category: {
             connect: {
               id: categoryId,
+            },
+          },
+        });
+      }
+
+      /** If an assetModelId is passed, link the asset model to the asset. */
+      if (assetModelId) {
+        Object.assign(data, {
+          assetModel: {
+            connect: {
+              id: assetModelId,
             },
           },
         });
@@ -1249,6 +1262,7 @@ export async function updateAsset({
   mainImageExpiration,
   thumbnailImage,
   categoryId,
+  assetModelId,
   tags,
   id,
   newLocationId,
@@ -1347,6 +1361,26 @@ export async function updateAsset({
         category: {
           connect: {
             id: categoryId,
+          },
+        },
+      });
+    }
+
+    /** If assetModelId is null, disconnect the asset model */
+    if (assetModelId === null) {
+      Object.assign(data, {
+        assetModel: {
+          disconnect: true,
+        },
+      });
+    }
+
+    /** If assetModelId is a valid ID, connect the asset model */
+    if (assetModelId && assetModelId !== null) {
+      Object.assign(data, {
+        assetModel: {
+          connect: {
+            id: assetModelId,
           },
         },
       });

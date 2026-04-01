@@ -40,6 +40,8 @@ export interface UpdateAssetPayload {
   description?: Asset["description"];
   /** Pass 'uncategorized' to clear the category */
   categoryId?: Asset["categoryId"];
+  /** Pass null to clear the asset model association */
+  assetModelId?: string | null;
   newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
@@ -148,6 +150,8 @@ export type AdvancedIndexAsset = Pick<
   | "status"
   | "type"
   | "valuation"
+  | "quantity"
+  | "unitOfMeasure"
   | "availableToBook"
   | "kitId"
 > & {
