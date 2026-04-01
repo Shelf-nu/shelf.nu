@@ -120,13 +120,14 @@ function stripQuotes(value: string): string {
  * with a single quote to prevent formula injection in Excel/Sheets.
  */
 export function escapeCsvValue(value: string): string {
-  // Prevent spreadsheet formula injection
-  let safe = value;
-  if (/^[=+\-@]/.test(safe)) {
-    safe = `'${safe}`;
-  }
-  if (/[",\n\r]/.test(safe)) {
+  // Prevent spreadsheet formula injection — always quote so the
+  // leading apostrophe stays inside the quoted field
+  if (/^[=+\-@]/.test(value)) {
+    const safe = `'${value}`;
     return `"${safe.replace(/"/g, '""')}"`;
   }
-  return safe;
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }

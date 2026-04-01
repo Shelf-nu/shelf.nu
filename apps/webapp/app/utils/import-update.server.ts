@@ -1,3 +1,12 @@
+/**
+ * @file Server-side bulk asset update via CSV import.
+ * Provides header analysis, field-level diffing, preview generation,
+ * entity resolution (categories, locations, tags), and batch update
+ * application for the import-update workflow.
+ *
+ * @see {@link file://./../../routes/_layout+/assets.import-update.tsx} Route handler
+ * @see {@link file://./../../components/assets/bulk-update/form.tsx} Client component
+ */
 import type { Asset, CustomField, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {

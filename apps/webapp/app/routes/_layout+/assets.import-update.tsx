@@ -53,6 +53,17 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       })
     );
 
+    // Validate file presence before parsing
+    const file = clonedFormData.get("file");
+    if (!file || !(file instanceof File) || file.size === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Please select a CSV file to upload.",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length === 0) {
       throw new ShelfError({
