@@ -51,6 +51,7 @@ export function UpdateImportForm() {
   const [agreed, setAgreed] = useState("");
   const lastProcessedPreview = useRef<UpdatePreview | null>(null);
   const lastProcessedResult = useRef<BulkUpdateResult | null>(null);
+  const activeFileNonce = useRef(0);
 
   const isPreviewLoading = useDisabled(previewFetcher);
   const isApplyLoading = useDisabled(applyFetcher);
@@ -67,8 +68,11 @@ export function UpdateImportForm() {
       applyFetcher.reset();
 
       // Client-side validation: read first few KB to check headers
+      // Use a nonce to ignore stale FileReader results from a previous file
+      const nonce = ++activeFileNonce.current;
       const reader = new FileReader();
       reader.onload = () => {
+        if (nonce !== activeFileNonce.current) return;
         const text = reader.result as string;
         const validation = validateCsvClientSide(text);
         setClientValidation(validation);

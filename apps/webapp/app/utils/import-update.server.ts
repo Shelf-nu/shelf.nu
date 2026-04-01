@@ -127,6 +127,8 @@ interface ParsedColumn {
   internalKey: string;
   /** "core" | "customField" | "ignored" */
   kind: "core" | "customField" | "ignored";
+  /** Column index in the CSV (for building the column index map) */
+  csvIndex?: number;
   /** For custom fields: the definition */
   cfDef?: Pick<
     CustomField,
@@ -253,6 +255,7 @@ export function analyzeUpdateHeaders(
           csvHeader: header,
           internalKey: internalField,
           kind: "core",
+          csvIndex: i,
         });
       } else {
         // Known field but not updatable (Status, Kit, etc.) — treat as ignored
@@ -267,6 +270,7 @@ export function analyzeUpdateHeaders(
             csvHeader: header,
             internalKey: `cf:${cf.name}`,
             kind: "customField",
+            csvIndex: i,
             cfDef: {
               name: cf.name,
               type: cf.type,
@@ -287,12 +291,12 @@ export function analyzeUpdateHeaders(
     }
   }
 
-  // Build column index map for updatable columns
+  // Build column index map for updatable columns using the original
+  // loop index (stored in csvIndex) to handle duplicate header names
   const columnIndexMap = new Map<number, ParsedColumn>();
   for (const col of updatableColumns) {
-    const idx = headersTrimmed.indexOf(col.csvHeader);
-    if (idx >= 0) {
-      columnIndexMap.set(idx, col);
+    if (col.csvIndex !== undefined) {
+      columnIndexMap.set(col.csvIndex, col);
     }
   }
 
@@ -480,11 +484,12 @@ export function computeAssetDiffs({
       });
       continue;
     }
-    seenIds.set(existingAsset.id, rowNumber);
 
     // Cross-check: if both identifier columns exist and have values,
     // verify they point to the same asset to prevent accidental mismatch.
     // Also reject if one identifier is populated but unresolved.
+    // NOTE: seenIds is set AFTER this check so a failed cross-check
+    // doesn't block a later valid row for the same asset.
     if (headerAnalysis.fallbackId && fallbackAssets) {
       const primaryValue = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
       const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
@@ -525,6 +530,9 @@ export function computeAssetDiffs({
         }
       }
     }
+
+    // Mark asset as seen only after all identifier checks pass
+    seenIds.set(existingAsset.id, rowNumber);
 
     // Compute per-field diffs
     const changes: FieldChange[] = [];
