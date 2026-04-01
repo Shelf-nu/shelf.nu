@@ -315,7 +315,11 @@ export async function generateKitCustodyAcknowledgementToken(kitCustodyId: strin
 // STRICTLY persist-before-sign:
 // 1. Atomically increment KitCustody.tokenVersion via UPDATE ... RETURNING
 // 2. Guard: if zero rows -> throw ShelfError("KitCustody not found")
-// 3. Update all child Custody records to same version (single UPDATE with subquery)
+// 3. Update child Custody records to same version, scoped by custodian:
+//    UPDATE "Custody" SET "tokenVersion" = newVersion
+//    WHERE "assetId" IN (SELECT "id" FROM "Asset" WHERE "kitId" = kit.id)
+//      AND "teamMemberId" = (SELECT "custodianId" FROM "KitCustody" WHERE "id" = kitCustodyId)
+//    (custodian filter prevents rotating unrelated custody rows if kit was reassigned)
 // 4. Guard: if zero child rows -> throw ShelfError("No child custody records found")
 // 5. Sign JWT with:
 //    - payload: { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
@@ -916,7 +920,7 @@ Pass to the banner component.
 
 **New file:** `apps/webapp/app/routes/api+/custody.acknowledgement.ts`
 
-Accepts `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId` (kit). Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only).
+Accepts **exactly one** of `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId` (kit). Validate with Zod discriminated union or manual XOR check — reject if zero or multiple identifiers are provided. Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only).
 
 **Multi-tenant safety:** ALL fetch and update queries in this endpoint MUST scope to `organizationId` (from the admin's session) via the `Asset.organizationId` join. This prevents an admin in Org A from rotating tokens for Org B's custodies, even if they somehow obtain a valid custody ID. Permission checks alone are insufficient — raw IDs in request bodies can be forged.
 
