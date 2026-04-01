@@ -1,9 +1,9 @@
 import type React from "react";
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
-import { isFormProcessing } from "~/utils/form";
 import type {
   UpdatePreview,
   BulkUpdateResult,
@@ -34,11 +34,11 @@ export function UpdateImportForm() {
   const [stage, setStage] = useState<Stage>("upload");
   const [preview, setPreview] = useState<UpdatePreview | null>(null);
   const [result, setResult] = useState<BulkUpdateResult | null>(null);
-  const [agreed, setAgreed] = useState<"I AGREE" | "">("");
+  const [agreed, setAgreed] = useState("");
   const lastProcessedPreview = useRef<UpdatePreview | null>(null);
 
-  const isPreviewLoading = isFormProcessing(previewFetcher.state);
-  const isApplyLoading = isFormProcessing(applyFetcher.state);
+  const isPreviewLoading = useDisabled(previewFetcher);
+  const isApplyLoading = useDisabled(applyFetcher);
 
   const processFile = useCallback(
     (file: File) => {

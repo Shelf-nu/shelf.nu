@@ -1,5 +1,4 @@
 import type React from "react";
-import { useRef } from "react";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import type { UpdatePreview } from "~/utils/import-update.server";
@@ -38,15 +37,13 @@ export function PreviewDisplay({
   preview: UpdatePreview;
   formRef: React.RefObject<HTMLFormElement | null>;
   agreed: string;
-  setAgreed: (v: "I AGREE" | "") => void;
+  setAgreed: (v: string) => void;
   applyFetcher: ReturnType<typeof useFetcherWithReset<typeof action>>;
   isApplyLoading: boolean;
   selectedFile: File | null;
   onReanalyze: () => void;
   isReanalyzing: boolean;
 }) {
-  const applyFormRef = useRef<HTMLFormElement>(null);
-
   const totalChanges = preview.totalFieldChanges;
   const totalAssets = preview.assetsToUpdate.length;
   const hasNewEntities =
@@ -331,12 +328,7 @@ export function PreviewDisplay({
 
       {/* Apply confirmation */}
       {preview.assetsToUpdate.length > 0 && (
-        <applyFetcher.Form
-          method="post"
-          encType="multipart/form-data"
-          ref={applyFormRef}
-        >
-          <input type="hidden" name="intent" value="apply-update" />
+        <>
           <AlertDialog
             onOpenChange={(open) => {
               if (!open) {
@@ -405,9 +397,7 @@ export function PreviewDisplay({
                   autoFocus
                   name="agree"
                   value={agreed}
-                  onChange={(e) =>
-                    setAgreed(e.target.value.toUpperCase() as any)
-                  }
+                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
                   placeholder="I AGREE"
                   pattern="^I AGREE$"
                   required
@@ -439,7 +429,7 @@ export function PreviewDisplay({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </applyFetcher.Form>
+        </>
       )}
 
       {preview.assetsToUpdate.length === 0 && (
