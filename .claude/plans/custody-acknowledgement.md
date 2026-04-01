@@ -448,6 +448,45 @@ export async function recordCustodyAcknowledgement({
 - If the row was already transitioned, the operation is **idempotent** — returns the existing state without error
 - This eliminates the need for an explicit status enum; the state is derived: pending (`both null`), acknowledged (`acceptedAt set`), declined (`declinedAt set`)
 
+### 3.6b Record batch acknowledgement
+
+```typescript
+export async function recordBatchCustodyAcknowledgement({
+  batchId,
+  method,
+  ip,
+  userAgent,
+  organizationId,
+}: RecordBatchAcknowledgementParams): Promise<{ transitionedIds: string[]; custodies: Custody[] }>
+// Updates ALL pending custody records in the batch:
+//   WHERE "acknowledgementBatchId" = batchId AND acceptedAt IS NULL AND declinedAt IS NULL
+//     AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = organizationId)
+// Sets: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
+// Returns list of IDs that actually transitioned (for note creation) + all custodies
+// Already-settled rows are skipped (idempotent)
+```
+
+### 3.6c Record kit custody acknowledgement
+
+```typescript
+export async function recordKitCustodyAcknowledgement({
+  kitCustodyId,
+  method,
+  ip,
+  userAgent,
+  organizationId,
+}: RecordKitAcknowledgementParams): Promise<{ transitioned: boolean; kitCustody: KitCustody; childTransitionedIds: string[] }>
+// In a single transaction:
+// 1. Update KitCustody: acceptedAt = now(), etc.
+//    WHERE id = kitCustodyId AND acceptedAt IS NULL AND declinedAt IS NULL
+// 2. Cascade to child Custody records (pending only):
+//    WHERE assetId IN (SELECT id FROM Asset WHERE kitId = (SELECT kitId FROM KitCustody WHERE id = kitCustodyId))
+//      AND "teamMemberId" = (SELECT "custodianId" FROM "KitCustody" WHERE "id" = kitCustodyId)
+//      AND acceptedAt IS NULL AND declinedAt IS NULL
+//      AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = organizationId)
+// Returns { transitioned, kitCustody, childTransitionedIds } for note/email logic
+```
+
 ### 3.7 Send acknowledgement email
 
 ```typescript
@@ -634,12 +673,14 @@ Handle two intents:
 
 **`acknowledge`:**
 1. Verify token again (full verification including rotation check)
-2. **DB transaction:** Call `recordCustodyAcknowledgement()` — returns `{ transitioned, custody }`
-3. **Only if `transitioned === true`:**
-   - Create acknowledgement activity note (inside same transaction or immediately after)
-   - If kit custody → cascade `acceptedAt` to all child custody records that are still pending (`WHERE acceptedAt IS NULL AND declinedAt IS NULL`) + create notes for each updated asset. Already-settled child rows are skipped to preserve idempotency.
+2. **Branch by token purpose and call the matching record function:**
+   - Single (`custody-ack`): `recordCustodyAcknowledgement()` → `{ transitioned, custody }`
+   - Batch (`custody-ack-batch`): `recordBatchCustodyAcknowledgement()` → `{ transitionedIds, custodies }`
+   - Kit (`custody-ack-kit`): `recordKitCustodyAcknowledgement()` → `{ transitioned, kitCustody, childTransitionedIds }`
+3. **Only for records that actually transitioned:**
+   - Create acknowledgement activity notes (one per transitioned custody/asset)
    - **After commit:** Enqueue admin + custodian notification emails via pg-boss
-4. If `transitioned === false` -> no notes, no emails (idempotent retry — just render current state)
+4. If nothing transitioned → no notes, no emails (idempotent retry — just render current state)
 5. Render success state (shows acknowledgement date regardless of whether this request caused the transition)
 
 **`decline`:**
@@ -1097,7 +1138,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 15. `apps/webapp/app/config/addon-copy.ts` — Upsell copy
 16. `apps/webapp/server/logger.ts` — Redact token query param on acceptance routes
 17. `apps/webapp/app/modules/stripe-webhook/handlers.server.ts` — Validate CUSTODY_TOKEN_SECRET on feature enablement
-17. `apps/webapp/app/utils/env.ts` — Add CUSTODY_TOKEN_SECRET
+18. `apps/webapp/app/utils/env.ts` — Add CUSTODY_TOKEN_SECRET
 
 ---
 
