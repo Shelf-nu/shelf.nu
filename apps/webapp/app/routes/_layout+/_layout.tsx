@@ -55,6 +55,7 @@ import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   installPwaPromptCookie,
+  expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
@@ -231,6 +232,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {
         headers: [
           setCookie(await userPrefs.serialize(userPrefsCookie)),
+          expireHostOnlyUserPrefsCookie(),
           ...(cookieRefreshNeeded
             ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
             : []),
