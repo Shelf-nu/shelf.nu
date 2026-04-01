@@ -25,6 +25,8 @@ export const Toaster = () => {
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
 
+  // Side effect: useTabId patches window.fetch to inject an X-Tab-Id header
+  // on same-origin requests, so the server can scope notifications to this tab.
   const tabId = useTabId();
 
   /** New notification coming from the server */

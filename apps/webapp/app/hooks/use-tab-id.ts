@@ -17,6 +17,9 @@ export function useTabId(): string {
     const tabId = tabIdRef.current;
     if (!tabId) return;
 
+    // Guard: skip patching if another instance of this hook already patched fetch
+    if ((window.fetch as any).__shelfTabIdPatch) return;
+
     const originalFetch = window.fetch;
 
     window.fetch = function patchedFetch(
@@ -30,7 +33,14 @@ export function useTabId(): string {
           ? input.href
           : input.url;
       const isSameOrigin =
-        url.startsWith("/") || url.startsWith(window.location.origin);
+        url.startsWith("/") ||
+        (() => {
+          try {
+            return new URL(url).origin === window.location.origin;
+          } catch {
+            return false;
+          }
+        })();
 
       if (isSameOrigin) {
         const headers = new Headers(init?.headers);
@@ -42,9 +52,14 @@ export function useTabId(): string {
 
       return originalFetch.call(window, input, init);
     };
+    const patchedFetchRef = window.fetch;
+    (patchedFetchRef as any).__shelfTabIdPatch = true;
 
     return () => {
-      window.fetch = originalFetch;
+      // Only restore if our patch is still the active one
+      if (window.fetch === patchedFetchRef) {
+        window.fetch = originalFetch;
+      }
     };
   }, []);
 
