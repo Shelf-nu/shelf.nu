@@ -414,7 +414,7 @@ export default function AssetOverview() {
                     {userHasPermission({
                       roles,
                       entity: PermissionEntity.assetModel,
-                      action: PermissionAction.read,
+                      action: PermissionAction.update,
                     }) ? (
                       <Button
                         to={`/settings/asset-models/${asset.assetModel.id}/edit`}

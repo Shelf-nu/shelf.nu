@@ -88,16 +88,28 @@ export const NewAssetFormSchema = z.object({
 
   // Tracking method & quantity fields
   type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
-  quantity: z.coerce
-    .number({ invalid_type_error: "Quantity must be a number" })
-    .int("Quantity must be a whole number")
-    .positive("Quantity is required and must be at least 1")
-    .optional(),
-  minQuantity: z.coerce
-    .number({ invalid_type_error: "Min quantity must be a number" })
-    .int("Min quantity must be a whole number")
-    .nonnegative("Min quantity cannot be negative")
-    .optional(),
+  quantity: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" || val === undefined ? undefined : +val))
+    .pipe(
+      z
+        .number({ invalid_type_error: "Quantity must be a number" })
+        .int("Quantity must be a whole number")
+        .positive("Quantity is required and must be at least 1")
+        .optional()
+    ),
+  minQuantity: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" || val === undefined ? undefined : +val))
+    .pipe(
+      z
+        .number({ invalid_type_error: "Min quantity must be a number" })
+        .int("Min quantity must be a whole number")
+        .nonnegative("Min quantity cannot be negative")
+        .optional()
+    ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
       errorMap: () => ({ message: "Please select a consumption type" }),

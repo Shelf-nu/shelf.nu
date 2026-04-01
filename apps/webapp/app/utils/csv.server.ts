@@ -501,10 +501,7 @@ export const buildCsvExportDataFromAssets = ({
                 : "Individual";
             break;
           case "assetModel":
-            value =
-              (asset as Record<string, any>).assetModelName ??
-              (asset as Record<string, any>).assetModel?.name ??
-              "";
+            value = asset.assetModelName ?? "";
             break;
           case "actions":
             value = "";
