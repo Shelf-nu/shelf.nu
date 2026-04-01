@@ -7,7 +7,7 @@ const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
   ACTIVE: BADGE_COLORS.violet,
   COMPLETED: BADGE_COLORS.green,
   CANCELLED: BADGE_COLORS.gray,
-  ARCHIVED: BADGE_COLORS.amber,
+  ARCHIVED: BADGE_COLORS.gray,
 };
 
 const auditStatusLabels: Record<AuditStatus, string> = {
