@@ -19,6 +19,7 @@ import {
 import { runWithRequestCache } from "./request-cache.server";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
+import { serverTiming } from "./timing.server";
 
 type ServerEnv = {
   Variables: Record<symbol, unknown>;
@@ -79,6 +80,9 @@ export default createHonoServer<ServerEnv>({
 
     // Attach a per-request AsyncLocalStorage cache for downstream loaders/actions.
     server.use("*", async (_c, next) => runWithRequestCache(() => next()));
+
+    // Measure total request duration (dev/staging only, skipped in production)
+    server.use("*", serverTiming());
 
     // Apply URL shortener middleware only when host matches
     // In v2, we check the host inside middleware instead of using getPath
