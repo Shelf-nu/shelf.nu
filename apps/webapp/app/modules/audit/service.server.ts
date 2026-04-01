@@ -2258,41 +2258,44 @@ export async function archiveAuditSession({
       });
     }
 
-    // Atomic update: include status in WHERE to prevent race conditions
-    // where a concurrent request changes the status between our check and update
-    const result = await db.auditSession.updateMany({
-      where: {
-        id: auditSessionId,
-        organizationId,
-        status: AuditStatus.COMPLETED,
-      },
-      data: { status: AuditStatus.ARCHIVED },
-    });
-
-    if (result.count === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit could not be archived. It may have been modified.",
-        additionalData: { auditSessionId, organizationId },
-        label,
-        status: 409,
+    // Wrap status update + activity note in a transaction so both
+    // succeed or fail together (prevents orphaned state changes)
+    await db.$transaction(async (tx) => {
+      // Atomic update: include status in WHERE to prevent race conditions
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: auditSessionId,
+          organizationId,
+          status: AuditStatus.COMPLETED,
+        },
+        data: { status: AuditStatus.ARCHIVED },
       });
-    }
 
-    // Fetch user info for the activity note
-    const user = await db.user.findFirst({
-      where: { id: userId },
-      select: { firstName: true, lastName: true, displayName: true },
-    });
+      if (result.count === 0) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit could not be archived. It may have been modified.",
+          additionalData: { auditSessionId, organizationId },
+          label,
+          status: 409,
+        });
+      }
 
-    // Create activity note: "[User] archived the audit"
-    await db.auditNote.create({
-      data: {
-        content: `${resolveUserDisplayName(user)} archived the audit`,
-        type: "UPDATE",
-        userId,
-        auditSessionId,
-      },
+      // Fetch user info for the activity note
+      const user = await tx.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, displayName: true },
+      });
+
+      // Create activity note: "[User] archived the audit"
+      await tx.auditNote.create({
+        data: {
+          content: `${resolveUserDisplayName(user)} archived the audit`,
+          type: "UPDATE",
+          userId,
+          auditSessionId,
+        },
+      });
     });
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
