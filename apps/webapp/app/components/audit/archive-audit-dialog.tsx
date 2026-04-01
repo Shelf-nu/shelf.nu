@@ -23,9 +23,13 @@ import {
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
 
+/** Props for the {@link ArchiveAuditDialog} component. */
 type ArchiveAuditDialogProps = {
+  /** Display name of the audit being archived */
   auditName: string;
+  /** Whether the dialog is currently visible */
   open: boolean;
+  /** Callback invoked when the dialog should close */
   onClose: () => void;
 };
 
