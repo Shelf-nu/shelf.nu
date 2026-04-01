@@ -1,3 +1,14 @@
+/**
+ * @file Archive Audit Dialog
+ *
+ * Renders a confirmation dialog for archiving a completed audit session.
+ * Used by the actions dropdown on the audit detail page when the audit
+ * status is COMPLETED. Submits the "archive-audit" intent via POST to
+ * the audit detail route action handler.
+ *
+ * @see {@link file://./actions-dropdown.tsx} - Triggers this dialog
+ * @see {@link file://../../routes/_layout+/audits.$auditId.tsx} - Action handler
+ */
 import { useEffect, useRef } from "react";
 import { Button } from "~/components/shared/button";
 import {
@@ -52,9 +63,9 @@ export function ArchiveAuditDialog({
             hidden from the default list view but can still be found using the
             status filter. This action cannot be undone.
             {actionData && "error" in actionData && actionData.error && (
-              <p className="mt-2 text-sm text-error-500">
+              <span className="mt-2 block text-sm text-error-500">
                 {actionData.error.message}
-              </p>
+              </span>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
