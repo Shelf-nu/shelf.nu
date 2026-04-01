@@ -63,6 +63,7 @@ declare global {
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
+      COOKIE_DOMAIN: string;
     }
   }
 }
@@ -136,6 +137,18 @@ export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
 export const URL_SHORTENER = getEnv("URL_SHORTENER", {
   isRequired: false,
 });
+
+/**
+ * Cookie domain for cross-subdomain cookie sharing.
+ * Set to ".shelf.nu" in production so the marketing site can read
+ * the user-prefs cookie to detect signed-in users.
+ * Trimmed and coerced to undefined if empty/whitespace.
+ */
+export const COOKIE_DOMAIN =
+  getEnv("COOKIE_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || undefined;
 
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
 export const FINGERPRINT = getEnv("FINGERPRINT", {
