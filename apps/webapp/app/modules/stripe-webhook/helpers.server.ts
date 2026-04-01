@@ -91,6 +91,7 @@ export function sendAdminInvoiceEmail({
     email: string;
     firstName?: string | null;
     lastName?: string | null;
+    displayName?: string | null;
   };
   eventType: string;
   invoiceId: string;
@@ -222,6 +223,7 @@ export async function constructVerifiedWebhookEvent(request: Request): Promise<{
         email: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         tierId: true,
         warnForNoPaymentMethod: true,
       },

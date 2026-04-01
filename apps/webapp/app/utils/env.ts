@@ -11,6 +11,7 @@ declare global {
       MAPTILER_TOKEN: string;
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
+      CLOUDFLARE_WEB_ANALYTICS_TOKEN: string;
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
@@ -38,6 +39,7 @@ declare global {
       MAPTILER_TOKEN: string;
       CRISP_WEBSITE_ID: string;
       MICROSOFT_CLARITY_ID: string;
+      CLOUDFLARE_WEB_ANALYTICS_TOKEN: string;
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
@@ -61,6 +63,7 @@ declare global {
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
+      COOKIE_DOMAIN: string;
     }
   }
 }
@@ -135,6 +138,18 @@ export const URL_SHORTENER = getEnv("URL_SHORTENER", {
   isRequired: false,
 });
 
+/**
+ * Cookie domain for cross-subdomain cookie sharing.
+ * Set to ".shelf.nu" in production so the marketing site can read
+ * the user-prefs cookie to detect signed-in users.
+ * Trimmed and coerced to undefined if empty/whitespace.
+ */
+export const COOKIE_DOMAIN =
+  getEnv("COOKIE_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  })?.trim() || undefined;
+
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
 export const FINGERPRINT = getEnv("FINGERPRINT", {
   isSecret: true,
@@ -201,6 +216,13 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
   isSecret: false,
   isRequired: false,
 });
+export const CLOUDFLARE_WEB_ANALYTICS_TOKEN = getEnv(
+  "CLOUDFLARE_WEB_ANALYTICS_TOKEN",
+  {
+    isSecret: false,
+    isRequired: false,
+  }
+);
 export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isSecret: false,
   isRequired: false,
@@ -282,6 +304,7 @@ export function getBrowserEnv() {
     MAPTILER_TOKEN,
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
+    CLOUDFLARE_WEB_ANALYTICS_TOKEN,
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
     CHROME_EXECUTABLE_PATH,

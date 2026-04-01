@@ -27,6 +27,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
@@ -45,6 +46,7 @@ import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
@@ -147,6 +149,7 @@ export async function simpleModeLoader({
     },
     tagsData,
     teamMembersForFormData,
+    notifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -178,6 +181,7 @@ export async function simpleModeLoader({
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -202,6 +206,7 @@ export async function simpleModeLoader({
             hasGetAllValue(searchParams, "teamMember"),
         })
       : Promise.resolve(null),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
@@ -225,10 +230,11 @@ export async function simpleModeLoader({
     );
   }
 
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -287,6 +293,7 @@ export async function simpleModeLoader({
       totalTeamMembers,
       currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
+      ...notifyData,
       filters,
       organizationId,
       locale,
@@ -389,6 +396,7 @@ export async function advancedModeLoader({
     teamMembersForFormData,
     bookings,
     totalBookings,
+    advNotifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -463,6 +471,7 @@ export async function advancedModeLoader({
         status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
     }),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
@@ -485,10 +494,11 @@ export async function advancedModeLoader({
     );
   }
 
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -549,6 +559,7 @@ export async function advancedModeLoader({
       currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
+      ...advNotifyData,
       categories,
       totalCategories,
       locations,

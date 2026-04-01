@@ -52,12 +52,17 @@ function useBarcodeAddonState() {
   const monthlyPrice = prices && "month" in prices ? prices.month : null;
   const yearlyPrice = prices && "year" in prices ? prices.year : null;
   const hasPrice = !!(monthlyPrice || yearlyPrice);
+  const hasPaymentMethod =
+    prices && "hasPaymentMethod" in prices
+      ? (prices.hasPaymentMethod as boolean)
+      : false;
 
   return {
     usedBarcodeTrial,
     monthlyPrice,
     yearlyPrice,
     hasPrice,
+    hasPaymentMethod,
     actionFetcher,
     disabled,
   };
@@ -68,6 +73,7 @@ function UnlockBarcodesModalContent({
   monthlyPrice,
   yearlyPrice,
   hasPrice,
+  hasPaymentMethod,
   usedBarcodeTrial,
   actionFetcher,
   disabled,
@@ -75,6 +81,7 @@ function UnlockBarcodesModalContent({
   monthlyPrice: PriceWithProduct | null;
   yearlyPrice: PriceWithProduct | null;
   hasPrice: boolean;
+  hasPaymentMethod: boolean;
   usedBarcodeTrial: boolean;
   actionFetcher: ReturnType<typeof useFetcher>;
   disabled: boolean;
@@ -105,6 +112,7 @@ function UnlockBarcodesModalContent({
           monthlyPrice={monthlyPrice}
           yearlyPrice={yearlyPrice}
           usedBarcodeTrial={usedBarcodeTrial}
+          hasPaymentMethod={hasPaymentMethod}
           actionFetcher={actionFetcher}
           disabled={disabled}
         />
@@ -202,18 +210,21 @@ function BarcodeModalPricing({
   monthlyPrice,
   yearlyPrice,
   usedBarcodeTrial,
+  hasPaymentMethod,
   actionFetcher,
   disabled,
 }: {
   monthlyPrice: PriceWithProduct | null;
   yearlyPrice: PriceWithProduct | null;
   usedBarcodeTrial: boolean;
+  hasPaymentMethod: boolean;
   actionFetcher: ReturnType<typeof useFetcher>;
   disabled: boolean;
 }) {
   const [selectedInterval, setSelectedInterval] = useState<"month" | "year">(
     "year"
   );
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const canTrial = !usedBarcodeTrial;
   const selectedPrice =
@@ -297,16 +308,38 @@ function BarcodeModalPricing({
         )}
       </div>
 
+      {canTrial && hasPaymentMethod && (
+        <div className="rounded-lg border border-[#FFE082] bg-[#FFF8E1] p-3">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-[13px] text-gray-600">
+              I understand that after the 7-day free trial, my payment method on
+              file will be automatically charged at the regular subscription
+              rate. I can cancel anytime before the trial ends to avoid being
+              charged.
+            </span>
+          </label>
+        </div>
+      )}
+
       {canTrial && yearlyPrice && (
         <actionFetcher.Form method="post" action="/api/barcode-addon">
           <input type="hidden" name="priceId" value={yearlyPrice.id} />
+          {consentChecked && (
+            <input type="hidden" name="consentAcknowledged" value="true" />
+          )}
           <Button
             type="submit"
             name="intent"
             value="trial"
             variant="primary"
             width="full"
-            disabled={disabled}
+            disabled={disabled || (hasPaymentMethod && !consentChecked)}
           >
             <span className="flex items-center gap-2">
               <SparklesIcon className="size-4" />

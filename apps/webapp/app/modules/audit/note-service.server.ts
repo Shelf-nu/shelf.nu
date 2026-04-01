@@ -67,6 +67,7 @@ export async function getAuditNotes({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             profilePicture: true,
           },

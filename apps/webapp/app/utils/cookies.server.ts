@@ -9,6 +9,7 @@ import type {
 import { cleanParamsForCookie } from "~/hooks/search-params";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import { COOKIE_DOMAIN } from "./env";
 import { getCurrentSearchParams } from "./http.server";
 
 // find cookie by name from request headers
@@ -67,7 +68,21 @@ export function setCookie(cookieValue: string): [string, string] {
 
 export const userPrefs = createCookie("user-prefs", {
   maxAge: 604_800, // one week
+  sameSite: "lax" as const,
+  domain: COOKIE_DOMAIN, // e.g. ".shelf.nu" — lets the marketing site detect signed-in users
 });
+
+/**
+ * Expires the old host-only `user-prefs` cookie that was set before the
+ * `domain` attribute was added. Without this, browsers carry two cookies
+ * with the same name (one host-only, one domain-scoped) for up to 7 days.
+ *
+ * Safe to call on every request — it's a no-op once the old cookie is gone.
+ * @TODO Can be removed after rollout (≥ 1 week post-deploy).
+ */
+export function expireHostOnlyUserPrefsCookie(): [string, string] {
+  return ["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"];
+}
 
 export async function updateCookieWithPerPage(
   request: Request,

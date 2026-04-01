@@ -177,6 +177,7 @@ export async function getLocation(
                           id: true,
                           firstName: true,
                           lastName: true,
+                          displayName: true,
                           profilePicture: true,
                           email: true,
                         },
@@ -845,7 +846,7 @@ async function createLocationEditNotes({
 
   const user = await db.user.findFirst({
     where: { id: userId },
-    select: { firstName: true, lastName: true },
+    select: { firstName: true, lastName: true, displayName: true },
   });
   const userLink = wrapUserLinkForNote({
     id: userId,
@@ -1225,6 +1226,7 @@ export async function getLocationKits(
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                       email: true,
                     },
@@ -1318,6 +1320,7 @@ async function createBulkLocationChangeNotes({
         select: {
           firstName: true;
           lastName: true;
+          displayName: true;
           id: true;
         };
       };
@@ -1337,6 +1340,7 @@ async function createBulkLocationChangeNotes({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       })
       .catch((cause) => {
@@ -1565,6 +1569,7 @@ export async function updateLocationAssets({
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               id: true,
             },
           },
@@ -1797,6 +1802,7 @@ export async function updateLocationKits({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       });
 
@@ -1956,6 +1962,7 @@ export async function updateLocationKits({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);

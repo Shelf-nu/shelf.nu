@@ -9,6 +9,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   BOOKING_INCLUDE_FOR_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
@@ -18,6 +19,7 @@ import {
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createStatusTransitionNote,
   scheduleNextBookingJob,
@@ -40,36 +42,55 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  const email = booking.custodianUser?.email;
-
-  if (email && booking.from && booking.to) {
-    const html = await bookingUpdatesTemplateString({
+  if (booking.from && booking.to) {
+    // Resolve recipients with isScheduledJob: true so no editor is excluded
+    // (scheduled jobs have no human actor to filter out)
+    const recipients = await getBookingNotificationRecipients({
       booking,
-      heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
-        new Date(booking.from),
-        new Date()
-      )}.`,
-      assetCount: booking._count.assets,
-      hints: data.hints,
+      eventType: "CHECKOUT_REMINDER",
+      organizationId: booking.organizationId,
+      isScheduledJob: true,
     });
 
-    sendEmail({
-      to: email,
-      subject: `🔔 Checkout reminder (${booking.name}) - shelf.nu`,
-      text: checkoutReminderEmailContent({
+    if (recipients.length > 0) {
+      const custodian =
+        resolveUserDisplayName(booking.custodianUser) ||
+        (booking.custodianTeamMember?.name as string);
+
+      const subject = `🔔 Checkout reminder (${booking.name}) - shelf.nu`;
+
+      const text = checkoutReminderEmailContent({
         bookingName: booking.name,
         assetsCount: booking._count.assets,
-        custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
-          (booking.custodianTeamMember?.name as string),
+        custodian,
         from: booking.from,
         to: booking.to,
         bookingId: booking.id,
         hints: data.hints,
         customEmailFooter: booking.organization.customEmailFooter,
-      }),
-      html,
-    });
+      });
+
+      for (const recipient of recipients) {
+        const html = await bookingUpdatesTemplateString({
+          booking,
+          heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+            new Date(booking.from),
+            new Date()
+          )}.`,
+          assetCount: booking._count.assets,
+          hints: data.hints,
+          recipientReason: recipient.reason,
+          recipientEmail: recipient.email,
+        });
+
+        sendEmail({
+          to: recipient.email,
+          subject,
+          text,
+          html,
+        });
+      }
+    }
   }
 };
 
@@ -88,18 +109,17 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
       });
     });
 
-  const email = booking.custodianUser?.email;
-
   /**
    * We need to meet some conditions to send the reminder, most important the booking needs to be ongoing so we dont send check-in reminder for assets that are not even checked out yet
    */
-  if (
-    email &&
-    booking.from &&
-    booking.to &&
-    booking.status === BookingStatus.ONGOING
-  ) {
-    await sendCheckinReminder(booking, booking._count.assets, data.hints);
+  // Delegate to sendCheckinReminder which handles recipient resolution internally
+  if (booking.from && booking.to && booking.status === BookingStatus.ONGOING) {
+    await sendCheckinReminder(
+      booking,
+      booking._count.assets,
+      data.hints,
+      booking.organizationId
+    );
   }
 
   //schedule the next job
@@ -156,34 +176,50 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     content: `Booking became overdue. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
   });
 
-  /** Send the OVERDUE email */
-  const email = booking.custodianUser?.email;
+  // Resolve recipients with isScheduledJob: true so no editor is excluded
+  // (the overdue transition is automatic, not triggered by a user)
+  const recipients = await getBookingNotificationRecipients({
+    booking,
+    eventType: "OVERDUE",
+    organizationId: booking.organizationId,
+    isScheduledJob: true,
+  });
 
-  if (email) {
-    const html = await bookingUpdatesTemplateString({
-      booking,
-      heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
-      assetCount: booking._count.assets,
+  if (recipients.length > 0) {
+    const custodian =
+      resolveUserDisplayName(booking.custodianUser) ||
+      (booking.custodianTeamMember?.name as string);
+
+    const subject = `⚠️ Overdue booking (${booking.name}) - shelf.nu`;
+
+    const text = overdueBookingEmailContent({
+      bookingName: booking.name,
+      assetsCount: booking._count.assets,
+      custodian,
+      from: booking.from as Date,
+      to: booking.to as Date,
+      bookingId: booking.id,
       hints: data.hints,
+      customEmailFooter: booking.organization.customEmailFooter,
     });
 
-    sendEmail({
-      to: email,
-      subject: `⚠️ Overdue booking (${booking.name}) - shelf.nu`,
-      text: overdueBookingEmailContent({
-        bookingName: booking.name,
-        assetsCount: booking._count.assets,
-        custodian:
-          `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
-          (booking.custodianTeamMember?.name as string),
-        from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it must have a from and to date
-        to: booking.to as Date,
-        bookingId: booking.id,
+    for (const recipient of recipients) {
+      const html = await bookingUpdatesTemplateString({
+        booking,
+        heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
+        assetCount: booking._count.assets,
         hints: data.hints,
-        customEmailFooter: booking.organization.customEmailFooter,
-      }),
-      html,
-    });
+        recipientReason: recipient.reason,
+        recipientEmail: recipient.email,
+      });
+
+      sendEmail({
+        to: recipient.email,
+        subject,
+        text,
+        html,
+      });
+    }
   }
 };
 

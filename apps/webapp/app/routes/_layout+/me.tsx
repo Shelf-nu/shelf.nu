@@ -5,10 +5,17 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getUserWithContact } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -17,7 +24,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     const user = await getUserWithContact(userId);
 
-    const userName = `${user.firstName?.trim()} ${user.lastName?.trim()}`;
+    const userName = resolveUserDisplayName(user);
 
     const header = { title: userName };
 
@@ -38,9 +45,20 @@ export function meta({ data }: MetaArgs<typeof loader>) {
 
 export default function Me() {
   const { user } = useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+
+  /* Notes tab is only visible to ADMIN/OWNER roles.
+   * Allows admins to see notes other admins have placed on their profile. */
+  const canReadNotes = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMemberNote,
+    action: PermissionAction.read,
+  });
+
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
+    ...(canReadNotes ? [{ to: "notes", content: "Notes" }] : []),
   ];
 
   return (
