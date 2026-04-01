@@ -322,7 +322,9 @@ export async function generateKitCustodyAcknowledgementToken(kitCustodyId: strin
 //    - options: { algorithm: "HS256", expiresIn: "30d", issuer: "shelf-custody", audience: "custody-ack" }
 ```
 
-**Token security:**
+**Token security and org scoping:**
+- Token generation functions (3.1) are called from route actions that already enforce `organizationId` via `requirePermission()`. The SQL UPDATE statements operate on specific custody/kit IDs that were already validated against the org. Adding `organizationId` to the UPDATE WHERE clause would be defense-in-depth but is not strictly required since the caller already validated ownership. The resend API (Phase 11) DOES include explicit org scoping in every query because it accepts raw IDs from request bodies.
+
 - Signed with dedicated `CUSTODY_TOKEN_SECRET` (not shared with invite tokens)
 - Pinned to `algorithm: "HS256"` on both sign and verify — prevents algorithm confusion attacks
 - `issuer: "shelf-custody"` and `audience: "custody-ack"` claims validated on verify — prevents cross-service token reuse
