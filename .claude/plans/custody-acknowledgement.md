@@ -317,7 +317,7 @@ export async function generateKitCustodyAcknowledgementToken(kitCustodyId: strin
 // 2. Guard: if zero rows -> throw ShelfError("KitCustody not found")
 // 3. Update child Custody records to same version, scoped by custodian:
 //    UPDATE "Custody" SET "tokenVersion" = newVersion
-//    WHERE "assetId" IN (SELECT "id" FROM "Asset" WHERE "kitId" = kit.id)
+//    WHERE "assetId" IN (SELECT "id" FROM "Asset" WHERE "kitId" = (SELECT "kitId" FROM "KitCustody" WHERE "id" = kitCustodyId))
 //      AND "teamMemberId" = (SELECT "custodianId" FROM "KitCustody" WHERE "id" = kitCustodyId)
 //    (custodian filter prevents rotating unrelated custody rows if kit was reassigned)
 // 4. Guard: if zero child rows -> throw ShelfError("No child custody records found")
@@ -430,9 +430,10 @@ export async function recordCustodyAcknowledgement({
   userAgent,
   organizationId,
 }: RecordAcknowledgementParams): Promise<{ transitioned: boolean; custody: Custody }>
-// Conditional update — only transitions from PENDING state:
+// Conditional update — only transitions from PENDING state, org-scoped:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
-// If no rows updated -> custody was already accepted or declined (idempotent: return current state)
+//     AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = organizationId)
+// If no rows updated -> already settled or not in this org (idempotent: return current state)
 // Sets: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
 // Returns { transitioned: true, custody } if state changed, { transitioned: false, custody } if already settled
 // Callers MUST check `transitioned` before creating notes or enqueuing emails — prevents duplicates on retry/refresh
@@ -470,9 +471,10 @@ export async function recordCustodyDecline({
   reason,
   organizationId,
 }: RecordDeclineParams): Promise<{ declined: boolean; custody: Custody }>
-// Conditional update — only transitions from PENDING state:
+// Conditional update — only transitions from PENDING state, org-scoped:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
-// If no rows updated -> already accepted or declined (idempotent: return current state)
+//     AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = organizationId)
+// If no rows updated -> already settled or not in this org (idempotent: return current state)
 // Validates reason: z.string().trim().max(500).optional()
 // Sets: declinedAt = now(), declineReason = sanitized reason
 // Does NOT change asset status or delete custody
@@ -1024,7 +1026,7 @@ if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown a
 //    RETURNING tokenVersion
 // 2. Guard: if zero rows -> throw ShelfError("Kit custody not found or cooldown active")
 // 3. UPDATE all child Custody records SET tokenVersion = newVersion, lastTokenRotatedAt = NOW()
-//    WHERE assetId IN (SELECT id FROM "Asset" WHERE "kitId" = kit.id)
+//    WHERE assetId IN (SELECT id FROM "Asset" WHERE "kitId" = (SELECT "kitId" FROM "KitCustody" WHERE "id" = kitCustodyId))
 //      AND "teamMemberId" = (SELECT "custodianId" FROM "KitCustody" WHERE id = kitCustodyId)
 //    Guard: if zero child rows -> throw ShelfError("No child custody records found")
 //    NOTE: The custodian filter (teamMemberId = custodianId) prevents updating custody records
@@ -1097,7 +1099,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 
 ## Build & Test Order
 
-1. **Phase 1** -> Run migration -> `pnpm db:deploy-migration`
+1. **Phase 1** -> Run migration -> `pnpm db:deploy-migration` -> Then run `CREATE INDEX CONCURRENTLY` statements separately (these cannot run inside Prisma's migration transaction — execute via `psql` or a separate script after migration completes)
 2. **Phase 2-3** -> Service + gating (no UI yet) -> Run unit tests
 3. **Phase 4** -> Email templates (can preview with React Email)
 4. **Phase 5** -> Public acceptance route -> Manual test with generated JWT
