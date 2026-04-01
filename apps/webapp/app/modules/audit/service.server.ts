@@ -1395,11 +1395,17 @@ export async function completeAuditSession({
         organizationId,
       });
 
-      if (session.status === AuditStatus.COMPLETED) {
+      if (
+        session.status === AuditStatus.COMPLETED ||
+        session.status === AuditStatus.CANCELLED
+      ) {
         throw new ShelfError({
           cause: null,
-          message: "Audit session is already completed",
-          additionalData: { sessionId },
+          message:
+            session.status === AuditStatus.COMPLETED
+              ? "Audit session is already completed"
+              : "Cancelled audits cannot be completed.",
+          additionalData: { sessionId, status: session.status },
           status: 400,
           label,
         });
