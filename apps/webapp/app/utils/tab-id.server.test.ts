@@ -1,3 +1,12 @@
+/**
+ * Unit tests for the tab ID server utilities.
+ *
+ * Verifies that {@link getTabId} and {@link runWithTabId} correctly scope
+ * tab identifiers using `AsyncLocalStorage`, ensuring session/tab isolation
+ * across concurrent async operations in the webapp server.
+ *
+ * @see {@link file://./tab-id.server.ts}
+ */
 import { describe, expect, it } from "vitest";
 import { getTabId, runWithTabId } from "./tab-id.server";
 
@@ -18,20 +27,23 @@ describe("tab-id.server", () => {
     });
   });
 
-  it("does not leak tabId across concurrent contexts", async () => {
+  it("does not leak tabId across concurrent async contexts", async () => {
     const results: Array<string | undefined> = [];
 
     await Promise.all([
-      new Promise<void>((r) =>
-        runWithTabId("tab-A", () => {
+      new Promise<void>((resolve) =>
+        runWithTabId("tab-A", async () => {
+          // Cross an async boundary so the context must survive a microtask hop
+          await Promise.resolve();
           results.push(getTabId());
-          r();
+          resolve();
         })
       ),
-      new Promise<void>((r) =>
-        runWithTabId("tab-B", () => {
+      new Promise<void>((resolve) =>
+        runWithTabId("tab-B", async () => {
+          await Promise.resolve();
           results.push(getTabId());
-          r();
+          resolve();
         })
       ),
     ]);
