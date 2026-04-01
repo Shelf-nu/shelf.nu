@@ -653,7 +653,14 @@ function compareCoreField(
 
     case "availableToBook": {
       const csvBool = parseYesNo(csvValue);
-      if (csvBool === undefined) return null; // unrecognized value
+      if (csvBool === undefined) {
+        return {
+          field: displayName,
+          currentValue: asset.availableToBook ? "Yes" : "No",
+          newValue: csvValue,
+          warning: `Unrecognized value "${csvValue}" — expected "Yes" or "No"`,
+        };
+      }
       if (csvBool !== asset.availableToBook) {
         return {
           field: displayName,
@@ -703,7 +710,14 @@ function compareCustomField(
 
     case "BOOLEAN": {
       const csvBool = parseYesNo(csvValue);
-      if (csvBool === undefined) return null;
+      if (csvBool === undefined) {
+        return {
+          field: displayName,
+          currentValue: currentStr || "(empty)",
+          newValue: csvValue,
+          warning: `Unrecognized value "${csvValue}" — expected "Yes" or "No"`,
+        };
+      }
       const currentBool =
         existingValue?.valueBoolean ??
         (typeof currentRaw === "string"

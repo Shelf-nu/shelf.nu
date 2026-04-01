@@ -1,3 +1,10 @@
+/**
+ * @file Results stage for the bulk asset update import flow.
+ * Displays a summary of applied changes (updated, unchanged, failed)
+ * with collapsible detail sections and a downloadable CSV report.
+ *
+ * @see {@link file://./form.tsx} Parent orchestration component
+ */
 import type { BulkUpdateResult } from "~/utils/import-update.server";
 import { escapeCsvValue } from "./helpers";
 import { SummaryPill } from "./shared";
@@ -8,6 +15,11 @@ import { Table, Td, Th, Tr } from "../../table";
 // Results Display (shown after bulk update is applied)
 // ---------------------------------------------------------------------------
 
+/**
+ * Displays results after bulk update changes have been applied.
+ * Shows summary pills, collapsible details for each outcome category,
+ * and action buttons (import another file, download report, view assets).
+ */
 export function ResultsDisplay({
   result,
   onReset,

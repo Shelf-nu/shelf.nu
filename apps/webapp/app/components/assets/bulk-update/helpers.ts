@@ -1,6 +1,12 @@
-// ---------------------------------------------------------------------------
-// Client-side CSV validation helpers for bulk update import
-// ---------------------------------------------------------------------------
+/**
+ * @file Client-side CSV validation helpers for the bulk update import flow.
+ * Provides lightweight validation and parsing utilities that run in the browser
+ * before the file is sent to the server. The server uses `csv-parse` for
+ * authoritative parsing — these helpers are for quick feedback only.
+ *
+ * @see {@link file://./form.tsx} Consumer of these helpers
+ * @see {@link file://./../../../utils/csv.server.ts} Server-side CSV parsing
+ */
 
 /** Identifier columns we accept, in order of preference */
 export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;

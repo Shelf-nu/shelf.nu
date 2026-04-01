@@ -1,3 +1,10 @@
+/**
+ * @file Shared UI components for the bulk update import flow.
+ * Used by both the preview and results stages.
+ *
+ * @see {@link file://./preview-display.tsx}
+ * @see {@link file://./results-display.tsx}
+ */
 import type { ClientValidation } from "./helpers";
 import Icon from "../../icons/icon";
 
@@ -5,6 +12,7 @@ import Icon from "../../icons/icon";
 // Summary Pill (used in both preview and results)
 // ---------------------------------------------------------------------------
 
+/** Colored pill badge showing a count and label (e.g. "5 to update"). */
 export function SummaryPill({
   count,
   label,
@@ -98,8 +106,8 @@ export function DefectedHeadersTable({
         </tr>
       </thead>
       <tbody>
-        {data.map((row) => (
-          <tr key={row.incorrectHeader}>
+        {data.map((row, index) => (
+          <tr key={`${row.incorrectHeader}-${index}`}>
             <td className="px-2 py-1">{row.incorrectHeader}</td>
             <td className="px-2 py-1">{row.errorMessage}</td>
           </tr>

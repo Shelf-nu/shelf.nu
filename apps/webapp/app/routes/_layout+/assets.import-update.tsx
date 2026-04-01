@@ -1,3 +1,11 @@
+/**
+ * @file Route for bulk-updating existing assets via CSV import.
+ * Handles two intents: `preview-update` (analyze CSV and return diffs)
+ * and `apply-update` (apply confirmed changes to the database).
+ *
+ * @see {@link file://./../../components/assets/bulk-update/index.tsx} UI component
+ * @see {@link file://./../../utils/import-update.server.ts} Server-side logic
+ */
 import type {
   ActionFunctionArgs,
   MetaFunction,

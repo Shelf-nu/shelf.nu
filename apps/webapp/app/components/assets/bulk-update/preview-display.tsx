@@ -1,3 +1,12 @@
+/**
+ * @file Preview stage for the bulk asset update import flow.
+ * Displays the server-generated diff analysis before changes are applied,
+ * including summary stats, validation warnings, new entity creation notices,
+ * a spreadsheet-style change grid, and the "I AGREE" confirmation dialog.
+ *
+ * @see {@link file://./form.tsx} Parent orchestration component
+ * @see {@link file://./../../../utils/import-update.server.ts} Server-side preview logic
+ */
 import type React from "react";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
@@ -23,6 +32,11 @@ import { Table, Td, Th, Tr } from "../../table";
 // Preview Display (shown after CSV analysis, before apply)
 // ---------------------------------------------------------------------------
 
+/**
+ * Displays the server-generated bulk-update preview and handles the apply confirmation.
+ * Shows summary statistics, validation warnings, unrecognized columns, new entity warnings,
+ * failed rows, a spreadsheet-style change grid, and the "I AGREE" confirmation dialog.
+ */
 export function PreviewDisplay({
   preview,
   formRef,
@@ -402,7 +416,11 @@ export function PreviewDisplay({
                   pattern="^I AGREE$"
                   required
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && agreed === "I AGREE") {
+                    if (
+                      e.key === "Enter" &&
+                      agreed === "I AGREE" &&
+                      !isApplyLoading
+                    ) {
                       e.preventDefault();
                       submitApply();
                     }

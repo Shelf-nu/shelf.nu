@@ -31,6 +31,11 @@ import When from "../../when/when";
 
 type Stage = "upload" | "preview" | "results";
 
+/**
+ * Main orchestration component for the bulk asset update CSV import.
+ * Manages a three-stage flow: file upload with client-side validation,
+ * server-side preview analysis, and post-apply results display.
+ */
 export function UpdateImportForm() {
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -56,6 +61,7 @@ export function UpdateImportForm() {
       setPreview(null);
       setResult(null);
       setClientValidation(null);
+      setAgreed("");
       previewFetcher.reset();
       applyFetcher.reset();
 
@@ -197,7 +203,9 @@ export function UpdateImportForm() {
               required
               onChange={handleFileSelect}
               accept=".csv"
-              disabled={stage === "results"}
+              disabled={
+                stage === "results" || isPreviewLoading || isApplyLoading
+              }
               ref={fileInputRef}
             />
           </div>
