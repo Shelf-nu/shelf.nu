@@ -1261,6 +1261,8 @@ model ConsumptionLog {
 
   @@index([assetId, createdAt])
   @@index([userId])
+  @@index([bookingId])
+  @@index([custodianId])
 }
 
 /**
@@ -1277,6 +1279,7 @@ model BookingAsset {
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
   @@unique([bookingId, assetId])
+  @@index([assetId])
 }
 
 model Booking {

@@ -1373,10 +1373,8 @@ export async function updateAsset({
           disconnect: true,
         },
       });
-    }
-
-    /** If assetModelId is a valid ID, connect the asset model */
-    if (assetModelId && assetModelId !== null) {
+    } else if (assetModelId) {
+      /** If assetModelId is a valid ID, connect the asset model */
       Object.assign(data, {
         assetModel: {
           connect: {

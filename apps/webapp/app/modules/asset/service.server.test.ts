@@ -418,11 +418,11 @@ describe("createAsset quantity validation", () => {
 
   it("does not throw quantity validation for INDIVIDUAL assets", async () => {
     // This test verifies that INDIVIDUAL assets skip quantity validation.
-    // The function will proceed past validation but may fail on
+    // The function will proceed past validation but will fail on
     // other operations (e.g., sequential ID generation) which is expected.
-    // We only care that it does NOT throw the quantity validation error.
-    try {
-      await createAsset({
+    // We assert the thrown error is NOT a quantity validation error.
+    await expect(
+      createAsset({
         title: "Test Laptop",
         description: "A laptop",
         userId: "user-1",
@@ -431,15 +431,11 @@ describe("createAsset quantity validation", () => {
         organizationId: "org-1",
         type: "INDIVIDUAL",
         // No quantity or consumptionType — should not throw validation error
-      });
-    } catch (e) {
-      // If it throws, make sure it's NOT the quantity validation error
-      expect((e as Error).message).not.toContain(
-        "Quantity is required for quantity-tracked assets"
-      );
-      expect((e as Error).message).not.toContain(
-        "Consumption type is required for quantity-tracked assets"
-      );
-    }
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining("Quantity is required"),
+      })
+    );
   });
 });

@@ -13,7 +13,6 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { isFormProcessing } from "~/utils/form";
-import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const DeleteAssetModel = ({
@@ -34,7 +33,7 @@ export const DeleteAssetModel = ({
       disabled={disabled}
       variant="secondary"
       size="sm"
-      type="submit"
+      type="button"
       className="text-[12px]"
       icon={"trash"}
       title={"Delete"}
@@ -70,7 +69,7 @@ export const DeleteAssetModel = ({
               Cancel
             </Button>
           </AlertDialogCancel>
-          <Form method="delete" action="/settings/asset-models">
+          <fetcher.Form method="delete" action="/settings/asset-models">
             <input type="hidden" name="id" value={assetModel.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
@@ -79,7 +78,7 @@ export const DeleteAssetModel = ({
             >
               {disabled ? "Deleting..." : "Delete"}
             </Button>
-          </Form>
+          </fetcher.Form>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

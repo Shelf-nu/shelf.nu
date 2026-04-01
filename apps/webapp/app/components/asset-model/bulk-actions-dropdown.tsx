@@ -3,8 +3,8 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";
+import AssetModelBulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
-import BulkDeleteDialog from "../category/bulk-delete-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import {
@@ -68,7 +68,7 @@ function ConditionalDropdown() {
         />
       )}
 
-      <BulkDeleteDialog />
+      <AssetModelBulkDeleteDialog />
 
       <DropdownMenu
         modal={false}

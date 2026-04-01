@@ -178,10 +178,29 @@ export async function deleteAssetModel({
   organizationId,
 }: Pick<AssetModel, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.assetModel.deleteMany({
+    const result = await db.assetModel.deleteMany({
       where: { id, organizationId },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not found",
+        message:
+          "The asset model you are trying to delete does not exist or you do not have permission to delete it.",
+        additionalData: { id, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    /** Re-throw ShelfErrors (e.g. the not-found check above) as-is */
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:

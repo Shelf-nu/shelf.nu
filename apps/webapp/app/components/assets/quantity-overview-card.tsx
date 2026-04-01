@@ -97,7 +97,9 @@ export function QuantityOverviewCard({
   const behaviorLabel =
     consumptionType === "ONE_WAY"
       ? "Used up (one-way)"
-      : "Returnable (two-way)";
+      : consumptionType === "TWO_WAY"
+      ? "Returnable (two-way)"
+      : "—";
 
   return (
     <Card className={tw("my-3 p-0", className)}>

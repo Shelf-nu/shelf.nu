@@ -411,13 +411,21 @@ export default function AssetOverview() {
                     Asset Model
                   </span>
                   <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
-                    <Button
-                      to={`/settings/asset-models/${asset.assetModel.id}/edit`}
-                      variant="link-gray"
-                      className="text-gray-600 underline"
-                    >
-                      {asset.assetModel.name}
-                    </Button>
+                    {userHasPermission({
+                      roles,
+                      entity: PermissionEntity.assetModel,
+                      action: PermissionAction.read,
+                    }) ? (
+                      <Button
+                        to={`/settings/asset-models/${asset.assetModel.id}/edit`}
+                        variant="link-gray"
+                        className="text-gray-600 underline"
+                      >
+                        {asset.assetModel.name}
+                      </Button>
+                    ) : (
+                      <span>{asset.assetModel.name}</span>
+                    )}
                   </div>
                 </li>
               ) : null}

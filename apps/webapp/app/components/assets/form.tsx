@@ -28,6 +28,8 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
@@ -210,10 +212,16 @@ export const AssetForm = ({
     return errors;
   }, [customFields, zo.errors]);
 
-  const actionData = useActionData<{
-    errors?: Record<string, { message: string }>;
-    error?: { message: string; additionalData?: Record<string, unknown> };
-  }>();
+  const actionData = useActionData<
+    DataOrErrorResponse & {
+      errors?: Record<string, { message: string }>;
+    }
+  >();
+
+  /** Server-side validation errors as fallback when client-side validation fails */
+  const validationErrors = getValidationErrors<typeof NewAssetFormSchema>(
+    actionData?.error
+  );
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(assetImageValidateFileAtom);
@@ -387,7 +395,10 @@ export const AssetForm = ({
                 className="w-full"
                 defaultValue={quantity ?? ""}
                 required={true}
-                error={zo.errors.quantity()?.message}
+                error={
+                  validationErrors?.quantity?.message ||
+                  zo.errors.quantity()?.message
+                }
               />
             </FormRow>
 
