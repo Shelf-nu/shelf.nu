@@ -79,6 +79,10 @@ export default {
         collapsed: true,
         items: [
           { text: "App Configuration", link: "/app-configuration" },
+          {
+            text: "Tracking & Analytics Scripts",
+            link: "/tracking-scripts",
+          },
           { text: "URL Shortener", link: "/url-shortener" },
         ],
       },
