@@ -95,11 +95,12 @@ export function SpreadsheetPreview({
                   </td>
 
                   {/* One cell per updatable column */}
-                  {columns.map((col) => {
+                  {columns.map((col, colIdx) => {
                     const change = changesByField.get(col);
                     const isHovered =
                       hoveredCell?.assetIdx === assetIdx &&
                       hoveredCell?.col === col;
+                    const tooltipId = `tooltip-${assetIdx}-${colIdx}`;
 
                     if (!change) {
                       // No change for this field — show dash
@@ -119,9 +120,7 @@ export function SpreadsheetPreview({
                       <td
                         key={col}
                         tabIndex={0}
-                        aria-describedby={
-                          isHovered ? `tooltip-${assetIdx}-${col}` : undefined
-                        }
+                        aria-describedby={isHovered ? tooltipId : undefined}
                         className={`relative cursor-default border-r px-3 py-1.5 ${
                           hasWarning ? "bg-red-50" : "bg-blue-50"
                         }`}
@@ -153,7 +152,7 @@ export function SpreadsheetPreview({
                         {/* Tooltip on hover with full values */}
                         {isHovered && (
                           <div
-                            id={`tooltip-${assetIdx}-${col}`}
+                            id={tooltipId}
                             role="tooltip"
                             className={`absolute left-1/2 z-30 w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-white px-3 py-2 text-xs shadow-lg ${
                               tooltipAbove

@@ -443,6 +443,8 @@ export function computeAssetDiffs({
     if (!existingAsset && headerAnalysis.fallbackId && fallbackAssets) {
       const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
       if (fallbackValue) {
+        // Always set assetId so failure reports show the actual identifier
+        if (!assetId) assetId = fallbackValue;
         existingAsset = fallbackAssets.get(fallbackValue);
         if (existingAsset) {
           assetId = fallbackValue; // use fallback as the match key
@@ -1084,28 +1086,32 @@ async function batchResolveCategoryNames(
   );
   if (namesToResolve.length === 0) return result;
 
+  // Deduplicate case-insensitively — keep first spelling per lowercase key
+  const lcToOriginal = new Map<string, string>();
+  for (const name of namesToResolve) {
+    const lc = name.toLowerCase();
+    if (!lcToOriginal.has(lc)) lcToOriginal.set(lc, name);
+  }
+  const uniqueNames = [...lcToOriginal.values()];
+
   // Batch fetch existing
   const existing = await db.category.findMany({
     where: {
       organizationId,
-      name: { in: namesToResolve, mode: "insensitive" },
+      name: { in: uniqueNames, mode: "insensitive" },
     },
     select: { id: true, name: true },
   });
+  const lcToId = new Map<string, string>();
   for (const cat of existing) {
-    // Map original name to ID (case-insensitive match)
-    for (const name of namesToResolve) {
-      if (name.toLowerCase() === cat.name.toLowerCase()) {
-        result.set(name, cat.id);
-      }
-    }
+    lcToId.set(cat.name.toLowerCase(), cat.id);
   }
 
-  // Create missing
-  const missing = namesToResolve.filter((n) => !result.has(n));
-  if (missing.length > 0) {
+  // Create missing (one per unique lowercase key)
+  const missingNames = uniqueNames.filter((n) => !lcToId.has(n.toLowerCase()));
+  if (missingNames.length > 0) {
     await db.category.createMany({
-      data: missing.map((name) => ({
+      data: missingNames.map((name) => ({
         name,
         color: getRandomColor(),
         userId,
@@ -1115,16 +1121,21 @@ async function batchResolveCategoryNames(
     });
     // Re-fetch to get IDs
     const created = await db.category.findMany({
-      where: { organizationId, name: { in: missing, mode: "insensitive" } },
+      where: {
+        organizationId,
+        name: { in: missingNames, mode: "insensitive" },
+      },
       select: { id: true, name: true },
     });
     for (const cat of created) {
-      for (const name of missing) {
-        if (name.toLowerCase() === cat.name.toLowerCase()) {
-          result.set(name, cat.id);
-        }
-      }
+      lcToId.set(cat.name.toLowerCase(), cat.id);
     }
+  }
+
+  // Map all original name variants to their resolved ID
+  for (const name of namesToResolve) {
+    const id = lcToId.get(name.toLowerCase());
+    if (id) result.set(name, id);
   }
 
   return result;
@@ -1143,24 +1154,32 @@ async function batchResolveLocationNames(
   const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
   if (trimmedNames.length === 0) return result;
 
+  // Deduplicate case-insensitively — keep first spelling per lowercase key
+  const lcToOriginal = new Map<string, string>();
+  for (const name of trimmedNames) {
+    const lc = name.toLowerCase();
+    if (!lcToOriginal.has(lc)) lcToOriginal.set(lc, name);
+  }
+  const uniqueNames = [...lcToOriginal.values()];
+
   // Batch fetch existing
   const existing = await db.location.findMany({
-    where: { organizationId, name: { in: trimmedNames, mode: "insensitive" } },
+    where: {
+      organizationId,
+      name: { in: uniqueNames, mode: "insensitive" },
+    },
     select: { id: true, name: true },
   });
+  const lcToId = new Map<string, string>();
   for (const loc of existing) {
-    for (const name of trimmedNames) {
-      if (name.toLowerCase() === loc.name.toLowerCase()) {
-        result.set(name, loc.id);
-      }
-    }
+    lcToId.set(loc.name.toLowerCase(), loc.id);
   }
 
-  // Create missing
-  const missing = trimmedNames.filter((n) => !result.has(n));
-  if (missing.length > 0) {
+  // Create missing (one per unique lowercase key)
+  const missingNames = uniqueNames.filter((n) => !lcToId.has(n.toLowerCase()));
+  if (missingNames.length > 0) {
     await db.location.createMany({
-      data: missing.map((name) => ({
+      data: missingNames.map((name) => ({
         name,
         userId,
         organizationId,
@@ -1169,16 +1188,21 @@ async function batchResolveLocationNames(
     });
     // Re-fetch to get IDs
     const created = await db.location.findMany({
-      where: { organizationId, name: { in: missing, mode: "insensitive" } },
+      where: {
+        organizationId,
+        name: { in: missingNames, mode: "insensitive" },
+      },
       select: { id: true, name: true },
     });
     for (const loc of created) {
-      for (const name of missing) {
-        if (name.toLowerCase() === loc.name.toLowerCase()) {
-          result.set(name, loc.id);
-        }
-      }
+      lcToId.set(loc.name.toLowerCase(), loc.id);
     }
+  }
+
+  // Map all original name variants to their resolved ID
+  for (const name of trimmedNames) {
+    const id = lcToId.get(name.toLowerCase());
+    if (id) result.set(name, id);
   }
 
   return result;
@@ -1508,10 +1532,12 @@ export async function applyBulkUpdatesFromImport({
             if (col.kind === "customField" && col.cfDef) {
               const fullCf = cfByName.get(col.cfDef.name.toLowerCase());
               if (fullCf) {
-                // For AMOUNT/NUMBER fields, pre-normalize the currency format
+                // For AMOUNT/NUMBER fields, pre-normalize and validate
                 let rawValue: string = change.newValue;
                 if (fullCf.type === "AMOUNT" || fullCf.type === "NUMBER") {
                   rawValue = normalizeExportedCurrencyValue(rawValue);
+                  // Skip if not a valid finite number (matches preview logic)
+                  if (!Number.isFinite(Number(rawValue))) continue;
                 }
 
                 const builtValue = buildCustomFieldValue(

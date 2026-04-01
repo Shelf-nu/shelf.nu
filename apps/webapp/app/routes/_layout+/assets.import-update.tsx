@@ -31,6 +31,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportAssets } from "~/utils/subscription.server";
 
+/** Handles preview-update and apply-update intents for bulk CSV import. */
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;

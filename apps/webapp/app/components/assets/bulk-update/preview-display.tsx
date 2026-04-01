@@ -405,6 +405,13 @@ export function PreviewDisplay({
                 <AlertDialogDescription>
                   Type <b>"I AGREE"</b> below to confirm.
                 </AlertDialogDescription>
+                {/* Server-side apply error shown inside the dialog */}
+                {applyFetcher.data?.error && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+                    {applyFetcher.data.error.message ||
+                      "An error occurred while applying changes."}
+                  </div>
+                )}
                 <Input
                   type="text"
                   label="Confirmation"
