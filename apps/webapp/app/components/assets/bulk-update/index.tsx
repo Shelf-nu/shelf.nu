@@ -1,11 +1,19 @@
+/**
+ * @file Entry point for the bulk asset update page (/assets/import-update).
+ * Renders instructional UI explaining the CSV-based bulk update workflow
+ * and embeds the {@link UpdateImportForm} for the upload/preview/apply flow.
+ *
+ * @see {@link file://./form.tsx} Upload/preview/apply orchestration
+ * @see {@link file://./../../../routes/_layout+/assets.import-update.tsx} Route handler
+ */
 import { UpdateImportForm } from "./form";
 import Icon from "../../icons/icon";
 import { Button } from "../../shared/button";
 
-// ---------------------------------------------------------------------------
-// Import Update Content (entry point for /assets/import-update)
-// ---------------------------------------------------------------------------
-
+/**
+ * Main content component for the bulk asset update page.
+ * Displays step-by-step instructions and embeds the CSV upload form.
+ */
 export const ImportUpdateContent = () => (
   <div className="w-full text-left">
     <h3>Update existing assets</h3>

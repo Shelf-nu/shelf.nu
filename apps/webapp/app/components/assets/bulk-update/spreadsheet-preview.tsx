@@ -1,3 +1,10 @@
+/**
+ * @file Spreadsheet-style preview grid for bulk asset update changes.
+ * Renders a table showing old vs. new values with color-coded cells,
+ * hover tooltips, and viewport-aware tooltip placement.
+ *
+ * @see {@link file://./preview-display.tsx} Parent component
+ */
 import { useCallback, useRef, useState } from "react";
 import type { AssetChangePreview } from "~/utils/import-update.server";
 
@@ -5,6 +12,11 @@ import type { AssetChangePreview } from "~/utils/import-update.server";
 // Spreadsheet-style Preview Grid
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders a spreadsheet-like grid of asset field changes.
+ * Highlights changed cells in blue, cells with warnings in red,
+ * and shows hover tooltips with full old/new values.
+ */
 export function SpreadsheetPreview({
   assets,
   columns,
