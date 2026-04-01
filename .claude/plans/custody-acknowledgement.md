@@ -258,8 +258,8 @@ export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", {
 
 1. **Feature enablement guard:** When `custodyAcknowledgementEnabled` is set to `true` on an org, validate that `CUSTODY_TOKEN_SECRET` is configured. If not, reject the enablement with a clear error: "Cannot enable custody acknowledgement: CUSTODY_TOKEN_SECRET is not configured." This check runs in:
    - **Stripe webhook handler** (`apps/webapp/app/modules/stripe-webhook/handlers.server.ts`) — for subscription-based enablement
-   - **Organization settings action** (`apps/webapp/app/routes/_layout+/settings.general.tsx`) — if manual toggle is added
-   - Both paths call `validateCustodyTokenSecretConfigured()` from the acknowledgement service before setting the flag to `true`
+   - **Organization settings action** (`apps/webapp/app/routes/_layout+/settings.general.tsx`) — if/when a manual toggle is added in future (not in v1)
+   - The webhook handler calls `validateCustodyTokenSecretConfigured()` from the acknowledgement service before setting the flag to `true`
 
 2. **Callsite guard (defense-in-depth):** At token sign/verify callsites, assert presence:
 ```typescript
