@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -10,13 +10,14 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { Form } from "../custom-form";
 
 type ArchiveAuditDialogProps = {
   auditName: string;
   open: boolean;
   onClose: () => void;
-  actionData?: any;
+  actionData?: DataOrErrorResponse;
 };
 
 /**
@@ -31,11 +32,15 @@ export function ArchiveAuditDialog({
 }: ArchiveAuditDialogProps) {
   const disabled = useDisabled();
 
+  /** Stabilize onClose in a ref to avoid stale closures in the effect */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (actionData?.success) {
-      onClose();
+    if (actionData && "success" in actionData) {
+      onCloseRef.current();
     }
-  }, [actionData, onClose]);
+  }, [actionData]);
 
   return (
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -46,6 +51,11 @@ export function ArchiveAuditDialog({
             Are you sure you want to archive this audit? Archived audits are
             hidden from the default list view but can still be found using the
             status filter. This action cannot be undone.
+            {actionData && "error" in actionData && actionData.error && (
+              <p className="mt-2 text-sm text-error-500">
+                {actionData.error.message}
+              </p>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
