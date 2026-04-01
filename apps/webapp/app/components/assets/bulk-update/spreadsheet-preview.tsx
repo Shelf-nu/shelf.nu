@@ -5,7 +5,9 @@
  *
  * @see {@link file://./preview-display.tsx} Parent component
  */
+import type React from "react";
 import { useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AssetChangePreview } from "~/utils/import-update.server";
 
 // ---------------------------------------------------------------------------
@@ -32,14 +34,22 @@ export function SpreadsheetPreview({
     assetIdx: number;
     col: string;
   } | null>(null);
-  const [tooltipAbove, setTooltipAbove] = useState(true);
+  const [tooltipStyle, setTooltipStyle] = useState<React.CSSProperties>({});
 
-  /** Measure available space above the cell to decide tooltip placement */
+  /** Measure cell position and compute fixed tooltip coordinates */
   const handleCellHover = useCallback(
     (assetIdx: number, col: string, el: HTMLTableCellElement) => {
       const rect = el.getBoundingClientRect();
-      // Flip below if less than 80px above the cell
-      setTooltipAbove(rect.top > 80);
+      const above = rect.top > 80;
+      setTooltipStyle({
+        position: "fixed",
+        left: rect.left + rect.width / 2,
+        ...(above
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+        transform: "translateX(-50%)",
+        zIndex: 50,
+      });
       setHoveredCell({ assetIdx, col });
     },
     []
@@ -121,7 +131,7 @@ export function SpreadsheetPreview({
                         key={col}
                         tabIndex={0}
                         aria-describedby={isHovered ? tooltipId : undefined}
-                        className={`relative cursor-default border-r px-3 py-1.5 ${
+                        className={`cursor-default border-r px-3 py-1.5 ${
                           hasWarning ? "bg-red-50" : "bg-blue-50"
                         }`}
                         onMouseEnter={(e) =>
@@ -149,47 +159,48 @@ export function SpreadsheetPreview({
                           </div>
                         )}
 
-                        {/* Tooltip on hover with full values */}
-                        {isHovered && (
-                          <div
-                            id={tooltipId}
-                            role="tooltip"
-                            className={`absolute left-1/2 z-30 w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-white px-3 py-2 text-xs shadow-lg ${
-                              tooltipAbove
-                                ? "bottom-full mb-2"
-                                : "top-full mt-2"
-                            }`}
-                          >
-                            <p className="mb-1 font-semibold text-gray-700">
-                              {col}
-                            </p>
-                            <p className="text-gray-500">
-                              <span className="font-medium text-gray-400">
-                                Was:
-                              </span>{" "}
-                              {change.currentValue || "(empty)"}
-                            </p>
-                            <p
-                              className={
-                                hasWarning ? "text-red-700" : "text-blue-700"
-                              }
+                        {/* Tooltip rendered via portal to avoid scroll clipping */}
+                        {isHovered &&
+                          createPortal(
+                            <div
+                              id={tooltipId}
+                              role="tooltip"
+                              style={tooltipStyle}
+                              className="w-max max-w-[280px] rounded-md border bg-white px-3 py-2 text-xs shadow-lg"
                             >
-                              <span
-                                className={`font-medium ${
-                                  hasWarning ? "text-red-600" : "text-blue-600"
-                                }`}
-                              >
-                                Now:
-                              </span>{" "}
-                              {change.newValue}
-                            </p>
-                            {hasWarning && (
-                              <p className="mt-1 text-red-600">
-                                ⚠ {change.warning}
+                              <p className="mb-1 font-semibold text-gray-700">
+                                {col}
                               </p>
-                            )}
-                          </div>
-                        )}
+                              <p className="text-gray-500">
+                                <span className="font-medium text-gray-400">
+                                  Was:
+                                </span>{" "}
+                                {change.currentValue || "(empty)"}
+                              </p>
+                              <p
+                                className={
+                                  hasWarning ? "text-red-700" : "text-blue-700"
+                                }
+                              >
+                                <span
+                                  className={`font-medium ${
+                                    hasWarning
+                                      ? "text-red-600"
+                                      : "text-blue-600"
+                                  }`}
+                                >
+                                  Now:
+                                </span>{" "}
+                                {change.newValue}
+                              </p>
+                              {hasWarning && (
+                                <p className="mt-1 text-red-600">
+                                  ⚠ {change.warning}
+                                </p>
+                              )}
+                            </div>,
+                            document.body
+                          )}
                       </td>
                     );
                   })}

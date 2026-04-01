@@ -31,8 +31,9 @@ export const ImportUpdateContent = () => (
           <Button variant="link" to="/assets">
             Asset Index
           </Button>
-          , select the assets you want to update, and click{" "}
-          <b>Export selection</b>.
+          , select the assets you want to update, and export them. Make sure
+          your export includes the <b>Asset ID</b> or <b>ID</b> column so we can
+          match rows to existing assets.
         </p>
       </div>
       <Button variant="secondary" to="/assets">

@@ -47,8 +47,10 @@ export function ResultsDisplay({
     for (const row of result.failed) {
       lines.push(
         `Failed,${row.rowNumber || ""},${escapeCsvValue(
-          row.id
-        )},${escapeCsvValue(row.title)},${escapeCsvValue(row.error)}`
+          row.id || "(unknown)"
+        )},${escapeCsvValue(
+          row.title || row.id || "(unknown)"
+        )},${escapeCsvValue(row.error)}`
       );
     }
 
