@@ -1340,6 +1340,9 @@ export async function updateAsset({
       mainImageExpiration,
       thumbnailImage,
       // Quantity-tracked fields (type is immutable, never updated here)
+      // TODO(Phase 2): Route quantity changes through an audited adjustment
+      // path that writes to ConsumptionLog. Direct mutation here bypasses
+      // the full-attribution audit trail required by the PRD.
       quantity,
       minQuantity,
       consumptionType,
@@ -4342,12 +4345,14 @@ export async function getEntitiesWithSelectedValues({
   selectedTagIds = [],
   selectedCategoryIds = [],
   selectedLocationIds = [],
+  selectedAssetModelIds = [],
 }: {
   organizationId: Organization["id"];
   allSelectedEntries: AllowedModelNames[];
   selectedTagIds: Array<Tag["id"]>;
   selectedCategoryIds: Array<Category["id"]>;
   selectedLocationIds: Array<Location["id"]>;
+  selectedAssetModelIds?: string[];
 }) {
   const [
     // Categories
@@ -4364,6 +4369,11 @@ export async function getEntitiesWithSelectedValues({
     locationExcludedSelected,
     selectedLocations,
     totalLocations,
+
+    // Asset Models
+    assetModelExcludedSelected,
+    selectedAssetModels,
+    totalAssetModels,
   ] = await Promise.all([
     /** Categories start */
     db.category.findMany({
@@ -4421,6 +4431,18 @@ export async function getEntitiesWithSelectedValues({
     }),
     db.location.count({ where: { organizationId } }),
     /** Location end */
+
+    /** Asset Models start */
+    db.assetModel.findMany({
+      where: { organizationId, id: { notIn: selectedAssetModelIds } },
+      take: allSelectedEntries.includes("assetModel") ? undefined : 12,
+      orderBy: { updatedAt: "desc" },
+    }),
+    db.assetModel.findMany({
+      where: { organizationId, id: { in: selectedAssetModelIds } },
+    }),
+    db.assetModel.count({ where: { organizationId } }),
+    /** Asset Models end */
   ]);
 
   return {
@@ -4430,6 +4452,8 @@ export async function getEntitiesWithSelectedValues({
     totalTags,
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
+    assetModels: [...selectedAssetModels, ...assetModelExcludedSelected],
+    totalAssetModels,
   };
 }
 

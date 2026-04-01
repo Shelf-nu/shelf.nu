@@ -39,7 +39,6 @@ import { getAllSelectedValuesFromFilters } from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
-import { getAssetModels } from "../asset-model/service.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -363,12 +362,16 @@ export async function advancedModeLoader({
     });
   }
 
-  const { selectedTags, selectedCategory, selectedLocation } =
-    await getAllSelectedValuesFromFilters(
-      filters,
-      settings.columns as Column[],
-      organizationId
-    );
+  const {
+    selectedTags,
+    selectedCategory,
+    selectedLocation,
+    selectedAssetModel,
+  } = await getAllSelectedValuesFromFilters(
+    filters,
+    settings.columns as Column[],
+    organizationId
+  );
 
   const {
     tags,
@@ -377,12 +380,15 @@ export async function advancedModeLoader({
     totalCategories,
     locations,
     totalLocations,
+    assetModels,
+    totalAssetModels,
   } = await getEntitiesWithSelectedValues({
     organizationId,
     allSelectedEntries,
     selectedTagIds: selectedTags,
     selectedCategoryIds: selectedCategory,
     selectedLocationIds: selectedLocation,
+    selectedAssetModelIds: selectedAssetModel,
   });
 
   /** Query tierLimit, assets & Asset index settings */
@@ -398,7 +404,6 @@ export async function advancedModeLoader({
     bookings,
     totalBookings,
     advNotifyData,
-    assetModelsData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -474,19 +479,7 @@ export async function advancedModeLoader({
       },
     }),
     getTeamMembersForNotify({ organizationId }),
-
-    // Asset models for filter dropdown
-    getAssetModels({
-      organizationId,
-      page: 1,
-      perPage:
-        searchParams.has("getAll") && hasGetAllValue(searchParams, "assetModel")
-          ? 10000
-          : 12,
-    }),
   ]);
-
-  const { assetModels, totalAssetModels } = assetModelsData;
 
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null

@@ -214,20 +214,48 @@ export async function deleteAssetModel({
 /**
  * Bulk deletes asset models by IDs or all models in the organization.
  * Supports the ALL_SELECTED_KEY pattern for select-all functionality.
+ *
+ * When ALL_SELECTED_KEY is present and `currentSearchParams` is provided,
+ * the deletion is scoped to models matching the active search filters
+ * (e.g. name/description search) rather than deleting every model in the org.
+ *
+ * @param assetModelIds - Array of model IDs to delete, or includes ALL_SELECTED_KEY
+ * @param organizationId - Organization scope for the deletion
+ * @param currentSearchParams - Serialized URLSearchParams string from the list view,
+ *   used to scope ALL_SELECTED deletions to the current filter state
  */
 export async function bulkDeleteAssetModels({
   assetModelIds,
   organizationId,
+  currentSearchParams,
 }: {
   assetModelIds: AssetModel["id"][];
   organizationId: Organization["id"];
+  currentSearchParams?: string | null;
 }) {
   try {
-    return await db.assetModel.deleteMany({
-      where: assetModelIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
-        : { id: { in: assetModelIds }, organizationId },
-    });
+    let where: Prisma.AssetModelWhereInput;
+
+    if (assetModelIds.includes(ALL_SELECTED_KEY)) {
+      where = { organizationId };
+
+      /** When there are active filters, scope the delete to matching models */
+      if (currentSearchParams) {
+        const params = new URLSearchParams(currentSearchParams);
+        const search = params.get("search");
+
+        if (search) {
+          where.OR = [
+            { name: { contains: search, mode: "insensitive" } },
+            { description: { contains: search, mode: "insensitive" } },
+          ];
+        }
+      }
+    } else {
+      where = { id: { in: assetModelIds }, organizationId };
+    }
+
+    return await db.assetModel.deleteMany({ where });
   } catch (cause) {
     throw new ShelfError({
       cause,

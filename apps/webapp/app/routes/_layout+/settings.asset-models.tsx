@@ -12,8 +12,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
+import { BulkDeleteAssetModelSchema } from "~/components/asset-model/bulk-delete-dialog";
 import { ErrorContent } from "~/components/errors";
-import { deleteAssetModel } from "~/modules/asset-model/service.server";
+import {
+  bulkDeleteAssetModels,
+  deleteAssetModel,
+} from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -59,8 +63,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
+    const formData = await request.formData();
+    const intent = formData.get("intent");
+
+    if (intent === "bulk-delete") {
+      const { assetModelIds, currentSearchParams } = parseData(
+        formData,
+        BulkDeleteAssetModelSchema.extend({
+          currentSearchParams: z.string().optional(),
+        }),
+        { additionalData: { userId } }
+      );
+
+      await bulkDeleteAssetModels({
+        assetModelIds,
+        organizationId,
+        currentSearchParams,
+      });
+
+      sendNotification({
+        title: "Asset models deleted",
+        message: "Selected asset models have been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
+      return payload({ success: true });
+    }
+
+    /** Default: single asset model delete */
     const { id } = parseData(
-      await request.formData(),
+      formData,
       z.object({
         id: z.string(),
       }),

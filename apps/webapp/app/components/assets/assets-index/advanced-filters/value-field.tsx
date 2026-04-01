@@ -152,13 +152,19 @@ export function ValueField({
     if (filter.type === "enum" && filter.value === "") {
       if (filter.name === "type") {
         setFilter("INDIVIDUAL"); // Default to INDIVIDUAL for asset type filter
-      } else {
+      } else if (filter.name === "status") {
+        const options = Object.values(AssetStatus);
+        setFilter(options[0]); // Set default value to first option
+      } else if (filter.name.startsWith("cf_")) {
+        // Only look up custom field options for actual custom fields (cf_ prefix)
         const options =
-          filter.name === "status"
-            ? Object.values(AssetStatus)
-            : customFields.find((field) => field?.name === filter.name.slice(3))
-                ?.options || [];
-        setFilter(options[0]); // Set default value to first option when enum field is selected
+          customFields.find((field) => field?.name === filter.name.slice(3))
+            ?.options || [];
+        setFilter(options[0] || ""); // Set default value to first option when enum field is selected
+      } else {
+        // Non-custom enum fields (category, location, kit, assetModel, etc.)
+        // default to empty string — user must pick a value from the selector
+        setFilter("");
       }
     }
   }, [customFields, filter.name, filter.type, filter.value, setFilter]);

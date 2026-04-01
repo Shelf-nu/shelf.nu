@@ -628,6 +628,7 @@ type AllSelectedValues = {
   selectedTags: string[];
   selectedCategory: string[];
   selectedLocation: string[];
+  selectedAssetModel: string[];
 };
 
 /**

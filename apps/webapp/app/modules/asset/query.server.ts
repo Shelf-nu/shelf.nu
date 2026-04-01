@@ -1355,7 +1355,9 @@ type DirectAssetField =
   | "description"
   | "createdAt"
   | "updatedAt"
-  | "availableToBook";
+  | "availableToBook"
+  | "type"
+  | "quantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1367,6 +1369,8 @@ const directAssetFields: Record<DirectAssetField, string> = {
   createdAt: "assetCreatedAt",
   updatedAt: "assetUpdatedAt",
   availableToBook: "assetAvailableToBook",
+  type: "assetType",
+  quantity: "assetQuantity",
 };
 
 /**
@@ -1460,6 +1464,10 @@ export function parseSortingOptions(sortBy: string[]): {
     } else if (field.name === "category") {
       orderByParts.push(
         getNormalizedSortExpression(`"categoryName"`, field.direction)
+      );
+    } else if (field.name === "assetModel") {
+      orderByParts.push(
+        getNormalizedSortExpression(`"assetModelName"`, field.direction)
       );
     } else if (field.name === "location") {
       orderByParts.push(
