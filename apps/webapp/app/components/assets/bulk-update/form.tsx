@@ -1,3 +1,12 @@
+/**
+ * @file Orchestrates the bulk asset update CSV import flow.
+ * Manages three stages: upload (file selection + client validation),
+ * preview (server analysis), and results (post-apply summary).
+ *
+ * @see {@link file://./preview-display.tsx} Preview stage component
+ * @see {@link file://./results-display.tsx} Results stage component
+ * @see {@link file://./../../../routes/_layout+/assets.import-update.tsx} Route action
+ */
 import type React from "react";
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";

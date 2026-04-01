@@ -67,7 +67,12 @@ export function validateCsvClientSide(text: string): ClientValidation {
 
 /**
  * Simple CSV line parser for client-side validation.
- * Handles quoted values and strips enclosing quotes.
+ * Handles quoted values (via {@link stripQuotes}) and both `,` and `;` delimiters.
+ *
+ * Note: This is intentionally simplified for quick client-side checks.
+ * It does not handle multi-line quoted values, encoding/BOM detection,
+ * or leading whitespace trimming. The server uses `csv-parse` with full
+ * encoding detection and edge-case handling as the source of truth.
  */
 export function parseSimpleCsvLine(line: string): string[] {
   const result: string[] = [];

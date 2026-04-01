@@ -1,4 +1,5 @@
 import type { ClientValidation } from "./helpers";
+import Icon from "../../icons/icon";
 
 // ---------------------------------------------------------------------------
 // Summary Pill (used in both preview and results)
@@ -49,12 +50,12 @@ export function ClientValidationFeedback({
         <span className="flex items-center gap-1">
           {validation.idColumnFound ? (
             <>
-              <span className="text-green-600">✓</span>
+              <Icon icon="check" className="text-green-600" />
               Matching by {validation.idColumnFound}
             </>
           ) : (
             <>
-              <span className="text-red-500">✗</span>
+              <Icon icon="x" className="text-red-500" />
               No identifier column found
             </>
           )}

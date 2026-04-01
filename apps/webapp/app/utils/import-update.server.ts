@@ -1209,6 +1209,64 @@ export async function applyBulkUpdatesFromImport({
   });
   const cfByName = new Map(allCfs.map((cf) => [cf.name.toLowerCase(), cf]));
 
+  // Pre-resolve all entity names in batch to avoid N+1 queries in the loop
+  const categoryNameMap = new Map<string, string>();
+  const locationNameMap = new Map<string, string>();
+  const tagNameMap = new Map<string, string>();
+
+  const allCategoryNames = new Set<string>();
+  const allLocationNames = new Set<string>();
+  const allTagNames = new Set<string>();
+
+  for (const asset of diffs.assetsToUpdate) {
+    for (const change of asset.changes) {
+      if (change.warning) continue;
+      const col = headerAnalysis.updatableColumns.find(
+        (c) => c.csvHeader === change.field
+      );
+      if (!col) continue;
+      if (col.internalKey === "category") allCategoryNames.add(change.newValue);
+      if (col.internalKey === "location") allLocationNames.add(change.newValue);
+      if (col.internalKey === "tags") {
+        change.newValue
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .forEach((t) => allTagNames.add(t));
+      }
+    }
+  }
+
+  // Batch resolve categories
+  for (const name of allCategoryNames) {
+    categoryNameMap.set(
+      name,
+      await resolveCategoryNameToId(name, userId, organizationId)
+    );
+  }
+
+  // Batch resolve locations
+  for (const name of allLocationNames) {
+    locationNameMap.set(
+      name,
+      await resolveLocationNameToId(name, userId, organizationId)
+    );
+  }
+
+  // Batch resolve tags
+  if (allTagNames.size > 0) {
+    // Ensure all tags exist (creates missing ones)
+    await resolveTagNamesToIds([...allTagNames], userId, organizationId);
+    // Fetch all org tags to build the name → id map
+    const allOrgTags = await db.tag.findMany({
+      where: { organizationId },
+      select: { id: true, name: true },
+    });
+    for (const tag of allOrgTags) {
+      tagNameMap.set(tag.name.toLowerCase(), tag.id);
+    }
+  }
+
   // Process updates
   const updated: BulkUpdateResult["updated"] = [];
   const skipped: BulkUpdateResult["skipped"] = diffs.skippedAssets;
@@ -1300,12 +1358,10 @@ export async function applyBulkUpdatesFromImport({
             break;
 
           case "category": {
-            const categoryId = await resolveCategoryNameToId(
-              change.newValue,
-              userId,
-              organizationId
-            );
-            updatePayload.categoryId = categoryId;
+            const categoryId = categoryNameMap.get(change.newValue);
+            if (categoryId) {
+              updatePayload.categoryId = categoryId;
+            }
             break;
           }
 
@@ -1314,11 +1370,10 @@ export async function applyBulkUpdatesFromImport({
               .split(",")
               .map((t) => t.trim())
               .filter(Boolean);
-            const tagIds = await resolveTagNamesToIds(
-              tagNames,
-              userId,
-              organizationId
-            );
+            const tagIds = tagNames
+              .map((n) => tagNameMap.get(n.toLowerCase()))
+              .filter((id): id is string => !!id)
+              .map((id) => ({ id }));
             updatePayload.tags = { set: tagIds };
             break;
           }
@@ -1395,11 +1450,15 @@ export async function applyBulkUpdatesFromImport({
       // Handle location separately to catch kit constraint
       if (locationChange) {
         try {
-          const locationId = await resolveLocationNameToId(
-            locationChange.newValue,
-            userId,
-            organizationId
-          );
+          const locationId = locationNameMap.get(locationChange.newValue);
+          if (!locationId) {
+            throw new ShelfError({
+              cause: null,
+              message: `Location "${locationChange.newValue}" could not be resolved`,
+              label: "Assets",
+              shouldBeCaptured: false,
+            });
+          }
           await updateAsset({
             id: assetDbId,
             userId,
@@ -1485,7 +1544,14 @@ export async function applyBulkUpdatesFromImport({
     }
   }
 
-  const total = updated.length + skipped.length + failed.length;
+  // Count unique assets — some may appear in both updated and failed
+  // when a partial success occurs (e.g. location kit constraint)
+  const uniqueIds = new Set([
+    ...updated.map((a) => a.id),
+    ...skipped.map((a) => a.id),
+    ...failed.map((r) => r.id),
+  ]);
+  const total = uniqueIds.size;
 
   return {
     updated,

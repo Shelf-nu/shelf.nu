@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { AssetChangePreview } from "~/utils/import-update.server";
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,20 @@ export function SpreadsheetPreview({
     assetIdx: number;
     col: string;
   } | null>(null);
+  const [tooltipAbove, setTooltipAbove] = useState(true);
+  const cellRef = useRef<HTMLTableCellElement | null>(null);
+
+  /** Measure available space above the cell to decide tooltip placement */
+  const handleCellHover = useCallback(
+    (assetIdx: number, col: string, el: HTMLTableCellElement) => {
+      cellRef.current = el;
+      const rect = el.getBoundingClientRect();
+      // Flip below if less than 80px above the cell
+      setTooltipAbove(rect.top > 80);
+      setHoveredCell({ assetIdx, col });
+    },
+    []
+  );
 
   const totalAssets = assets.length;
   const displayAssets = assets.slice(0, displayLimit);
@@ -98,9 +112,13 @@ export function SpreadsheetPreview({
                         className={`relative cursor-default border-r px-3 py-1.5 ${
                           hasWarning ? "bg-red-50" : "bg-blue-50"
                         }`}
-                        onMouseEnter={() => setHoveredCell({ assetIdx, col })}
+                        onMouseEnter={(e) =>
+                          handleCellHover(assetIdx, col, e.currentTarget)
+                        }
                         onMouseLeave={() => setHoveredCell(null)}
-                        onFocus={() => setHoveredCell({ assetIdx, col })}
+                        onFocus={(e) =>
+                          handleCellHover(assetIdx, col, e.currentTarget)
+                        }
                         onBlur={() => setHoveredCell(null)}
                       >
                         <div
@@ -121,7 +139,13 @@ export function SpreadsheetPreview({
 
                         {/* Tooltip on hover with full values */}
                         {isHovered && (
-                          <div className="absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-white px-3 py-2 text-xs shadow-lg">
+                          <div
+                            className={`absolute left-1/2 z-30 w-max max-w-[280px] -translate-x-1/2 rounded-md border bg-white px-3 py-2 text-xs shadow-lg ${
+                              tooltipAbove
+                                ? "bottom-full mb-2"
+                                : "top-full mt-2"
+                            }`}
+                          >
                             <p className="mb-1 font-semibold text-gray-700">
                               {col}
                             </p>

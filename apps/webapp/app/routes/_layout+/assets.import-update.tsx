@@ -46,10 +46,19 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     );
 
     const csvData = await csvDataFromRequest({ request });
-    if (csvData.length < 2) {
+    if (csvData.length === 0) {
       throw new ShelfError({
         cause: null,
-        message: "CSV file is empty or has no data rows.",
+        message: "CSV file is empty or contains only whitespace.",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+    if (csvData.length === 1) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "CSV contains a header row but no data rows. Add at least one asset row below the headers.",
         label: "Assets",
         shouldBeCaptured: false,
       });
