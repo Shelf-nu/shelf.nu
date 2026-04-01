@@ -205,6 +205,10 @@ export function SpreadsheetPreview({
           Changed — will be updated
         </span>
         <span className="flex items-center gap-1.5">
+          <span className="inline-block size-3 rounded-sm bg-red-50 ring-1 ring-red-200" />
+          Warning — value may be invalid
+        </span>
+        <span className="flex items-center gap-1.5">
           <span className="text-gray-300">—</span>
           No change
         </span>

@@ -28,27 +28,27 @@ export function ResultsDisplay({
   onReset: () => void;
 }) {
   const handleDownloadReport = () => {
-    const lines: string[] = ["Status,Asset ID,Asset Name,Details"];
+    const lines: string[] = ["Status,Row,Asset ID,Asset Name,Details"];
 
     for (const asset of result.updated) {
       lines.push(
-        `Updated,${escapeCsvValue(asset.id)},${escapeCsvValue(asset.title)},${
+        `Updated,,${escapeCsvValue(asset.id)},${escapeCsvValue(asset.title)},${
           asset.changesApplied
         } fields changed`
       );
     }
     for (const asset of result.skipped) {
       lines.push(
-        `Skipped,${escapeCsvValue(asset.id)},${escapeCsvValue(
+        `Skipped,,${escapeCsvValue(asset.id)},${escapeCsvValue(
           asset.title
         )},${escapeCsvValue(asset.reason)}`
       );
     }
     for (const row of result.failed) {
       lines.push(
-        `Failed,${escapeCsvValue(row.id)},${escapeCsvValue(
-          row.title
-        )},${escapeCsvValue(row.error)}`
+        `Failed,${row.rowNumber || ""},${escapeCsvValue(
+          row.id
+        )},${escapeCsvValue(row.title)},${escapeCsvValue(row.error)}`
       );
     }
 

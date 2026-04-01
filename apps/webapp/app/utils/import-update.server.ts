@@ -472,13 +472,39 @@ export function computeAssetDiffs({
     seenIds.set(existingAsset.id, rowNumber);
 
     // Cross-check: if both identifier columns exist and have values,
-    // verify they point to the same asset to prevent accidental mismatch
+    // verify they point to the same asset to prevent accidental mismatch.
+    // Also reject if one identifier is populated but unresolved.
     if (headerAnalysis.fallbackId && fallbackAssets) {
       const primaryValue = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
       const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
       if (primaryValue && fallbackValue) {
+        const primaryAsset = existingAssets.get(primaryValue);
         const fallbackAsset = fallbackAssets.get(fallbackValue);
-        if (fallbackAsset && fallbackAsset.id !== existingAsset.id) {
+
+        // Reject if one identifier resolved but the other didn't
+        if (primaryAsset && !fallbackAsset) {
+          failedRows.push({
+            rowNumber,
+            id: assetId,
+            reason: `ID "${fallbackValue}" not found — but Asset ID "${primaryValue}" resolved. Check for typos.`,
+          });
+          continue;
+        }
+        if (!primaryAsset && fallbackAsset) {
+          failedRows.push({
+            rowNumber,
+            id: assetId,
+            reason: `Asset ID "${primaryValue}" not found — but ID "${fallbackValue}" resolved. Check for typos.`,
+          });
+          continue;
+        }
+
+        // Reject if both resolved but to different assets
+        if (
+          primaryAsset &&
+          fallbackAsset &&
+          fallbackAsset.id !== primaryAsset.id
+        ) {
           failedRows.push({
             rowNumber,
             id: assetId,
@@ -623,7 +649,8 @@ function compareCoreField(
 
     case "valuation": {
       const normalized = normalizeExportedCurrencyValue(csvValue);
-      const csvNum = parseFloat(normalized);
+      const csvNum = Number(normalized);
+      // Number() rejects partial matches like "12abc" (unlike parseFloat)
       if (isNaN(csvNum)) {
         return {
           field: displayName,
@@ -765,7 +792,7 @@ function compareCustomField(
     case "AMOUNT":
     case "NUMBER": {
       const normalizedCsv = normalizeExportedCurrencyValue(csvValue);
-      const csvNum = parseFloat(normalizedCsv);
+      const csvNum = Number(normalizedCsv);
       if (isNaN(csvNum)) {
         return {
           field: displayName,
@@ -775,7 +802,7 @@ function compareCustomField(
         };
       }
       // Distinguish empty/null from numeric 0
-      const currentNum = currentStr ? parseFloat(currentStr) : NaN;
+      const currentNum = currentStr ? Number(currentStr) : NaN;
       if (isNaN(currentNum)) {
         // Current is empty — any valid number (including 0) is a change
         return {
@@ -1251,21 +1278,23 @@ export async function applyBulkUpdatesFromImport({
     }
   }
 
-  // Batch resolve categories
-  for (const name of allCategoryNames) {
-    categoryNameMap.set(
-      name,
-      await resolveCategoryNameToId(name, userId, organizationId)
-    );
-  }
-
-  // Batch resolve locations
-  for (const name of allLocationNames) {
-    locationNameMap.set(
-      name,
-      await resolveLocationNameToId(name, userId, organizationId)
-    );
-  }
+  // Resolve categories and locations in parallel
+  const [categoryResults, locationResults] = await Promise.all([
+    Promise.all(
+      [...allCategoryNames].map(async (name) => ({
+        name,
+        id: await resolveCategoryNameToId(name, userId, organizationId),
+      }))
+    ),
+    Promise.all(
+      [...allLocationNames].map(async (name) => ({
+        name,
+        id: await resolveLocationNameToId(name, userId, organizationId),
+      }))
+    ),
+  ]);
+  for (const { name, id } of categoryResults) categoryNameMap.set(name, id);
+  for (const { name, id } of locationResults) locationNameMap.set(name, id);
 
   // Batch resolve tags
   if (allTagNames.size > 0) {
@@ -1394,7 +1423,7 @@ export async function applyBulkUpdatesFromImport({
 
           case "valuation": {
             const normalized = normalizeExportedCurrencyValue(change.newValue);
-            const val = parseFloat(normalized);
+            const val = Number(normalized);
             if (!isNaN(val)) {
               updatePayload.valuation = val;
             }
@@ -1495,16 +1524,30 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
-      // Handle availableToBook separately
+      // Handle availableToBook separately to avoid outer catch
+      // masking earlier successful writes as a full-row failure
       if (availableToBookChange) {
-        const newBool = parseYesNo(availableToBookChange.newValue);
-        if (newBool !== undefined) {
-          await updateAssetBookingAvailability({
-            id: assetDbId,
-            availableToBook: newBool,
-            organizationId,
-          });
-          changesApplied++;
+        try {
+          const newBool = parseYesNo(availableToBookChange.newValue);
+          if (newBool !== undefined) {
+            await updateAssetBookingAvailability({
+              id: assetDbId,
+              availableToBook: newBool,
+              organizationId,
+            });
+            changesApplied++;
+          }
+        } catch (cause) {
+          const msg = isLikeShelfError(cause)
+            ? (cause as { message: string }).message
+            : "Booking availability update failed";
+          // Track as partial failure if other fields already applied
+          if (changesApplied > 0 || hasMainChanges) {
+            locationKitError =
+              locationKitError || `Available-to-book change skipped: ${msg}`;
+          } else {
+            throw cause;
+          }
         }
       }
 

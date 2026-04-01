@@ -114,10 +114,19 @@ function stripQuotes(value: string): string {
   return value;
 }
 
-/** Escape a value for CSV output — wraps in quotes if needed */
+/**
+ * Escape a value for CSV output — wraps in quotes if needed.
+ * Also prefixes spreadsheet formula triggers (`=`, `+`, `-`, `@`)
+ * with a single quote to prevent formula injection in Excel/Sheets.
+ */
 export function escapeCsvValue(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Prevent spreadsheet formula injection
+  let safe = value;
+  if (/^[=+\-@]/.test(safe)) {
+    safe = `'${safe}`;
   }
-  return value;
+  if (/[",\n\r]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
 }
