@@ -8,6 +8,7 @@ import {
 import { useFetcher } from "react-router";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { AUDIT_ADDON } from "~/config/addon-copy";
 import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
@@ -32,12 +33,14 @@ export function UnlockAuditsPage({
   monthlyPrice,
   yearlyPrice,
   auditSubInfo,
+  hasPaymentMethod = false,
 }: {
   isOwner: boolean;
   usedAuditTrial: boolean;
   monthlyPrice: PriceWithProduct | null;
   yearlyPrice: PriceWithProduct | null;
   auditSubInfo?: AuditSubInfo;
+  hasPaymentMethod?: boolean;
 }) {
   const [selectedInterval, setSelectedInterval] = useState<"month" | "year">(
     "year"
@@ -60,12 +63,7 @@ export function UnlockAuditsPage({
         )
       : null;
 
-  const features = [
-    "Track and verify your assets in real-time",
-    "Assign auditors and set due dates",
-    "Scan QR codes for quick verification",
-    "Generate detailed audit reports",
-  ];
+  const features = AUDIT_ADDON.features;
 
   return (
     <div className="flex size-full items-center justify-center p-6">
@@ -75,10 +73,10 @@ export function UnlockAuditsPage({
           <div className="mb-4 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-3 text-primary">
             <ClipboardCheckIcon className="size-6" />
           </div>
-          <h2 className="mb-2 text-display-xs font-semibold">Unlock Audits</h2>
-          <p className="text-gray-600">
-            Add powerful audit capabilities to your workspace.
-          </p>
+          <h2 className="mb-2 text-display-xs font-semibold">
+            Unlock {AUDIT_ADDON.label}
+          </h2>
+          <p className="text-gray-600">{AUDIT_ADDON.subtitle}</p>
         </div>
 
         {/* Feature list */}
@@ -118,6 +116,7 @@ export function UnlockAuditsPage({
                 yearlyPrice={yearlyPrice}
                 selectedPrice={selectedPrice}
                 selectedInterval={selectedInterval}
+                hasPaymentMethod={hasPaymentMethod}
               />
             )
           ) : (
@@ -281,28 +280,55 @@ function OwnerCTAs({
   yearlyPrice,
   selectedPrice,
   selectedInterval,
+  hasPaymentMethod,
 }: {
   canStartTrial: boolean;
   yearlyPrice: PriceWithProduct | null;
   selectedPrice: PriceWithProduct | null;
   selectedInterval: "month" | "year";
+  hasPaymentMethod: boolean;
 }) {
   const trialFetcher = useFetcher();
   const subscribeFetcher = useFetcher();
   const isStartingTrial = trialFetcher.state !== "idle";
   const isSubscribing = subscribeFetcher.state !== "idle";
+  const [consentChecked, setConsentChecked] = useState(false);
+
+  const needsConsent = hasPaymentMethod && canStartTrial;
 
   return (
     <>
+      {needsConsent && (
+        <div className="rounded-lg border border-[#FFE082] bg-[#FFF8E1] p-3">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-[13px] text-gray-600">
+              I understand that after the 7-day free trial, my payment method on
+              file will be automatically charged at the regular subscription
+              rate. I can cancel anytime before the trial ends to avoid being
+              charged.
+            </span>
+          </label>
+        </div>
+      )}
+
       {canStartTrial && yearlyPrice && (
         <trialFetcher.Form method="post" action="/audits">
           <input type="hidden" name="intent" value="trial" />
           <input type="hidden" name="priceId" value={yearlyPrice.id} />
+          {consentChecked && (
+            <input type="hidden" name="consentAcknowledged" value="true" />
+          )}
           <Button
             type="submit"
             variant="primary"
             width="full"
-            disabled={isStartingTrial}
+            disabled={isStartingTrial || (hasPaymentMethod && !consentChecked)}
           >
             <span className="item flex gap-2">
               <SparklesIcon className="size-4" />
@@ -344,10 +370,7 @@ function OwnerCTAs({
 function NonOwnerMessage() {
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-center">
-      <p className="text-gray-600">
-        Contact your workspace owner to enable the Audits add-on for your
-        organization.
-      </p>
+      <p className="text-gray-600">{AUDIT_ADDON.nonOwnerDescription}</p>
     </div>
   );
 }

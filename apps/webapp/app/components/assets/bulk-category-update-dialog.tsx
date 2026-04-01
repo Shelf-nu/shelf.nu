@@ -63,6 +63,7 @@ export default function BulkCategoryUpdateDialog() {
 
           <div className="flex gap-3">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               disabled={disabled}
@@ -70,7 +71,12 @@ export default function BulkCategoryUpdateDialog() {
             >
               Cancel
             </Button>
-            <Button variant="primary" width="full" disabled={disabled}>
+            <Button
+              type="submit"
+              variant="primary"
+              width="full"
+              disabled={disabled}
+            >
               Confirm
             </Button>
           </div>

@@ -7,6 +7,7 @@ import { CustodianField } from "~/components/booking/forms/fields/custodian";
 import { DatesFields } from "~/components/booking/forms/fields/dates";
 import { DescriptionField } from "~/components/booking/forms/fields/description";
 import { NameField } from "~/components/booking/forms/fields/name";
+import { NotificationRecipientsField } from "~/components/booking/forms/fields/notification-recipients";
 import type { BookingFormSchemaType } from "~/components/booking/forms/forms-schema";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
@@ -151,7 +152,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               />
             </Card>
 
-            <Card className="m-0">
+            <Card className="m-0 mb-2">
               <DescriptionField
                 description={undefined}
                 fieldName={zo.fields.description()}
@@ -163,12 +164,21 @@ export default function CreateBookingForSelectedAssetsDialog() {
               />
             </Card>
 
+            <Card className="m-0 overflow-visible">
+              <NotificationRecipientsField
+                disabled={disabled}
+                isAdminOrOwner={isAdministratorOrOwner}
+                creatorName="You"
+              />
+            </Card>
+
             {fetcherError && !validationErrors ? (
               <p className="mt-2 text-sm text-error-500">{fetcherError}</p>
             ) : null}
 
             <div className="flex items-center gap-3">
               <Button
+                type="button"
                 variant="secondary"
                 width="full"
                 disabled={disabled}

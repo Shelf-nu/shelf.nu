@@ -23,6 +23,7 @@ import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 
 import ExtendBookingDialog from "./extend-booking-dialog";
+import ManageNotificationsDialog from "./manage-notifications-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
@@ -34,8 +35,15 @@ interface Props {
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
-  const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatusHelpers(booking.status);
+  const {
+    isCompleted,
+    isOngoing,
+    isReserved,
+    isOverdue,
+    isDraft,
+    isArchived,
+    isCancelled,
+  } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
@@ -132,6 +140,17 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               Duplicate booking
             </Button>
           </DropdownMenuItem>
+
+          <When
+            truthy={
+              !isBaseOrSelfService &&
+              !isCompleted &&
+              !isArchived &&
+              !isCancelled
+            }
+          >
+            <ManageNotificationsDialog />
+          </When>
 
           {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
 

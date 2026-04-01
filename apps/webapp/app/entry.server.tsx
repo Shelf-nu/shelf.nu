@@ -8,6 +8,7 @@ import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import type { AppLoadContext, EntryContext } from "react-router";
 import { registerEmailWorkers } from "./emails/email.worker.server";
+import { registerAddonTrialWorkers } from "./modules/addon-trial/worker.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
@@ -62,6 +63,18 @@ schedulerService
             new ShelfError({
               cause,
               message: "Something went wrong while registering audit workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      registerAddonTrialWorkers()
+        .then(() => console.log("Addon trial workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering addon trial workers.",
               label: "Scheduler",
             })
           );

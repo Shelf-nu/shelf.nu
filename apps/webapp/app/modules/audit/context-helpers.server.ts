@@ -72,6 +72,7 @@ export async function resolveAssetIdsForAudit({
         }". Add assets before starting an audit.`,
         status: 400,
         label: "Audit",
+        shouldBeCaptured: false,
       });
     }
 

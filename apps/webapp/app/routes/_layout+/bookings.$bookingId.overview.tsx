@@ -46,6 +46,7 @@ import {
   reserveBooking,
   revertBookingToDraft,
   updateBasicBooking,
+  updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -56,6 +57,7 @@ import { buildTagsSet } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
@@ -129,7 +131,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     // Get the booking with basic asset information
-    const [booking, tags] = await Promise.all([
+    const [booking, tags, notifyData] = await Promise.all([
       getBooking({
         id: bookingId,
         organizationId: organizationId,
@@ -141,9 +143,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
+          // Only include notification recipients for admin/owner users.
+          // Self-service/base users don't need this data (they can't see or
+          // manage notification settings).
+          ...(isSelfServiceOrBase
+            ? {}
+            : {
+                notificationRecipients: {
+                  select: {
+                    id: true,
+                    name: true,
+                    user: {
+                      select: {
+                        id: true,
+                        email: true,
+                        firstName: true,
+                        lastName: true,
+                      },
+                    },
+                  },
+                },
+              }),
         },
       }),
       db.tag.findMany({
@@ -156,7 +180,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
+      // Only fetch notification team members for admin/owner users
+      isSelfServiceOrBase
+        ? Promise.resolve({
+            teamMembersForNotify: [],
+            totalTeamMembersForNotify: 0,
+          })
+        : getTeamMembersForNotify({ organizationId }),
     ]);
+
+    // Exclude custodian from the notification recipients picker since
+    // the custodian is always notified and doesn't need to be added
+    if (booking.custodianTeamMemberId) {
+      notifyData.teamMembersForNotify = notifyData.teamMembersForNotify.filter(
+        (tm) => tm.id !== booking.custodianTeamMemberId
+      );
+      notifyData.totalTeamMembersForNotify =
+        notifyData.teamMembersForNotify.length;
+    }
+
     // DEPRECATED for now
     //  * if the booking is ongoing and there is no status param, we need to set it to
     // checked-out as that is the default
@@ -484,6 +526,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         partialCheckinDetails,
         // Asset search tooltip
         searchFieldLabel: "Search by asset name",
+        ...notifyData,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -544,6 +587,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
+          "updateNotificationRecipients",
         ]),
         nameChangeOnly: z
           .string()
@@ -571,6 +615,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
+      updateNotificationRecipients: PermissionAction.update,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -589,6 +634,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -633,7 +679,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },
-        getClientHint(request)
+        getClientHint(request),
+        userId
       );
 
       const actor = wrapUserLinkForNote({
@@ -843,6 +890,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
             label: "Booking",
+            shouldBeCaptured: false,
           });
         }
         if (
@@ -856,6 +904,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
             status: 403,
             label: "Booking",
+            shouldBeCaptured: false,
           });
         }
 
@@ -1114,6 +1163,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return payload({ success: true });
+      }
+      case "updateNotificationRecipients": {
+        if (isSelfServiceOrBase) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "You do not have permission to manage notification recipients.",
+            label: "Booking",
+            shouldBeCaptured: false,
+            status: 403,
+          });
+        }
+
+        const recipientIdsRaw = formData.get(
+          "notificationRecipientIds"
+        ) as string;
+        const teamMemberIds = recipientIdsRaw
+          ? recipientIdsRaw.split(",").filter(Boolean)
+          : [];
+
+        await updateBookingNotificationRecipients({
+          bookingId: id,
+          organizationId,
+          teamMemberIds,
+        });
+
+        sendNotification({
+          title: "Notifications updated",
+          message: "Booking notification recipients have been updated.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }), { headers });
       }
       case "bulk-remove-asset-or-kit": {
         const { assetOrKitIds } = parseData(

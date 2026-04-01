@@ -362,15 +362,12 @@ async function validateKitCustodyConflicts({
             existingKit.assets.length
           } existing asset${existingKit.assets.length === 1 ? "" : "s"}`,
         });
-      } else if (
-        existingKit.custody &&
-        existingKit.custody.custodian.name !== asset.custodian
-      ) {
+      } else if (existingKit.custody) {
         conflicts.push({
           asset: asset.title,
           custodian: asset.custodian!,
           kit: asset.kit!,
-          issue: `Kit already in custody with ${existingKit.custody.custodian.name}`,
+          issue: `Kit already has a custodian (${existingKit.custody.custodian.name}). Importing custody for kits that already have a custodian is not allowed`,
         });
       }
     }
@@ -1564,7 +1561,7 @@ export async function updateAsset({
         const [user, customFieldsFromForm] = await Promise.all([
           db.user.findFirst({
             where: { id: userId },
-            select: { firstName: true, lastName: true },
+            select: { firstName: true, lastName: true, displayName: true },
           }),
           db.customField.findMany({
             where: {
@@ -2994,6 +2991,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   profilePicture: true,
                 },
               },
@@ -3045,8 +3043,8 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
             };
           }
 
-          /** This should not happen as there shouldn't be a case when asset is CHECKED_OUT but has no custodian */
-          Logger.error(
+          /** Data integrity edge case: asset is CHECKED_OUT but booking has no custodian assigned */
+          Logger.warn(
             new ShelfError({
               cause: null,
               message: "Couldn't find custodian for asset",
@@ -3068,6 +3066,233 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
       label,
     });
   }
+}
+
+/**
+ * Checks if an error indicates the storage object was not found.
+ * Walks both additionalData and the cause chain to handle
+ * Supabase StorageApiError wrapped by ShelfError.
+ */
+export function isStorageObjectNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  if (
+    "additionalData" in error &&
+    error.additionalData &&
+    typeof error.additionalData === "object" &&
+    "errorMessage" in error.additionalData &&
+    typeof error.additionalData.errorMessage === "string" &&
+    error.additionalData.errorMessage.toLowerCase().includes("object not found")
+  ) {
+    return true;
+  }
+
+  if ("cause" in error && error.cause) {
+    if (
+      error.cause instanceof Error &&
+      error.cause.message.toLowerCase().includes("object not found")
+    ) {
+      return true;
+    }
+    return isStorageObjectNotFound(error.cause);
+  }
+
+  return false;
+}
+
+/**
+ * Refreshes expired signed URLs for asset images server-side.
+ * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ *
+ * Only refreshes existing thumbnail URLs — does not generate missing
+ * thumbnails, as that requires downloading + re-uploading images
+ * which is too expensive for a batch operation.
+ */
+export async function refreshExpiredAssetImages<
+  T extends {
+    id: string;
+    organizationId: string;
+    mainImage: string | null;
+    mainImageExpiration: Date | null;
+    thumbnailImage?: string | null;
+  },
+>(assets: T[]): Promise<T[]> {
+  const now = new Date();
+  const expiredAssets = assets.filter(
+    (a) =>
+      a.mainImage &&
+      a.mainImageExpiration &&
+      new Date(a.mainImageExpiration) < now
+  );
+
+  if (expiredAssets.length === 0) return assets;
+
+  const BATCH_SIZE = 10;
+  /** Short backoff to prevent retry storms when refresh fails */
+  const BACKOFF_SECONDS = 30;
+
+  const applyBackoff = async (asset: (typeof expiredAssets)[number]) => {
+    try {
+      const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+      await db.asset.update({
+        where: { id: asset.id, organizationId: asset.organizationId },
+        data: { mainImageExpiration: backoffExpiration },
+      });
+    } catch {
+      // If even the backoff update fails, just move on
+    }
+  };
+
+  const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
+    try {
+      const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
+      if (!mainImagePath) {
+        // Can't extract path — apply backoff to avoid retrying every load
+        await applyBackoff(asset);
+        return null;
+      }
+
+      const newMainImageUrl = await createSignedUrl({
+        filename: mainImagePath,
+        bucketName: "assets",
+      });
+
+      // Refresh thumbnail if present — isolated so failure doesn't block mainImage
+      let newThumbnailUrl: string | null = null;
+      if (asset.thumbnailImage) {
+        try {
+          const thumbnailPath = extractStoragePath(
+            asset.thumbnailImage,
+            "assets"
+          );
+          if (thumbnailPath) {
+            newThumbnailUrl = await createSignedUrl({
+              filename: thumbnailPath,
+              bucketName: "assets",
+            });
+          }
+        } catch {
+          Logger.info(
+            `Failed to refresh thumbnail for asset ${asset.id}, proceeding with mainImage only`
+          );
+        }
+      }
+
+      const newExpiration = oneDayFromNow();
+
+      const updateData: {
+        mainImage: string;
+        mainImageExpiration: Date;
+        thumbnailImage?: string;
+      } = {
+        mainImage: newMainImageUrl,
+        mainImageExpiration: newExpiration,
+      };
+
+      if (newThumbnailUrl) {
+        updateData.thumbnailImage = newThumbnailUrl;
+      }
+
+      await db.asset.update({
+        where: { id: asset.id, organizationId: asset.organizationId },
+        data: updateData,
+      });
+
+      return {
+        id: asset.id,
+        mainImage: newMainImageUrl,
+        mainImageExpiration: newExpiration,
+        ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
+      };
+    } catch (error) {
+      // Asset deleted between query and update — not an error
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2025"
+      ) {
+        return null;
+      }
+
+      // File deleted from storage — expected, not a bug
+      if (isStorageObjectNotFound(error)) {
+        Logger.info(
+          `Image file not found in storage for asset ${asset.id}, applying backoff`
+        );
+        await applyBackoff(asset);
+        return null;
+      }
+
+      // Preserve shouldBeCaptured from original error if present
+      const shouldCapture =
+        error &&
+        typeof error === "object" &&
+        "shouldBeCaptured" in error &&
+        typeof error.shouldBeCaptured === "boolean"
+          ? error.shouldBeCaptured
+          : true;
+
+      Logger.error(
+        new ShelfError({
+          cause: error,
+          message: `Failed to refresh expired image URLs for asset ${asset.id}`,
+          additionalData: { assetId: asset.id },
+          label: "Assets",
+          shouldBeCaptured: shouldCapture,
+        })
+      );
+
+      await applyBackoff(asset);
+      throw error;
+    }
+  };
+
+  const refreshResults: PromiseSettledResult<{
+    id: string;
+    mainImage: string;
+    mainImageExpiration: Date;
+    thumbnailImage?: string;
+  } | null>[] = [];
+
+  for (let i = 0; i < expiredAssets.length; i += BATCH_SIZE) {
+    const batch = expiredAssets.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map((asset) => refreshAsset(asset))
+    );
+    refreshResults.push(...batchResults);
+  }
+
+  const refreshedMap = new Map<
+    string,
+    {
+      mainImage: string;
+      mainImageExpiration: Date;
+      thumbnailImage?: string;
+    }
+  >();
+  for (const result of refreshResults) {
+    if (result.status === "fulfilled" && result.value) {
+      const entry: {
+        mainImage: string;
+        mainImageExpiration: Date;
+        thumbnailImage?: string;
+      } = {
+        mainImage: result.value.mainImage,
+        mainImageExpiration: result.value.mainImageExpiration,
+      };
+      if (result.value.thumbnailImage) {
+        entry.thumbnailImage = result.value.thumbnailImage;
+      }
+      refreshedMap.set(result.value.id, entry);
+    }
+  }
+
+  return assets.map((a) => {
+    const refreshed = refreshedMap.get(a.id);
+    if (refreshed) {
+      return { ...a, ...refreshed };
+    }
+    return a;
+  });
 }
 
 export async function updateAssetQrCode({
@@ -3242,6 +3467,7 @@ export async function bulkCheckOutAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
@@ -3253,6 +3479,7 @@ export async function bulkCheckOutAssets({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -3280,6 +3507,13 @@ export async function bulkCheckOutAssets({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      /** Clean up any stale custody records that may exist despite AVAILABLE status.
+       * This prevents P2002 unique constraint violations when a previous
+       * release/checkin updated status but failed to delete the custody row. */
+      await tx.custody.deleteMany({
+        where: { assetId: { in: assets.map((a) => a.id) } },
+      });
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({
@@ -3375,6 +3609,7 @@ export async function bulkCheckInAssets({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -3498,6 +3733,7 @@ export async function bulkUpdateAssetLocation({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -3871,6 +4107,7 @@ export async function relinkAssetQrCode({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({
@@ -3886,6 +4123,8 @@ export async function relinkAssetQrCode({
       title: "QR not valid.",
       message: "This QR code does not belong to your organization",
       label: "QR",
+      status: 403,
+      shouldBeCaptured: false,
     });
   }
 

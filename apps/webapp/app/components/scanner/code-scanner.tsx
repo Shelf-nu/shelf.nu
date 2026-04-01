@@ -373,6 +373,7 @@ export const CodeScanner = ({
                     {errorMessage}
                   </p>
                   <Button
+                    type="button"
                     onClick={() => setPaused(false)}
                     variant="secondary"
                     className="mt-2"
@@ -507,6 +508,7 @@ function ScannerMode({
           onBlur={() => setInputIsFocused(false)}
         />
         <Button
+          type="button"
           onClick={handleButtonClick}
           disabled={paused || !inputValue.trim()}
           variant="secondary"
@@ -766,7 +768,11 @@ function CameraMode({
           </div>
           <p className="mb-4">{error}</p>
           <p className="mb-4">If the issue persists, please contact support.</p>
-          <Button onClick={() => window.location.reload()} variant="secondary">
+          <Button
+            type="button"
+            onClick={() => window.location.reload()}
+            variant="secondary"
+          >
             Reload Page
           </Button>
         </InfoOverlay>
@@ -853,6 +859,7 @@ function Initializing() {
       {expired && (
         <div>
           <Button
+            type="button"
             variant={"secondary"}
             onClick={() => window.location.reload()}
             className={"mt-4"}

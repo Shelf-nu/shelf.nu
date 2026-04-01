@@ -9,6 +9,7 @@ import { useHints } from "~/utils/client-hints";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import { resolveUserDisplayName } from "~/utils/user";
 
 type Items = NonNullable<
   ReturnType<typeof useLoaderData<KitIndexLoaderData>>["items"]
@@ -36,16 +37,18 @@ export function useKitAvailabilityData(items: Items) {
       },
     }));
 
-    // Collect all unique bookings across all kits and their assets
+    // Collect all unique booking-kit combinations across all kits
+    // A booking can span multiple kits (via assets from different kits),
+    // so we use a composite key to ensure each kit gets its own event
     const allBookings = new Map();
 
     items.forEach((kit) => {
       kit.assets.forEach((asset) => {
         if (asset.bookings) {
           asset.bookings.forEach((booking) => {
-            // Use booking ID as key to ensure uniqueness
-            if (!allBookings.has(booking.id)) {
-              allBookings.set(booking.id, { ...booking, kitId: kit.id });
+            const key = `${booking.id}-${kit.id}`;
+            if (!allBookings.has(key)) {
+              allBookings.set(key, { ...booking, kitId: kit.id });
             }
           });
         }
@@ -60,7 +63,7 @@ export function useKitAvailabilityData(items: Items) {
       };
 
       const custodianName = bookingWithRelations?.custodianUser
-        ? `${bookingWithRelations.custodianUser.firstName} ${bookingWithRelations.custodianUser.lastName}`
+        ? resolveUserDisplayName(bookingWithRelations.custodianUser)
         : bookingWithRelations.custodianTeamMember?.name;
 
       let title = bookingWithRelations.name;
@@ -71,7 +74,6 @@ export function useKitAvailabilityData(items: Items) {
       return {
         title,
         resourceId: bookingWithRelations.kitId,
-        url: `/bookings/${bookingWithRelations.id}`,
         start: toIsoDateTimeToUserTimezone(
           bookingWithRelations.from!,
           timeZone
@@ -89,6 +91,7 @@ export function useKitAvailabilityData(items: Items) {
           ),
         ],
         extendedProps: {
+          url: `/bookings/${bookingWithRelations.id}`,
           id: bookingWithRelations.id,
           name: bookingWithRelations.name,
           status: bookingWithRelations.status,

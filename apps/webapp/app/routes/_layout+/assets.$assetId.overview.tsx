@@ -11,6 +11,7 @@ import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
+import { UnlockBarcodesBanner } from "~/components/barcode/unlock-barcodes-banner";
 import { CodePreview } from "~/components/code-preview/code-preview";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -69,6 +70,9 @@ type AssetWithOptionalBarcodes = ReturnType<
     type: any;
     value: string;
   }>;
+  _count?: {
+    barcodes: number;
+  };
 };
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -402,46 +406,73 @@ export default function AssetOverview() {
 
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
+                const barcodeCount =
+                  assetWithBarcodes.barcodes?.length ||
+                  assetWithBarcodes._count?.barcodes ||
+                  0;
+
+                if (!barcodeCount) return null;
+
+                // Barcodes exist and addon is enabled — show them
+                if (canUseBarcodes && assetWithBarcodes.barcodes?.length) {
+                  return (
+                    <li className="w-full max-w-full p-4 last:border-b-0 md:block">
+                      <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
+                        Barcodes ({assetWithBarcodes.barcodes.length})
+                        <InfoTooltip
+                          iconClassName="size-4"
+                          content={
+                            <>
+                              <h6>Barcodes support</h6>
+                              <p>
+                                Want to know more about barcodes? Check out our
+                                knowledge base article on{" "}
+                                <Button
+                                  variant="link"
+                                  target="_blank"
+                                  to="https://www.shelf.nu/knowledge-base/alternative-barcodes"
+                                >
+                                  barcode support
+                                </Button>
+                              </p>
+                            </>
+                          }
+                        />
+                      </span>
+                      <div className="flex flex-wrap gap-3">
+                        {assetWithBarcodes.barcodes.map((barcode) => (
+                          <BarcodeCard key={barcode.id} barcode={barcode} />
+                        ))}
+                      </div>
+                    </li>
+                  );
+                }
+
+                // Barcodes exist but addon is disabled — show locked state
                 return (
-                  asset &&
-                  assetWithBarcodes.barcodes?.length &&
-                  assetWithBarcodes.barcodes.length > 0 &&
-                  canUseBarcodes
+                  <li className="w-full max-w-full p-4 last:border-b-0 md:block">
+                    <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
+                      Barcodes ({barcodeCount})
+                    </span>
+                    <div className="flex flex-wrap gap-3">
+                      {Array.from({ length: barcodeCount }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="flex h-[72px] w-[180px] items-center justify-center rounded border border-gray-200 bg-gray-50"
+                        >
+                          <div className="flex flex-col items-center gap-1 text-gray-400">
+                            <Icon icon="lock" />
+                            <span className="text-xs">Hidden</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3">
+                      <UnlockBarcodesBanner />
+                    </div>
+                  </li>
                 );
-              })() ? (
-                <li className="w-full max-w-full p-4 last:border-b-0 md:block">
-                  <span className="mb-3 flex items-center gap-1 text-[14px] font-medium text-gray-900">
-                    Barcodes (
-                    {(asset as AssetWithOptionalBarcodes).barcodes?.length})
-                    <InfoTooltip
-                      iconClassName="size-4"
-                      content={
-                        <>
-                          <h6>Barcodes support</h6>
-                          <p>
-                            Want to know more about barcodes? Check out our
-                            knowledge base article on{" "}
-                            <Button
-                              variant="link"
-                              target="_blank"
-                              to="https://www.shelf.nu/knowledge-base/alternative-barcodes"
-                            >
-                              barcode support
-                            </Button>
-                          </p>
-                        </>
-                      }
-                    />
-                  </span>
-                  <div className="flex flex-wrap gap-3">
-                    {(asset as AssetWithOptionalBarcodes).barcodes?.map(
-                      (barcode) => (
-                        <BarcodeCard key={barcode.id} barcode={barcode} />
-                      )
-                    )}
-                  </div>
-                </li>
-              ) : null}
+              })()}
             </ul>
           </Card>
 

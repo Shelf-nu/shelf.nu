@@ -5,6 +5,7 @@ import {
   Roles,
 } from "@prisma/client";
 import type { Organization, Prisma, TierId, User } from "@prisma/client";
+import type Stripe from "stripe";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -16,9 +17,11 @@ import {
   createStripeCustomer,
   customerHasPaymentMethod,
   getUserActiveSubscription,
+  getUserActiveSubscriptions,
   premiumIsEnabled,
   transferSubscriptionToCustomer,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
@@ -153,6 +156,7 @@ export async function createOrganization({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     });
 
@@ -181,7 +185,7 @@ export async function createOrganization({
        */
       members: {
         create: {
-          name: `${owner.firstName} ${owner.lastName} (Owner)`,
+          name: `${resolveUserDisplayName(owner)} (Owner)`,
           user: { connect: { id: owner.id } },
         },
       },
@@ -371,6 +375,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   baseUserCanSeeCustody: true,
   baseUserCanSeeBookings: true,
   barcodesEnabled: true,
+  usedBarcodeTrial: true,
   auditsEnabled: true,
   usedAuditTrial: true,
   hasSequentialIdsMigrated: true,
@@ -394,7 +399,7 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
           select: ORGANIZATION_SELECT_FIELDS,
         },
         user: {
-          select: { lastSelectedOrganizationId: true },
+          select: { lastSelectedOrganizationId: true, sso: true },
         },
       },
     });
@@ -437,6 +442,57 @@ export async function getOrganizationAdminsEmails({
       cause,
       message:
         "Something went wrong while fetching organization admins emails. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Returns admin and owner users for an organization with their full
+ * notification-relevant fields: `id`, `email`, `firstName`, `lastName`.
+ *
+ * This differs from `getOrganizationAdminsEmails()` (which returns only
+ * email strings) because the notification recipient resolver needs the
+ * `userId` to perform editor exclusion — if the admin performing an action
+ * is also in the recipient list, they should be filtered out so they don't
+ * email themselves. Returning bare email strings would not support that
+ * matching.
+ *
+ * @param organizationId - The organization to fetch admins for
+ * @returns Array of user objects with id, email, firstName, lastName
+ */
+export async function getOrganizationAdminsForNotification({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    const admins = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: {
+          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
+        },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return admins.map((a) => a.user);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
       additionalData: { organizationId },
       label,
     });
@@ -634,7 +690,13 @@ export async function getOrganizationAdmins({
       where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
       select: {
         user: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            email: true,
+          },
         },
       },
     });
@@ -708,6 +770,7 @@ export async function transferOwnership({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             roles: true,
             customerId: true,
@@ -813,35 +876,47 @@ export async function transferOwnership({
     let subscriptionTransferError: Error | null = null;
     if (premiumIsEnabled && transferSubscription) {
       try {
-        const currentOwnerSubscription = await getUserActiveSubscription(
+        const activeSubscriptions = await getUserActiveSubscriptions(
           currentOwnerUserOrg.user.id
         );
 
-        if (currentOwnerSubscription) {
-          // Ensure new owner has a Stripe customer ID
+        // Filter to subscriptions relevant to this workspace:
+        // - Tier subscriptions (always relevant)
+        // - Addon subscriptions linked to THIS workspace
+        const relevantSubscriptions = filterRelevantSubscriptions(
+          activeSubscriptions,
+          currentOrganization.id
+        );
+
+        if (relevantSubscriptions.length > 0) {
+          // Ensure new owner has a Stripe customer ID (only once)
           let newOwnerCustomerId: string | null | undefined =
             newOwnerUserOrg.user.customerId;
           if (!newOwnerCustomerId) {
             newOwnerCustomerId = await createStripeCustomer({
               email: newOwnerUserOrg.user.email,
-              name: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+              name: resolveUserDisplayName(newOwnerUserOrg.user),
               userId: newOwnerId,
             });
           }
 
           if (newOwnerCustomerId) {
-            // Transfer the subscription to the new customer in Stripe
-            await transferSubscriptionToCustomer({
-              subscriptionId: currentOwnerSubscription.id,
-              newCustomerId: newOwnerCustomerId,
-            });
+            // Transfer each relevant subscription
+            for (const sub of relevantSubscriptions) {
+              await transferSubscriptionToCustomer({
+                subscriptionId: sub.id,
+                newCustomerId: newOwnerCustomerId,
+              });
+            }
 
-            // Update tiers in database
-            // New owner gets the transferred tier
-            await updateUserTierId(newOwnerId, currentOwnerTierId);
-
-            // Downgrade current owner to free
-            await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+            // Update tier if a tier subscription was transferred
+            const hasTierSubscription = relevantSubscriptions.some((sub) =>
+              isTierSubscription(sub)
+            );
+            if (hasTierSubscription) {
+              await updateUserTierId(newOwnerId, currentOwnerTierId);
+              await updateUserTierId(currentOwnerUserOrg.user.id, "free");
+            }
 
             subscriptionTransferred = true;
 
@@ -879,7 +954,7 @@ export async function transferOwnership({
       subject: `🎉 You're now the Owner of ${currentOrganization.name} - Shelf`,
       to: newOwnerUserOrg.user.email,
       text: newOwnerEmailText({
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -890,8 +965,8 @@ export async function transferOwnership({
       subject: `🔁 You've Transferred Ownership of ${currentOrganization.name}`,
       to: currentOwnerUserOrg.user.email,
       text: previousOwnerEmailText({
-        previousOwnerName: `${currentOwnerUserOrg.user.firstName} ${currentOwnerUserOrg.user.lastName}`,
-        newOwnerName: `${newOwnerUserOrg.user.firstName} ${newOwnerUserOrg.user.lastName}`,
+        previousOwnerName: resolveUserDisplayName(currentOwnerUserOrg.user),
+        newOwnerName: resolveUserDisplayName(newOwnerUserOrg.user),
         workspaceName: currentOrganization.name,
         subscriptionTransferred,
       }),
@@ -915,12 +990,12 @@ export async function transferOwnership({
 Workspace: ${currentOrganization.name}
 Workspace ID: ${currentOrganization.id}
 
-Previous Owner: ${currentOwnerUserOrg.user.firstName} ${
-          currentOwnerUserOrg.user.lastName
-        } (${currentOwnerUserOrg.user.email})
-New Owner: ${newOwnerUserOrg.user.firstName} ${
-          newOwnerUserOrg.user.lastName
-        } (${newOwnerUserOrg.user.email})
+Previous Owner: ${resolveUserDisplayName(currentOwnerUserOrg.user)} (${
+          currentOwnerUserOrg.user.email
+        })
+New Owner: ${resolveUserDisplayName(newOwnerUserOrg.user)} (${
+          newOwnerUserOrg.user.email
+        })
 
 Subscription transferred: ${subscriptionStatus}
 ${
@@ -977,4 +1052,52 @@ export async function resetPersonalWorkspaceBranding(userId: User["id"]) {
       label,
     });
   }
+}
+
+/**
+ * Checks if a Stripe subscription is a tier subscription
+ * by looking at its line-item product metadata.
+ */
+function isTierSubscription(sub: Stripe.Subscription): boolean {
+  return sub.items.data.some((item) => {
+    const product = item.price?.product;
+    if (typeof product === "object" && product && "metadata" in product) {
+      return !!(product as Stripe.Product).metadata?.shelf_tier;
+    }
+    return false;
+  });
+}
+
+/**
+ * Checks if a Stripe subscription is an addon linked to a specific workspace.
+ */
+function isAddonForOrganization(
+  sub: Stripe.Subscription,
+  organizationId: string
+): boolean {
+  const subOrgId = sub.metadata?.organizationId;
+  if (subOrgId !== organizationId) return false;
+
+  return sub.items.data.some((item) => {
+    const product = item.price?.product;
+    if (typeof product === "object" && product && "metadata" in product) {
+      return (product as Stripe.Product).metadata?.product_type === "addon";
+    }
+    return false;
+  });
+}
+
+/**
+ * Filters subscriptions to those relevant to a workspace transfer:
+ * - Tier subscriptions (always relevant)
+ * - Addon subscriptions linked to the specific workspace
+ */
+function filterRelevantSubscriptions(
+  subscriptions: Stripe.Subscription[],
+  organizationId: string
+): Stripe.Subscription[] {
+  return subscriptions.filter(
+    (sub) =>
+      isTierSubscription(sub) || isAddonForOrganization(sub, organizationId)
+  );
 }

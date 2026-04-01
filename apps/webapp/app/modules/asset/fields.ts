@@ -24,6 +24,7 @@ export const KITS_INCLUDE_FIELDS = {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
               email: true,
             },
@@ -101,7 +102,6 @@ export const getAssetOverviewFields = (
     },
   } satisfies Prisma.AssetInclude;
 
-  // Conditionally add barcodes if enabled
   if (canUseBarcodes) {
     return {
       ...baseFields,
@@ -115,7 +115,15 @@ export const getAssetOverviewFields = (
     } satisfies Prisma.AssetInclude;
   }
 
-  return baseFields;
+  // Always fetch barcode count so we can show a "locked" indicator
+  return {
+    ...baseFields,
+    _count: {
+      select: {
+        barcodes: true,
+      },
+    },
+  } satisfies Prisma.AssetInclude;
 };
 
 /**
@@ -149,6 +157,7 @@ export const assetIndexFields = ({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -233,6 +242,7 @@ export const advancedAssetIndexFields = () => {
               select: {
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
                 email: true,
               },

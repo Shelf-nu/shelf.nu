@@ -259,6 +259,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
           <div className="mb-4 flex gap-3">
             <Button
+              type="submit"
               variant="primary"
               width="full"
               disabled={disabled || disableSubmit || idsTotalCount === 0}
@@ -380,7 +381,9 @@ function SubmittingDialog({
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Done</Button>
+              <Button type="button" variant="secondary">
+                Done
+              </Button>
             </AlertDialogCancel>
           </div>
         </AlertDialogFooter>

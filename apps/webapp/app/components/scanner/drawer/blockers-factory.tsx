@@ -63,6 +63,7 @@ export function createBlockers({
           </div>
 
           <Button
+            type="button"
             variant="secondary"
             size="xs"
             className="whitespace-nowrap text-[12px] leading-3"

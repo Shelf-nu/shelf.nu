@@ -402,6 +402,7 @@ export function SavedFilterPresetsControls() {
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
+            type="button"
             variant="secondary"
             size="sm"
             className={"font-normal text-gray-500"}
@@ -438,6 +439,7 @@ export function SavedFilterPresetsControls() {
                   </p>
                   {hasActiveFilters && (
                     <Button
+                      type="button"
                       variant="secondary"
                       size="sm"
                       className="mt-3"

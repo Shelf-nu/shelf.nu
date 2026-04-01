@@ -416,3 +416,10 @@ export const canUseAudits = (org: { auditsEnabled: boolean }) => {
   return org.auditsEnabled;
 };
 /** End Audit Add-on */
+
+/** Barcode Add-on */
+export const canUseBarcodes = (org: { barcodesEnabled: boolean }) => {
+  if (!premiumIsEnabled) return true;
+  return org.barcodesEnabled;
+};
+/** End Barcode Add-on */

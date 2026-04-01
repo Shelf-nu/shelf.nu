@@ -1,0 +1,380 @@
+import type { User } from "@prisma/client";
+import type Stripe from "stripe";
+import type { PriceWithProduct } from "~/components/subscription/prices";
+import { db } from "~/database/db.server";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
+import { premiumIsEnabled, stripe } from "~/utils/stripe.server";
+
+const label: ErrorLabel = "Stripe";
+
+/** Creates a Stripe checkout session for the barcode add-on */
+export async function createBarcodeAddonCheckoutSession({
+  priceId,
+  userId,
+  domainUrl,
+  customerId,
+  organizationId,
+}: {
+  priceId: Stripe.Price["id"];
+  userId: User["id"];
+  domainUrl: string;
+  customerId: string;
+  organizationId: string;
+}): Promise<string> {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { priceId, userId, domainUrl, customerId },
+        label,
+      });
+    }
+
+    const { url } = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${domainUrl}/assets?success=true&addon=barcodes`,
+      cancel_url: `${domainUrl}/assets?canceled=true&addon=barcodes`,
+      client_reference_id: userId,
+      customer: customerId,
+      subscription_data: {
+        metadata: { organizationId },
+      },
+    });
+
+    if (!url) {
+      throw new ShelfError({
+        cause: null,
+        message: "No url found in stripe checkout session response",
+        additionalData: { priceId, userId, domainUrl, customerId },
+        label,
+      });
+    }
+    return url;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating barcode add-on checkout session. Please try again later or contact support.",
+      additionalData: { priceId, userId, domainUrl, customerId },
+      label,
+    });
+  }
+}
+
+/** Creates a trial subscription for the barcode add-on directly via Stripe API */
+export async function createBarcodeAddonTrialSubscription({
+  customerId,
+  priceId,
+  userId,
+  organizationId,
+}: {
+  customerId: string;
+  priceId: Stripe.Price["id"];
+  userId: User["id"];
+  organizationId: string;
+}) {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { customerId, priceId, userId },
+        label,
+      });
+    }
+
+    // If the customer has a payment method, set it as default so Stripe
+    // can auto-charge when the trial ends (avoids past_due after trial).
+    // If no payment method exists (e.g. team trial user), Stripe will
+    // handle payment collection via invoice when the trial ends.
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      limit: 1,
+    });
+
+    const defaultPaymentMethod = paymentMethods.data[0]?.id;
+
+    const subscription = await stripe.subscriptions.create({
+      customer: customerId,
+      items: [{ price: priceId }],
+      trial_period_days: 7,
+      trial_settings: {
+        end_behavior: {
+          missing_payment_method: "pause",
+        },
+      },
+      ...(defaultPaymentMethod && {
+        default_payment_method: defaultPaymentMethod,
+      }),
+      metadata: { userId, organizationId },
+    });
+
+    return { subscription, hasPaymentMethod: !!defaultPaymentMethod };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating barcode add-on trial. Please try again later or contact support.",
+      additionalData: { customerId, priceId, userId },
+      label,
+    });
+  }
+}
+
+/** Fetches barcode add-on prices from Stripe */
+export async function getBarcodeAddonPrices() {
+  try {
+    if (!premiumIsEnabled || !stripe) {
+      return { month: null, year: null };
+    }
+
+    const pricesResponse = await stripe.prices.list({
+      active: true,
+      type: "recurring",
+      expand: ["data.product"],
+      limit: 100,
+    });
+
+    const barcodePrices = pricesResponse.data.filter((p) => {
+      const product = p.product as Stripe.Product;
+      return (
+        product?.metadata?.product_type === "addon" &&
+        product?.metadata?.addon_type === "barcodes"
+      );
+    }) as PriceWithProduct[];
+
+    const monthlyPrice =
+      barcodePrices.find((p) => p.recurring?.interval === "month") || null;
+    const yearlyPrice =
+      barcodePrices.find((p) => p.recurring?.interval === "year") || null;
+
+    return { month: monthlyPrice, year: yearlyPrice };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching barcode add-on prices.",
+      label,
+    });
+  }
+}
+
+/**
+ * Links an existing barcode add-on subscription item to a newly created organization.
+ * Used during workspace creation when the team checkout included barcodes.
+ *
+ * Finds the customer's active/trialing subscription that contains a barcode addon item,
+ * updates the subscription metadata with the organizationId, and enables barcodes on the org.
+ */
+export async function linkBarcodeAddonToOrganization({
+  customerId,
+  organizationId,
+}: {
+  customerId: string;
+  organizationId: string;
+}) {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { customerId, organizationId },
+        label,
+      });
+    }
+
+    // Find subscriptions for this customer (no deep expansion —
+    // Stripe list API only allows 4 levels, and
+    // data.items.data.price.product would be 5)
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+    });
+
+    // Check each active/trialing subscription's items by retrieving products.
+    // Skip subscriptions linked to a *different* organization to avoid
+    // overwriting another org's linkage. Allow re-linking to the same org
+    // (both addons may share one subscription).
+    let barcodeSubscription: Stripe.Subscription | undefined;
+    for (const sub of subscriptions.data) {
+      if (sub.status !== "active" && sub.status !== "trialing") continue;
+      if (
+        sub.metadata?.organizationId &&
+        sub.metadata.organizationId !== organizationId
+      )
+        continue;
+
+      for (const item of sub.items.data) {
+        const productId =
+          typeof item.price.product === "string"
+            ? item.price.product
+            : item.price.product?.id;
+        if (!productId) continue;
+
+        const product = await stripe.products.retrieve(productId);
+        if (
+          product.metadata?.product_type === "addon" &&
+          product.metadata?.addon_type === "barcodes"
+        ) {
+          barcodeSubscription = sub;
+          break;
+        }
+      }
+      if (barcodeSubscription) break;
+    }
+
+    if (!barcodeSubscription) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "No active subscription with barcode addon found for this customer",
+        additionalData: { customerId, organizationId },
+        label,
+      });
+    }
+
+    const isTrialing = barcodeSubscription.status === "trialing";
+
+    // Update subscription metadata with the organizationId
+    await stripe.subscriptions.update(barcodeSubscription.id, {
+      metadata: {
+        ...barcodeSubscription.metadata,
+        organizationId,
+      },
+    });
+
+    // Enable barcodes on the organization
+    await db.organization.update({
+      where: { id: organizationId },
+      data: {
+        barcodesEnabled: true,
+        barcodesEnabledAt: new Date(),
+        ...(isTrialing && { usedBarcodeTrial: true }),
+      },
+      select: { id: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while linking barcode add-on to organization.",
+      additionalData: { customerId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Fetches the current barcode add-on subscription info for a customer.
+ * Returns the billing interval and price, or null if no subscription found.
+ */
+export async function getBarcodeSubscriptionInfo({
+  customerId,
+}: {
+  customerId: string;
+}): Promise<{
+  interval: "month" | "year";
+  amount: number;
+  currency: string;
+  status: string;
+} | null> {
+  try {
+    if (!stripe) return null;
+
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+    });
+
+    // Check each subscription's items by retrieving the product separately
+    for (const sub of subscriptions.data) {
+      for (const item of sub.items.data) {
+        const productId =
+          typeof item.price.product === "string"
+            ? item.price.product
+            : item.price.product?.id;
+        if (!productId) continue;
+
+        const product = await stripe.products.retrieve(productId);
+        if (
+          product.metadata?.product_type === "addon" &&
+          product.metadata?.addon_type === "barcodes"
+        ) {
+          return {
+            interval:
+              (item.price.recurring?.interval as "month" | "year") || "year",
+            amount: item.price.unit_amount || 0,
+            currency: item.price.currency,
+            status: sub.status,
+          };
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Handles barcode add-on subscription webhook events.
+ * Sets barcodesEnabled and usedBarcodeTrial flags on the Organization.
+ */
+export async function handleBarcodeAddonWebhook({
+  eventType,
+  subscription,
+  organizationId,
+}: {
+  eventType: string;
+  subscription?: Stripe.Subscription;
+  organizationId: string;
+}) {
+  switch (eventType) {
+    case "checkout.session.completed":
+    case "customer.subscription.created": {
+      const isTrialSubscription =
+        subscription && !!subscription.trial_end && !!subscription.trial_start;
+      const isTransferredSubscription =
+        !!subscription?.metadata?.transferred_from_subscription;
+
+      await db.organization.update({
+        where: { id: organizationId },
+        data: {
+          barcodesEnabled: true,
+          barcodesEnabledAt: new Date(),
+          ...(isTrialSubscription &&
+            !isTransferredSubscription && { usedBarcodeTrial: true }),
+        },
+        select: { id: true },
+      });
+      break;
+    }
+    case "customer.subscription.updated": {
+      const isActive =
+        subscription?.status === "active" ||
+        subscription?.status === "trialing";
+      await db.organization.update({
+        where: { id: organizationId },
+        data: { barcodesEnabled: isActive },
+        select: { id: true },
+      });
+      break;
+    }
+    case "customer.subscription.paused":
+    case "customer.subscription.deleted": {
+      await db.organization.update({
+        where: { id: organizationId },
+        data: { barcodesEnabled: false },
+        select: { id: true },
+      });
+      break;
+    }
+    // trial_will_end: no action needed, user still has access
+    default:
+      break;
+  }
+}

@@ -52,7 +52,9 @@ const DeleteReminder = forwardRef<HTMLButtonElement, DeleteReminderProps>(
           <AlertDialogFooter>
             <div className="flex justify-center gap-2">
               <AlertDialogCancel disabled={disabled} asChild>
-                <Button variant="secondary">Cancel</Button>
+                <Button type="button" variant="secondary">
+                  Cancel
+                </Button>
               </AlertDialogCancel>
 
               <Form method="delete">
@@ -60,6 +62,7 @@ const DeleteReminder = forwardRef<HTMLButtonElement, DeleteReminderProps>(
                 <input type="hidden" value="delete-reminder" name="intent" />
 
                 <Button
+                  type="submit"
                   disabled={disabled}
                   className="border-error-600 bg-error-600 hover:border-error-800 hover:!bg-error-800"
                 >

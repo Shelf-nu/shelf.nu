@@ -83,7 +83,7 @@ export default function SettingsPage() {
       <Header hidePageDescription />
       <When
         truthy={
-          !["$userId.assets", "$userId.bookings"].includes(
+          !["$userId.assets", "$userId.bookings", "$userId.notes"].includes(
             currentRoute?.handle?.name
           )
         }

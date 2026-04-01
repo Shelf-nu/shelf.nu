@@ -11,6 +11,7 @@ export type UpdateWithRelations = Prisma.UpdateGetPayload<{
         id: true;
         firstName: true;
         lastName: true;
+        displayName: true;
       };
     };
     userReads: true;
@@ -274,6 +275,7 @@ export function getUpdateById(id: string): Promise<UpdateWithRelations | null> {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
       userReads: true,
@@ -297,6 +299,7 @@ export function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
       userReads: true,

@@ -56,6 +56,7 @@ export function AssetIndexPagination() {
       <When truthy={isMd}>
         <div className="flex items-stretch gap-2 px-4 py-[6px]">
           <Button
+            type="button"
             onClick={handleScrollToTop}
             variant="secondary"
             title="Scroll to top"
@@ -83,6 +84,7 @@ export function AssetIndexPagination() {
 
               <ButtonGroup>
                 <Button
+                  type="submit"
                   variant="secondary"
                   className={tw(
                     "h-[34px]",
@@ -95,6 +97,7 @@ export function AssetIndexPagination() {
                   Simple
                 </Button>
                 <Button
+                  type="submit"
                   variant="secondary"
                   className={tw(
                     "h-[34px]",

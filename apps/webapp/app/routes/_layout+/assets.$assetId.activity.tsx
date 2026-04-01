@@ -46,6 +46,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               select: {
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },

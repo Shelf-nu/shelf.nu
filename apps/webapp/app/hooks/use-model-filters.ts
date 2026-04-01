@@ -46,7 +46,25 @@ function isAllDataLoaded(
 }
 
 /**
- * Performs client-side filtering of items
+ * Recursively checks if any string value within a nested object
+ * contains the given query string.
+ */
+function containsQueryDeep(obj: unknown, normalizedQuery: string): boolean {
+  if (typeof obj === "string") {
+    return obj.toLowerCase().includes(normalizedQuery);
+  }
+  if (obj !== null && typeof obj === "object") {
+    return Object.values(obj).some((value) =>
+      containsQueryDeep(value, normalizedQuery)
+    );
+  }
+  return false;
+}
+
+/**
+ * Performs client-side filtering of items.
+ * Searches all nested string values in the item, including top-level
+ * fields and nested objects (e.g. user.email for team members).
  */
 function filterItemsLocally(
   items: ModelFilterItem[],
@@ -55,15 +73,7 @@ function filterItemsLocally(
   const normalizedQuery = query.toLowerCase().trim();
   if (!normalizedQuery) return items;
 
-  return items.filter(
-    (item) =>
-      item.name.toLowerCase().includes(normalizedQuery) ||
-      Object.values(item.metadata || {}).some(
-        (value) =>
-          typeof value === "string" &&
-          value.toLowerCase().includes(normalizedQuery)
-      )
-  );
+  return items.filter((item) => containsQueryDeep(item, normalizedQuery));
 }
 
 export function useModelFilters({

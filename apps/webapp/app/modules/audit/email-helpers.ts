@@ -6,6 +6,7 @@ import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { resolveUserDisplayName } from "~/utils/user";
 
 type BasicAuditEmailContentArgs = {
   auditName: string;
@@ -154,7 +155,7 @@ export async function sendAuditAssignedEmail({
   assigneeName: string;
   hints: ClientHint;
 }) {
-  const creatorName = `${audit.createdBy.firstName} ${audit.createdBy.lastName}`;
+  const creatorName = resolveUserDisplayName(audit.createdBy);
   const assetCount = audit._count.assets;
 
   try {
@@ -211,11 +212,16 @@ export function sendAuditCancelledEmails({
   audit: AuditForEmail;
   assigneesToNotify: Array<{
     userId: string;
-    user: { email: string; firstName: string | null; lastName: string | null };
+    user: {
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      displayName?: string | null;
+    };
   }>;
   hints: ClientHint;
 }) {
-  const creatorName = `${audit.createdBy.firstName} ${audit.createdBy.lastName}`;
+  const creatorName = resolveUserDisplayName(audit.createdBy);
   const assetCount = audit._count.assets;
 
   if (assigneesToNotify.length === 0) {
@@ -247,9 +253,8 @@ export function sendAuditCancelledEmails({
         html,
       });
 
-      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
-        assignment.user.lastName || "User"
-      }`;
+      const assigneeName =
+        resolveUserDisplayName(assignment.user) || "Unknown User";
       Logger.info(
         `Audit cancellation email sent to ${assigneeName} (${assignment.user.email})`
       );
@@ -287,15 +292,14 @@ export function sendAuditCompletedEmail({
       email: string;
       firstName: string | null;
       lastName: string | null;
+      displayName?: string | null;
     };
   }>;
   hints: ClientHint;
   completedAt: Date;
   wasOverdue: boolean;
 }): void {
-  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
-    audit.createdBy.lastName || "User"
-  }`;
+  const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
 
   if (assigneesToNotify.length === 0) {
@@ -332,9 +336,8 @@ export function sendAuditCompletedEmail({
         html,
       });
 
-      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
-        assignment.user.lastName || "User"
-      }`;
+      const assigneeName =
+        resolveUserDisplayName(assignment.user) || "Unknown User";
       Logger.info(
         `Audit completion email sent to ${assigneeName} (${assignment.user.email})`
       );
@@ -374,15 +377,14 @@ export function sendAuditReminderEmail({
       email: string;
       firstName: string | null;
       lastName: string | null;
+      displayName?: string | null;
     };
   }>;
   hints: ClientHint;
   timeframe: string;
   heading: string;
 }): void {
-  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
-    audit.createdBy.lastName || "User"
-  }`;
+  const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
 
   assignees.forEach(async (assignment) => {
@@ -411,9 +413,8 @@ export function sendAuditReminderEmail({
         html,
       });
 
-      const assigneeName = `${assignment.user.firstName || "Unknown"} ${
-        assignment.user.lastName || "User"
-      }`;
+      const assigneeName =
+        resolveUserDisplayName(assignment.user) || "Unknown User";
       Logger.info(
         `${timeframe} reminder email sent to ${assigneeName} (${assignment.user.email})`
       );
@@ -447,12 +448,11 @@ export function sendAuditOverdueEmail({
     email: string;
     firstName: string | null;
     lastName: string | null;
+    displayName?: string | null;
   }>;
   hints: ClientHint;
 }): void {
-  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
-    audit.createdBy.lastName || "User"
-  }`;
+  const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
   const assetCount = audit._count.assets;
 
   recipients.forEach(async (recipient) => {
@@ -480,9 +480,7 @@ export function sendAuditOverdueEmail({
         html,
       });
 
-      const recipientName = `${recipient.firstName || "Unknown"} ${
-        recipient.lastName || "User"
-      }`;
+      const recipientName = resolveUserDisplayName(recipient) || "Unknown User";
       Logger.info(
         `Overdue notice email sent to ${recipientName} (${recipient.email})`
       );

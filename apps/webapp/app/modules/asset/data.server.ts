@@ -14,9 +14,11 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { parseMarkdownToReact } from "~/utils/md";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -25,10 +27,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
   getPaginatedAndFilterableAssets,
+  refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
@@ -42,6 +46,7 @@ import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
@@ -144,6 +149,7 @@ export async function simpleModeLoader({
     },
     tagsData,
     teamMembersForFormData,
+    notifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -175,6 +181,7 @@ export async function simpleModeLoader({
                       id: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -199,6 +206,7 @@ export async function simpleModeLoader({
             hasGetAllValue(searchParams, "teamMember"),
         })
       : Promise.resolve(null),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
@@ -207,10 +215,26 @@ export async function simpleModeLoader({
 
   assets = await updateAssetsWithBookingCustodians(assets);
 
+  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  try {
+    assets = await refreshExpiredAssetImages(assets);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
+
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -269,6 +293,7 @@ export async function simpleModeLoader({
       totalTeamMembers,
       currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
+      ...notifyData,
       filters,
       organizationId,
       locale,
@@ -371,6 +396,7 @@ export async function advancedModeLoader({
     teamMembersForFormData,
     bookings,
     totalBookings,
+    advNotifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -445,16 +471,34 @@ export async function advancedModeLoader({
         status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
     }),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
+  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  let refreshedAssets = assets;
+  try {
+    refreshedAssets = await refreshExpiredAssetImages(assets);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to batch refresh expired asset images",
+        label: "Assets",
+        additionalData: { assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
+
+  const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
+      ? userName
+        ? `${userName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
@@ -481,7 +525,7 @@ export async function advancedModeLoader({
   return data(
     payload({
       header,
-      items: assets,
+      items: refreshedAssets,
       search,
       page,
       totalItems: totalAssets,
@@ -515,6 +559,7 @@ export async function advancedModeLoader({
       currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
+      ...advNotifyData,
       categories,
       totalCategories,
       locations,

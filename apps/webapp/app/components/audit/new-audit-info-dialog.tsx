@@ -10,7 +10,9 @@ export function NewAuditInfoDialog() {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>New Audit</Button>
+      <Button type="button" onClick={() => setOpen(true)}>
+        New Audit
+      </Button>
       <DialogPortal>
         <Dialog
           open={open}

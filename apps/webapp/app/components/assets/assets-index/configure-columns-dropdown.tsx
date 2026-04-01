@@ -76,6 +76,7 @@ export function ConfigureColumnsDropdown() {
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="secondary"
           icon="columns"
           className="mt-2 font-normal text-gray-500 md:mt-0"
@@ -242,6 +243,7 @@ export function ConfigureColumnsDropdown() {
             </div>
             <footer className="absolute bottom-0 w-full border-t bg-white p-[10px]">
               <Button
+                type="submit"
                 disabled={!hasChanges || disabled}
                 variant="secondary"
                 width="full"
@@ -287,6 +289,7 @@ function ColumnsBulkActions({
           )}
         >
           <Button
+            type="button"
             className=" justify-start whitespace-nowrap p-2 text-gray-700 hover:bg-gray-50 hover:text-gray-700 "
             variant="link"
             width="full"
@@ -299,6 +302,7 @@ function ColumnsBulkActions({
           </Button>
 
           <Button
+            type="button"
             className=" justify-start whitespace-nowrap p-2 text-gray-700 hover:bg-gray-50 hover:text-gray-700  "
             variant="link"
             width="full"

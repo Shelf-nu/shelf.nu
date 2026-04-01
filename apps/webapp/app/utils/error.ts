@@ -88,6 +88,7 @@ export type FailureReason = {
     | "SSO"
     | "Kit"
     | "Note"
+    | "Team Member Note"
     | "Audit Image"
     // Other kinds of errors
     | "DB"
@@ -217,6 +218,10 @@ function isAbortError(cause: unknown) {
   if (cause instanceof Error) {
     const name = cause.name?.toLowerCase?.() ?? "";
     const message = cause.message?.toLowerCase?.() ?? "";
+    const code =
+      "code" in cause && typeof (cause as any).code === "string"
+        ? (cause as any).code
+        : "";
 
     if (name === "aborterror") {
       return true;
@@ -224,7 +229,9 @@ function isAbortError(cause: unknown) {
 
     if (
       message.includes("call aborted") ||
-      message.includes("request aborted")
+      message.includes("request aborted") ||
+      message === "aborted" ||
+      code === "ECONNRESET"
     ) {
       return true;
     }

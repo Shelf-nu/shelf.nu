@@ -15,6 +15,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [{ title: appendToMetaTitle("Updates") }];
 
@@ -167,7 +168,7 @@ export default function Updates() {
                   </fetcher.Form>
                 </Td>
                 <Td className="text-sm">
-                  {update.createdBy.firstName} {update.createdBy.lastName}
+                  {resolveUserDisplayName(update.createdBy)}
                 </Td>
                 <Td>
                   <Button

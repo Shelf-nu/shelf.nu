@@ -17,6 +17,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
     },
@@ -32,7 +33,10 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
   organization: { select: { name: true, customEmailFooter: true } },
 } satisfies Prisma.AssetReminderInclude;
 
-type UserToEmail = Pick<User, "email" | "firstName" | "lastName"> & {
+type UserToEmail = Pick<
+  User,
+  "email" | "firstName" | "lastName" | "displayName"
+> & {
   isOwner?: boolean;
 };
 
@@ -82,7 +86,12 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
             },
           },
         },
-        select: { email: true, firstName: true, lastName: true },
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
       });
 
       if (!owner) {

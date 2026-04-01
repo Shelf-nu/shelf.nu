@@ -53,7 +53,7 @@ export default function BookingProcessSidebar({
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="block-link-gray" className={"mt-0"}>
+        <Button type="button" variant="block-link-gray" className={"mt-0"}>
           <div className="flex items-center gap-2">
             <InfoIcon className="size-4" />
             How bookings work

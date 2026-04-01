@@ -119,6 +119,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -248,10 +249,9 @@ export default function ExistingBooking() {
             Cancel
           </Button>
           <Button
+            type="submit"
             variant="primary"
             width="full"
-            name="intent"
-            type={`Add Assets`}
             disabled={disabled}
           >
             Confirm

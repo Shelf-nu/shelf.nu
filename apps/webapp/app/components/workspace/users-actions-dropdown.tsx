@@ -76,6 +76,7 @@ export function TeamUsersActionsDropdown({
             customTrigger(disabled)
           ) : (
             <Button
+              type="button"
               variant="tertiary"
               width="full"
               className="border-0 pr-0"

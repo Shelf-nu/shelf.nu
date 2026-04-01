@@ -152,6 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   id: true,
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   email: true,
                 },
               },

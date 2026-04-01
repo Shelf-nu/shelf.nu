@@ -203,6 +203,7 @@ export function MarkdownNoteForm({
             {/* Action buttons positioned in top-right corner */}
             <div className="flex justify-end gap-1 md:absolute md:right-2 md:top-2">
               <Button
+                type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => setIsEditing(false)}

@@ -23,6 +23,10 @@ const dbMocks = vi.hoisted(() => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    custody: {
+      // why: action now clears stale custody before assignment
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   };
 });
 
@@ -41,6 +45,16 @@ vi.mock("~/database/db.server", () => ({
       findMany: dbMocks.teamMember.findMany,
       count: dbMocks.teamMember.count,
     },
+    custody: {
+      deleteMany: dbMocks.custody.deleteMany,
+    },
+    // why: action wraps custody cleanup + assignment in a transaction
+    $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
+      cb({
+        custody: { deleteMany: dbMocks.custody.deleteMany },
+        asset: { update: dbMocks.asset.update },
+      })
+    ),
   },
 }));
 
@@ -279,6 +293,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },
@@ -339,6 +354,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },

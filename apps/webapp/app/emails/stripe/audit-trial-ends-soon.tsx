@@ -29,7 +29,9 @@ export const sendAuditTrialEndsSoonEmail = async ({
   trialEndDate,
 }: AuditTrialEndsSoonProps) => {
   try {
-    const subject = "Your Audits trial is ending soon";
+    const subject = hasPaymentMethod
+      ? "Your Audits trial ends in 3 days — auto-charge reminder"
+      : "Your Audits trial is ending soon";
     const html = await auditTrialEndsSoonEmailHtml({
       firstName,
       hasPaymentMethod,
@@ -78,11 +80,11 @@ export const auditTrialEndsSoonEmailText = ({
   if (hasPaymentMethod) {
     return `Hey${firstName ? ` ${firstName}` : ""},
 
-Your 7-day Audits trial ends on ${dateStr}. Since you have a payment method on file, your subscription will automatically continue and you'll be charged at the regular rate.
+ACTION REQUIRED: You will be automatically charged when your trial ends.
+
+Your 7-day Audits trial ends on ${dateStr}. Because you have a payment method on file, you will be automatically charged at the regular subscription rate when the trial ends. To avoid being charged, cancel from your subscription settings before the trial ends: ${SERVER_URL}/account-details/subscription
 
 If you'd like to keep using Audits, no action is needed - everything will transition seamlessly.
-
-If you'd rather not continue, you can cancel before the trial ends from your subscription settings to avoid being charged: ${SERVER_URL}/account-details/subscription
 
 If you have any questions, feel free to reach out to us at ${SUPPORT_EMAIL}. We're happy to help!
 
@@ -135,19 +137,8 @@ function AuditTrialEndsSoonEmailTemplate({
             Hey{firstName ? ` ${firstName}` : ""},
           </Text>
 
-          <Text style={{ ...styles.p }}>
-            Your <strong>7-day Audits trial</strong> ends on{" "}
-            <strong>{dateStr}</strong>.
-          </Text>
-
           {hasPaymentMethod ? (
             <>
-              <Text style={{ ...styles.p }}>
-                Since you have a payment method on file, your subscription will
-                automatically continue and you'll be charged at the regular
-                rate.
-              </Text>
-
               <Text
                 style={{
                   ...styles.p,
@@ -157,19 +148,46 @@ function AuditTrialEndsSoonEmailTemplate({
                   padding: "16px",
                 }}
               >
-                If you'd rather not continue, you can cancel before the trial
-                ends from your{" "}
+                <strong>
+                  Action required if you don't want to be charged.
+                </strong>{" "}
+                Your 7-day Audits trial ends on <strong>{dateStr}</strong>.
+                Because you have a payment method on file, you will be
+                automatically charged at the regular subscription rate when the
+                trial ends. To avoid being charged, cancel from your{" "}
                 <Link
                   href={`${SERVER_URL}/account-details/subscription`}
                   style={{ color: emailPrimaryColor }}
                 >
                   subscription settings
                 </Link>{" "}
-                to avoid being charged.
+                before the trial ends.
+              </Text>
+
+              <Button
+                href={`${SERVER_URL}/account-details/subscription`}
+                style={{
+                  ...styles.button,
+                  textAlign: "center" as const,
+                  maxWidth: "250px",
+                  marginBottom: "24px",
+                }}
+              >
+                Manage subscription
+              </Button>
+
+              <Text style={{ ...styles.p }}>
+                If you'd like to keep using Audits, no action is needed —
+                everything will transition seamlessly.
               </Text>
             </>
           ) : (
             <>
+              <Text style={{ ...styles.p }}>
+                Your <strong>7-day Audits trial</strong> ends on{" "}
+                <strong>{dateStr}</strong>.
+              </Text>
+
               <Text style={{ ...styles.p }}>
                 Since you don't have a payment method on file, your Audits
                 access will be <strong>paused</strong> when the trial ends.

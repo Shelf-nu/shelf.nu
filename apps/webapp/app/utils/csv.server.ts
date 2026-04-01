@@ -741,6 +741,7 @@ type NoteFetcher<Where> = (args: {
       select: {
         firstName: true;
         lastName: true;
+        displayName: true;
       };
     };
   };
@@ -772,6 +773,7 @@ async function exportNotesToCsv<Where>({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
     },

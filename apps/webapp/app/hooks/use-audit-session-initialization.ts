@@ -124,6 +124,9 @@ export function useAuditSessionInitialization({
             auditAssetId: scan.auditAssetId,
             auditNotesCount: scan.auditNotesCount,
             auditImagesCount: scan.auditImagesCount,
+            location: scan.assetLocationName
+              ? { name: scan.assetLocationName }
+              : null,
           },
         };
         // Mark them as already persisted so we don't try to persist again

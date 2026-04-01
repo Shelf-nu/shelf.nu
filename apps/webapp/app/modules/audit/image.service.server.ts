@@ -295,6 +295,7 @@ export async function getAuditImages({
           id: true;
           firstName: true;
           lastName: true;
+          displayName: true;
           profilePicture: true;
         };
       };
@@ -334,6 +335,7 @@ export async function getAuditImages({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             profilePicture: true,
           },
         },

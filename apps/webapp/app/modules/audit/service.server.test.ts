@@ -290,6 +290,7 @@ describe("audit service", () => {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
           assignments: {
@@ -298,6 +299,7 @@ describe("audit service", () => {
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                 },
               },
             },

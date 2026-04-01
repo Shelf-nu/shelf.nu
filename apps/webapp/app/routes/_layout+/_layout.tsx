@@ -55,6 +55,7 @@ import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   installPwaPromptCookie,
+  expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
@@ -90,6 +91,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         username: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         profilePicture: true,
         onboarded: true,
         customerId: true,
@@ -143,10 +145,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizations,
       currentOrganization,
       cookieRefreshNeeded,
+      noVisibleOrganizations,
     } = await getSelectedOrganization({
       userId: authSession.userId,
       request,
     });
+
+    // SSO user with no team orgs — redirect to a friendly pending page
+    if (noVisibleOrganizations) {
+      return redirect("/sso-pending-assignment");
+    }
+
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering
@@ -223,6 +232,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {
         headers: [
           setCookie(await userPrefs.serialize(userPrefsCookie)),
+          expireHostOnlyUserPrefsCookie(),
           ...(cookieRefreshNeeded
             ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
             : []),

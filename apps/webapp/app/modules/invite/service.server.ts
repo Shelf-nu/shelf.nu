@@ -268,6 +268,7 @@ export async function createInvite(
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -767,7 +768,9 @@ export async function bulkInviteUsers({
     expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
 
     const INVITE_INCLUDE = {
-      inviter: { select: { firstName: true, lastName: true } },
+      inviter: {
+        select: { firstName: true, lastName: true, displayName: true },
+      },
       organization: true,
     } satisfies Prisma.InviteInclude;
 

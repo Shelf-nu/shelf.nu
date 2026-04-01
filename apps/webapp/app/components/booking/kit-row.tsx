@@ -146,6 +146,7 @@ export default function KitRow({
         <Td className="pr-4 text-right align-middle">
           <div className="flex items-center justify-end gap-5">
             <Button
+              type="button"
               onClick={() => {
                 onToggleExpansion && onToggleExpansion(kit.id);
               }}
