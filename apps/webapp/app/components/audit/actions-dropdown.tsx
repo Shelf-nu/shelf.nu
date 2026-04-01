@@ -253,7 +253,6 @@ const ConditionalActionsDropdown = () => {
         <ArchiveAuditDialog
           auditName={session.name}
           open={isArchiveDialogOpen}
-          actionData={actionData}
           onClose={() => setIsArchiveDialogOpen(false)}
         />
       </When>
