@@ -63,11 +63,25 @@ model Custody {
 
 **DB CHECK constraint** (in migration SQL, not expressible in Prisma schema):
 ```sql
+-- Mutual exclusivity: cannot be both accepted and declined
 ALTER TABLE "Custody" ADD CONSTRAINT "custody_accept_decline_exclusive"
   CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
 
+-- Only ack-enabled custodies can have accept/decline timestamps
+ALTER TABLE "Custody" ADD CONSTRAINT "custody_ack_requires_flag"
+  CHECK (
+    ("requiresAcceptance" = true) OR
+    ("acceptedAt" IS NULL AND "declinedAt" IS NULL)
+  );
+
 ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_accept_decline_exclusive"
   CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
+
+ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_ack_requires_flag"
+  CHECK (
+    ("requiresAcceptance" = true) OR
+    ("acceptedAt" IS NULL AND "declinedAt" IS NULL)
+  );
 ```
 This enforces mutual exclusivity at the database layer — defense-in-depth beyond application logic.
 
@@ -197,7 +211,8 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 // STRICTLY persist-before-sign:
 // 1. Atomically increment tokenVersion and read back new value:
 //    UPDATE "Custody" SET "tokenVersion" = "tokenVersion" + 1 WHERE id = custodyId RETURNING "tokenVersion"
-// 2. Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion } using CUSTODY_TOKEN_SECRET
+// 2. Guard: if zero rows returned, throw ShelfError("Custody not found")
+// 3. Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion } using CUSTODY_TOKEN_SECRET
 // 30-day expiry (exp claim)
 // The increment-then-sign order guarantees the token is never self-invalidated.
 ```
@@ -807,6 +822,9 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
     AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
   RETURNING "tokenVersion"
 `;
+if (!updated) {
+  throw new ShelfError({ message: "Custody not found, already settled, or cooldown active." });
+}
 // Sign with { id: custodyId, purpose: "custody-ack", ver: updated.tokenVersion }
 ```
 
@@ -824,10 +842,10 @@ const rows = await db.$queryRaw`
   WHERE "acknowledgementBatchId" = ${batchId}
     AND "requiresAcceptance" = true
     AND (
-      (SELECT MIN("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+      (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
       IS NULL
       OR
-      (SELECT MIN("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+      (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
       < NOW() - INTERVAL '60 seconds'
     )
   RETURNING "tokenVersion"
