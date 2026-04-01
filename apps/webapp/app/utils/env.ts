@@ -11,6 +11,7 @@ declare global {
       MAPTILER_TOKEN: string;
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
+      CLOUDFLARE_WEB_ANALYTICS_TOKEN: string;
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
@@ -38,6 +39,7 @@ declare global {
       MAPTILER_TOKEN: string;
       CRISP_WEBSITE_ID: string;
       MICROSOFT_CLARITY_ID: string;
+      CLOUDFLARE_WEB_ANALYTICS_TOKEN: string;
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
@@ -214,6 +216,13 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
   isSecret: false,
   isRequired: false,
 });
+export const CLOUDFLARE_WEB_ANALYTICS_TOKEN = getEnv(
+  "CLOUDFLARE_WEB_ANALYTICS_TOKEN",
+  {
+    isSecret: false,
+    isRequired: false,
+  }
+);
 export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isSecret: false,
   isRequired: false,
@@ -295,6 +304,7 @@ export function getBrowserEnv() {
     MAPTILER_TOKEN,
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
+    CLOUDFLARE_WEB_ANALYTICS_TOKEN,
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
     CHROME_EXECUTABLE_PATH,

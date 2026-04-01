@@ -123,6 +123,10 @@ export async function signUpWithEmailPass(email: string, password: string) {
       (cause.status === 429 ||
         cause.message.includes("request this after 5 seconds"));
     const isTransientFetchError = isAuthRetryableFetchError(cause);
+    /** Supabase can return transient database errors during user creation
+     * that resolve on retry — suppress these from Sentry. */
+    const isDatabaseError =
+      isAuthApiError(cause) && cause.message.includes("Database error");
     const message = isRateLimitError
       ? "You're trying too fast. Please wait a few seconds and try again."
       : "Something went wrong, refresh page and try to signup again.";
@@ -131,7 +135,11 @@ export async function signUpWithEmailPass(email: string, password: string) {
       message,
       additionalData: { email },
       label,
-      shouldBeCaptured: !(isRateLimitError || isTransientFetchError),
+      shouldBeCaptured: !(
+        isRateLimitError ||
+        isTransientFetchError ||
+        isDatabaseError
+      ),
     });
   }
 }

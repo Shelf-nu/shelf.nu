@@ -46,6 +46,7 @@ import { getTagsForBookingTagsFilter } from "../tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "../team-member/service.server";
 import { getOrganizationTierLimit } from "../tier/service.server";
 
@@ -148,6 +149,7 @@ export async function simpleModeLoader({
     },
     tagsData,
     teamMembersForFormData,
+    notifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -204,6 +206,7 @@ export async function simpleModeLoader({
             hasGetAllValue(searchParams, "teamMember"),
         })
       : Promise.resolve(null),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
@@ -290,6 +293,7 @@ export async function simpleModeLoader({
       totalTeamMembers,
       currentUserTeamMember,
       teamMembersForForm: teamMembersForFormData?.teamMembers ?? teamMembers,
+      ...notifyData,
       filters,
       organizationId,
       locale,
@@ -392,6 +396,7 @@ export async function advancedModeLoader({
     teamMembersForFormData,
     bookings,
     totalBookings,
+    advNotifyData,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -466,6 +471,7 @@ export async function advancedModeLoader({
         status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
       },
     }),
+    getTeamMembersForNotify({ organizationId }),
   ]);
 
   const currentUserTeamMember = isSelfService
@@ -553,6 +559,7 @@ export async function advancedModeLoader({
       currentUserTeamMember,
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
+      ...advNotifyData,
       categories,
       totalCategories,
       locations,
