@@ -50,6 +50,7 @@ export function UpdateImportForm() {
   const [result, setResult] = useState<BulkUpdateResult | null>(null);
   const [agreed, setAgreed] = useState("");
   const lastProcessedPreview = useRef<UpdatePreview | null>(null);
+  const lastProcessedResult = useRef<BulkUpdateResult | null>(null);
 
   const isPreviewLoading = useDisabled(previewFetcher);
   const isApplyLoading = useDisabled(applyFetcher);
@@ -88,6 +89,7 @@ export function UpdateImportForm() {
   // Handle paste anywhere on the upload area
   const handlePaste = useCallback(
     (event: React.ClipboardEvent) => {
+      if (isPreviewLoading || isApplyLoading) return;
       const text = event.clipboardData.getData("text/plain");
       if (!text.trim()) return;
 
@@ -104,7 +106,7 @@ export function UpdateImportForm() {
 
       processFile(file);
     },
-    [processFile]
+    [processFile, isPreviewLoading, isApplyLoading]
   );
 
   // Handle preview response
@@ -146,8 +148,10 @@ export function UpdateImportForm() {
       applyData &&
       !applyData.error &&
       applyData.intent === "apply-update" &&
-      applyData.result
+      applyData.result &&
+      applyData.result !== lastProcessedResult.current
     ) {
+      lastProcessedResult.current = applyData.result;
       setResult(applyData.result);
       setStage("results");
     }

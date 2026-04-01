@@ -651,7 +651,8 @@ function compareCoreField(
       const normalized = normalizeExportedCurrencyValue(csvValue);
       const csvNum = Number(normalized);
       // Number() rejects partial matches like "12abc" (unlike parseFloat)
-      if (isNaN(csvNum)) {
+      // Also reject Infinity/-Infinity
+      if (!Number.isFinite(csvNum)) {
         return {
           field: displayName,
           currentValue: String(asset.valuation ?? "(none)"),
@@ -745,6 +746,21 @@ function compareCustomField(
           warning: `Unrecognized value "${csvValue}" — expected "Yes" or "No"`,
         };
       }
+      // Treat truly missing values as undefined so "No" is detected as a change from empty
+      const hasStoredValue =
+        existingValue?.valueBoolean !== undefined &&
+        existingValue?.valueBoolean !== null &&
+        currentRaw !== undefined &&
+        currentRaw !== null &&
+        currentRaw !== "";
+      if (!hasStoredValue) {
+        // No existing value — any CSV boolean is a change
+        return {
+          field: displayName,
+          currentValue: "(empty)",
+          newValue: csvBool ? "Yes" : "No",
+        };
+      }
       const currentBool =
         existingValue?.valueBoolean ??
         (typeof currentRaw === "string"
@@ -793,7 +809,7 @@ function compareCustomField(
     case "NUMBER": {
       const normalizedCsv = normalizeExportedCurrencyValue(csvValue);
       const csvNum = Number(normalizedCsv);
-      if (isNaN(csvNum)) {
+      if (!Number.isFinite(csvNum)) {
         return {
           field: displayName,
           currentValue: currentStr || "(empty)",
@@ -1036,69 +1052,127 @@ async function detectNewEntities(
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves a category name to its ID, creating it if it doesn't exist.
- * Returns "uncategorized" if the name is "Uncategorized".
+ * Batch-resolves category names to IDs, creating missing ones.
+ * Uses findMany + createMany + re-fetch to avoid race conditions.
  */
-async function resolveCategoryNameToId(
-  name: string,
+async function batchResolveCategoryNames(
+  names: string[],
   userId: string,
   organizationId: string
-): Promise<string> {
-  if (name.toLowerCase() === "uncategorized") {
-    return "uncategorized";
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
+
+  // Handle "uncategorized" specially
+  for (const name of trimmedNames) {
+    if (name.toLowerCase() === "uncategorized") {
+      result.set(name, "uncategorized");
+    }
   }
 
-  const existing = await db.category.findFirst({
+  const namesToResolve = trimmedNames.filter(
+    (n) => n.toLowerCase() !== "uncategorized"
+  );
+  if (namesToResolve.length === 0) return result;
+
+  // Batch fetch existing
+  const existing = await db.category.findMany({
     where: {
-      name: { equals: name.trim(), mode: "insensitive" },
       organizationId,
+      name: { in: namesToResolve, mode: "insensitive" },
     },
-    select: { id: true },
+    select: { id: true, name: true },
   });
+  for (const cat of existing) {
+    // Map original name to ID (case-insensitive match)
+    for (const name of namesToResolve) {
+      if (name.toLowerCase() === cat.name.toLowerCase()) {
+        result.set(name, cat.id);
+      }
+    }
+  }
 
-  if (existing) return existing.id;
+  // Create missing
+  const missing = namesToResolve.filter((n) => !result.has(n));
+  if (missing.length > 0) {
+    await db.category.createMany({
+      data: missing.map((name) => ({
+        name,
+        color: getRandomColor(),
+        userId,
+        organizationId,
+      })),
+      skipDuplicates: true,
+    });
+    // Re-fetch to get IDs
+    const created = await db.category.findMany({
+      where: { organizationId, name: { in: missing, mode: "insensitive" } },
+      select: { id: true, name: true },
+    });
+    for (const cat of created) {
+      for (const name of missing) {
+        if (name.toLowerCase() === cat.name.toLowerCase()) {
+          result.set(name, cat.id);
+        }
+      }
+    }
+  }
 
-  const created = await db.category.create({
-    data: {
-      name: name.trim(),
-      color: getRandomColor(),
-      user: { connect: { id: userId } },
-      organization: { connect: { id: organizationId } },
-    },
-    select: { id: true },
-  });
-
-  return created.id;
+  return result;
 }
 
 /**
- * Resolves a location name to its ID, creating it if it doesn't exist.
+ * Batch-resolves location names to IDs, creating missing ones.
+ * Uses findMany + createMany + re-fetch to avoid race conditions.
  */
-async function resolveLocationNameToId(
-  name: string,
+async function batchResolveLocationNames(
+  names: string[],
   userId: string,
   organizationId: string
-): Promise<string> {
-  const existing = await db.location.findFirst({
-    where: {
-      name: { equals: name.trim(), mode: "insensitive" },
-      organizationId,
-    },
-    select: { id: true },
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
+  if (trimmedNames.length === 0) return result;
+
+  // Batch fetch existing
+  const existing = await db.location.findMany({
+    where: { organizationId, name: { in: trimmedNames, mode: "insensitive" } },
+    select: { id: true, name: true },
   });
+  for (const loc of existing) {
+    for (const name of trimmedNames) {
+      if (name.toLowerCase() === loc.name.toLowerCase()) {
+        result.set(name, loc.id);
+      }
+    }
+  }
 
-  if (existing) return existing.id;
+  // Create missing
+  const missing = trimmedNames.filter((n) => !result.has(n));
+  if (missing.length > 0) {
+    await db.location.createMany({
+      data: missing.map((name) => ({
+        name,
+        userId,
+        organizationId,
+      })),
+      skipDuplicates: true,
+    });
+    // Re-fetch to get IDs
+    const created = await db.location.findMany({
+      where: { organizationId, name: { in: missing, mode: "insensitive" } },
+      select: { id: true, name: true },
+    });
+    for (const loc of created) {
+      for (const name of missing) {
+        if (name.toLowerCase() === loc.name.toLowerCase()) {
+          result.set(name, loc.id);
+        }
+      }
+    }
+  }
 
-  const created = await db.location.create({
-    data: {
-      name: name.trim(),
-      user: { connect: { id: userId } },
-      organization: { connect: { id: organizationId } },
-    },
-    select: { id: true },
-  });
-
-  return created.id;
+  return result;
 }
 
 /**
@@ -1278,23 +1352,13 @@ export async function applyBulkUpdatesFromImport({
     }
   }
 
-  // Resolve categories and locations in parallel
-  const [categoryResults, locationResults] = await Promise.all([
-    Promise.all(
-      [...allCategoryNames].map(async (name) => ({
-        name,
-        id: await resolveCategoryNameToId(name, userId, organizationId),
-      }))
-    ),
-    Promise.all(
-      [...allLocationNames].map(async (name) => ({
-        name,
-        id: await resolveLocationNameToId(name, userId, organizationId),
-      }))
-    ),
+  // Resolve categories, locations, and tags in parallel using batch queries
+  const [batchedCategories, batchedLocations] = await Promise.all([
+    batchResolveCategoryNames([...allCategoryNames], userId, organizationId),
+    batchResolveLocationNames([...allLocationNames], userId, organizationId),
   ]);
-  for (const { name, id } of categoryResults) categoryNameMap.set(name, id);
-  for (const { name, id } of locationResults) locationNameMap.set(name, id);
+  for (const [name, id] of batchedCategories) categoryNameMap.set(name, id);
+  for (const [name, id] of batchedLocations) locationNameMap.set(name, id);
 
   // Batch resolve tags
   if (allTagNames.size > 0) {
@@ -1424,7 +1488,7 @@ export async function applyBulkUpdatesFromImport({
           case "valuation": {
             const normalized = normalizeExportedCurrencyValue(change.newValue);
             const val = Number(normalized);
-            if (!isNaN(val)) {
+            if (Number.isFinite(val)) {
               updatePayload.valuation = val;
             }
             break;
