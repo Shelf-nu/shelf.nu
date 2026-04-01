@@ -1,28 +1,33 @@
+import { useEffect } from "react";
+
+const BEACON_SCRIPT_SRC = "https://static.cloudflareinsights.com/beacon.min.js";
+
 /**
  * Cloudflare Web Analytics
  *
- * Conditionally loads the Cloudflare Web Analytics beacon script
+ * Injects the Cloudflare Web Analytics beacon script on the client
  * when the `CLOUDFLARE_WEB_ANALYTICS_TOKEN` environment variable is set.
- * This allows the open-source codebase to remain token-free while
- * enabling analytics on deployed instances.
+ * Uses useEffect to avoid server/client hydration mismatches — the
+ * component always renders nothing, and the script is appended to the
+ * document head on mount.
  *
  * @see https://developers.cloudflare.com/analytics/web-analytics/
  */
 export function CloudflareWebAnalytics() {
-  if (
-    typeof window === "undefined" ||
-    !window.env.CLOUDFLARE_WEB_ANALYTICS_TOKEN
-  ) {
-    return null;
-  }
+  useEffect(() => {
+    const token = window.env.CLOUDFLARE_WEB_ANALYTICS_TOKEN;
+    if (!token) return;
 
-  return (
-    <script
-      defer
-      src="https://static.cloudflareinsights.com/beacon.min.js"
-      data-cf-beacon={JSON.stringify({
-        token: window.env.CLOUDFLARE_WEB_ANALYTICS_TOKEN,
-      })}
-    />
-  );
+    const script = document.createElement("script");
+    script.defer = true;
+    script.src = BEACON_SCRIPT_SRC;
+    script.dataset.cfBeacon = JSON.stringify({ token });
+    document.head.appendChild(script);
+
+    return () => {
+      script.remove();
+    };
+  }, []);
+
+  return null;
 }

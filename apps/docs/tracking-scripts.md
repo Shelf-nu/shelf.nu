@@ -113,8 +113,10 @@ To add a new third-party tracking script, follow the established pattern:
 
 2. **Create a component** in `app/components/marketing/`:
 
-   - Check `window.env.YOUR_TOKEN` — return `null` if not set
-   - Render the script tag when the token is present
+   - The component must return `null` (no rendered markup) to avoid hydration mismatches
+   - Use a `useEffect` hook to check `window.env.YOUR_TOKEN` and programmatically inject the `<script>` element into `document.head`
+   - Include cleanup in the effect's return to remove the script on unmount
+   - See `cloudflare-web-analytics.tsx` for a reference implementation
 
 3. **Mount the component** in `app/root.tsx`
 
