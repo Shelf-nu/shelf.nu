@@ -581,6 +581,7 @@ Add: `"/accept-custody/:custodyId"` (narrow — no wildcard)
 **Token-in-URL leak mitigations:**
 Tokens are passed as query params (`?token=...`), which are prone to leakage via referrer headers, browser history, server logs, and analytics. Mitigations:
 - Set `Referrer-Policy: no-referrer` on the acceptance page response headers (prevents token leaking to external resources)
+- Set `Cache-Control: no-store, private` and `Pragma: no-cache` on both loader and action responses for this route (prevents token-bearing pages from being cached in browser or proxy layers)
 - **Modify `apps/webapp/server/logger.ts`**: The current middleware logs full query strings via `getQueryStrings(c.req.raw.url)`. Add redaction for the `token` param on `/accept-custody` routes (replace value with `[REDACTED]`). **This is an implementation step, not just guidance.**
 - The 30-day expiry + rotation on resend limits the window of exposure
 - After acknowledgement, the token becomes useless (idempotent, already-accepted state)
@@ -625,7 +626,7 @@ Handle two intents:
 2. **DB transaction:** Call `recordCustodyAcknowledgement()` — returns `{ transitioned, custody }`
 3. **Only if `transitioned === true`:**
    - Create acknowledgement activity note (inside same transaction or immediately after)
-   - If kit custody -> cascade `acceptedAt` to all child custody records + create notes for each asset
+   - If kit custody → cascade `acceptedAt` to all child custody records that are still pending (`WHERE acceptedAt IS NULL AND declinedAt IS NULL`) + create notes for each updated asset. Already-settled child rows are skipped to preserve idempotency.
    - **After commit:** Enqueue admin + custodian notification emails via pg-boss
 4. If `transitioned === false` -> no notes, no emails (idempotent retry — just render current state)
 5. Render success state (shows acknowledgement date regardless of whether this request caused the transition)
@@ -915,19 +916,25 @@ Pass to the banner component.
 
 Accepts `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId` (kit). Requires `PermissionAction.custody` on `PermissionEntity.asset` (admin only).
 
+**Multi-tenant safety:** ALL fetch and update queries in this endpoint MUST scope to `organizationId` (from the admin's session) via the `Asset.organizationId` join. This prevents an admin in Org A from rotating tokens for Org B's custodies, even if they somehow obtain a valid custody ID. Permission checks alone are insufficient — raw IDs in request bodies can be forged.
+
 **Three rotation paths** (matching the three token purposes):
 
 **Single custody resend** (only for custodies NOT in a batch or kit):
 ```typescript
 // GUARD: reject if custody belongs to a batch or kit — must use batch/kit resend path instead
 // Check for kit: look for KitCustody with requiresAcceptance = true that covers this asset
-const custody = await db.custody.findUnique({
-  where: { id: custodyId },
+const custody = await db.custody.findFirst({
+  where: {
+    id: custodyId,
+    asset: { organizationId },  // ORG SCOPE: ensures custody belongs to admin's org
+  },
   select: {
     acknowledgementBatchId: true,
-    asset: { select: { kitId: true } }
+    asset: { select: { kitId: true, organizationId: true } }
   }
 });
+if (!custody) throw new ShelfError({ message: "Custody not found." });
 if (custody?.acknowledgementBatchId) throw new ShelfError({ message: "This asset is part of a bulk assignment. Use batch resend." });
 
 // Kit guard: check if a KitCustody exists with requiresAcceptance for this asset's kit
@@ -951,6 +958,7 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
     AND "acknowledgementBatchId" IS NULL
     AND "acceptedAt" IS NULL AND "declinedAt" IS NULL
     AND ("lastTokenRotatedAt" IS NULL OR "lastTokenRotatedAt" < NOW() - INTERVAL '60 seconds')
+    AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = ${organizationId})
   RETURNING "tokenVersion"
 `;
 if (!updated) {
@@ -978,11 +986,18 @@ const rows = await db.$transaction(async (tx) => {
     "lastTokenRotatedAt" = NOW(), "updatedAt" = NOW()
     WHERE "acknowledgementBatchId" = ${batchId}
       AND "requiresAcceptance" = true
+      AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = ${organizationId})
       AND (
-        (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+        (SELECT MAX("lastTokenRotatedAt") FROM "Custody"
+         WHERE "acknowledgementBatchId" = ${batchId}
+           AND "requiresAcceptance" = true
+           AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = ${organizationId}))
         IS NULL
         OR
-        (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+        (SELECT MAX("lastTokenRotatedAt") FROM "Custody"
+         WHERE "acknowledgementBatchId" = ${batchId}
+           AND "requiresAcceptance" = true
+           AND "assetId" IN (SELECT "id" FROM "Asset" WHERE "organizationId" = ${organizationId}))
         < NOW() - INTERVAL '60 seconds'
       )
     RETURNING "tokenVersion"
@@ -998,6 +1013,7 @@ if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown a
 // In a single transaction:
 // 1. UPDATE KitCustody SET tokenVersion = tokenVersion + 1, lastTokenRotatedAt = NOW()
 //    WHERE id = kitCustodyId AND requiresAcceptance = true
+//    AND "kitId" IN (SELECT "id" FROM "Kit" WHERE "organizationId" = organizationId)  -- ORG SCOPE
 //    AND (lastTokenRotatedAt IS NULL OR lastTokenRotatedAt < NOW() - INTERVAL '60 seconds')
 //    RETURNING tokenVersion
 // 2. Guard: if zero rows -> throw ShelfError("Kit custody not found or cooldown active")
@@ -1112,7 +1128,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 | Atomic resend cooldown | Raw SQL `UPDATE ... RETURNING` with `lastTokenRotatedAt` + `NOW() - INTERVAL '60 seconds'` + state guards. Single query: increment version, enforce cooldown, return new version. TOCTOU-safe, clock-skew safe. |
 | Advisory lock for batch token generation | `pg_advisory_xact_lock(hashtext(batchId))` prevents concurrent calls from reading the same MAX and generating duplicate versions. |
 | Network metadata cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes retain only name (business record). Cron job for long-lived custodies is trivial to add later if needed. |
-| Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
+| Org-scoped everywhere | In-app route AND all resend/copy-link queries scope to `organizationId` via asset/kit join. Multi-tenant boundary enforced at query level, not just permission checks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
 | Self-assignment hides checkbox | Can't corroborate receipt from the person who assigned. |
 | One email per custodian for bulk | Not spammy. One acknowledge-all click via batch token. |
