@@ -1,8 +1,8 @@
 # Tracking & Analytics Scripts
 
-Shelf supports several optional tracking and analytics integrations. All of them follow the same pattern: set an environment variable with the service token/ID, and the script loads automatically. If the variable is not set, no script is injected — keeping the app lightweight for self-hosted instances.
+Shelf supports several optional tracking and analytics integrations. Most of them follow the same pattern: set an environment variable with the service token/ID, and the script loads automatically on page load. Some UI-based tools (for example, the Crisp chat widget) are still configured via environment variable but only activate in response to user interaction. In all cases, if the required variable is not set, no script is injected — keeping the app lightweight for self-hosted instances.
 
-This approach keeps tokens out of the open-source codebase while allowing each deployment to configure its own analytics.
+This approach keeps tokens out of the open-source codebase while allowing each deployment to configure its own analytics or support tooling.
 
 ## How it works
 
