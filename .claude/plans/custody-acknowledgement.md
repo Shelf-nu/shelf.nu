@@ -256,7 +256,10 @@ export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", {
 ```
 **Two-layer validation:**
 
-1. **Feature enablement guard:** When `custodyAcknowledgementEnabled` is set to `true` on an org (via Stripe webhook or admin toggle), validate that `CUSTODY_TOKEN_SECRET` is configured. If not, reject the enablement with a clear error: "Cannot enable custody acknowledgement: CUSTODY_TOKEN_SECRET is not configured." This prevents orgs from entering a broken state.
+1. **Feature enablement guard:** When `custodyAcknowledgementEnabled` is set to `true` on an org, validate that `CUSTODY_TOKEN_SECRET` is configured. If not, reject the enablement with a clear error: "Cannot enable custody acknowledgement: CUSTODY_TOKEN_SECRET is not configured." This check runs in:
+   - **Stripe webhook handler** (`apps/webapp/app/modules/stripe-webhook/handlers.server.ts`) — for subscription-based enablement
+   - **Organization settings action** (`apps/webapp/app/routes/_layout+/settings.general.tsx`) — if manual toggle is added
+   - Both paths call `validateCustodyTokenSecretConfigured()` from the acknowledgement service before setting the flag to `true`
 
 2. **Callsite guard (defense-in-depth):** At token sign/verify callsites, assert presence:
 ```typescript
@@ -1076,7 +1079,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 9. `apps/webapp/app/routes/api+/custody.acknowledgement.ts` — Resend/copy-link API
 10. `packages/database/prisma/migrations/[ts]_add_custody_acknowledgement/migration.sql`
 
-### Modified files (17):
+### Modified files (18):
 1. `packages/database/prisma/schema.prisma` — Custody, KitCustody, Organization, User models
 2. `apps/webapp/server/index.ts` — Add public path
 3. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.assign-custody.tsx` — Checkbox + email logic
@@ -1093,6 +1096,7 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 14. `apps/webapp/app/utils/roles.server.ts` — Return `canUseCustodyAcknowledgement`
 15. `apps/webapp/app/config/addon-copy.ts` — Upsell copy
 16. `apps/webapp/server/logger.ts` — Redact token query param on acceptance routes
+17. `apps/webapp/app/modules/stripe-webhook/handlers.server.ts` — Validate CUSTODY_TOKEN_SECRET on feature enablement
 17. `apps/webapp/app/utils/env.ts` — Add CUSTODY_TOKEN_SECRET
 
 ---
