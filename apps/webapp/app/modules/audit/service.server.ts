@@ -41,6 +41,26 @@ import type { AuditSchedulerData } from "./types";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
+/**
+ * Rejects writes against archived audits.
+ * Call immediately after loading the session in every mutating service
+ * so the archive/read-only contract is enforced server-side.
+ */
+function assertAuditNotArchived(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (status === AuditStatus.ARCHIVED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Archived audits are read-only.",
+      additionalData: details,
+      label,
+      status: 400,
+    });
+  }
+}
+
 export const AUDIT_LIST_INCLUDE = {
   createdBy: {
     select: {
@@ -390,6 +410,11 @@ export async function updateAuditSession({
         status: 404,
       });
     }
+
+    assertAuditNotArchived(currentAudit.status, {
+      auditSessionId: id,
+      organizationId,
+    });
 
     if (currentAudit.status === AuditStatus.CANCELLED) {
       throw new ShelfError({
@@ -1008,6 +1033,11 @@ export async function recordAuditScan(
       });
     }
 
+    assertAuditNotArchived(session.status, {
+      auditSessionId,
+      organizationId,
+    });
+
     // Check if this asset was already scanned in this audit
     const existingScan = await db.auditScan.findFirst({
       where: {
@@ -1359,6 +1389,11 @@ export async function completeAuditSession({
           label,
         });
       }
+
+      assertAuditNotArchived(session.status, {
+        auditSessionId: sessionId,
+        organizationId,
+      });
 
       if (session.status === AuditStatus.COMPLETED) {
         throw new ShelfError({
@@ -1775,6 +1810,11 @@ export async function cancelAuditSession({
         status: 404,
       });
     }
+
+    assertAuditNotArchived(auditSession.status, {
+      auditSessionId,
+      organizationId,
+    });
 
     // Check if user is the creator
     if (auditSession.createdById !== userId) {
