@@ -34,14 +34,11 @@ model Custody {
   acceptanceUserAgent       String?                   // Browser user-agent (ephemeral — deleted with custody)
   assignedBy                User?     @relation("custodyAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   assignedByUserId          String?                   // Who assigned custody (for admin notification routing, SetNull on user delete)
-  // NOTE: Requires inverse relation on User model:
-  //   custodyAssignments Custody[] @relation("custodyAssigner")
-  // Same pattern needed for KitCustody if assignedBy is added there.
   // Fallback: if assignedByUserId is null (user deleted), admin notifications
   // route to the organization owner instead (org.userId is always present)
   declinedAt                DateTime?                 // When custodian reported they don't have the item
   declineReason             String?   @db.VarChar(500)  // Optional reason from custodian (trimmed, max 500 chars)
-  tokenVersion              Int       @default(0)      // Monotonic counter — incremented on each resend/rotation. Embedded in JWT, compared on verify.
+  tokenVersion              Int       @default(0)      // 0 = no token generated; first token uses version 1
   lastTokenRotatedAt        DateTime?                 // When token was last rotated (dedicated cooldown field, not coupled to updatedAt)
   acknowledgementBatchId    String?                   // Groups multiple custody records for bulk acknowledgement
 
@@ -54,14 +51,30 @@ model Custody {
   @@index([acknowledgementBatchId])  // Batch lookups/updates in verification and resend
 
   // Additional partial indexes (in migration SQL, not Prisma):
-  // CREATE INDEX idx_custody_pending_ack ON "Custody" ("teamMemberId")
+  // CREATE INDEX CONCURRENTLY idx_custody_pending_ack ON "Custody" ("teamMemberId")
   //   WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
-  // CREATE INDEX idx_custody_batch_pending ON "Custody" ("acknowledgementBatchId")
+  // CREATE INDEX CONCURRENTLY idx_custody_batch_pending ON "Custody" ("acknowledgementBatchId")
   //   WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
 }
 ```
 
-**DB CHECK constraint** (in migration SQL, not expressible in Prisma schema):
+**User model — inverse relation (required by Prisma):**
+
+Add to the `User` model in `packages/database/prisma/schema.prisma`:
+
+```prisma
+model User {
+  // ... existing fields ...
+
+  // Custody acknowledgement: tracks which custodies this user assigned
+  custodyAssignments    Custody[]    @relation("custodyAssigner")
+  kitCustodyAssignments KitCustody[] @relation("kitCustodyAssigner")
+}
+```
+
+This inverse relation is required by Prisma for the `assignedBy` relation on both `Custody` and `KitCustody`. Without it, `prisma generate` will fail.
+
+**DB CHECK constraints** (in migration SQL, not expressible in Prisma schema):
 ```sql
 -- Mutual exclusivity: cannot be both accepted and declined
 ALTER TABLE "Custody" ADD CONSTRAINT "custody_accept_decline_exclusive"
@@ -74,6 +87,10 @@ ALTER TABLE "Custody" ADD CONSTRAINT "custody_ack_requires_flag"
     ("acceptedAt" IS NULL AND "declinedAt" IS NULL)
   );
 
+-- declineReason requires declinedAt to be non-null
+ALTER TABLE "Custody" ADD CONSTRAINT "custody_decline_reason_requires_declined"
+  CHECK ("declineReason" IS NULL OR "declinedAt" IS NOT NULL);
+
 ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_accept_decline_exclusive"
   CHECK (NOT ("acceptedAt" IS NOT NULL AND "declinedAt" IS NOT NULL));
 
@@ -82,12 +99,53 @@ ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_ack_requires_flag"
     ("requiresAcceptance" = true) OR
     ("acceptedAt" IS NULL AND "declinedAt" IS NULL)
   );
+
+-- declineReason requires declinedAt to be non-null (KitCustody)
+ALTER TABLE "KitCustody" ADD CONSTRAINT "kit_custody_decline_reason_requires_declined"
+  CHECK ("declineReason" IS NULL OR "declinedAt" IS NOT NULL);
 ```
-This enforces mutual exclusivity at the database layer — defense-in-depth beyond application logic.
+This enforces mutual exclusivity and decline-reason consistency at the database layer — defense-in-depth beyond application logic.
 
-### 1.2 KitCustody model — add same acknowledgement fields
+### 1.2 KitCustody model — add acknowledgement fields
 
-Add identical fields to `KitCustody` for kit-level acknowledgement.
+**File:** `packages/database/prisma/schema.prisma` (KitCustody model)
+
+**Important:** KitCustody uses `custodianId` (not `teamMemberId` like Custody). All field names and relations below reflect the real KitCustody schema.
+
+```prisma
+model KitCustody {
+  id String @id @default(cuid())
+
+  custodian    TeamMember @relation(fields: [custodianId], references: [id])
+  custodianId  String
+
+  kit   Kit    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String @unique
+
+  // Acknowledgement fields
+  requiresAcceptance        Boolean   @default(false)
+  acceptedAt                DateTime?
+  acceptanceMethod          String?
+  acceptanceIp              String?
+  acceptanceUserAgent       String?
+  assignedBy                User?     @relation("kitCustodyAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  assignedByUserId          String?
+  declinedAt                DateTime?
+  declineReason             String?   @db.VarChar(500)
+  tokenVersion              Int       @default(0)      // 0 = no token generated; first token uses version 1
+  lastTokenRotatedAt        DateTime?
+  acknowledgementBatchId    String?
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([custodianId])
+  @@index([acknowledgementBatchId])
+}
+```
+
+**Schema difference to remember:** Custody references its custodian as `teamMemberId`, while KitCustody references its custodian as `custodianId`. This difference is important for token verification (Phase 3.4) and kit resend logic (Phase 11).
 
 ### 1.3 Organization model — add feature toggle
 
@@ -107,6 +165,16 @@ usedCustodyAcknowledgementTrial Boolean   @default(false)
 Run: `pnpm db:prepare-migration` then `pnpm db:deploy-migration`
 
 All new columns are nullable or have defaults — zero impact on existing data.
+
+**Important:** Use `CREATE INDEX CONCURRENTLY` for partial indexes (production safety — avoids locking the table during index creation):
+```sql
+-- Run these OUTSIDE the migration transaction (in a separate migration or manually):
+CREATE INDEX CONCURRENTLY idx_custody_pending_ack ON "Custody" ("teamMemberId")
+  WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
+CREATE INDEX CONCURRENTLY idx_custody_batch_pending ON "Custody" ("acknowledgementBatchId")
+  WHERE "requiresAcceptance" = true AND "acceptedAt" IS NULL AND "declinedAt" IS NULL;
+```
+Note: `CREATE INDEX CONCURRENTLY` cannot run inside a transaction. Prisma migrations run in a transaction by default, so these indexes must be created in a separate non-transactional migration step or via a raw SQL script.
 
 ---
 
@@ -163,10 +231,10 @@ export const CUSTODY_ACKNOWLEDGEMENT_ADDON = {
 
 The boolean `custodyAcknowledgementEnabled` on the Organization model is just a **switch**. How it gets flipped on is a business decision:
 
-- **Include in Plus/Team by default** → Set to `true` when they subscribe. No extra purchase.
-- **Block for Free tier** → Leave `false`. Show upsell prompting upgrade.
-- **Sell as separate add-on** → Wire to Stripe like barcodes/audits (v2 if needed).
-- **Give to everyone** → Set `ENABLE_PREMIUM_FEATURES=false` and the check is bypassed.
+- **Include in Plus/Team by default** -> Set to `true` when they subscribe. No extra purchase.
+- **Block for Free tier** -> Leave `false`. Show upsell prompting upgrade.
+- **Sell as separate add-on** -> Wire to Stripe like barcodes/audits (v2 if needed).
+- **Give to everyone** -> Set `ENABLE_PREMIUM_FEATURES=false` and the check is bypassed.
 
 For v1, the simplest path: include it in Plus and Team plans automatically. Free users see the upsell to upgrade. No Stripe add-on product needed — just set the flag when the user's tier qualifies.
 
@@ -180,9 +248,10 @@ Add to `apps/webapp/app/utils/env.ts`:
 ```typescript
 // Optional at startup — only required when acknowledgement feature is used.
 // Follows same pattern as other secrets but won't crash startup if unset.
+// The getEnv helper uses isRequired: false to return undefined instead of throwing.
 export const CUSTODY_TOKEN_SECRET = getEnv("CUSTODY_TOKEN_SECRET", {
   isSecret: true,
-  isOptional: true,
+  isRequired: false,
 });
 ```
 **Two-layer validation:**
@@ -195,8 +264,6 @@ if (!CUSTODY_TOKEN_SECRET) {
   throw new ShelfError({ message: "CUSTODY_TOKEN_SECRET is not configured." });
 }
 ```
-
-If `getEnv` does not support `isOptional`, add it following the existing pattern — a single boolean that returns `undefined` instead of throwing on missing value.
 
 ---
 
@@ -212,39 +279,53 @@ export async function generateCustodyAcknowledgementToken(custodyId: string): Pr
 // 1. Atomically increment tokenVersion and read back new value:
 //    UPDATE "Custody" SET "tokenVersion" = "tokenVersion" + 1 WHERE id = custodyId RETURNING "tokenVersion"
 // 2. Guard: if zero rows returned, throw ShelfError("Custody not found")
-// 3. Sign JWT with { id: custodyId, purpose: "custody-ack", ver: newVersion } using CUSTODY_TOKEN_SECRET
-// 30-day expiry (exp claim)
+// 3. Sign JWT with:
+//    - payload: { id: custodyId, purpose: "custody-ack", ver: newVersion }
+//    - options: { algorithm: "HS256", expiresIn: "30d", issuer: "shelf-custody", audience: "custody-ack" }
+//    using CUSTODY_TOKEN_SECRET
 // The increment-then-sign order guarantees the token is never self-invalidated.
 ```
 
 ```typescript
 export async function generateBatchAcknowledgementToken(batchId: string): Promise<string>
-// STRICTLY persist-before-sign, single atomic UPDATE (no separate SELECT):
-// 1. Single SQL statement:
+// STRICTLY persist-before-sign, wrapped in advisory lock to prevent concurrency races:
+// 1. Begin transaction with advisory lock:
+//    SELECT pg_advisory_xact_lock(hashtext(batchId))
+// 2. Single SQL statement inside transaction:
 //    UPDATE "Custody"
-//    SET "tokenVersion" = (SELECT MAX("tokenVersion") + 1 FROM "Custody" WHERE "acknowledgementBatchId" = batchId),
+//    SET "tokenVersion" = (
+//      SELECT COALESCE(MAX("tokenVersion"), 0) + 1
+//      FROM "Custody"
+//      WHERE "acknowledgementBatchId" = batchId AND "requiresAcceptance" = true
+//    ),
 //        "lastTokenRotatedAt" = NOW()
-//    WHERE "acknowledgementBatchId" = batchId
+//    WHERE "acknowledgementBatchId" = batchId AND "requiresAcceptance" = true
 //    RETURNING "tokenVersion"
-// 2. Guard: if zero rows returned, throw ShelfError("Batch not found or already fully processed")
-// 3. Read returned tokenVersion from rows[0] (all rows now share the same value)
-// 4. Sign JWT with { batchId, purpose: "custody-ack-batch", ver: newVersion }
-// 30-day expiry. Single atomic UPDATE — no transaction needed, no app-side MAX computation.
+// 3. Guard: if zero rows returned, throw ShelfError("Batch not found or already fully processed")
+// 4. Read returned tokenVersion from rows[0] (all rows now share the same value)
+// 5. Sign JWT with:
+//    - payload: { batchId, purpose: "custody-ack-batch", ver: newVersion }
+//    - options: { algorithm: "HS256", expiresIn: "30d", issuer: "shelf-custody", audience: "custody-ack" }
+// The advisory lock prevents two concurrent calls from seeing the same MAX and generating
+// duplicate token versions. The lock is released when the transaction commits.
 ```
 
 ```typescript
 export async function generateKitCustodyAcknowledgementToken(kitCustodyId: string): Promise<string>
 // STRICTLY persist-before-sign:
 // 1. Atomically increment KitCustody.tokenVersion via UPDATE ... RETURNING
-// 2. Guard: if zero rows → throw ShelfError("KitCustody not found")
+// 2. Guard: if zero rows -> throw ShelfError("KitCustody not found")
 // 3. Update all child Custody records to same version (single UPDATE with subquery)
-// 4. Guard: if zero child rows → throw ShelfError("No child custody records found")
-// 5. Sign JWT with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
-// 30-day expiry.
+// 4. Guard: if zero child rows -> throw ShelfError("No child custody records found")
+// 5. Sign JWT with:
+//    - payload: { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+//    - options: { algorithm: "HS256", expiresIn: "30d", issuer: "shelf-custody", audience: "custody-ack" }
 ```
 
 **Token security:**
 - Signed with dedicated `CUSTODY_TOKEN_SECRET` (not shared with invite tokens)
+- Pinned to `algorithm: "HS256"` on both sign and verify — prevents algorithm confusion attacks
+- `issuer: "shelf-custody"` and `audience: "custody-ack"` claims validated on verify — prevents cross-service token reuse
 - 30-day expiry via JWT `exp` claim
 - On resend: `tokenVersion` incremented, new token embeds new version — old tokens rejected (integer comparison, no timestamp precision issues)
 - Token's decoded `id` is the **sole authority** for DB operations — URL param is for routing only
@@ -252,14 +333,37 @@ export async function generateKitCustodyAcknowledgementToken(kitCustodyId: strin
 
 ### 3.2 JWT signature verification (shared entry point)
 
-The loader calls `jwt.verify(token, CUSTODY_TOKEN_SECRET)` ONCE to validate signature + expiry. The verified payload is then passed to purpose-specific verifiers below. This avoids double-verification and ensures purpose branching happens on trusted data.
+The loader calls `jwt.verify(token, CUSTODY_TOKEN_SECRET, { algorithms: ["HS256"], issuer: "shelf-custody", audience: "custody-ack" })` ONCE to validate signature + expiry + issuer + audience. The verified payload is then passed to purpose-specific verifiers below. This avoids double-verification and ensures purpose branching happens on trusted data.
 
 ```typescript
+/** Verified and typed JWT payload from a custody acknowledgement token. */
+type VerifiedCustodyPayload = {
+  /** Present for single and kit tokens — the custody or kitCustody ID */
+  id?: string;
+  /** Present for batch tokens — the acknowledgementBatchId */
+  batchId?: string;
+  /** Token purpose: "custody-ack" | "custody-ack-batch" | "custody-ack-kit" */
+  purpose: string;
+  /** Monotonic token version — compared against DB value on verify */
+  ver: number;
+  /** Standard JWT claims (added by jwt.sign) */
+  iat: number;
+  exp: number;
+  iss: string;
+  aud: string;
+};
+
 export function verifyTokenSignature(token: string): VerifiedCustodyPayload
-// 1. jwt.verify(token, CUSTODY_TOKEN_SECRET) — validates signature + exp
-// 2. Returns typed payload: { id?: string, batchId?: string, purpose: string, ver: number }
+// 1. jwt.verify(token, CUSTODY_TOKEN_SECRET, {
+//      algorithms: ["HS256"],
+//      issuer: "shelf-custody",
+//      audience: "custody-ack",
+//    })
+//    — validates signature + exp + iss + aud
+// 2. Returns typed payload as VerifiedCustodyPayload
 // 3. Throws ShelfError("Token expired") on exp failure
 // 4. Throws ShelfError("Invalid token") on signature failure
+// 5. Throws ShelfError("Invalid token") on issuer/audience mismatch
 // Does NOT do DB checks — that's the purpose-specific verifier's job
 ```
 
@@ -288,6 +392,8 @@ export async function verifyBatchCustodyToken(
 // 1. Asserts payload.purpose === "custody-ack-batch" and payload.batchId exists
 // 2. Fetches all custody records with matching acknowledgementBatchId
 // 3. Enforces single-custodian membership: all records must have same teamMemberId
+//    NOTE: This checks Custody.teamMemberId (not KitCustody.custodianId — batch
+//    verification operates on Custody records, which use teamMemberId)
 // 4. Validates ALL custody.tokenVersion === payload.ver (uniform after SET normalization)
 // 5. Throws if no records found, mixed custodians, or any version mismatch
 // Returns batchId + full custody list with asset details
@@ -302,6 +408,7 @@ export async function verifyKitCustodyToken(
 ): Promise<{ kitCustodyId: string; kitCustody: KitCustodyWithAssets }>
 // 1. Asserts payload.purpose === "custody-ack-kit" and payload.id exists
 // 2. Fetches KitCustody record (NOT Custody) with kit + all child assets + custodian
+//    NOTE: KitCustody uses custodianId (not teamMemberId)
 // 3. Validates payload.ver === kitCustody.tokenVersion (integer equality)
 // 4. Throws if KitCustody not found or version mismatch
 // Returns kitCustodyId + full kit custody with child asset details
@@ -319,7 +426,7 @@ export async function recordCustodyAcknowledgement({
 }: RecordAcknowledgementParams): Promise<{ transitioned: boolean; custody: Custody }>
 // Conditional update — only transitions from PENDING state:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
-// If no rows updated → custody was already accepted or declined (idempotent: return current state)
+// If no rows updated -> custody was already accepted or declined (idempotent: return current state)
 // Sets: acceptedAt = now(), acceptanceMethod, acceptanceIp, acceptanceUserAgent
 // Returns { transitioned: true, custody } if state changed, { transitioned: false, custody } if already settled
 // Callers MUST check `transitioned` before creating notes or enqueuing emails — prevents duplicates on retry/refresh
@@ -359,7 +466,7 @@ export async function recordCustodyDecline({
 }: RecordDeclineParams): Promise<{ declined: boolean; custody: Custody }>
 // Conditional update — only transitions from PENDING state:
 //   WHERE id = custodyId AND acceptedAt IS NULL AND declinedAt IS NULL
-// If no rows updated → already accepted or declined (idempotent: return current state)
+// If no rows updated -> already accepted or declined (idempotent: return current state)
 // Validates reason: z.string().trim().max(500).optional()
 // Sets: declinedAt = now(), declineReason = sanitized reason
 // Does NOT change asset status or delete custody
@@ -372,7 +479,7 @@ export async function recordCustodyDecline({
 ### 3.9 Create acknowledgement activity note
 
 ```typescript
-export function createAcknowledgementNote({
+export async function createAcknowledgementNote({
   userId,
   assetId,
   custodianName,
@@ -398,7 +505,12 @@ Raw IP and user-agent are stored on the Custody record's ephemeral fields. These
 - The primary cleanup mechanism (custody release = hard delete) already covers the vast majority of cases
 - A cron job for a v1 feature that hasn't shipped is premature optimization
 - If a customer or legal review flags long-lived custodies as a concern, adding a cleanup query is ~30 minutes of work
-- The data model supports it (just `UPDATE ... SET acceptanceIp = NULL WHERE acceptedAt < 2_years_ago`) — no schema changes needed later
+- The data model supports it — no schema changes needed later:
+  ```sql
+  UPDATE "Custody"
+  SET "acceptanceIp" = NULL, "acceptanceUserAgent" = NULL
+  WHERE "acceptedAt" < NOW() - INTERVAL '2 years'
+  ```
 
 **v2 consideration:** If needed, add a daily pg-boss job to null out IP/UA on custodies older than 2 years. The schema is ready for this with zero changes.
 
@@ -429,7 +541,7 @@ Following the pattern from `app/emails/stripe/audit-trial-welcome.tsx` per CLAUD
 - "Hey {firstName}," greeting
 - Body: "You've been assigned custody of {assetTitle} by {assignerName} at {orgName}."
 - Asset details: title, category (if any), serial/sequential ID
-- CTA button: "Acknowledge Receipt" → `${SERVER_URL}/accept-custody/${custodyId}?token=${jwt}`
+- CTA button: "Acknowledge Receipt" -> `${SERVER_URL}/accept-custody/${custodyId}?token=${jwt}`
 - Secondary text: "If you don't have this item, click the link above and report it."
 - CustomEmailFooter from org settings
 - Both HTML + plain text exports
@@ -457,6 +569,8 @@ Following the pattern from `app/emails/stripe/audit-trial-welcome.tsx` per CLAUD
 ## Phase 5: Public Acceptance Route
 
 **New file:** `apps/webapp/app/routes/_auth+/accept-custody.$custodyId.tsx`
+
+**Note on `_auth+` prefix:** This route uses the `_auth+` prefix which serves public (unauthenticated) pages. This follows the existing precedent set by `_auth+/accept-invite.$inviteId.tsx` — both are token-authenticated public routes that don't require a session.
 
 ### 5.1 Add to public paths
 
@@ -490,16 +604,16 @@ Tokens are passed as query params (`?token=...`), which are prone to leakage via
 
 1. Extract `token` from search params
 2. **Verify signature first, then branch on purpose.** Do NOT use `jwt.decode()` — unverified payloads can be forged.
-   - Call `verifyTokenSignature(token)` (Phase 3.2) — validates signature + expiry, returns typed verified payload
+   - Call `verifyTokenSignature(token)` (Phase 3.2) — validates signature + expiry + issuer + audience, returns typed verified payload
    - Read `purpose` from the VERIFIED payload
 3. **Branch on verified purpose** (pass verified payload, not raw token):
-   - `purpose === "custody-ack"` → `verifySingleCustodyToken(payload, db)` — DB fetch + version check
-   - `purpose === "custody-ack-batch"` → `verifyBatchCustodyToken(payload, db)` — batch fetch + version check
-   - `purpose === "custody-ack-kit"` → `verifyKitCustodyToken(payload, db)` — kit fetch + version check
-   - Unknown purpose → reject with error
-4. Handle error states (see 3.9 error handling table): expired, revoked, not found
-5. If already accepted → render "Already acknowledged" confirmation
-6. If declined → render "Already reported" confirmation
+   - `purpose === "custody-ack"` -> `verifySingleCustodyToken(payload, db)` — DB fetch + version check
+   - `purpose === "custody-ack-batch"` -> `verifyBatchCustodyToken(payload, db)` — batch fetch + version check
+   - `purpose === "custody-ack-kit"` -> `verifyKitCustodyToken(payload, db)` — kit fetch + version check
+   - Unknown purpose -> reject with error
+4. Handle error states (see section 3.11 error handling table): expired, revoked, not found
+5. If already accepted -> render "Already acknowledged" confirmation
+6. If declined -> render "Already reported" confirmation
 7. Return asset details + custody info (single or batch list) to component
 
 ### 5.4 Action
@@ -511,9 +625,9 @@ Handle two intents:
 2. **DB transaction:** Call `recordCustodyAcknowledgement()` — returns `{ transitioned, custody }`
 3. **Only if `transitioned === true`:**
    - Create acknowledgement activity note (inside same transaction or immediately after)
-   - If kit custody → cascade `acceptedAt` to all child custody records + create notes for each asset
+   - If kit custody -> cascade `acceptedAt` to all child custody records + create notes for each asset
    - **After commit:** Enqueue admin + custodian notification emails via pg-boss
-4. If `transitioned === false` → no notes, no emails (idempotent retry — just render current state)
+4. If `transitioned === false` -> no notes, no emails (idempotent retry — just render current state)
 5. Render success state (shows acknowledgement date regardless of whether this request caused the transition)
 
 **`decline`:**
@@ -522,7 +636,7 @@ Handle two intents:
 3. **Only if `declined === true`:**
    - Create decline activity note
    - **After commit:** Enqueue admin alert email via pg-boss
-4. If `declined === false` → no notes, no emails (idempotent)
+4. If `declined === false` -> no notes, no emails (idempotent)
 5. Render "reported" confirmation
 
 **Why enqueue after commit:** Mixing DB mutations and email sends in one request path risks partial success (DB committed but email lost). The existing `sendEmail()` function already uses pg-boss as an outbox with retry — we just need to call it AFTER the transaction commits, not inside it.
@@ -530,48 +644,48 @@ Handle two intents:
 ### 5.5 Component (the brand moment page)
 
 ```text
-┌──────────────────────────────────────────┐
-│  [Shelf Logo]                            │
-│                                          │
-│  You've been assigned an asset           │
-│                                          │
-│  ┌────────────────────────────────────┐  │
-│  │  [Asset Image]                     │  │
-│  │                                    │  │
-│  │  MacBook Pro 16"                   │  │
-│  │  Category: Electronics             │  │
-│  │  ID: SAM-0042                      │  │
-│  │  Assigned by: Admin Name           │  │
-│  │  Date: March 30, 2026             │  │
-│  └────────────────────────────────────┘  │
-│                                          │
-│  By acknowledging, you confirm you have  │
-│  received this asset.                    │
-│                                          │
-│  ┌────────────────────────────────────┐  │
-│  │      [Acknowledge Receipt]         │  │
-│  └────────────────────────────────────┘  │
-│                                          │
-│  I don't have this item                  │
-│                                          │
-└──────────────────────────────────────────┘
++------------------------------------------+
+|  [Shelf Logo]                            |
+|                                          |
+|  You've been assigned an asset           |
+|                                          |
+|  +------------------------------------+  |
+|  |  [Asset Image]                     |  |
+|  |                                    |  |
+|  |  MacBook Pro 16"                   |  |
+|  |  Category: Electronics             |  |
+|  |  ID: SAM-0042                      |  |
+|  |  Assigned by: Admin Name           |  |
+|  |  Date: March 31, 2026              |  |
+|  +------------------------------------+  |
+|                                          |
+|  By acknowledging, you confirm you have  |
+|  received this asset.                    |
+|                                          |
+|  +------------------------------------+  |
+|  |      [Acknowledge Receipt]         |  |
+|  +------------------------------------+  |
+|                                          |
+|  I don't have this item                  |
+|                                          |
++------------------------------------------+
 ```
 
 After acknowledgement:
 ```text
-┌──────────────────────────────────────────┐
-│  [Shelf Logo]                            │
-│                                          │
-│  ✓ Receipt acknowledged                  │
-│                                          │
-│  You've confirmed receipt of             │
-│  MacBook Pro 16" (SAM-0042)              │
-│  March 31, 2026 at 2:47 PM              │
-│                                          │
-│  A confirmation has been sent to your    │
-│  email.                                  │
-│                                          │
-└──────────────────────────────────────────┘
++------------------------------------------+
+|  [Shelf Logo]                            |
+|                                          |
+|  Receipt acknowledged                    |
+|                                          |
+|  You've confirmed receipt of             |
+|  MacBook Pro 16" (SAM-0042)              |
+|  March 31, 2026 at 2:47 PM              |
+|                                          |
+|  A confirmation has been sent to your    |
+|  email.                                  |
+|                                          |
++------------------------------------------+
 ```
 
 ---
@@ -592,14 +706,14 @@ After acknowledgement:
 - If `requiresAcceptance` and feature is enabled:
   - Include `requiresAcceptance: true` and `assignedByUserId: userId` in custody create
   - Generate JWT token
-  - If custodian has user with email → send acknowledgement email
+  - If custodian has user with email -> send acknowledgement email
   - Store token reference (not in DB — token encodes custody ID, verification is stateless)
 - Modify activity note: if acknowledgement requested, append "(acknowledgement requested)"
 
 **Component changes:**
 - Add checkbox: "Require acknowledgement" (hidden if self-assignment, hidden if feature not enabled)
 - Show upsell block if feature not enabled and org is free tier
-- After submission with acknowledgement for non-registered member → show copy-link dialog/toast with the generated URL
+- After submission with acknowledgement for non-registered member -> show copy-link dialog/toast with the generated URL
 
 ### 6.2 Kit assign custody
 
@@ -648,10 +762,10 @@ requiresAcceptance: z
 **File:** `apps/webapp/app/routes/_layout+/assets.$assetId.overview.release-custody.tsx`
 
 Before releasing, check the acknowledgement state and include it in the release note:
-- `requiresAcceptance && !acceptedAt && !declinedAt` → "released {custodian}'s custody (acknowledgement was pending)"
-- `requiresAcceptance && declinedAt` → "released {custodian}'s custody (custody was disputed)"
-- `requiresAcceptance && acceptedAt` → "released {custodian}'s custody (was acknowledged on {date})"
-- `!requiresAcceptance` → existing behavior, no acknowledgement mention
+- `requiresAcceptance && !acceptedAt && !declinedAt` -> "released {custodian}'s custody (acknowledgement was pending)"
+- `requiresAcceptance && declinedAt` -> "released {custodian}'s custody (custody was disputed)"
+- `requiresAcceptance && acceptedAt` -> "released {custodian}'s custody (was acknowledged on {date})"
+- `!requiresAcceptance` -> existing behavior, no acknowledgement mention
 
 ### 7.2 Bulk release
 
@@ -688,7 +802,7 @@ After the existing "Since {date}" line:
 - If `requiresAcceptance && !acceptedAt && !declinedAt`:
   ```text
   Awaiting acknowledgement
-  [Copy link] · [Resend email]  (conditional on custodian having email)
+  [Copy link] . [Resend email]  (conditional on custodian having email)
   ```
 
 - If `requiresAcceptance && acceptedAt`:
@@ -728,11 +842,11 @@ Add to `defaultFields`: `{ name: "acknowledgement", visible: false, position: ..
 Add `case "acknowledgement":` to the switch statement.
 
 Render:
-- No custody → `<EmptyTableValue />`
-- Custody without `requiresAcceptance` → `<EmptyTableValue />`
-- Pending → Amber badge "Pending" with hover popover: "Sent X days ago. [Copy link] [Resend]"
-- Acknowledged → Green check + date
-- Declined → Red indicator "Disputed"
+- No custody -> `<EmptyTableValue />`
+- Custody without `requiresAcceptance` -> `<EmptyTableValue />`
+- Pending -> Amber badge "Pending" with hover popover: "Sent X days ago. [Copy link] [Resend]"
+- Acknowledged -> Green check + date
+- Declined -> Red indicator "Disputed"
 
 ### 9.3 Asset index loader
 
@@ -806,9 +920,26 @@ Accepts `custodyId` (single), `acknowledgementBatchId` (batch), or `kitCustodyId
 **Single custody resend** (only for custodies NOT in a batch or kit):
 ```typescript
 // GUARD: reject if custody belongs to a batch or kit — must use batch/kit resend path instead
-const custody = await db.custody.findUnique({ where: { id: custodyId }, select: { acknowledgementBatchId: true, asset: { select: { kitId: true } } } });
+// Check for kit: look for KitCustody with requiresAcceptance = true that covers this asset
+const custody = await db.custody.findUnique({
+  where: { id: custodyId },
+  select: {
+    acknowledgementBatchId: true,
+    asset: { select: { kitId: true } }
+  }
+});
 if (custody?.acknowledgementBatchId) throw new ShelfError({ message: "This asset is part of a bulk assignment. Use batch resend." });
-if (custody?.asset?.kitId) throw new ShelfError({ message: "This asset is part of a kit. Use kit resend." });
+
+// Kit guard: check if a KitCustody exists with requiresAcceptance for this asset's kit
+if (custody?.asset?.kitId) {
+  const kitCustody = await db.kitCustody.findUnique({
+    where: { kitId: custody.asset.kitId },
+    select: { requiresAcceptance: true }
+  });
+  if (kitCustody?.requiresAcceptance) {
+    throw new ShelfError({ message: "This asset is part of a kit with acknowledgement. Use kit resend." });
+  }
+}
 
 const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
   UPDATE "Custody"
@@ -825,33 +956,41 @@ const [updated] = await db.$queryRaw<[{ tokenVersion: number }]>`
 if (!updated) {
   throw new ShelfError({ message: "Custody not found, already settled, or cooldown active." });
 }
-// Sign with { id: custodyId, purpose: "custody-ack", ver: updated.tokenVersion }
+// Sign with { id: custodyId, purpose: "custody-ack", ver: updated.tokenVersion,
+//   algorithm: "HS256", issuer: "shelf-custody", audience: "custody-ack" }
 ```
 
 **Batch resend** (rotates ALL rows in batch — including already-accepted/declined):
 ```typescript
 // Rotate ALL rows regardless of state. The verifier checks version on ALL rows,
 // so if one was accepted and keeps the old version, the new batch token breaks.
-// Cooldown check uses MIN(lastTokenRotatedAt) across the batch.
-const rows = await db.$queryRaw`
-  UPDATE "Custody"
-  SET "tokenVersion" = (
-    SELECT MAX("tokenVersion") + 1 FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId}
-  ),
-  "lastTokenRotatedAt" = NOW(), "updatedAt" = NOW()
-  WHERE "acknowledgementBatchId" = ${batchId}
-    AND "requiresAcceptance" = true
-    AND (
-      (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
-      IS NULL
-      OR
-      (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
-      < NOW() - INTERVAL '60 seconds'
-    )
-  RETURNING "tokenVersion"
-`;
+// Wrap in advisory lock to prevent concurrent MAX race condition.
+const rows = await db.$transaction(async (tx) => {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${batchId}))`;
+  return tx.$queryRaw`
+    UPDATE "Custody"
+    SET "tokenVersion" = (
+      SELECT COALESCE(MAX("tokenVersion"), 0) + 1
+      FROM "Custody"
+      WHERE "acknowledgementBatchId" = ${batchId}
+        AND "requiresAcceptance" = true
+    ),
+    "lastTokenRotatedAt" = NOW(), "updatedAt" = NOW()
+    WHERE "acknowledgementBatchId" = ${batchId}
+      AND "requiresAcceptance" = true
+      AND (
+        (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+        IS NULL
+        OR
+        (SELECT MAX("lastTokenRotatedAt") FROM "Custody" WHERE "acknowledgementBatchId" = ${batchId})
+        < NOW() - INTERVAL '60 seconds'
+      )
+    RETURNING "tokenVersion"
+  `;
+});
 if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown active." });
-// Sign with { batchId, purpose: "custody-ack-batch", ver: rows[0].tokenVersion }
+// Sign with { batchId, purpose: "custody-ack-batch", ver: rows[0].tokenVersion,
+//   algorithm: "HS256", issuer: "shelf-custody", audience: "custody-ack" }
 ```
 
 **Kit resend** (rotates KitCustody + all child Custody rows):
@@ -861,11 +1000,16 @@ if (!rows.length) throw new ShelfError({ message: "Batch not found or cooldown a
 //    WHERE id = kitCustodyId AND requiresAcceptance = true
 //    AND (lastTokenRotatedAt IS NULL OR lastTokenRotatedAt < NOW() - INTERVAL '60 seconds')
 //    RETURNING tokenVersion
-// 2. Guard: if zero rows → throw ShelfError("Kit custody not found or cooldown active")
+// 2. Guard: if zero rows -> throw ShelfError("Kit custody not found or cooldown active")
 // 3. UPDATE all child Custody records SET tokenVersion = newVersion, lastTokenRotatedAt = NOW()
-//    WHERE assetId IN (SELECT id FROM Asset WHERE kitId = kit.id)
-//    Guard: if zero child rows → throw ShelfError("No child custody records found")
-// 4. After commit: sign with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion }
+//    WHERE assetId IN (SELECT id FROM "Asset" WHERE "kitId" = kit.id)
+//      AND "teamMemberId" = (SELECT "custodianId" FROM "KitCustody" WHERE id = kitCustodyId)
+//    Guard: if zero child rows -> throw ShelfError("No child custody records found")
+//    NOTE: The custodian filter (teamMemberId = custodianId) prevents updating custody records
+//    belonging to a different custodian if the kit was reassigned between operations.
+//    Remember: KitCustody uses custodianId, Custody uses teamMemberId.
+// 4. After commit: sign with { id: kitCustodyId, purpose: "custody-ack-kit", ver: newVersion,
+//      algorithm: "HS256", issuer: "shelf-custody", audience: "custody-ack" }
 ```
 
 All paths: atomic `UPDATE ... RETURNING`, cooldown via `lastTokenRotatedAt` with DB time (`NOW() - INTERVAL`), state guards. Batch/kit resend rotates the **entire group** — never a single row from a group, which would desynchronize versions and break batch/kit verification.
@@ -909,40 +1053,40 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 10. `packages/database/prisma/migrations/[ts]_add_custody_acknowledgement/migration.sql`
 
 ### Modified files (17):
-1. `packages/database/prisma/schema.prisma` — Custody, KitCustody, Organization models
+1. `packages/database/prisma/schema.prisma` — Custody, KitCustody, Organization, User models
 2. `apps/webapp/server/index.ts` — Add public path
 3. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.assign-custody.tsx` — Checkbox + email logic
 4. `apps/webapp/app/routes/_layout+/kits.$kitId.assets.assign-custody.tsx` — Same for kits
 5. `apps/webapp/app/routes/api+/assets.bulk-assign-custody.ts` — Bulk assign support
 6. `apps/webapp/app/modules/asset/service.server.ts` — `bulkCheckOutAssets` acknowledgement
 7. `apps/webapp/app/modules/kit/service.server.ts` — Kit custody acknowledgement
-8. `apps/webapp/app/modules/custody/service.server.ts` — No changes to releaseCustody (it already hard-deletes)
-9. `apps/webapp/app/modules/custody/schema.ts` — Add requiresAcceptance to schema
-10. `apps/webapp/app/components/assets/asset-custody-card.tsx` — Show status + actions
-11. `apps/webapp/app/modules/asset-index-settings/helpers.ts` — New column
-12. `apps/webapp/app/components/assets/assets-index/advanced-asset-columns.tsx` — Render column
-13. `apps/webapp/app/routes/_layout+/assets._index.tsx` — Load acknowledgement data + banner
-14. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.release-custody.tsx` — Pending note
-15. `apps/webapp/app/utils/roles.server.ts` — Return `canUseCustodyAcknowledgement`
-16. `apps/webapp/app/config/addon-copy.ts` — Upsell copy
-17. `apps/webapp/server/logger.ts` — Redact token query param on acceptance routes
+8. `apps/webapp/app/modules/custody/schema.ts` — Add requiresAcceptance to schema
+9. `apps/webapp/app/components/assets/asset-custody-card.tsx` — Show status + actions
+10. `apps/webapp/app/modules/asset-index-settings/helpers.ts` — New column
+11. `apps/webapp/app/components/assets/assets-index/advanced-asset-columns.tsx` — Render column
+12. `apps/webapp/app/routes/_layout+/assets._index.tsx` — Load acknowledgement data + banner
+13. `apps/webapp/app/routes/_layout+/assets.$assetId.overview.release-custody.tsx` — Pending note
+14. `apps/webapp/app/utils/roles.server.ts` — Return `canUseCustodyAcknowledgement`
+15. `apps/webapp/app/config/addon-copy.ts` — Upsell copy
+16. `apps/webapp/server/logger.ts` — Redact token query param on acceptance routes
+17. `apps/webapp/app/utils/env.ts` — Add CUSTODY_TOKEN_SECRET
 
 ---
 
 ## Build & Test Order
 
-1. **Phase 1** → Run migration → `pnpm db:deploy-migration`
-2. **Phase 2-3** → Service + gating (no UI yet) → Run unit tests
-3. **Phase 4** → Email templates (can preview with React Email)
-4. **Phase 5** → Public acceptance route → Manual test with generated JWT
-5. **Phase 6** → Assign custody changes → Test full flow: assign → email → accept
-6. **Phase 7** → Release changes → Test release-with-pending notes
-7. **Phase 8** → Custody card → Visual verification via preview
-8. **Phase 9** → Index column → Visual verification via preview
-9. **Phase 10** → In-app banner + acknowledge page → Test as BASE/SELF_SERVICE user
-10. **Phase 11** → Resend/copy-link API → Test from custody card buttons
-11. **Phase 12** → Settings/stripe (can be deferred)
-12. **Final** → `pnpm webapp:validate` → Full validation pass
+1. **Phase 1** -> Run migration -> `pnpm db:deploy-migration`
+2. **Phase 2-3** -> Service + gating (no UI yet) -> Run unit tests
+3. **Phase 4** -> Email templates (can preview with React Email)
+4. **Phase 5** -> Public acceptance route -> Manual test with generated JWT
+5. **Phase 6** -> Assign custody changes -> Test full flow: assign -> email -> accept
+6. **Phase 7** -> Release changes -> Test release-with-pending notes
+7. **Phase 8** -> Custody card -> Visual verification via preview
+8. **Phase 9** -> Index column -> Visual verification via preview
+9. **Phase 10** -> In-app banner + acknowledge page -> Test as BASE/SELF_SERVICE user
+10. **Phase 11** -> Resend/copy-link API -> Test from custody card buttons
+11. **Phase 12** -> Settings/stripe (can be deferred)
+12. **Final** -> `pnpm webapp:validate` -> Full validation pass
 
 ---
 
@@ -960,11 +1104,13 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 | Narrow public path | `/accept-custody/:custodyId` — no wildcard. Minimal exposure surface. |
 | Dedicated CUSTODY_TOKEN_SECRET | Separate secret prevents token confusion with invite tokens (invite verifier doesn't check `purpose`). |
 | Three token purposes | `custody-ack` (single), `custody-ack-batch` (bulk), `custody-ack-kit` (kit) — each with dedicated verifier fetching from the correct model. |
-| Verify-once-then-dispatch | `verifyTokenSignature()` validates JWT once. Verified payload passed to purpose-specific verifiers for DB checks. No double-verification, no unverified branching. |
+| Verify-once-then-dispatch | `verifyTokenSignature()` validates JWT once (signature + exp + iss + aud). Verified payload passed to purpose-specific verifiers for DB checks. No double-verification, no unverified branching. |
+| Pinned HS256 + issuer/audience | `algorithms: ["HS256"]` prevents algorithm confusion. `issuer` + `audience` claims prevent cross-service token reuse. |
 | Checkbox coercion in Zod schema | HTML checkbox sends `"on"` not `true`. Uses `z.union([z.boolean(), z.literal("on")]).transform()` — follows existing column visibility pattern. |
 | Decline uses same conditional guard as accept | `WHERE acceptedAt IS NULL AND declinedAt IS NULL` — prevents race between concurrent accept/decline. |
 | Single owner for email side effects | Service functions are DB-only. Route actions enqueue emails via pg-boss after commit. Prevents duplicate sends. |
 | Atomic resend cooldown | Raw SQL `UPDATE ... RETURNING` with `lastTokenRotatedAt` + `NOW() - INTERVAL '60 seconds'` + state guards. Single query: increment version, enforce cooldown, return new version. TOCTOU-safe, clock-skew safe. |
+| Advisory lock for batch token generation | `pg_advisory_xact_lock(hashtext(batchId))` prevents concurrent calls from reading the same MAX and generating duplicate versions. |
 | Network metadata cleanup deferred (not an oversight) | Custody hard-delete already purges IP/UA. Notes retain only name (business record). Cron job for long-lived custodies is trivial to add later if needed. |
 | Org-scoped in-app acknowledgement | In-app route verifies custody belongs to current session org. Prevents cross-org attacks. |
 | Feature gated per-org (boolean switch) | Same infra as barcode/audit. Included in Plus/Team by default. Free users see upsell to upgrade. Not a separate purchase — just tier-gated. |
@@ -974,3 +1120,5 @@ No separate Stripe product, no trial flow, no add-on management page needed for 
 | BASE users can acknowledge own custody | Permission bypass in in-app mode: if you ARE the custodian, you can acknowledge. Not a general custody permission. |
 | Non-registered members get copy-link only | No email field on TeamMember. Admin copies link, sends manually. |
 | Column hidden by default | Opt-in visibility. Admins who use the feature toggle it on. |
+| Custody vs KitCustody field naming | Custody uses `teamMemberId`, KitCustody uses `custodianId`. Both point to TeamMember. Code must use the correct field name per model. |
+| `_auth+` prefix for public route | Follows existing `accept-invite` precedent — token-authenticated public routes that don't require a session. |
