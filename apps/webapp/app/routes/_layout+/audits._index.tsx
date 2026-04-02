@@ -139,6 +139,7 @@ export default function AuditsIndexPage() {
                   ACTIVE: "ACTIVE",
                   COMPLETED: "COMPLETED",
                   CANCELLED: "CANCELLED",
+                  ARCHIVED: "ARCHIVED",
                 }}
               />
             ),

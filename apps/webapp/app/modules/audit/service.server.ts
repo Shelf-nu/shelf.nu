@@ -16,8 +16,8 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { Logger } from "~/utils/logger";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -37,10 +37,29 @@ import {
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
 } from "./helpers.server";
-
 import type { AuditSchedulerData } from "./types";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
+
+/**
+ * Rejects writes against archived audits.
+ * Call immediately after loading the session in every mutating service
+ * so the archive/read-only contract is enforced server-side.
+ */
+function assertAuditNotArchived(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (status === AuditStatus.ARCHIVED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Archived audits are read-only.",
+      additionalData: details,
+      label,
+      status: 400,
+    });
+  }
+}
 
 export const AUDIT_LIST_INCLUDE = {
   createdBy: {
@@ -391,6 +410,11 @@ export async function updateAuditSession({
         status: 404,
       });
     }
+
+    assertAuditNotArchived(currentAudit.status, {
+      auditSessionId: id,
+      organizationId,
+    });
 
     if (currentAudit.status === AuditStatus.CANCELLED) {
       throw new ShelfError({
@@ -1009,6 +1033,11 @@ export async function recordAuditScan(
       });
     }
 
+    assertAuditNotArchived(session.status, {
+      auditSessionId,
+      organizationId,
+    });
+
     // Check if this asset was already scanned in this audit
     const existingScan = await db.auditScan.findFirst({
       where: {
@@ -1361,11 +1390,22 @@ export async function completeAuditSession({
         });
       }
 
-      if (session.status === AuditStatus.COMPLETED) {
+      assertAuditNotArchived(session.status, {
+        auditSessionId: sessionId,
+        organizationId,
+      });
+
+      if (
+        session.status === AuditStatus.COMPLETED ||
+        session.status === AuditStatus.CANCELLED
+      ) {
         throw new ShelfError({
           cause: null,
-          message: "Audit session is already completed",
-          additionalData: { sessionId },
+          message:
+            session.status === AuditStatus.COMPLETED
+              ? "Audit session is already completed"
+              : "Cancelled audits cannot be completed.",
+          additionalData: { sessionId, status: session.status },
           status: 400,
           label,
         });
@@ -1594,9 +1634,11 @@ export async function getAuditsForOrganization(params: {
       ];
     }
 
-    // Add status filter
+    // Add status filter — exclude ARCHIVED by default when no filter is set
     if (status) {
       where.status = status;
+    } else {
+      where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
     const [audits, totalAudits] = await Promise.all([
@@ -1775,6 +1817,11 @@ export async function cancelAuditSession({
       });
     }
 
+    assertAuditNotArchived(auditSession.status, {
+      auditSessionId,
+      organizationId,
+    });
+
     // Check if user is the creator
     if (auditSession.createdById !== userId) {
       throw new ShelfError({
@@ -1810,12 +1857,20 @@ export async function cancelAuditSession({
       data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
+    // Fetch acting user's info for the activity note
+    const actingUser = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
     // Create activity note for cancellation
     await db.auditNote.create({
       data: {
-        content: `${resolveUserDisplayName(
-          auditSession.createdBy
-        )} cancelled the audit`,
+        content: `${wrapUserLinkForNote({
+          id: userId,
+          firstName: actingUser?.firstName,
+          lastName: actingUser?.lastName,
+        })} cancelled the audit`,
         type: "UPDATE",
         userId,
         auditSessionId,
@@ -2209,4 +2264,81 @@ export async function removeAssetsFromAudit({
 
       return { removedCount: result.removedCount };
     });
+}
+
+/**
+ * Archives a completed or cancelled audit session.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) can be archived.
+ * This is irreversible — there is no "unarchive" action.
+ *
+ * @param auditSessionId - The ID of the audit to archive
+ * @param organizationId - The organization ID for scoping
+ * @param userId - The user performing the archive action
+ * @throws {ShelfError} If the audit is not found or not in a terminal status
+ */
+export async function archiveAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    // Wrap status update + activity note in a transaction so both
+    // succeed or fail together (prevents orphaned state changes).
+    // The updateMany WHERE clause atomically validates existence,
+    // org scoping, and terminal status — no pre-read needed.
+    await db.$transaction(async (tx) => {
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: auditSessionId,
+          organizationId,
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      if (result.count === 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Audit could not be archived. It may not exist, is not in a terminal state, or was already modified.",
+          additionalData: { auditSessionId, organizationId },
+          label,
+          status: 409,
+        });
+      }
+
+      // Fetch user info for the activity note
+      const user = await tx.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, displayName: true },
+      });
+
+      // Create activity note: "[User] archived the audit"
+      await tx.auditNote.create({
+        data: {
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE",
+          userId,
+          auditSessionId,
+        },
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to archive audit session",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
 }

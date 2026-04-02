@@ -14,6 +14,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader, action } from "~/routes/_layout+/audits.$auditId";
 import { tw } from "~/utils/tw";
+import { ArchiveAuditDialog } from "./archive-audit-dialog";
 import { AuditReceiptPDF } from "./audit-receipt-pdf";
 import { CancelAuditDialog } from "./cancel-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
@@ -30,6 +31,7 @@ const ConditionalActionsDropdown = () => {
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
   // Track auto-open so the email deep link only triggers once.
   const hasAutoOpenedReceiptRef = useRef(false);
@@ -37,14 +39,21 @@ const ConditionalActionsDropdown = () => {
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
+  const isArchived = session.status === AuditStatus.ARCHIVED;
   const isCreator = session.createdById === user?.id;
   const receiptRequested = searchParams.get("receipt") === "1";
 
   // Only admin/owner can edit audit details
-  const canEditAudit = isAdminOrOwner && !isCompleted && !isCancelled;
+  const canEditAudit =
+    isAdminOrOwner && !isCompleted && !isCancelled && !isArchived;
+
+  // Admin/owner can archive completed or cancelled audits
+  const canArchiveAudit =
+    isAdminOrOwner && (isCompleted || isCancelled) && !isArchived;
 
   // Only the creator can cancel an audit, and only if it's not already completed or cancelled
-  const canCancelAudit = isCreator && !isCompleted && !isCancelled;
+  const canCancelAudit =
+    isCreator && !isCompleted && !isCancelled && !isArchived;
 
   function handleMenuClose() {
     setOpen(false);
@@ -171,6 +180,23 @@ const ConditionalActionsDropdown = () => {
                 </div>
               </When>
 
+              <When truthy={canArchiveAudit}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsArchiveDialogOpen(true);
+                    }}
+                  >
+                    Archive
+                  </Button>
+                </div>
+              </When>
+
               {/* PDF Download Button - Always visible for all users with audit read permission */}
               <div className="border-b px-0 py-1 md:p-0">
                 <Button
@@ -219,8 +245,15 @@ const ConditionalActionsDropdown = () => {
         <CancelAuditDialog
           auditName={session.name}
           open={isCancelDialogOpen}
-          actionData={actionData}
           onClose={() => setIsCancelDialogOpen(false)}
+        />
+      </When>
+
+      <When truthy={isArchiveDialogOpen}>
+        <ArchiveAuditDialog
+          auditName={session.name}
+          open={isArchiveDialogOpen}
+          onClose={() => setIsArchiveDialogOpen(false)}
         />
       </When>
 
