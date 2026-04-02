@@ -3,7 +3,8 @@
  *
  * Renders a confirmation dialog for archiving a completed audit session.
  * Used by the actions dropdown on the audit detail page when the audit
- * status is COMPLETED. Submits the "archive-audit" intent via a scoped
+ * is in a terminal state (COMPLETED or CANCELLED). Submits the
+ * "archive-audit" intent via a scoped
  * fetcher to avoid cross-form interference with other dialogs on the page.
  *
  * @see {@link file://./actions-dropdown.tsx} - Triggers this dialog
@@ -43,7 +44,7 @@ export function ArchiveAuditDialog({
   open,
   onClose,
 }: ArchiveAuditDialogProps) {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher({ key: "archive-audit" });
   const disabled = useDisabled(fetcher);
 
   /** Stabilize onClose in a ref to avoid stale closures in the effect */
@@ -51,10 +52,10 @@ export function ArchiveAuditDialog({
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (fetcher.data && "success" in fetcher.data) {
+    if (fetcher.state === "idle" && fetcher.data && "success" in fetcher.data) {
       onCloseRef.current();
     }
-  }, [fetcher.data]);
+  }, [fetcher.data, fetcher.state]);
 
   return (
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>

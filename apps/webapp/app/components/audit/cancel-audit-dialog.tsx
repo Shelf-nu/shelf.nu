@@ -1,4 +1,17 @@
-import { useEffect } from "react";
+/**
+ * @file Cancel Audit Dialog
+ *
+ * Renders a confirmation dialog for cancelling an active audit session.
+ * Used by the actions dropdown on the audit detail page when the current
+ * user is the audit creator and the audit is not yet completed or cancelled.
+ * Submits the "cancel-audit" intent via a scoped fetcher to avoid
+ * cross-form interference with other dialogs on the page.
+ *
+ * @see {@link file://./actions-dropdown.tsx} - Triggers this dialog
+ * @see {@link file://../../routes/_layout+/audits.$auditId.tsx} - Action handler
+ */
+import { useEffect, useRef } from "react";
+import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -11,29 +24,41 @@ import {
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
-import { Form } from "../custom-form";
 import { AlertIcon } from "../icons/library";
 
+/** Props for the {@link CancelAuditDialog} component. */
 type CancelAuditDialogProps = {
+  /** Display name of the audit being cancelled */
   auditName: string;
+  /** Whether the dialog is currently visible */
   open: boolean;
+  /** Callback invoked when the dialog should close */
   onClose: () => void;
-  actionData?: any;
 };
 
+/**
+ * Confirmation dialog for cancelling an active audit.
+ * Uses a fetcher so its response is scoped and doesn't
+ * interfere with other forms on the audit detail page.
+ */
 export function CancelAuditDialog({
   auditName,
   open,
   onClose,
-  actionData,
 }: CancelAuditDialogProps) {
-  const disabled = useDisabled();
-  // Close dialog on success (redirect happens in action)
+  const fetcher = useFetcher({ key: "cancel-audit" });
+  const disabled = useDisabled(fetcher);
+
+  /** Stabilize onClose in a ref to avoid stale closures in the effect */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (actionData?.success) {
-      onClose();
+    if (fetcher.state === "idle" && fetcher.data && "success" in fetcher.data) {
+      onCloseRef.current();
     }
-  }, [actionData, onClose]);
+  }, [fetcher.data, fetcher.state]);
+
   return (
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <AlertDialogContent>
@@ -47,6 +72,11 @@ export function CancelAuditDialog({
           <AlertDialogDescription>
             Are you sure you want to cancel this audit? This action cannot be
             undone.
+            {fetcher.data && "error" in fetcher.data && fetcher.data.error && (
+              <span className="mt-2 block text-sm text-error-500">
+                {fetcher.data.error.message}
+              </span>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -57,7 +87,7 @@ export function CancelAuditDialog({
               </Button>
             </AlertDialogCancel>
 
-            <Form method="post">
+            <fetcher.Form method="post">
               <input type="hidden" name="intent" value="cancel-audit" />
               <Button
                 type="submit"
@@ -68,7 +98,7 @@ export function CancelAuditDialog({
               >
                 Cancel audit
               </Button>
-            </Form>
+            </fetcher.Form>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>

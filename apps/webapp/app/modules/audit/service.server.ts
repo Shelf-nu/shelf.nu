@@ -16,8 +16,8 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { Logger } from "~/utils/logger";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
-import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -1857,12 +1857,20 @@ export async function cancelAuditSession({
       data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
+    // Fetch acting user's info for the activity note
+    const actingUser = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
     // Create activity note for cancellation
     await db.auditNote.create({
       data: {
-        content: `${resolveUserDisplayName(
-          auditSession.createdBy
-        )} cancelled the audit`,
+        content: `${wrapUserLinkForNote({
+          id: userId,
+          firstName: actingUser?.firstName,
+          lastName: actingUser?.lastName,
+        })} cancelled the audit`,
         type: "UPDATE",
         userId,
         auditSessionId,
@@ -2259,14 +2267,14 @@ export async function removeAssetsFromAudit({
 }
 
 /**
- * Archives a completed audit session.
- * Only audits with COMPLETED status can be archived.
+ * Archives a completed or cancelled audit session.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) can be archived.
  * This is irreversible — there is no "unarchive" action.
  *
  * @param auditSessionId - The ID of the audit to archive
  * @param organizationId - The organization ID for scoping
  * @param userId - The user performing the archive action
- * @throws {ShelfError} If the audit is not found or not in COMPLETED status
+ * @throws {ShelfError} If the audit is not found or not in a terminal status
  */
 export async function archiveAuditSession({
   auditSessionId,
@@ -2278,41 +2286,16 @@ export async function archiveAuditSession({
   userId: string;
 }): Promise<void> {
   try {
-    // Verify the audit exists and is in COMPLETED status
-    const auditSession = await db.auditSession.findFirst({
-      where: { id: auditSessionId, organizationId },
-      select: { id: true, status: true },
-    });
-
-    if (!auditSession) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { auditSessionId, organizationId },
-        label,
-        status: 404,
-      });
-    }
-
-    if (auditSession.status !== AuditStatus.COMPLETED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Only completed audits can be archived.",
-        additionalData: { auditSessionId, currentStatus: auditSession.status },
-        label,
-        status: 400,
-      });
-    }
-
     // Wrap status update + activity note in a transaction so both
-    // succeed or fail together (prevents orphaned state changes)
+    // succeed or fail together (prevents orphaned state changes).
+    // The updateMany WHERE clause atomically validates existence,
+    // org scoping, and terminal status — no pre-read needed.
     await db.$transaction(async (tx) => {
-      // Atomic update: include status in WHERE to prevent race conditions
       const result = await tx.auditSession.updateMany({
         where: {
           id: auditSessionId,
           organizationId,
-          status: AuditStatus.COMPLETED,
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
         },
         data: { status: AuditStatus.ARCHIVED },
       });
@@ -2320,7 +2303,8 @@ export async function archiveAuditSession({
       if (result.count === 0) {
         throw new ShelfError({
           cause: null,
-          message: "Audit could not be archived. It may have been modified.",
+          message:
+            "Audit could not be archived. It may not exist, is not in a terminal state, or was already modified.",
           additionalData: { auditSessionId, organizationId },
           label,
           status: 409,
@@ -2336,7 +2320,11 @@ export async function archiveAuditSession({
       // Create activity note: "[User] archived the audit"
       await tx.auditNote.create({
         data: {
-          content: `${resolveUserDisplayName(user)} archived the audit`,
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
           type: "UPDATE",
           userId,
           auditSessionId,
@@ -2344,13 +2332,13 @@ export async function archiveAuditSession({
       });
     });
   } catch (cause) {
-    const isShelfError = isLikeShelfError(cause);
+    if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
-      message: isShelfError ? cause.message : "Failed to archive audit session",
+      message: "Failed to archive audit session",
       additionalData: { auditSessionId, organizationId, userId },
       label,
-      status: isShelfError ? cause.status : 500,
+      status: 500,
     });
   }
 }

@@ -47,8 +47,9 @@ const ConditionalActionsDropdown = () => {
   const canEditAudit =
     isAdminOrOwner && !isCompleted && !isCancelled && !isArchived;
 
-  // Admin/owner can archive only completed audits
-  const canArchiveAudit = isAdminOrOwner && isCompleted;
+  // Admin/owner can archive completed or cancelled audits
+  const canArchiveAudit =
+    isAdminOrOwner && (isCompleted || isCancelled) && !isArchived;
 
   // Only the creator can cancel an audit, and only if it's not already completed or cancelled
   const canCancelAudit =
@@ -191,7 +192,7 @@ const ConditionalActionsDropdown = () => {
                       setIsArchiveDialogOpen(true);
                     }}
                   >
-                    <span className="flex items-center gap-2">Archive</span>
+                    Archive
                   </Button>
                 </div>
               </When>
@@ -244,7 +245,6 @@ const ConditionalActionsDropdown = () => {
         <CancelAuditDialog
           auditName={session.name}
           open={isCancelDialogOpen}
-          actionData={actionData}
           onClose={() => setIsCancelDialogOpen(false)}
         />
       </When>
