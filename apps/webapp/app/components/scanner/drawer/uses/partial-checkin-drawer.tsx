@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
@@ -646,11 +646,14 @@ const CustomForm = ({
   isLoading,
   hasBlockers,
 }: CustomFormProps) => {
-  const formRef = useRef<HTMLFormElement>(null);
+  /** Use state instead of ref so the component re-renders once the form
+   * mounts — this guarantees portalContainer is always the real DOM node
+   * when the user opens the early-checkin dialog. */
+  const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
 
   return (
     <Form
-      ref={formRef}
+      ref={setFormElement}
       id="partial-checkin-form"
       className="mb-4 flex max-h-full w-full"
       method="post"
@@ -685,7 +688,7 @@ const CustomForm = ({
             disabled={
               isLoading || hasBlockers || assetIdsForCheckin.length === 0
             }
-            portalContainer={formRef.current || undefined}
+            portalContainer={formElement || undefined}
             formId="partial-checkin-form"
             specificAssetIds={assetIdsForCheckin}
           />

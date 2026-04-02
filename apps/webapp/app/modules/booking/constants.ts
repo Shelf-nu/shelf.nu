@@ -5,6 +5,22 @@ import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
   custodianUser: true,
+  // Include creator details so the notification resolver can add the
+  // booking creator as a recipient when the org setting is enabled
+  creator: {
+    select: { id: true, email: true, firstName: true, lastName: true },
+  },
+  // Include per-booking notification recipients (team members explicitly
+  // added to this booking) for the recipient resolver's step 6
+  notificationRecipients: {
+    select: {
+      id: true,
+      name: true,
+      user: {
+        select: { id: true, email: true, firstName: true, lastName: true },
+      },
+    },
+  },
   organization: {
     include: {
       owner: {
