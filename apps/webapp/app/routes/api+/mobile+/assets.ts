@@ -1,10 +1,14 @@
 import { data, type LoaderFunctionArgs } from "react-router";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
+import { oneDayFromNow } from "~/utils/one-week-from-now";
+import { createSignedUrl } from "~/utils/storage.server";
 
 /**
  * GET /api/mobile/assets?orgId=xxx&search=xxx&page=1&perPage=20&myCustody=true&status=IN_CUSTODY
@@ -67,6 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           title: true,
           status: true,
           mainImage: true,
+          mainImageExpiration: true,
           thumbnailImage: true,
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
@@ -85,8 +90,70 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.asset.count({ where }),
     ]);
 
+    // Refresh expired signed image URLs in batch (same pattern as
+    // the webapp asset-image component, but done server-side for mobile)
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+    const refreshedAssets = await Promise.all(
+      assets.map(async (asset) => {
+        const { mainImageExpiration, ...rest } = asset;
+        let { mainImage, thumbnailImage } = rest;
+
+        const needsRefresh =
+          mainImage &&
+          (!mainImageExpiration ||
+            new Date(mainImageExpiration).getTime() < oneHourFromNow);
+
+        if (needsRefresh && mainImage) {
+          try {
+            const mainPath = extractStoragePath(mainImage, "assets");
+            if (mainPath) {
+              mainImage = await createSignedUrl({
+                filename: mainPath,
+                bucketName: "assets",
+              });
+
+              if (thumbnailImage) {
+                const thumbPath = extractStoragePath(thumbnailImage, "assets");
+                if (thumbPath) {
+                  thumbnailImage = await createSignedUrl({
+                    filename: thumbPath,
+                    bucketName: "assets",
+                  });
+                }
+              }
+
+              // Update DB with fresh URLs (fire and forget)
+              db.asset
+                .update({
+                  where: { id: asset.id },
+                  data: {
+                    mainImage,
+                    thumbnailImage,
+                    mainImageExpiration: oneDayFromNow(),
+                  },
+                })
+                .catch((err) => {
+                  Logger.error(
+                    new Error(
+                      `Failed to update refreshed image URLs for asset ${asset.id}: ${err}`
+                    )
+                  );
+                });
+            }
+          } catch (err) {
+            // If refresh fails, return existing (possibly expired) URLs
+            Logger.warn(
+              `Failed to refresh image URL for asset ${asset.id}: ${err}`
+            );
+          }
+        }
+
+        return { ...rest, mainImage, thumbnailImage };
+      })
+    );
+
     return data({
-      assets,
+      assets: refreshedAssets,
       page,
       perPage,
       totalCount,

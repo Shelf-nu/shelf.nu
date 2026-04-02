@@ -68,6 +68,8 @@ export default function BookingDetailScreen() {
     setCheckedInAssetIds(data.checkedInAssetIds);
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
+    // Clear stale selections — checked-in assets are no longer selectable
+    setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
   }, [id, currentOrg]);
 
@@ -185,7 +187,9 @@ export default function BookingDetailScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             const msg = data?.isComplete
               ? `All assets checked in. "${booking.name}" is now complete.`
-              : `${data?.checkedInCount} checked in, ${data?.remainingCount} remaining.`;
+              : `${data?.checkedInCount ?? count} checked in, ${
+                  data?.remainingCount ?? "some"
+                } remaining.`;
             Alert.alert("Checked In", msg, [
               {
                 text: "OK",

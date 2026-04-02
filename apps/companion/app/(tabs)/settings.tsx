@@ -1,5 +1,12 @@
 import { useState, useEffect } from "react";
-import { View, Text, TouchableOpacity, Alert, ScrollView } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Alert,
+  ScrollView,
+  Switch,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import Constants from "expo-constants";
@@ -15,6 +22,11 @@ import {
   setStartPage,
   type StartPage,
 } from "@/lib/start-page";
+import {
+  loadScanSoundPreference,
+  setScanSoundEnabled,
+  playScanSound,
+} from "@/lib/scan-sound";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -38,10 +50,12 @@ export default function SettingsScreen() {
   const styles = useStyles();
 
   const [startPage, setStartPageState] = useState<StartPage>("assets");
+  const [scanSoundOn, setScanSoundOn] = useState(true);
 
-  // Load persisted start page on mount
+  // Load persisted start page and scan sound preference on mount
   useEffect(() => {
     getStartPage().then(setStartPageState);
+    loadScanSoundPreference().then(setScanSoundOn);
   }, []);
 
   const handleStartPageChange = (page: StartPage) => {
@@ -241,6 +255,47 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               );
             })}
+          </View>
+        </View>
+      </View>
+
+      {/* Scan sound toggle */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Scanner</Text>
+        <View style={styles.card}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="volume-medium-outline"
+                size={20}
+                color={colors.foreground}
+              />
+              <View>
+                <Text style={styles.settingLabel}>Scan sound</Text>
+                <Text style={styles.settingHint}>
+                  Bleep + haptic on successful scan
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={scanSoundOn}
+              onValueChange={async (value) => {
+                Haptics.selectionAsync();
+                setScanSoundOn(value);
+                await setScanSoundEnabled(value);
+                // Play a preview bleep when turning on
+                if (value) {
+                  playScanSound();
+                }
+              }}
+              trackColor={{
+                false: colors.borderLight,
+                true: colors.primary + "60",
+              }}
+              thumbColor={scanSoundOn ? colors.primary : colors.mutedLight}
+              accessibilityLabel="Toggle scan sound"
+              accessibilityRole="switch"
+            />
           </View>
         </View>
       </View>

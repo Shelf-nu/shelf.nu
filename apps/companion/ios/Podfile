@@ -60,8 +60,7 @@ target 'Shelf' do
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
 
-    # Xcode 16.4+ enables Swift 6 strict concurrency by default,
-    # which breaks expo-image and other pods. Force minimal mode.
+    # Fix Swift 6 strict concurrency errors in expo-image (Xcode 16.4+)
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
         bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'

@@ -13,7 +13,8 @@ import { makeShelfError } from "~/utils/error";
  * Returns paginated audits for the user's organization.
  * Query params:
  *   - orgId (required): organization ID
- *   - status (optional): filter by a single AuditStatus (e.g., PENDING, ACTIVE, COMPLETED)
+ *   - status (optional): comma-separated AuditStatus values
+ *     e.g. "PENDING,ACTIVE" or "COMPLETED"
  *   - page (optional): page number (default 1)
  *   - perPage (optional): items per page (default 20, max 50)
  *   - search (optional): search string
@@ -35,27 +36,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
       Math.max(1, parseInt(url.searchParams.get("perPage") || "20", 10) || 20)
     );
 
-    // Validate status filter — only pass a single valid AuditStatus.
-    // If the client sends multiple comma-separated values, ignore and show all.
+    // Parse and validate status filters
     const validStatuses = Object.values(AuditStatus);
-    let statusFilter: AuditStatus | null = null;
-    if (statusParam) {
-      const trimmed = statusParam.trim();
-      if (
-        !trimmed.includes(",") &&
-        validStatuses.includes(trimmed as AuditStatus)
-      ) {
-        statusFilter = trimmed as AuditStatus;
-      }
-    }
+    const statusFilters: AuditStatus[] = statusParam
+      ? statusParam
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s): s is AuditStatus =>
+            validStatuses.includes(s as AuditStatus)
+          )
+      : [];
 
-    const { audits, totalAudits } = await getAuditsForOrganization({
-      organizationId,
-      page,
-      perPage,
-      search: searchParam || null,
-      status: statusFilter,
-    });
+    // Single status → pass directly to service (uses DB-level filter)
+    // No status or all statuses → pass null (get everything)
+    // Multiple statuses → fetch all, filter in JS (service only accepts single)
+    const isSingleStatus = statusFilters.length === 1;
+    const isAllOrNone =
+      statusFilters.length === 0 ||
+      statusFilters.length >= validStatuses.length;
+
+    const { audits: rawAudits, totalAudits: rawTotal } =
+      await getAuditsForOrganization({
+        organizationId,
+        page: isSingleStatus || isAllOrNone ? page : 1,
+        perPage: isSingleStatus || isAllOrNone ? perPage : 200,
+        search: searchParam || null,
+        status: isSingleStatus ? statusFilters[0] : null,
+      });
+
+    // Post-filter for multi-status queries (e.g. "PENDING,ACTIVE")
+    const needsPostFilter = !isSingleStatus && !isAllOrNone;
+    const audits = needsPostFilter
+      ? rawAudits.filter((a) => statusFilters.includes(a.status as AuditStatus))
+      : rawAudits;
+    const totalAudits = needsPostFilter ? audits.length : rawTotal;
 
     return data({
       audits: audits.map((a) => ({

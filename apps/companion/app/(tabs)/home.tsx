@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo } from "react";
+import { useState, useCallback, useRef, memo, useEffect } from "react";
 import {
   View,
   Text,
@@ -165,39 +165,63 @@ function HomeContent() {
         <Text style={styles.orgName}>{currentOrg?.name}</Text>
       </View>
 
-      {/* ── KPI Cards ────────────────────────────── */}
-      <View style={styles.kpiGrid}>
-        <KPICard
-          icon="cube-outline"
-          label="Total Assets"
-          value={kpis.totalAssets}
-          color={colors.primary}
-          onPress={() => router.push("/(tabs)/assets")}
-        />
-        <KPICard
-          icon="hand-left-outline"
-          label="My Custody"
-          value={kpis.myCustody}
-          color={colors.inCustody}
-          onPress={() =>
-            router.push({
-              pathname: "/(tabs)/assets",
-              params: { myCustody: "true" },
-            })
-          }
-        />
-        <KPICard
-          icon="pricetag-outline"
-          label="Categories"
-          value={kpis.categories}
-          color={colors.checkedOut}
-        />
-        <KPICard
-          icon="location-outline"
-          label="Locations"
-          value={kpis.locations}
-          color={colors.success}
-        />
+      {/* ── KPI Summary (compact, non-tappable) ── */}
+      <View style={styles.kpiRow}>
+        <View style={styles.kpiChip}>
+          <Ionicons name="cube-outline" size={14} color={colors.primary} />
+          <Text style={styles.kpiChipValue}>{kpis.totalAssets}</Text>
+          <Text style={styles.kpiChipLabel}>Assets</Text>
+        </View>
+        <View style={styles.kpiChip}>
+          <Ionicons
+            name="hand-left-outline"
+            size={14}
+            color={colors.inCustody}
+          />
+          <Text style={styles.kpiChipValue}>{kpis.myCustody}</Text>
+          <Text style={styles.kpiChipLabel}>Custody</Text>
+        </View>
+        <View style={styles.kpiChip}>
+          <Ionicons
+            name="pricetag-outline"
+            size={14}
+            color={colors.checkedOut}
+          />
+          <Text style={styles.kpiChipValue}>{kpis.categories}</Text>
+          <Text style={styles.kpiChipLabel}>Categories</Text>
+        </View>
+        <View style={styles.kpiChip}>
+          <Ionicons name="location-outline" size={14} color={colors.success} />
+          <Text style={styles.kpiChipValue}>{kpis.locations}</Text>
+          <Text style={styles.kpiChipLabel}>Locations</Text>
+        </View>
+      </View>
+
+      {/* ── Quick Actions (moved up for Audits access) */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.quickActionsGrid}>
+          <QuickAction
+            icon="clipboard-outline"
+            label="Audits"
+            onPress={() => router.push("/(tabs)/audits")}
+          />
+          <QuickAction
+            icon="scan-outline"
+            label="Scan Code"
+            onPress={() => router.push("/(tabs)/scanner")}
+          />
+          <QuickAction
+            icon="add-circle-outline"
+            label="New Asset"
+            onPress={() => router.push("/(tabs)/assets/new")}
+          />
+          <QuickAction
+            icon="calendar-outline"
+            label="Bookings"
+            onPress={() => router.push("/(tabs)/bookings")}
+          />
+        </View>
       </View>
 
       {/* ── Assets by Status ─────────────────────── */}
@@ -347,74 +371,12 @@ function HomeContent() {
         </View>
       )}
 
-      {/* ── Quick Actions ────────────────────────── */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsGrid}>
-          <QuickAction
-            icon="add-circle-outline"
-            label="New Asset"
-            onPress={() => router.push("/(tabs)/assets/new")}
-          />
-          <QuickAction
-            icon="scan-outline"
-            label="Scan Code"
-            onPress={() => router.push("/(tabs)/scanner")}
-          />
-          <QuickAction
-            icon="calendar-outline"
-            label="Bookings"
-            onPress={() => router.push("/(tabs)/bookings")}
-          />
-          <QuickAction
-            icon="clipboard-outline"
-            label="Audits"
-            onPress={() => router.push("/(tabs)/audits")}
-          />
-        </View>
-      </View>
+      {/* Quick Actions already rendered above */}
     </ScrollView>
   );
 }
 
 // ── Sub-components ───────────────────────────────────
-
-const KPICard = memo(function KPICard({
-  icon,
-  label,
-  value,
-  color,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: number;
-  color: string;
-  onPress?: () => void;
-}) {
-  const styles = useStyles();
-  return (
-    <TouchableOpacity
-      style={styles.kpiCard}
-      disabled={!onPress}
-      onPress={() => {
-        if (onPress) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onPress();
-        }
-      }}
-      activeOpacity={0.7}
-      accessibilityLabel={`${label}: ${value.toLocaleString()}`}
-      accessibilityRole={onPress ? "button" : "summary"}
-    >
-      <View style={[styles.kpiIconWrap, { backgroundColor: color + "15" }]}>
-        <Ionicons name={icon} size={20} color={color} />
-      </View>
-      <Text style={styles.kpiValue}>{value.toLocaleString()}</Text>
-      <Text style={styles.kpiLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-});
 
 const BookingCard = memo(function BookingCard({
   booking,
@@ -723,41 +685,33 @@ const useStyles = createStyles((colors, shadows) => ({
     marginTop: 2,
   },
 
-  // ── KPI Grid ─────────────────────────────────
-  kpiGrid: {
+  // ── KPI Compact Row ────────────────────────────
+  kpiRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     gap: spacing.sm,
   },
-  kpiCard: {
+  kpiChip: {
     flex: 1,
-    minWidth: "45%",
+    flexDirection: "column",
+    alignItems: "center",
     backgroundColor: colors.white,
     borderRadius: borderRadius.md,
-    padding: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
     borderWidth: 1,
     borderColor: colors.border,
-    ...shadows.sm,
+    gap: 2,
   },
-  kpiIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  kpiValue: {
-    fontSize: 22,
+  kpiChipValue: {
+    fontSize: fontSize.lg,
     fontWeight: "700",
     color: colors.foreground,
   },
-  kpiLabel: {
-    fontSize: fontSize.sm,
+  kpiChipLabel: {
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 2,
   },
 
   // ── Sections ─────────────────────────────────

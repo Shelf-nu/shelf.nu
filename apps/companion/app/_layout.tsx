@@ -12,6 +12,7 @@ import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
+import { preloadScanSound } from "@/lib/scan-sound";
 import Constants from "expo-constants";
 
 // Keep the native splash visible until our animated splash is mounted.
@@ -23,6 +24,9 @@ if (__DEV__) {
     `\n[Shelf] JS executing on ${Platform.OS} | SDK ${Constants.expoConfig?.sdkVersion} | RN ${Platform.constants?.reactNativeVersion?.major}.${Platform.constants?.reactNativeVersion?.minor}.${Platform.constants?.reactNativeVersion?.patch}\n`
   );
 }
+
+// Pre-load scan sound so first scan is instant (no init delay)
+preloadScanSound();
 
 function RootLayoutNav() {
   const { session, isLoading } = useAuth();

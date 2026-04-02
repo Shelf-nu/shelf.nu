@@ -25,6 +25,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
+import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
@@ -433,6 +434,7 @@ function ScannerContent() {
           setBookingCheckinItems((prev) => [newItem, ...prev]);
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
           setScanResult({
             type: "success",
             title: asset.title,
@@ -457,6 +459,7 @@ function ScannerContent() {
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
           announce("Code scanned successfully");
           setScanResult({
             type: "success",
@@ -497,6 +500,7 @@ function ScannerContent() {
         setScannedItems((prev) => [newItem, ...prev]);
         flashFrame("success");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        playScanSound();
         setScanResult({
           type: "success",
           title: asset.title,
@@ -557,20 +561,18 @@ function ScannerContent() {
         );
         return;
       }
-      Alert.alert(
-        "Release Custody",
-        `Release custody of ${releasable.length} asset${
-          releasable.length > 1 ? "s" : ""
-        }?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Release",
-            style: "destructive",
-            onPress: () => performBulkRelease(),
-          },
-        ]
-      );
+      const releaseLabel =
+        releasable.length === 1
+          ? `"${releasable[0].title}"`
+          : `${releasable.length} assets`;
+      Alert.alert("Release Custody", `Release custody of ${releaseLabel}?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Release",
+          style: "destructive",
+          onPress: () => performBulkRelease(),
+        },
+      ]);
     } else if (action === "update_location") {
       setShowLocationPicker(true);
     }
@@ -586,46 +588,44 @@ function ScannerContent() {
           .join(" ") || member.name
       : member.name;
 
-    Alert.alert(
-      "Assign Custody",
-      `Assign ${scannedItems.length} asset${
-        scannedItems.length > 1 ? "s" : ""
-      } to ${displayName}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Assign",
-          onPress: async () => {
-            setIsSubmitting(true);
-            const assetIds = scannedItems.map((i) => i.assetId);
-            const { data: result, error } = await api.bulkAssignCustody(
-              currentOrg.id,
-              assetIds,
-              member.id
-            );
-            setIsSubmitting(false);
+    const confirmLabel =
+      scannedItems.length === 1
+        ? `"${scannedItems[0].title}"`
+        : `${scannedItems.length} assets`;
+    Alert.alert("Assign Custody", `Assign ${confirmLabel} to ${displayName}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Assign",
+        onPress: async () => {
+          setIsSubmitting(true);
+          const assetIds = scannedItems.map((i) => i.assetId);
+          const { data: result, error } = await api.bulkAssignCustody(
+            currentOrg.id,
+            assetIds,
+            member.id
+          );
+          setIsSubmitting(false);
 
-            if (error) {
-              Alert.alert("Error", error);
-            } else {
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success
-              );
-              const msg = result?.skipped
-                ? `Assigned ${result.assigned} asset${
-                    (result.assigned ?? 0) > 1 ? "s" : ""
-                  }. ${result.skipped} skipped (already in custody).`
-                : `Assigned ${result?.assigned} asset${
-                    (result?.assigned ?? 0) > 1 ? "s" : ""
-                  } to ${displayName}.`;
-              Alert.alert("Done", msg);
-              setScannedItems([]);
-              lastScanRef.current = "";
-            }
-          },
+          if (error) {
+            Alert.alert("Error", error);
+          } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            const assignedCount = result?.assigned ?? scannedItems.length;
+            const assetLabel =
+              scannedItems.length === 1
+                ? `"${scannedItems[0].title}"`
+                : `${assignedCount} asset${assignedCount > 1 ? "s" : ""}`;
+            const msg = result?.skipped
+              ? `Assigned ${assetLabel} to ${displayName}. ${result.skipped} skipped (already in custody).`
+              : `Assigned ${assetLabel} to ${displayName}.`;
+            Alert.alert("Done", msg);
+            setScannedItems([]);
+            lastScanRef.current = "";
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const performBulkRelease = async () => {
@@ -642,13 +642,15 @@ function ScannerContent() {
       Alert.alert("Error", error);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      playScanSound();
+      const releasedCount = result?.released ?? scannedItems.length;
+      const assetLabel =
+        scannedItems.length === 1
+          ? `"${scannedItems[0].title}"`
+          : `${releasedCount} asset${releasedCount > 1 ? "s" : ""}`;
       const msg = result?.skipped
-        ? `Released ${result.released} asset${
-            (result.released ?? 0) > 1 ? "s" : ""
-          }. ${result.skipped} skipped (not in custody).`
-        : `Released ${result?.released} asset${
-            (result?.released ?? 0) > 1 ? "s" : ""
-          }.`;
+        ? `Released ${assetLabel}. ${result.skipped} skipped (not in custody).`
+        : `Released custody of ${assetLabel}.`;
       Alert.alert("Done", msg);
       setScannedItems([]);
       lastScanRef.current = "";
@@ -659,46 +661,44 @@ function ScannerContent() {
     setShowLocationPicker(false);
     if (!currentOrg) return;
 
-    Alert.alert(
-      "Update Location",
-      `Move ${scannedItems.length} asset${
-        scannedItems.length > 1 ? "s" : ""
-      } to ${location.name}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Move",
-          onPress: async () => {
-            setIsSubmitting(true);
-            const assetIds = scannedItems.map((i) => i.assetId);
-            const { data: result, error } = await api.bulkUpdateLocation(
-              currentOrg.id,
-              assetIds,
-              location.id
-            );
-            setIsSubmitting(false);
+    const moveLabel =
+      scannedItems.length === 1
+        ? `"${scannedItems[0].title}"`
+        : `${scannedItems.length} assets`;
+    Alert.alert("Update Location", `Move ${moveLabel} to ${location.name}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Move",
+        onPress: async () => {
+          setIsSubmitting(true);
+          const assetIds = scannedItems.map((i) => i.assetId);
+          const { data: result, error } = await api.bulkUpdateLocation(
+            currentOrg.id,
+            assetIds,
+            location.id
+          );
+          setIsSubmitting(false);
 
-            if (error) {
-              Alert.alert("Error", error);
-            } else {
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success
-              );
-              const msg = result?.skipped
-                ? `Moved ${result.updated} asset${
-                    (result.updated ?? 0) > 1 ? "s" : ""
-                  }. ${result.skipped} already at this location.`
-                : `Moved ${result?.updated} asset${
-                    (result?.updated ?? 0) > 1 ? "s" : ""
-                  } to ${location.name}.`;
-              Alert.alert("Done", msg);
-              setScannedItems([]);
-              lastScanRef.current = "";
-            }
-          },
+          if (error) {
+            Alert.alert("Error", error);
+          } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            const updatedCount = result?.updated ?? scannedItems.length;
+            const assetLabel =
+              scannedItems.length === 1
+                ? `"${scannedItems[0].title}"`
+                : `${updatedCount} asset${updatedCount > 1 ? "s" : ""}`;
+            const msg = result?.skipped
+              ? `Moved ${assetLabel} to ${location.name}. ${result.skipped} already at this location.`
+              : `Moved ${assetLabel} to ${location.name}.`;
+            Alert.alert("Done", msg);
+            setScannedItems([]);
+            lastScanRef.current = "";
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // ── Booking Check-in Actions ────────────────────────
@@ -752,11 +752,14 @@ function ScannerContent() {
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
             const msg = result?.isComplete
               ? `All assets checked in! "${
                   bookingName || "Booking"
                 }" is now complete.`
-              : `${result?.checkedInCount} checked in, ${result?.remainingCount} remaining.`;
+              : `${
+                  result?.checkedInCount ?? bookingCheckinItems.length
+                } checked in, ${result?.remainingCount ?? "some"} remaining.`;
             Alert.alert("Checked In", msg, [
               {
                 text: "OK",

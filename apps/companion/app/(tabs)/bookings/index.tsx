@@ -121,6 +121,16 @@ function BookingsListContent() {
     setError(null);
     nextPage.current = 1;
   }, [currentOrg?.id]);
+
+  // Re-fetch immediately when filter changes
+  useEffect(() => {
+    if (!currentOrg || !hasFetchedBookings.current) return;
+    nextPage.current = 1;
+    fetchBookings(1, true).finally(() => {
+      lastFetchedAt.current = Date.now();
+    });
+  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;

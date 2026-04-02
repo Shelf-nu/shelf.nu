@@ -59,8 +59,47 @@ export const hitSlop = {
 
 // ── Utility functions ──────────────────────────────────────────────────────
 
+/**
+ * Format status enums into user-friendly labels consistent with the webapp.
+ * Webapp uses sentence-case ("In custody", "Checked out") not Title Case.
+ */
 export function formatStatus(status: string) {
-  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  // Asset statuses — match webapp's userFriendlyAssetStatus()
+  switch (status) {
+    case "IN_CUSTODY":
+      return "In custody";
+    case "CHECKED_OUT":
+      return "Checked out";
+    case "AVAILABLE":
+      return "Available";
+    // Booking statuses — match webapp's booking-status-badge
+    case "DRAFT":
+      return "Draft";
+    case "RESERVED":
+      return "Reserved";
+    case "ONGOING":
+      return "Ongoing";
+    case "OVERDUE":
+      return "Overdue";
+    case "COMPLETE":
+      return "Complete";
+    case "ARCHIVED":
+      return "Archived";
+    case "CANCELLED":
+      return "Cancelled";
+    // Audit statuses
+    case "PENDING":
+      return "Pending";
+    case "ACTIVE":
+      return "Active";
+    case "COMPLETED":
+      return "Completed";
+    // Fallback: sentence-case (capitalize first word only)
+    default: {
+      const words = status.replace(/_/g, " ").toLowerCase();
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    }
+  }
 }
 
 export function formatDate(dateStr: string) {

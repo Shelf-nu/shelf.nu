@@ -22,6 +22,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
+import { playScanSound } from "@/lib/scan-sound";
 import { clearAuditScanState } from "@/lib/audit-scan-persistence";
 import React from "react";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
@@ -344,6 +345,7 @@ function AuditScannerContent() {
           animateProgress(newFound);
           flashFrame("found");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
           announce("Asset found");
           showToast(
             "found",
@@ -451,6 +453,7 @@ function AuditScannerContent() {
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
             Alert.alert(
               "Audit Complete",
               `"${auditName}" has been completed.`,

@@ -126,7 +126,7 @@ export default function AssetDetailScreen() {
   // ── Notes Action ────────────────────────────────────
 
   const handlePostNote = async () => {
-    if (!asset || !noteText.trim()) return;
+    if (!asset || !noteText.trim() || isPostingNote) return;
     setIsPostingNote(true);
     const { error: err } = await api.addNote(asset.id, noteText.trim());
     if (err) {
