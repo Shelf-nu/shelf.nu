@@ -28,6 +28,7 @@ import {
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { parseFiltersWithHierarchy } from "./query.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
@@ -362,11 +363,21 @@ export async function advancedModeLoader({
     });
   }
 
+  // Parse and expand location hierarchy filters ONCE — this avoids redundant
+  // DB calls that were previously happening in both getAllSelectedValuesFromFilters
+  // and getAdvancedPaginatedAndFilterableAssets independently.
+  const parsedFilters = await parseFiltersWithHierarchy(
+    filters ?? "",
+    settings.columns as Column[],
+    organizationId
+  );
+
   const { selectedTags, selectedCategory, selectedLocation } =
     await getAllSelectedValuesFromFilters(
       filters,
       settings.columns as Column[],
-      organizationId
+      organizationId,
+      parsedFilters
     );
 
   const {
@@ -410,6 +421,7 @@ export async function advancedModeLoader({
       getBookings: view === "availability",
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
       availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+      preParsedFilters: parsedFilters,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({

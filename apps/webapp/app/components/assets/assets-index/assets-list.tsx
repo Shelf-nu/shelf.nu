@@ -192,6 +192,7 @@ export const AssetsList = ({
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
               headerChildren={headerChildren}
+              extraItemComponentProps={modeIsSimple ? undefined : { columns }}
             />
           )}
         </ListContentWrapper>
