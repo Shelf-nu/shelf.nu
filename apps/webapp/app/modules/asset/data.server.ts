@@ -362,12 +362,16 @@ export async function advancedModeLoader({
     });
   }
 
-  const { selectedTags, selectedCategory, selectedLocation } =
-    await getAllSelectedValuesFromFilters(
-      filters,
-      settings.columns as Column[],
-      organizationId
-    );
+  const {
+    selectedTags,
+    selectedCategory,
+    selectedLocation,
+    selectedAssetModel,
+  } = await getAllSelectedValuesFromFilters(
+    filters,
+    settings.columns as Column[],
+    organizationId
+  );
 
   const {
     tags,
@@ -376,12 +380,15 @@ export async function advancedModeLoader({
     totalCategories,
     locations,
     totalLocations,
+    assetModels,
+    totalAssetModels,
   } = await getEntitiesWithSelectedValues({
     organizationId,
     allSelectedEntries,
     selectedTagIds: selectedTags,
     selectedCategoryIds: selectedCategory,
     selectedLocationIds: selectedLocation,
+    selectedAssetModelIds: selectedAssetModel,
   });
 
   /** Query tierLimit, assets & Asset index settings */
@@ -571,6 +578,8 @@ export async function advancedModeLoader({
       tagsData,
       bookings,
       totalBookings,
+      assetModels,
+      totalAssetModels,
       // Saved filter presets
       savedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,

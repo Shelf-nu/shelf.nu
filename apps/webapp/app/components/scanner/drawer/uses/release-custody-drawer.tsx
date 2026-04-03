@@ -27,6 +27,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -392,9 +393,12 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const availabilityConfigs = [
     {
       condition: asset.status === AssetStatus.IN_CUSTODY,
-      badgeText: `In custody of: ${asset.custody?.custodian?.name}`,
+      badgeText: `In custody of: ${getPrimaryCustody(asset.custody)?.custodian
+        ?.name}`,
       tooltipTitle: "Asset is in custody",
-      tooltipContent: `This asset is in custody of ${asset.custody?.custodian?.name}.`,
+      tooltipContent: `This asset is in custody of ${getPrimaryCustody(
+        asset.custody
+      )?.custodian?.name}.`,
       priority: 110,
       className: "bg-gray-50 border-gray-200 text-gray-700",
     },

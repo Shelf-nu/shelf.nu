@@ -47,6 +47,7 @@ export const getAssetOverviewFields = (
     custody: {
       select: {
         createdAt: true,
+        quantity: true,
         custodian: {
           include: {
             user: true,
@@ -79,6 +80,7 @@ export const getAssetOverviewFields = (
         },
       },
     },
+    assetModel: { select: { id: true, name: true } },
     kit: { select: { id: true, name: true, status: true } },
     bookings: {
       where: {

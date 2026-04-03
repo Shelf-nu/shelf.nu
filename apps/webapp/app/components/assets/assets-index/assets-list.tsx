@@ -27,6 +27,7 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
@@ -93,6 +94,7 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
+      <Th>Quantity</Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -209,7 +211,8 @@ export const ListAssetContent = ({
   bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
-  const { category, tags, custody, location, kit } = item;
+  const { category, tags, custody: custodyArray, location, kit } = item;
+  const custody = getPrimaryCustody(custodyArray);
   return (
     <>
       {/* Item */}
@@ -304,6 +307,18 @@ export const ListAssetContent = ({
               childCount: location._count?.children ?? 0,
             }}
           />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      {/* Quantity */}
+      <Td>
+        {item.type === "QUANTITY_TRACKED" && item.quantity != null ? (
+          <span>
+            {item.quantity}
+            {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
+          </span>
         ) : (
           <EmptyTableValue />
         )}

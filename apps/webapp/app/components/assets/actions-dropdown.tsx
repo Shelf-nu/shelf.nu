@@ -12,6 +12,7 @@ import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
   PermissionAction,
@@ -32,7 +33,7 @@ const ConditionalActionsDropdown = () => {
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
   const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
 
-  const assetCanBeReleased = asset.custody;
+  const assetCanBeReleased = hasCustody(asset.custody);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
   const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
@@ -50,7 +51,8 @@ const ConditionalActionsDropdown = () => {
   }
 
   const disableReleaseForSelfService =
-    isSelfService && asset.custody?.custodian?.userId !== user?.id;
+    isSelfService &&
+    getPrimaryCustody(asset.custody)?.custodian?.userId !== user?.id;
 
   return (
     <>

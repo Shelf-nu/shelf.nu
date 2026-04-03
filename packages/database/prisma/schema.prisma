@@ -110,6 +110,8 @@ model User {
   customTierLimit CustomTierLimit?
 
   assetFilterPresets AssetFilterPreset[]
+  assetModels        AssetModel[]
+  consumptionLogs    ConsumptionLog[]
 
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
@@ -192,6 +194,17 @@ model Asset {
   availableToBook     Boolean     @default(true)
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
+  // Tracking method & model
+  type            AssetType        @default(INDIVIDUAL)
+  assetModelId    String?
+  assetModel      AssetModel?      @relation(fields: [assetModelId], references: [id])
+
+  // Quantity-tracked fields (null for INDIVIDUAL assets)
+  quantity        Int? // Total quantity at this location
+  minQuantity     Int? // Low-stock alert threshold
+  consumptionType ConsumptionType? // How consumption is tracked
+  unitOfMeasure   String? // e.g., "pcs", "boxes", "liters"
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -208,17 +221,19 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
+  custody      Custody[]
   notes        Note[]
   qrCodes      Qr[]
   barcodes     Barcode[]
   reports      ReportFound[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
-  bookings     Booking[]
-  reminders    AssetReminder[]
-  auditEntries AuditAsset[]
-  auditScans   AuditScan[]
+  bookings        Booking[]
+  bookingAssets   BookingAsset[]
+  consumptionLogs ConsumptionLog[]
+  reminders       AssetReminder[]
+  auditEntries    AuditAsset[]
+  auditScans      AuditScan[]
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -232,6 +247,7 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
+  @@index([assetModelId, organizationId], name: "Asset_assetModelId_organizationId_idx")
   @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
   @@index([userId])
@@ -241,6 +257,27 @@ enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   CHECKED_OUT
+}
+
+/** Determines how an asset is tracked throughout the system. Immutable after creation. */
+enum AssetType {
+  INDIVIDUAL // Default. One row = one physical item.
+  QUANTITY_TRACKED // One row = N fungible items at a location.
+}
+
+/** Controls what happens after checkout for quantity-tracked assets. */
+enum ConsumptionType {
+  ONE_WAY // Checked out and consumed. No return expected.
+  TWO_WAY // Checked out and returned, with consumption report.
+}
+
+/** Classifies the type of quantity change in a ConsumptionLog entry. */
+enum ConsumptionCategory {
+  CHECKOUT // Items checked out to a custodian or booking
+  RETURN // Items returned from a custodian or booking
+  RESTOCK // New stock added (shipment arrived, manual increase)
+  ADJUSTMENT // Manual correction (inventory count, error fix)
+  LOSS // Items reported lost or damaged
 }
 
 model AssetFilterPreset {
@@ -314,7 +351,8 @@ model Category {
   user   User    @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
-  customFields CustomField[]
+  customFields       CustomField[]
+  assetModelDefaults AssetModel[] // Asset models that use this category as their default
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
@@ -322,6 +360,38 @@ model Category {
   //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
   // Indexes for foreign keys
   @@index([organizationId])
+  @@index([userId])
+}
+
+/**
+ * A template/grouping entity for assets.
+ * Groups individual assets of the same type (e.g., "Dell Latitude 5550")
+ * and provides default field values when creating new assets from the model.
+ */
+model AssetModel {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  image           String?
+  imageExpiration DateTime?
+
+  // Template defaults (applied when creating a new asset from this model)
+  defaultCategoryId String?
+  defaultCategory   Category? @relation(fields: [defaultCategoryId], references: [id])
+  defaultValuation  Float?
+
+  // Relationships
+  assets         Asset[]
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+  createdBy      User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId         String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, name])
   @@index([userId])
 }
 
@@ -652,9 +722,10 @@ model TeamMember {
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
-  bookings       Booking[]
+  deletedAt       DateTime?
+  bookings        Booking[]
   assetReminders  AssetReminder[]
+  consumptionLogs ConsumptionLog[]
   teamMemberNotes TeamMemberNote[]
 
   // Booking notification settings
@@ -675,12 +746,15 @@ model Custody {
   teamMemberId String
 
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String @unique
+  assetId String
+
+  quantity Int @default(1) // How many units in custody (1 for individual assets)
 
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([assetId, teamMemberId]) // One record per asset-custodian pair
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])
@@ -743,6 +817,7 @@ model Organization {
   images             Image[]              @relation("owner")
   bookings           Booking[]
   kits               Kit[]
+  assetModels        AssetModel[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
@@ -1161,6 +1236,55 @@ enum BookingStatus {
   CANCELLED
 }
 
+/**
+ * Audit trail for all quantity changes on quantity-tracked assets.
+ * Every event records who performed it, who received/returned items,
+ * which booking it relates to, and the category of change.
+ * Quantity is always positive — direction is determined by category.
+ */
+model ConsumptionLog {
+  id        String              @id @default(cuid())
+  asset     Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId   String
+  category  ConsumptionCategory
+  quantity  Int // Always positive. Direction determined by category (Decision #9).
+  note      String?
+
+  performedBy User   @relation(fields: [userId], references: [id])
+  userId      String
+
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+  bookingId String?
+
+  custodian   TeamMember? @relation(fields: [custodianId], references: [id])
+  custodianId String? // Who received/returned the items (if applicable)
+
+  // Datetime
+  createdAt DateTime @default(now())
+
+  @@index([assetId, createdAt])
+  @@index([userId])
+  @@index([bookingId])
+  @@index([custodianId])
+}
+
+/**
+ * Explicit pivot table between Booking and Asset.
+ * In Phase 1 this coexists with the implicit M2M (Booking.assets / Asset.bookings).
+ * In Phase 3 the implicit M2M will be replaced by this table via a rename migration.
+ */
+model BookingAsset {
+  id        String  @id @default(cuid())
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  bookingId String
+  asset     Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId   String
+  quantity  Int     @default(1) // For quantity-tracked assets: how many booked
+
+  @@unique([bookingId, assetId])
+  @@index([assetId])
+}
+
 model Booking {
   id String @id @default(cuid())
 
@@ -1183,8 +1307,10 @@ model Booking {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  assets Asset[]
-  notes  BookingNote[]
+  assets          Asset[] // Implicit M2M — will be replaced by bookingAssets in Phase 3
+  bookingAssets   BookingAsset[]
+  consumptionLogs ConsumptionLog[]
+  notes           BookingNote[]
 
   tags            Tag[]
   partialCheckins PartialBookingCheckin[]

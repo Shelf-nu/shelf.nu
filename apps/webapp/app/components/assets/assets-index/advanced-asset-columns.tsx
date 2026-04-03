@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
-import { CustomFieldType } from "@prisma/client";
+import { AssetType, CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
@@ -46,6 +46,7 @@ import type {
   ColumnLabelKey,
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
@@ -172,13 +173,20 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div className="min-w-0 flex-1 truncate">
-                <Link
-                  to={item.id}
-                  className="truncate font-medium underline hover:text-gray-600"
-                  title={item.title}
-                >
-                  {item.title}
-                </Link>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    to={item.id}
+                    className="truncate font-medium underline hover:text-gray-600"
+                    title={item.title}
+                  >
+                    {item.title}
+                  </Link>
+                  {item.type === AssetType.QUANTITY_TRACKED ? (
+                    <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                      QTY
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
           }
@@ -316,6 +324,39 @@ export function AdvancedIndexColumn({
     case "barcode_EAN13":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "type":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.type === AssetType.QUANTITY_TRACKED ? (
+            <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+              QTY
+            </span>
+          ) : (
+            "Individual"
+          )}
+        </Td>
+      );
+
+    case "assetModel":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.assetModelName ? item.assetModelName : <EmptyTableValue />}
+        </Td>
+      );
+
+    case "quantity":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.type === AssetType.QUANTITY_TRACKED && item.quantity != null ? (
+            `${item.quantity}${
+              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
+            }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
@@ -449,6 +490,7 @@ function CustodyColumn({
   custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
+  const primaryCustody = getPrimaryCustody(custody);
 
   return (
     <When
@@ -459,8 +501,8 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {custody?.custodian ? (
-          <TeamMemberBadge teamMember={custody?.custodian} />
+        {primaryCustody?.custodian ? (
+          <TeamMemberBadge teamMember={primaryCustody.custodian} />
         ) : (
           <EmptyTableValue />
         )}

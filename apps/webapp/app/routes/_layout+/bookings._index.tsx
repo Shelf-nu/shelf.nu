@@ -34,6 +34,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { hasCustody } from "~/modules/custody/utils";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -419,7 +420,7 @@ const ListBookingsContent = ({
 }) => {
   const hasUnavaiableAssets =
     item.assets.some(
-      (asset) => !asset.availableToBook || asset.custody !== null
+      (asset) => !asset.availableToBook || hasCustody(asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
   return (

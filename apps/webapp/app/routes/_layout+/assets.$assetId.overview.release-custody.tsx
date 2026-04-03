@@ -8,6 +8,7 @@ import { Button } from "~/components/shared/button";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { releaseCustody } from "~/modules/custody/service.server";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -72,13 +73,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset.custody) {
+    if (!hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
     }
 
+    /** Get the primary custody record to display in the modal */
+    const primaryCustody = getPrimaryCustody(asset.custody);
+
     return payload({
       showModal: true,
-      custody: asset.custody,
+      custody: primaryCustody,
       asset: { title: asset.title },
     });
   } catch (cause) {
@@ -145,7 +149,7 @@ export const action = async ({
         },
       },
     });
-    const custodyRecord = assetWithCustody.custody;
+    const custodyRecord = getPrimaryCustody(assetWithCustody.custody);
 
     if (isSelfService) {
       if (custodyRecord?.custodian?.userId !== user.id) {
@@ -162,7 +166,7 @@ export const action = async ({
 
     const asset = await releaseCustody({ assetId, organizationId });
 
-    if (!asset.custody) {
+    if (!hasCustody(asset.custody)) {
       const formData = await request.formData();
       const { custodianName } = parseData(
         formData,
@@ -247,7 +251,13 @@ export default function Custody() {
               "your"
             ) : (
               <span className="font-medium">
-                {resolveTeamMemberName(custody?.custodian)}'s'
+                {custody?.custodian
+                  ? resolveTeamMemberName({
+                      name: custody.custodian.name,
+                      user: custody.custodian.user,
+                    })
+                  : ""}
+                's'
               </span>
             )}{" "}
             custody over <span className="font-medium">{asset.title}</span>?
@@ -258,7 +268,14 @@ export default function Custody() {
             <input
               type="hidden"
               name="custodianName"
-              value={resolveTeamMemberName(custody?.custodian)}
+              value={
+                custody?.custodian
+                  ? resolveTeamMemberName({
+                      name: custody.custodian.name,
+                      user: custody.custodian.user,
+                    })
+                  : ""
+              }
             />
             <Button
               to=".."

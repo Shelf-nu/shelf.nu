@@ -532,14 +532,20 @@ export function getAssetsWhereInput({
     where.OR = [
       ...(where.OR ?? []),
       {
-        custody: { teamMemberId: { in: teamMemberIds } },
+        custody: { some: { teamMemberId: { in: teamMemberIds } } },
       },
-      { custody: { custodian: { userId: { in: teamMemberIds } } } },
+      {
+        custody: {
+          some: { custodian: { userId: { in: teamMemberIds } } },
+        },
+      },
       {
         bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
       },
       { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
-      ...(teamMemberIds.includes("without-custody") ? [{ custody: null }] : []),
+      ...(teamMemberIds.includes("without-custody")
+        ? [{ custody: { none: {} } }]
+        : []),
     ];
   }
 
@@ -628,6 +634,7 @@ type AllSelectedValues = {
   selectedTags: string[];
   selectedCategory: string[];
   selectedLocation: string[];
+  selectedAssetModel: string[];
 };
 
 /**

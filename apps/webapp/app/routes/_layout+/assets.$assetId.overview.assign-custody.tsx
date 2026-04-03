@@ -20,6 +20,7 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -90,7 +91,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /** If the asset already has a custody, this page should not be visible */
-    if (asset && asset.custody) {
+    if (asset && hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
     }
 

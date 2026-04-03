@@ -41,6 +41,7 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
@@ -416,11 +417,13 @@ export const buildCsvExportDataFromAssets = ({
           case "kit":
             value = asset.kit?.name;
             break;
-          case "custody":
-            value = asset.custody
-              ? resolveTeamMemberName(asset.custody.custodian)
+          case "custody": {
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            value = primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
               : "";
             break;
+          }
           case "tags":
             value = asset.tags?.map((t) => t.name).join(", ") ?? "";
             break;
@@ -485,6 +488,24 @@ export const buildCsvExportDataFromAssets = ({
             break;
           }
 
+          case "quantity":
+            value =
+              asset.type === "QUANTITY_TRACKED" && asset.quantity != null
+                ? `${asset.quantity}${
+                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
+                  }`
+                : "";
+            break;
+          case "type":
+            // Handled by default column logic — asset.type is a direct string field
+            value =
+              asset.type === "QUANTITY_TRACKED"
+                ? "Tracked by quantity"
+                : "Individual";
+            break;
+          case "assetModel":
+            value = asset.assetModelName ?? "";
+            break;
           case "actions":
             value = "";
             break;

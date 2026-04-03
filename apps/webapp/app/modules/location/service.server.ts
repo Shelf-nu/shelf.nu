@@ -108,10 +108,12 @@ export async function getLocation(
       assetsWhere.OR = [
         ...(assetsWhere.OR ?? []),
         {
-          custody: { teamMemberId: { in: teamMemberIds } },
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
         {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
+          },
         },
         {
           bookings: {
@@ -134,7 +136,7 @@ export async function getLocation(
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
+          ? [{ custody: { none: {} } }]
           : []),
       ];
     }

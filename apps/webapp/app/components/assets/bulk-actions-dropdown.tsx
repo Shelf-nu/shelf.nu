@@ -6,6 +6,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
 import {
@@ -103,9 +104,12 @@ function ConditionalDropdown() {
     (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
   );
 
-  const selfUserCustody = selectedAssets.some(
-    (a) => a?.custody?.custodian?.userId === user?.id
-  );
+  const selfUserCustody = selectedAssets.some((a) => {
+    const primary = getPrimaryCustody(
+      a?.custody as Record<string, unknown>[] | undefined
+    ) as { custodian?: { userId?: string } } | null;
+    return primary?.custodian?.userId === user?.id;
+  });
   const disableReleaseCustody = isSelfService && !selfUserCustody;
 
   function closeMenu() {

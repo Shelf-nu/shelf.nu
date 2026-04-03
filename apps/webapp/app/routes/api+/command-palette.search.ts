@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "~/database/db.server";
 import { getAssets } from "~/modules/asset/service.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -330,33 +331,48 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         query,
-        assets: assetResults.assets.map((asset) => ({
-          id: asset.id,
-          title: asset.title,
-          sequentialId: asset.sequentialId,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration?.toISOString() ?? null,
-          locationName: asset.location?.name ?? null,
-          description: asset.description,
-          qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
-          categoryName: asset.category?.name ?? null,
-          tagNames: asset.tags?.map((tag) => tag.name) ?? [],
-          custodianName: (asset.custody as any)?.custodian?.name ?? null,
-          custodianUserName: (asset.custody as any)?.custodian?.user
-            ? `${(asset.custody as any).custodian.user.firstName} ${
-                (asset.custody as any).custodian.user.lastName
-              }`.trim()
-            : null,
-          barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
-          customFieldValues:
-            asset.customFields
-              ?.map((cf) => {
-                const value = cf.value as any;
-                const extractedValue = value?.raw ?? value ?? "";
-                return String(extractedValue);
-              })
-              .filter(Boolean) ?? [],
-        })),
+        assets: assetResults.assets.map((asset) => {
+          /** Custody records from getAssets may include custodian if the query includes it */
+          const primaryCustody = getPrimaryCustody(
+            asset.custody as Array<
+              Record<string, unknown> & {
+                custodian?: {
+                  name?: string;
+                  user?: {
+                    firstName?: string | null;
+                    lastName?: string | null;
+                  } | null;
+                };
+              }
+            >
+          );
+          return {
+            id: asset.id,
+            title: asset.title,
+            sequentialId: asset.sequentialId,
+            mainImage: asset.mainImage,
+            mainImageExpiration:
+              asset.mainImageExpiration?.toISOString() ?? null,
+            locationName: asset.location?.name ?? null,
+            description: asset.description,
+            qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
+            categoryName: asset.category?.name ?? null,
+            tagNames: asset.tags?.map((tag) => tag.name) ?? [],
+            custodianName: primaryCustody?.custodian?.name ?? null,
+            custodianUserName: primaryCustody?.custodian?.user
+              ? `${primaryCustody.custodian.user.firstName} ${primaryCustody.custodian.user.lastName}`.trim()
+              : null,
+            barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
+            customFieldValues:
+              asset.customFields
+                ?.map((cf) => {
+                  const value = cf.value as any;
+                  const extractedValue = value?.raw ?? value ?? "";
+                  return String(extractedValue);
+                })
+                .filter(Boolean) ?? [],
+          };
+        }),
         audits: audits.map((audit) => ({
           id: audit.id,
           name: audit.name,

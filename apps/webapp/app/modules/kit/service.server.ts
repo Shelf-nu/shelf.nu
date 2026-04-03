@@ -65,6 +65,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
@@ -400,7 +401,7 @@ export async function getPaginatedAndFilterableKits<
       where.assets = {
         every: {
           organizationId,
-          custody: null,
+          custody: { none: {} },
         },
       };
 
@@ -2130,7 +2131,7 @@ export async function updateKitAssets({
 
     /** An asset already in custody cannot be added to a kit */
     const isSomeAssetInCustody = newlyAddedAssets.some(
-      (asset) => asset.custody && asset.kit?.id !== kit.id
+      (asset) => hasCustody(asset.custody) && asset.kit?.id !== kit.id
     );
     if (isSomeAssetInCustody) {
       throw new ShelfError({
@@ -2253,7 +2254,7 @@ export async function updateKitAssets({
      * If a kit is in custody then the assets added to kit will also inherit the status
      */
     const assetsToInheritStatus = newlyAddedAssets.filter(
-      (asset) => !asset.custody
+      (asset) => !hasCustody(asset.custody)
     );
 
     if (
@@ -2269,9 +2270,11 @@ export async function updateKitAssets({
             data: {
               status: AssetStatus.IN_CUSTODY,
               custody: {
-                create: {
-                  custodian: { connect: { id: kit.custody?.custodian.id } },
-                },
+                create: [
+                  {
+                    custodian: { connect: { id: kit.custody?.custodian.id } },
+                  },
+                ],
               },
             },
           })
@@ -2444,13 +2447,13 @@ export async function bulkRemoveAssetsFromKits({
        * to avoid orphaned custody records when status is set to AVAILABLE
        */
       const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && asset.custody
+        (asset) => !!asset.kit?.custody && hasCustody(asset.custody)
       );
 
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a) => {
-        invariant(a.custody, "Custody not found over asset");
-        return a.custody.id;
-      });
+      /** Collect all custody record IDs from assets whose kits are in custody */
+      const custodyIdsToDelete = assetsWhoseKitsInCustody.flatMap((a) =>
+        (a.custody ?? []).map((c) => c.id)
+      );
 
       if (custodyIdsToDelete.length > 0) {
         await tx.custody.deleteMany({
@@ -2468,9 +2471,10 @@ export async function bulkRemoveAssetsFromKits({
       if (assetsWhoseKitsInCustody.length > 0) {
         await tx.note.createMany({
           data: assetsWhoseKitsInCustody.map((asset) => {
-            const custodianDisplay = asset.custody?.custodian
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            const custodianDisplay = primaryCustody?.custodian
               ? wrapCustodianForNote({
-                  teamMember: asset.custody.custodian,
+                  teamMember: primaryCustody.custodian,
                 })
               : "**Unknown Custodian**";
             return {
