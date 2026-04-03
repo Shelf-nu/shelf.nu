@@ -221,7 +221,7 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
+  custody      Custody[]
   notes        Note[]
   qrCodes      Qr[]
   barcodes     Barcode[]
@@ -746,12 +746,15 @@ model Custody {
   teamMemberId String
 
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String @unique
+  assetId String
+
+  quantity Int @default(1) // How many units in custody (1 for individual assets)
 
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([assetId, teamMemberId]) // One record per asset-custodian pair
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])

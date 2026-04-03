@@ -46,6 +46,7 @@ import type {
   ColumnLabelKey,
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
@@ -489,6 +490,7 @@ function CustodyColumn({
   custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
+  const primaryCustody = getPrimaryCustody(custody);
 
   return (
     <When
@@ -499,8 +501,8 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {custody?.custodian ? (
-          <TeamMemberBadge teamMember={custody?.custodian} />
+        {primaryCustody?.custodian ? (
+          <TeamMemberBadge teamMember={primaryCustody.custodian} />
         ) : (
           <EmptyTableValue />
         )}

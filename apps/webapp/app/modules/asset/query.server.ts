@@ -1769,14 +1769,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ) FILTER (WHERE t.id IS NOT NULL),
         '[]'::jsonb
       ) AS tags,
-      COALESCE(
-        CASE 
-          WHEN cu.id IS NOT NULL THEN
+      CASE
+        WHEN cu.id IS NOT NULL THEN
+          jsonb_build_array(
             jsonb_build_object(
               'name', tm.name,
               'custodian', jsonb_build_object(
                 'name', tm.name,
-                'user', CASE 
+                'user', CASE
                   WHEN u.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', u.id,
@@ -1789,7 +1789,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 END
               )
             )
-          WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+          )
+        WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+          jsonb_build_array(
             jsonb_build_object(
               'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
               'custodian', jsonb_build_object(
@@ -1807,10 +1809,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 END
               )
             )
-          ELSE NULL
-        END,
-        NULL
-      ) AS custody,
+          )
+        ELSE NULL
+      END AS custody,
       (
         SELECT jsonb_agg(
           jsonb_build_object(

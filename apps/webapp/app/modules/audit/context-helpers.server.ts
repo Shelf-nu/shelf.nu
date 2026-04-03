@@ -189,8 +189,10 @@ export async function getAssetsForUserContext({
     where: {
       organizationId,
       custody: {
-        custodian: {
-          userId: custodianUserId,
+        some: {
+          custodian: {
+            userId: custodianUserId,
+          },
         },
       },
     },

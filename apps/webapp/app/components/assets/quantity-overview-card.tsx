@@ -6,8 +6,8 @@
  * units in custody, unit of measure, optional low-stock alert threshold,
  * and the consumption behavior mode.
  *
- * Phase 1: "Available" mirrors total quantity and "In custody" is hardcoded to 0.
- * Phase 2 will compute these from actual booking/checkout data.
+ * Availability and in-custody values are computed by the loader from actual
+ * custody records and passed as props. Falls back to total/0 if not provided.
  *
  * @see {@link file://./../../routes/_layout+/assets.$assetId.overview.tsx} - Asset overview page
  * @see {@link file://./asset-custody-card.tsx} - Similar sidebar card pattern
@@ -16,11 +16,15 @@
 import type React from "react";
 import type { ConsumptionType } from "@prisma/client";
 import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { tw } from "~/utils/tw";
+import { QuickAdjustDialog } from "./quick-adjust-dialog";
 
 /** Props for the QuantityOverviewCard component */
 export interface QuantityOverviewCardProps {
+  /** The asset's unique ID, used by the quick-adjust dialog */
+  assetId: string;
   /** Total quantity of the asset */
   quantity: number | null;
   /** Unit of measure label (e.g., "pcs", "boxes", "liters") */
@@ -29,6 +33,14 @@ export interface QuantityOverviewCardProps {
   minQuantity: number | null;
   /** Consumption behavior: ONE_WAY (used up) or TWO_WAY (returnable) */
   consumptionType: ConsumptionType | null;
+  /** Computed available quantity (total - inCustody), provided by the loader */
+  availableQuantity?: number;
+  /** Computed quantity currently in custody, provided by the loader */
+  inCustodyQuantity?: number;
+  /** Whether the user has permission to adjust quantity */
+  canUpdate?: boolean;
+  /** When true, the quick-adjust dialog opens automatically (e.g., QR scan) */
+  autoOpenAdjust?: boolean;
   /** Optional additional CSS class names */
   className?: string;
 }
@@ -76,22 +88,26 @@ function OverviewRow({
  * @returns Card element, or null if quantity data is missing
  */
 export function QuantityOverviewCard({
+  assetId,
   quantity,
   unitOfMeasure,
   minQuantity,
   consumptionType,
+  availableQuantity,
+  inCustodyQuantity,
+  canUpdate = false,
+  autoOpenAdjust = false,
   className,
 }: QuantityOverviewCardProps) {
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
 
-  /** Low stock when a threshold is set and current quantity is at or below it */
-  const isLowStock =
-    minQuantity != null && quantity != null && quantity <= minQuantity;
+  /** Use computed values from the loader, falling back to phase-1 defaults */
+  const available = availableQuantity ?? qty;
+  const inCustody = inCustodyQuantity ?? 0;
 
-  /** Phase 1: available mirrors total; in-custody is hardcoded to 0 */
-  const available = qty;
-  const inCustody = 0;
+  /** Low stock when a threshold is set and available quantity is at or below it */
+  const isLowStock = minQuantity != null && available <= minQuantity;
 
   /** Human-readable behavior label */
   const behaviorLabel =
@@ -115,9 +131,23 @@ export function QuantityOverviewCard({
             </Badge>
           ) : null}
         </div>
-        <span className="text-[14px] font-medium text-gray-700">
-          {formatWithUnit(qty, unit)}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[14px] font-medium text-gray-700">
+            {available} / {formatWithUnit(qty, unit)}
+          </span>
+          {canUpdate ? (
+            <QuickAdjustDialog
+              assetId={assetId}
+              unitOfMeasure={unitOfMeasure}
+              autoOpen={autoOpenAdjust}
+              trigger={
+                <Button type="button" variant="secondary" size="sm">
+                  Adjust
+                </Button>
+              }
+            />
+          ) : null}
+        </div>
       </div>
 
       {/* Detail rows */}

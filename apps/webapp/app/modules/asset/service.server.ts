@@ -38,6 +38,7 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
@@ -134,6 +135,8 @@ import {
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
+import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
@@ -567,18 +570,30 @@ export async function getAssets(params: {
           // Search in custodian names
           {
             custody: {
-              custodian: {
-                OR: [
-                  { name: { contains: term, mode: "insensitive" } },
-                  {
-                    user: {
-                      OR: [
-                        { firstName: { contains: term, mode: "insensitive" } },
-                        { lastName: { contains: term, mode: "insensitive" } },
-                      ],
+              some: {
+                custodian: {
+                  OR: [
+                    { name: { contains: term, mode: "insensitive" } },
+                    {
+                      user: {
+                        OR: [
+                          {
+                            firstName: {
+                              contains: term,
+                              mode: "insensitive",
+                            },
+                          },
+                          {
+                            lastName: {
+                              contains: term,
+                              mode: "insensitive",
+                            },
+                          },
+                        ],
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
             },
           },
@@ -629,8 +644,8 @@ export async function getAssets(params: {
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;
-      //not assigned to team meber
-      where.custody = null;
+      //not assigned to team member
+      where.custody = { none: {} };
       if (bookingFrom && bookingTo) {
         where.AND = [
           // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
@@ -738,9 +753,13 @@ export async function getAssets(params: {
       where.OR = [
         ...(where.OR ?? []),
         {
-          custody: { teamMemberId: { in: teamMemberIds } },
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
-        { custody: { custodian: { userId: { in: teamMemberIds } } } },
+        {
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
+          },
+        },
         {
           bookings: {
             some: {
@@ -764,7 +783,7 @@ export async function getAssets(params: {
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
+          ? [{ custody: { none: {} } }]
           : []),
       ];
     }
@@ -2901,17 +2920,13 @@ export async function createAssetsFromBackupImport({
 
             Object.assign(d.data, {
               custody: {
-                create: {
-                  teamMemberId: newCustodian.id,
-                },
+                create: [{ teamMemberId: newCustodian.id }],
               },
             });
           } else {
             Object.assign(d.data, {
               custody: {
-                create: {
-                  teamMemberId: existingCustodian.id,
-                },
+                create: [{ teamMemberId: existingCustodian.id }],
               },
             });
           }
@@ -3693,7 +3708,9 @@ export async function bulkCheckInAssets({
       }),
     ]);
 
-    const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
+    const hasAssetsWithoutCustody = assets.some(
+      (asset) => !hasCustody(asset.custody)
+    );
 
     if (hasAssetsWithoutCustody) {
       throw new ShelfError({
@@ -3715,20 +3732,7 @@ export async function bulkCheckInAssets({
       /** Deleting custodies over assets */
       await tx.custody.deleteMany({
         where: {
-          id: {
-            in: assets.map((asset) => {
-              /** This case should not happen but in case */
-              if (!asset.custody) {
-                throw new ShelfError({
-                  cause: null,
-                  label: "Assets",
-                  message: "Could not find custody over asset.",
-                });
-              }
-
-              return asset.custody.id;
-            }),
-          },
+          assetId: { in: assets.map((asset) => asset.id) },
         },
       });
 
@@ -3740,16 +3744,21 @@ export async function bulkCheckInAssets({
 
       /** Creating notes for the assets */
       await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${
-            user.lastName
-          }** has released **${resolveTeamMemberName(
-            asset.custody!.custodian
-          )}'s** custody over **${asset.title?.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: assets.map((asset) => {
+          const primaryCustody = getPrimaryCustody(asset.custody);
+          return {
+            content: `**${user.firstName?.trim()} ${
+              user.lastName
+            }** has released **${
+              primaryCustody
+                ? resolveTeamMemberName(primaryCustody.custodian)
+                : "Unknown Custodian"
+            }'s** custody over **${asset.title?.trim()}**`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
     });
 
@@ -4544,6 +4553,289 @@ export async function getLocationsForCreateAndEdit({
       cause,
       message: "Something went wrong while fetching tags",
       additionalData: { organizationId, defaultLocation },
+      label,
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Quantity-Aware Custody Operations                     */
+/* -------------------------------------------------------------------------- */
+
+/** Arguments for checking out a quantity of a QUANTITY_TRACKED asset to a custodian. */
+type CheckOutQuantityArgs = {
+  /** The asset to check out from */
+  assetId: string;
+  /** The team member receiving custody */
+  teamMemberId: string;
+  /** Number of units to check out (must be positive integer) */
+  quantity: number;
+  /** The user performing the checkout */
+  userId: string;
+  /** The organization owning the asset (used for validation) */
+  organizationId: string;
+  /** Optional note explaining the checkout */
+  note?: string;
+};
+
+/**
+ * Checks out a quantity of units from a QUANTITY_TRACKED asset to a custodian.
+ *
+ * Runs inside an interactive transaction with a row-level lock to prevent
+ * concurrent modifications. Validates that the asset is QUANTITY_TRACKED,
+ * belongs to the given organization, and that enough units are available.
+ *
+ * Creates or increments a Custody record for the asset-teamMember pair
+ * and logs an immutable CHECKOUT consumption log entry.
+ *
+ * @param args - The checkout details
+ * @returns The updated Asset record
+ * @throws {ShelfError} If the asset is not QUANTITY_TRACKED, does not belong
+ *   to the organization, or there are insufficient available units
+ */
+export async function checkOutQuantity({
+  assetId,
+  teamMemberId,
+  quantity,
+  userId,
+  organizationId,
+  note,
+}: CheckOutQuantityArgs) {
+  try {
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be greater than zero.",
+        label,
+        status: 400,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Step 1: Acquire row-level lock to prevent concurrent modifications */
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      /** Step 2: Validate asset belongs to the organization */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /** Step 3: Validate the asset is quantity-tracked */
+      if (asset.type !== "QUANTITY_TRACKED") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only quantity-tracked assets support quantity custody operations.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /** Step 4: Compute available quantity within the transaction */
+      const totalQuantity = asset.quantity ?? 0;
+      const custodySum = await tx.custody.aggregate({
+        where: { assetId },
+        _sum: { quantity: true },
+      });
+      const inCustody = custodySum._sum.quantity ?? 0;
+      const available = totalQuantity - inCustody;
+
+      /** Step 5: Validate sufficient availability */
+      if (quantity > available) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available.`,
+          label,
+          status: 400,
+          additionalData: { assetId, quantity, available },
+        });
+      }
+
+      /** Step 6: Upsert the custody record — create if new, increment if existing */
+      await tx.custody.upsert({
+        where: {
+          assetId_teamMemberId: { assetId, teamMemberId },
+        },
+        create: {
+          assetId,
+          teamMemberId,
+          quantity,
+        },
+        update: {
+          quantity: { increment: quantity },
+        },
+      });
+
+      /** Step 7: Create an immutable audit log entry */
+      await createConsumptionLog({
+        assetId,
+        category: "CHECKOUT",
+        quantity,
+        userId,
+        custodianId: teamMemberId,
+        note,
+        tx,
+      });
+
+      /** Step 8: Return the refreshed asset */
+      return tx.asset.findUniqueOrThrow({
+        where: { id: assetId },
+      });
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while checking out quantity. Please try again or contact support.",
+      additionalData: { assetId, teamMemberId, quantity, organizationId },
+      label,
+    });
+  }
+}
+
+/** Arguments for releasing (returning) a quantity from a custodian back to the available pool. */
+type ReleaseQuantityArgs = {
+  /** The asset to release units for */
+  assetId: string;
+  /** The team member releasing custody */
+  teamMemberId: string;
+  /** Number of units to release (must be positive integer) */
+  quantity: number;
+  /** The user performing the release */
+  userId: string;
+  /** The organization owning the asset (used for validation) */
+  organizationId: string;
+  /** Optional note explaining the release */
+  note?: string;
+};
+
+/**
+ * Releases a quantity of units from a custodian back to the available pool.
+ *
+ * Runs inside an interactive transaction with a row-level lock to prevent
+ * concurrent modifications. Validates that a custody record exists for the
+ * asset-teamMember pair and that the release quantity does not exceed what
+ * the custodian currently holds.
+ *
+ * If releasing the full custodied amount, the Custody record is deleted.
+ * Otherwise, the quantity is decremented. An immutable RETURN consumption
+ * log entry is always created.
+ *
+ * @param args - The release details
+ * @returns The updated Asset record
+ * @throws {ShelfError} If no custody record exists or the release quantity
+ *   exceeds the custodied amount
+ */
+export async function releaseQuantity({
+  assetId,
+  teamMemberId,
+  quantity,
+  userId,
+  organizationId,
+  note,
+}: ReleaseQuantityArgs) {
+  try {
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be greater than zero.",
+        label,
+        status: 400,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Step 1: Acquire row-level lock to prevent concurrent modifications */
+      await lockAssetForQuantityUpdate(tx, assetId);
+
+      /** Step 2: Find the custody record for this asset-teamMember pair */
+      const custody = await tx.custody.findUnique({
+        where: {
+          assetId_teamMemberId: { assetId, teamMemberId },
+        },
+      });
+
+      if (!custody) {
+        throw new ShelfError({
+          cause: null,
+          message: "No custody record found for this team member and asset.",
+          label,
+          status: 404,
+          additionalData: { assetId, teamMemberId },
+        });
+      }
+
+      /** Step 3: Validate the release quantity does not exceed custodied amount */
+      if (quantity > custody.quantity) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot release ${quantity} units. The custodian only holds ${custody.quantity} units.`,
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            teamMemberId,
+            quantity,
+            custodied: custody.quantity,
+          },
+        });
+      }
+
+      /** Step 4: Delete the custody record if releasing full amount, else decrement */
+      if (quantity === custody.quantity) {
+        await tx.custody.delete({
+          where: {
+            assetId_teamMemberId: { assetId, teamMemberId },
+          },
+        });
+      } else {
+        await tx.custody.update({
+          where: {
+            assetId_teamMemberId: { assetId, teamMemberId },
+          },
+          data: {
+            quantity: { decrement: quantity },
+          },
+        });
+      }
+
+      /** Step 5: Create an immutable audit log entry */
+      await createConsumptionLog({
+        assetId,
+        category: "RETURN",
+        quantity,
+        userId,
+        custodianId: teamMemberId,
+        note,
+        tx,
+      });
+
+      /** Step 6: Return the refreshed asset */
+      return tx.asset.findUniqueOrThrow({
+        where: { id: assetId },
+      });
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while releasing quantity. Please try again or contact support.",
+      additionalData: { assetId, teamMemberId, quantity, organizationId },
       label,
     });
   }

@@ -3,6 +3,7 @@ import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import { hasCustody } from "~/modules/custody/utils";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
 import { SERVER_URL } from "~/utils/env";
@@ -273,7 +274,8 @@ export function getKitAvailabilityStatus(
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
   const isInCustody =
-    kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
+    kit.status === "IN_CUSTODY" ||
+    kit.assets.some((a) => hasCustody(a.custody));
 
   const isKitWithoutAssets = kit.assets.length === 0;
 

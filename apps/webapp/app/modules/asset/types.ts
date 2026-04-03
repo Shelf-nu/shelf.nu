@@ -167,18 +167,20 @@ export type AdvancedIndexAsset = Pick<
         childCount?: number;
       })
     | null;
-  custody: {
-    custodian: {
-      name: string;
-      user: {
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-        profilePicture: string | null;
-        email: string;
-      } | null;
-    };
-  } | null;
+  custody:
+    | {
+        custodian: {
+          name: string;
+          user: {
+            id: string;
+            firstName: string | null;
+            lastName: string | null;
+            profilePicture: string | null;
+            email: string;
+          } | null;
+        };
+      }[]
+    | null;
   customFields: (AssetCustomFieldValue & {
     customField: Pick<
       CustomField,

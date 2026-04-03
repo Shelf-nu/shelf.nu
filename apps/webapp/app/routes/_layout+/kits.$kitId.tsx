@@ -299,7 +299,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             where: { id: assetId, organizationId },
             data: {
               status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
+              custody: { deleteMany: {} },
             },
           });
         }
@@ -507,7 +507,7 @@ export default function KitDetails() {
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
-              custody={kit.custody}
+              custody={kit.custody ? [kit.custody] : null}
             />
           </When>
 

@@ -3,6 +3,12 @@ import { AssetStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
+/**
+ * Releases all custody for an asset, setting its status to AVAILABLE.
+ * For INDIVIDUAL assets, this deletes the single custody record.
+ * For QUANTITY_TRACKED assets, use releaseQuantity() in the asset service
+ * instead — this function releases ALL custodians at once.
+ */
 export async function releaseCustody({
   assetId,
   organizationId,
@@ -16,7 +22,7 @@ export async function releaseCustody({
       data: {
         status: AssetStatus.AVAILABLE,
         custody: {
-          delete: true,
+          deleteMany: {},
         },
       },
       include: {

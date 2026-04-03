@@ -47,6 +47,7 @@ export const getAssetOverviewFields = (
     custody: {
       select: {
         createdAt: true,
+        quantity: true,
         custodian: {
           include: {
             user: true,
