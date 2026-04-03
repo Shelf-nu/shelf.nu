@@ -9,6 +9,7 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import type { AssetChangePreview } from "~/utils/import-update.server";
+import { AlertIcon } from "../../icons/library";
 
 // ---------------------------------------------------------------------------
 // Spreadsheet-style Preview Grid
@@ -65,8 +66,11 @@ export function SpreadsheetPreview({
         {totalAssets} asset{totalAssets !== 1 ? "s" : ""}
         {totalAssets > displayLimit && ` (showing first ${displayLimit})`}
       </p>
-      <div className="max-h-[420px] overflow-auto rounded-md border">
-        <table className="w-full border-collapse text-sm">
+      <div className="max-h-[600px] overflow-auto rounded-md border">
+        <table
+          className="w-full border-collapse text-sm"
+          aria-label="Asset changes preview"
+        >
           <thead className="sticky top-0 z-10">
             <tr className="bg-gray-100">
               <th className="sticky left-0 z-20 border-b border-r bg-gray-100 px-3 py-2 text-left font-semibold text-gray-700">
@@ -124,16 +128,26 @@ export function SpreadsheetPreview({
                       );
                     }
 
-                    // Changed cell — highlighted (red if warning, blue if valid)
+                    // Changed cell — highlighted based on type:
+                    // red = warning, amber = clearing, blue = normal change
                     const hasWarning = !!change.warning;
+                    const isClearing = !!change.clearing;
+                    const cellBg = hasWarning
+                      ? "bg-red-50"
+                      : isClearing
+                      ? "bg-amber-50"
+                      : "bg-blue-50";
+                    const textColor = hasWarning
+                      ? "text-red-700"
+                      : isClearing
+                      ? "text-amber-700"
+                      : "text-blue-700";
                     return (
                       <td
                         key={col}
                         tabIndex={0}
                         aria-describedby={isHovered ? tooltipId : undefined}
-                        className={`cursor-default border-r px-3 py-1.5 ${
-                          hasWarning ? "bg-red-50" : "bg-blue-50"
-                        }`}
+                        className={`cursor-default border-r px-3 py-1.5 ${cellBg}`}
                         onMouseEnter={(e) =>
                           handleCellHover(assetIdx, col, e.currentTarget)
                         }
@@ -144,18 +158,17 @@ export function SpreadsheetPreview({
                         onBlur={() => setHoveredCell(null)}
                       >
                         <div
-                          className={`max-w-[180px] truncate font-medium ${
-                            hasWarning ? "text-red-700" : "text-blue-700"
-                          }`}
+                          className={`max-w-[180px] truncate font-medium ${textColor}`}
                         >
-                          {change.newValue}
+                          {isClearing ? "(clear)" : change.newValue}
                         </div>
                         <div className="max-w-[180px] truncate text-[11px] text-gray-400 line-through">
                           {change.currentValue}
                         </div>
                         {hasWarning && (
                           <div className="truncate text-[10px] text-red-500">
-                            ⚠ {change.warning}
+                            <AlertIcon className="inline-block size-4" />{" "}
+                            {change.warning}
                           </div>
                         )}
 
@@ -195,7 +208,8 @@ export function SpreadsheetPreview({
                               </p>
                               {hasWarning && (
                                 <p className="mt-1 text-red-600">
-                                  ⚠ {change.warning}
+                                  <AlertIcon className="inline-block size-4" />{" "}
+                                  {change.warning}
                                 </p>
                               )}
                             </div>,

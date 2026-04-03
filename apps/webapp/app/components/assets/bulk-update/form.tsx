@@ -36,7 +36,12 @@ type Stage = "upload" | "preview" | "results";
  * Manages a three-stage flow: file upload with client-side validation,
  * server-side preview analysis, and post-apply results display.
  */
-export function UpdateImportForm() {
+export function UpdateImportForm({
+  onStageChange,
+}: {
+  /** Called when the form transitions between stages (upload/preview/results) */
+  onStageChange?: (stage: Stage) => void;
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewFetcher = useFetcherWithReset<typeof action>();
@@ -113,53 +118,55 @@ export function UpdateImportForm() {
     [processFile, isPreviewLoading, isApplyLoading]
   );
 
-  // Handle preview response
-  const previewData = previewFetcher.data as
-    | {
-        error?: unknown;
-        success?: boolean;
-        intent?: string;
-        preview?: UpdatePreview;
-      }
-    | undefined;
+  // Handle preview response — use optional chaining instead of type casts.
+  // The fetcher is already typed via useFetcherWithReset<typeof action>,
+  // so we access properties defensively with optional chaining.
+  const previewData = previewFetcher.data;
 
   useEffect(() => {
+    if (!previewData || previewData.error) return;
+
+    const fetchedPreview =
+      "preview" in previewData
+        ? (previewData.preview as UpdatePreview)
+        : undefined;
+
     if (
-      previewData &&
-      !previewData.error &&
+      "intent" in previewData &&
       previewData.intent === "preview-update" &&
-      previewData.preview &&
-      previewData.preview !== lastProcessedPreview.current
+      fetchedPreview &&
+      fetchedPreview !== lastProcessedPreview.current
     ) {
-      lastProcessedPreview.current = previewData.preview;
-      setPreview(previewData.preview);
+      lastProcessedPreview.current = fetchedPreview;
+      setPreview(fetchedPreview);
       setStage("preview");
+      onStageChange?.("preview");
     }
-  }, [previewData]);
+  }, [previewData, onStageChange]);
 
-  // Handle apply response
-  const applyData = applyFetcher.data as
-    | {
-        error?: unknown;
-        success?: boolean;
-        intent?: string;
-        result?: BulkUpdateResult;
-      }
-    | undefined;
+  // Handle apply response — same pattern, no type cast needed.
+  const applyData = applyFetcher.data;
 
   useEffect(() => {
+    if (!applyData || applyData.error) return;
+
+    const fetchedResult =
+      "result" in applyData
+        ? (applyData.result as BulkUpdateResult)
+        : undefined;
+
     if (
-      applyData &&
-      !applyData.error &&
+      "intent" in applyData &&
       applyData.intent === "apply-update" &&
-      applyData.result &&
-      applyData.result !== lastProcessedResult.current
+      fetchedResult &&
+      fetchedResult !== lastProcessedResult.current
     ) {
-      lastProcessedResult.current = applyData.result;
-      setResult(applyData.result);
+      lastProcessedResult.current = fetchedResult;
+      setResult(fetchedResult);
       setStage("results");
+      onStageChange?.("results");
     }
-  }, [applyData]);
+  }, [applyData, onStageChange]);
 
   const handleReset = () => {
     setSelectedFile(null);
@@ -173,6 +180,7 @@ export function UpdateImportForm() {
     if (formRef.current) {
       formRef.current.reset();
     }
+    onStageChange?.("upload");
   };
 
   const canAnalyze =
@@ -279,6 +287,7 @@ export function UpdateImportForm() {
             });
           }}
           isReanalyzing={isPreviewLoading}
+          onReset={handleReset}
         />
       )}
 

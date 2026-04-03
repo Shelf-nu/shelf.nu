@@ -1,865 +1,57 @@
 /**
- * @file Server-side bulk asset update via CSV import.
- * Provides header analysis, field-level diffing, preview generation,
- * entity resolution (categories, locations, tags), and batch update
- * application for the import-update workflow.
+ * @file Server-side orchestration for bulk asset update via CSV import.
+ * Coordinates header analysis, diff computation, entity resolution,
+ * and batch update application. Delegates to focused modules for each concern.
  *
+ * @see {@link file://./import-update-types.ts} Types and constants
+ * @see {@link file://./import-update-diff.ts} Pure diff logic
+ * @see {@link file://./import-update-entities.server.ts} Entity resolution
  * @see {@link file://./../../routes/_layout+/assets.import-update.tsx} Route handler
- * @see {@link file://./../../components/assets/bulk-update/form.tsx} Client component
  */
-import type { Asset, CustomField, User } from "@prisma/client";
+import type { User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   updateAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type {
-  ShelfAssetCustomFieldValueType,
+  ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
-import {
-  columnsLabelsMap,
-  type ColumnLabelKey,
-} from "~/modules/asset-index-settings/helpers";
 import { buildCustomFieldValue } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
-import { getRandomColor } from "~/utils/get-random-color";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Reverse mapping: exported CSV header label → internal field name.
- * Built from columnsLabelsMap. E.g. "Name" → "name", "Category" → "category"
- */
-const EXPORT_HEADER_TO_FIELD_MAP: Record<string, ColumnLabelKey> =
-  Object.fromEntries(
-    Object.entries(columnsLabelsMap).map(([key, label]) => [label, key])
-  ) as Record<string, ColumnLabelKey>;
-
-/** Fields that v1 supports updating (core metadata). */
-const UPDATABLE_FIELDS = new Set<string>([
-  "name",
-  "category",
-  "location",
-  "tags",
-  "valuation",
-  "availableToBook",
-]);
-
-/** Custom field types that are safe for round-trip update. */
-const UPDATABLE_CF_TYPES = new Set<string>([
-  "TEXT",
-  "BOOLEAN",
-  "DATE",
-  "OPTION",
-  "NUMBER",
-  "AMOUNT",
-]);
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface FieldChange {
-  /** Human-readable field name (e.g. "Name", "Category", "cf:Serial Number") */
-  field: string;
-  currentValue: string;
-  newValue: string;
-  /** If set, this value has a format problem that will cause the update to fail */
-  warning?: string;
-}
-
-export interface AssetChangePreview {
-  /** The sequential ID from the CSV (e.g. "SAM-0022") */
-  id: string;
-  /** The internal UUID — needed for updateAsset() calls */
-  assetDbId: string;
-  title: string;
-  changes: FieldChange[];
-}
-
-export interface UpdatePreview {
-  totalRows: number;
-  assetsToUpdate: AssetChangePreview[];
-  skippedAssets: { id: string; title: string; reason: string }[];
-  failedRows: { rowNumber: number; id: string; reason: string }[];
-  /** Known columns that we intentionally skip (Status, Kit, Custody, etc.) */
-  ignoredColumns: string[];
-  /** Columns the user added that don't match any known or custom field */
-  unrecognizedColumns: string[];
-  updatableColumns: string[];
-  /** Total individual field changes across all assets to update */
-  totalFieldChanges: number;
-  /** Total fields that will remain unchanged (for reassurance message) */
-  totalUnchangedFields: number;
-  /** Entities (categories, locations, tags) that don't exist yet and will be created */
-  newEntities: {
-    categories: string[];
-    locations: string[];
-    tags: string[];
-  };
-}
-
-export interface BulkUpdateResult {
-  updated: { id: string; title: string; changesApplied: number }[];
-  skipped: { id: string; title: string; reason: string }[];
-  failed: {
-    id: string;
-    title: string;
-    rowNumber: number;
-    error: string;
-  }[];
-  summary: {
-    total: number;
-    updated: number;
-    skipped: number;
-    failed: number;
-  };
-}
-
-/** Internal representation of a parsed CSV column */
-interface ParsedColumn {
-  /** The original CSV header text */
-  csvHeader: string;
-  /** Internal field key (e.g. "name", "category") or custom field key (e.g. "cf:Purchase Date") */
-  internalKey: string;
-  /** "core" | "customField" | "ignored" */
-  kind: "core" | "customField" | "ignored";
-  /** Column index in the CSV (for building the column index map) */
-  csvIndex?: number;
-  /** For custom fields: the definition */
-  cfDef?: Pick<
-    CustomField,
-    "name" | "type" | "helpText" | "required" | "active"
-  >;
-}
-
-/**
- * Identifier columns we accept for matching CSV rows to assets.
- * Priority order: Asset ID (most user-friendly) > ID (UUID).
- * QR ID is not usable because it's a relation field (Qr model), not a
- * direct field on Asset.
- */
-const IDENTIFIER_COLUMNS: {
-  header: string;
-  internalField: ColumnLabelKey;
-  dbField: "sequentialId" | "id";
-}[] = [
-  {
-    header: "Asset ID",
-    internalField: "sequentialId",
-    dbField: "sequentialId",
-  },
-  { header: "ID", internalField: "id", dbField: "id" },
-];
-
-interface IdentifierColumn {
-  index: number;
-  dbField: "sequentialId" | "id";
-  header: string;
-}
-
-interface HeaderAnalysis {
-  /** Columns that will be used for updates */
-  updatableColumns: ParsedColumn[];
-  /** Known columns that will be ignored (Status, Kit, etc.) */
-  ignoredColumns: string[];
-  /** User-added columns that don't match any known or custom field */
-  unrecognizedColumns: string[];
-  /** Primary identifier column in the CSV — used as row matcher */
-  idColumnIndex: number;
-  /** Which database field the identifier maps to */
-  idDbField: "sequentialId" | "id";
-  /** The CSV header name used as identifier (for display) */
-  idColumnHeader: string;
-  /** Fallback identifier column (if both Asset ID and ID are present) */
-  fallbackId: IdentifierColumn | null;
-  /** Map from column CSV index → ParsedColumn (for updatable only) */
-  columnIndexMap: Map<number, ParsedColumn>;
-}
-
-// ---------------------------------------------------------------------------
-// Header Analysis
-// ---------------------------------------------------------------------------
-
-/**
- * Analyzes CSV headers from an Asset Index export and classifies them
- * for the update import flow.
- *
- * Export CSV headers use human-readable labels from `columnsLabelsMap`
- * (e.g. "Name", "Category", "Available to book").
- * Custom field headers are the field name directly (e.g. "Purchase Date").
- */
-export function analyzeUpdateHeaders(
-  headers: string[],
-  orgCustomFields: Pick<CustomField, "id" | "name" | "type">[]
-): HeaderAnalysis {
-  const updatableColumns: ParsedColumn[] = [];
-  const ignoredColumns: string[] = [];
-  const unrecognizedColumns: string[] = [];
-
-  // Find all available identifier columns (priority order)
-  const headersTrimmed = headers.map((h) => h.trim());
-  const foundIdCols: IdentifierColumn[] = [];
-  for (const idCol of IDENTIFIER_COLUMNS) {
-    const idx = headersTrimmed.indexOf(idCol.header);
-    if (idx >= 0) {
-      foundIdCols.push({
-        index: idx,
-        dbField: idCol.dbField,
-        header: idCol.header,
-      });
-    }
-  }
-
-  // Primary = highest priority; fallback = next available
-  const primaryId = foundIdCols[0];
-  const idColumnIndex = primaryId?.index ?? -1;
-  const idDbField: HeaderAnalysis["idDbField"] =
-    primaryId?.dbField ?? "sequentialId";
-  const idColumnHeader = primaryId?.header ?? "";
-  const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
-
-  // Set of internal field names used as identifiers — skip them during
-  // column classification so they aren't treated as updatable or ignored
-  const identifierFields = new Set(
-    IDENTIFIER_COLUMNS.map((c) => c.internalField)
-  );
-
-  // Build a lookup of org custom fields by name (case-insensitive)
-  const cfByName = new Map(
-    orgCustomFields.map((cf) => [cf.name.toLowerCase(), cf])
-  );
-
-  for (let i = 0; i < headers.length; i++) {
-    const header = headersTrimmed[i];
-    if (!header) continue;
-
-    // Check if it's a known fixed-field header via reverse map
-    const internalField = EXPORT_HEADER_TO_FIELD_MAP[header];
-
-    if (internalField) {
-      // Skip identifier columns — they're handled above
-      if (identifierFields.has(internalField)) {
-        // If this isn't the one we picked as the matcher, list it as ignored
-        if (i !== idColumnIndex) {
-          ignoredColumns.push(header);
-        }
-        continue;
-      }
-
-      if (UPDATABLE_FIELDS.has(internalField)) {
-        updatableColumns.push({
-          csvHeader: header,
-          internalKey: internalField,
-          kind: "core",
-          csvIndex: i,
-        });
-      } else {
-        // Known field but not updatable (Status, Kit, etc.) — treat as ignored
-        ignoredColumns.push(header);
-      }
-    } else {
-      // Not a fixed field header — check if it's a custom field name
-      const cf = cfByName.get(header.toLowerCase());
-      if (cf) {
-        if (UPDATABLE_CF_TYPES.has(cf.type)) {
-          updatableColumns.push({
-            csvHeader: header,
-            internalKey: `cf:${cf.name}`,
-            kind: "customField",
-            csvIndex: i,
-            cfDef: {
-              name: cf.name,
-              type: cf.type,
-              helpText: "",
-              required: false,
-              active: true,
-            },
-          });
-        } else {
-          ignoredColumns.push(
-            `${header} (${cf.type.toLowerCase()} fields not supported for update)`
-          );
-        }
-      } else {
-        // Unknown column — don't block the import, just skip it
-        unrecognizedColumns.push(header);
-      }
-    }
-  }
-
-  // Build column index map for updatable columns using the original
-  // loop index (stored in csvIndex) to handle duplicate header names
-  const columnIndexMap = new Map<number, ParsedColumn>();
-  for (const col of updatableColumns) {
-    if (col.csvIndex !== undefined) {
-      columnIndexMap.set(col.csvIndex, col);
-    }
-  }
-
-  return {
-    updatableColumns,
-    ignoredColumns,
-    unrecognizedColumns,
-    idColumnIndex,
-    idDbField,
-    idColumnHeader,
-    fallbackId,
-    columnIndexMap,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Asset Fetching
-// ---------------------------------------------------------------------------
-
-type AssetForUpdate = Asset & {
-  category: { name: string } | null;
-  location: { id: string; name: string } | null;
-  tags: { id: string; name: string }[];
-  customFields: {
-    id: string;
-    value: unknown;
-    customField: CustomField;
-  }[];
-};
-
-/**
- * Fetches assets by the given identifier field (sequentialId or id).
- * Returns a map keyed by that identifier value for CSV row lookup.
- */
-export async function fetchAssetsForUpdate(
-  identifierValues: string[],
-  organizationId: string,
-  dbField: "sequentialId" | "id"
-): Promise<Map<string, AssetForUpdate>> {
-  const assets = await db.asset.findMany({
-    where: { [dbField]: { in: identifierValues }, organizationId },
-    include: {
-      category: { select: { name: true } },
-      location: { select: { id: true, name: true } },
-      tags: { select: { id: true, name: true } },
-      customFields: { include: { customField: true } },
-    },
-  });
-
-  // Key by the identifier field value so CSV rows can look up their asset.
-  return new Map(
-    assets.map((a) => {
-      const asset = a as AssetForUpdate;
-      const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
-      return [key, asset];
-    })
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Diff Computation
-// ---------------------------------------------------------------------------
-
-/**
- * Strips currency symbols and normalizes both US and European number formats
- * into a plain decimal number string that `parseFloat()` can handle.
- *
- * Handles:
- *  - US format:       "$1,234.56"  → "1234.56"
- *  - European format: "1.234,56"   → "1234.56"
- *  - European short:  "5454,5"     → "5454.5"
- *  - Plain:           "1234.56"    → "1234.56"
- *  - Ambiguous:       "1,234"      → "1234" (US thousand, since our export uses US)
- */
-function normalizeExportedCurrencyValue(value: string): string {
-  // Strip common currency symbols
-  let v = value.replace(/[$€£¥₹₽₩₪₫฿₴₦₲₵₡₺₨]/g, "").trim();
-
-  const lastComma = v.lastIndexOf(",");
-  const lastDot = v.lastIndexOf(".");
-
-  if (lastComma > lastDot) {
-    // Comma appears after dot (or no dot) — comma might be decimal separator
-    const digitsAfterComma = v.length - lastComma - 1;
-    if (digitsAfterComma === 3) {
-      // Ambiguous: "1,234" — treat as US thousand separator
-      // (our export uses US format, so this is the safe default)
-      v = v.replace(/,/g, "");
-    } else {
-      // European decimal: "5454,5" or "1.234,56"
-      v = v.replace(/\./g, ""); // strip dots (thousand separators)
-      v = v.replace(",", "."); // replace decimal comma with dot
-    }
-  } else {
-    // Dot appears after comma (US: "1,234.56") or only dots/no separators
-    v = v.replace(/,/g, ""); // strip commas (thousand separators)
-  }
-
-  return v;
-}
-
-/**
- * Normalizes a Yes/No string to a boolean. Case-insensitive.
- * Returns undefined if the value is not a recognized boolean string.
- */
-function parseYesNo(value: string): boolean | undefined {
-  const lower = value.trim().toLowerCase();
-  if (lower === "yes") return true;
-  if (lower === "no") return false;
-  return undefined;
-}
-
-/**
- * Computes field-by-field diffs between CSV rows and existing assets.
- */
-export function computeAssetDiffs({
-  csvData,
-  headerAnalysis,
-  existingAssets,
-  fallbackAssets,
-}: {
-  csvData: string[][];
-  headerAnalysis: HeaderAnalysis;
-  existingAssets: Map<string, AssetForUpdate>;
-  /** Assets keyed by fallback identifier (e.g. UUID when primary is Asset ID) */
-  fallbackAssets?: Map<string, AssetForUpdate>;
-}): Pick<
+import {
+  analyzeUpdateHeaders,
+  computeAssetDiffs,
+  normalizeExportedCurrencyValue,
+  parseYesNo,
+} from "./import-update-diff";
+import {
+  batchResolveCategoryNames,
+  batchResolveLocationNames,
+  detectNewEntities,
+  fetchAssetsForUpdate,
+  resolveTagNamesToIds,
+} from "./import-update-entities.server";
+import type {
+  AssetForUpdate,
+  BulkUpdateResult,
+  FieldChange,
   UpdatePreview,
-  "totalRows" | "assetsToUpdate" | "skippedAssets" | "failedRows"
-> {
-  const dataRows = csvData.slice(1); // skip header row
-  const assetsToUpdate: AssetChangePreview[] = [];
-  const skippedAssets: UpdatePreview["skippedAssets"] = [];
-  const failedRows: UpdatePreview["failedRows"] = [];
+} from "./import-update-types";
+import { MAX_BULK_UPDATE_ROWS } from "./import-update-types";
 
-  // Track seen IDs to detect duplicates
-  const seenIds = new Map<string, number>(); // id → first row number (1-based)
-
-  for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
-    const row = dataRows[rowIdx];
-    const rowNumber = rowIdx + 2; // 1-based, accounting for header row
-
-    // Extract asset ID — try primary identifier, fall back to secondary
-    let assetId = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
-    let existingAsset = assetId ? existingAssets.get(assetId) : undefined;
-
-    // If primary is blank or not found, try fallback identifier (e.g. UUID)
-    if (!existingAsset && headerAnalysis.fallbackId && fallbackAssets) {
-      const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
-      if (fallbackValue) {
-        // Always set assetId so failure reports show the actual identifier
-        if (!assetId) assetId = fallbackValue;
-        existingAsset = fallbackAssets.get(fallbackValue);
-        if (existingAsset) {
-          assetId = fallbackValue; // use fallback as the match key
-        }
-      }
-    }
-
-    if (!assetId) {
-      failedRows.push({
-        rowNumber,
-        id: "",
-        reason: "Missing asset ID",
-      });
-      continue;
-    }
-
-    if (!existingAsset) {
-      failedRows.push({
-        rowNumber,
-        id: assetId,
-        reason: "Asset not found in your organization",
-      });
-      continue;
-    }
-
-    // Check for duplicate assets by canonical UUID (not CSV identifier string)
-    const firstSeenRow = seenIds.get(existingAsset.id);
-    if (firstSeenRow !== undefined) {
-      failedRows.push({
-        rowNumber,
-        id: assetId,
-        reason: `Duplicate ID — already processed in row ${firstSeenRow}`,
-      });
-      continue;
-    }
-
-    // Cross-check: if both identifier columns exist and have values,
-    // verify they point to the same asset to prevent accidental mismatch.
-    // Also reject if one identifier is populated but unresolved.
-    // NOTE: seenIds is set AFTER this check so a failed cross-check
-    // doesn't block a later valid row for the same asset.
-    if (headerAnalysis.fallbackId && fallbackAssets) {
-      const primaryValue = row[headerAnalysis.idColumnIndex]?.trim() ?? "";
-      const fallbackValue = row[headerAnalysis.fallbackId.index]?.trim() ?? "";
-      if (primaryValue && fallbackValue) {
-        const primaryAsset = existingAssets.get(primaryValue);
-        const fallbackAsset = fallbackAssets.get(fallbackValue);
-
-        // Reject if one identifier resolved but the other didn't
-        if (primaryAsset && !fallbackAsset) {
-          failedRows.push({
-            rowNumber,
-            id: assetId,
-            reason: `ID "${fallbackValue}" not found — but Asset ID "${primaryValue}" resolved. Check for typos.`,
-          });
-          continue;
-        }
-        if (!primaryAsset && fallbackAsset) {
-          failedRows.push({
-            rowNumber,
-            id: assetId,
-            reason: `Asset ID "${primaryValue}" not found — but ID "${fallbackValue}" resolved. Check for typos.`,
-          });
-          continue;
-        }
-
-        // Reject if both resolved but to different assets
-        if (
-          primaryAsset &&
-          fallbackAsset &&
-          fallbackAsset.id !== primaryAsset.id
-        ) {
-          failedRows.push({
-            rowNumber,
-            id: assetId,
-            reason: `Identifier mismatch — Asset ID "${primaryValue}" and ID "${fallbackValue}" point to different assets`,
-          });
-          continue;
-        }
-      }
-    }
-
-    // Mark asset as seen only after all identifier checks pass
-    seenIds.set(existingAsset.id, rowNumber);
-
-    // Compute per-field diffs
-    const changes: FieldChange[] = [];
-
-    for (const [colIdx, column] of headerAnalysis.columnIndexMap) {
-      const csvValue = row[colIdx]?.trim() ?? "";
-
-      // Empty cell = no change
-      if (csvValue === "" || csvValue === '""') {
-        continue;
-      }
-
-      if (column.kind === "core") {
-        const change = compareCoreField(
-          column.internalKey,
-          csvValue,
-          existingAsset,
-          column.csvHeader
-        );
-        if (change) {
-          changes.push(change);
-        }
-      } else if (column.kind === "customField" && column.cfDef) {
-        const change = compareCustomField(
-          column.cfDef,
-          csvValue,
-          existingAsset,
-          column.csvHeader
-        );
-        if (change) {
-          changes.push(change);
-        }
-      }
-    }
-
-    if (changes.length === 0) {
-      skippedAssets.push({
-        id: assetId,
-        title: existingAsset.title,
-        reason: "No changes detected",
-      });
-    } else {
-      assetsToUpdate.push({
-        id: assetId,
-        assetDbId: existingAsset.id,
-        title: existingAsset.title,
-        changes,
-      });
-    }
-  }
-
-  return {
-    totalRows: dataRows.length,
-    assetsToUpdate,
-    skippedAssets,
-    failedRows,
-  };
-}
-
-/** Compares a core field value between CSV and existing asset */
-function compareCoreField(
-  fieldKey: string,
-  csvValue: string,
-  asset: AssetForUpdate,
-  displayName: string
-): FieldChange | null {
-  switch (fieldKey) {
-    case "name": {
-      const current = asset.title;
-      if (csvValue !== current) {
-        return {
-          field: displayName,
-          currentValue: current,
-          newValue: csvValue,
-        };
-      }
-      return null;
-    }
-
-    case "category": {
-      const current = asset.category?.name ?? "Uncategorized";
-      if (csvValue.toLowerCase() !== current.toLowerCase()) {
-        return {
-          field: displayName,
-          currentValue: current,
-          newValue: csvValue,
-        };
-      }
-      return null;
-    }
-
-    case "location": {
-      const current = asset.location?.name ?? "";
-      if (csvValue.toLowerCase() !== current.toLowerCase()) {
-        return {
-          field: displayName,
-          currentValue: current || "(none)",
-          newValue: csvValue,
-        };
-      }
-      return null;
-    }
-
-    case "tags": {
-      const currentTags = asset.tags
-        .map((t) => t.name)
-        .sort((a, b) => a.localeCompare(b));
-      const csvTags = csvValue
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-
-      const currentStr = currentTags.join(", ");
-      const csvStr = csvTags.join(", ");
-
-      // Case-insensitive set comparison
-      const currentSet = new Set(currentTags.map((t) => t.toLowerCase()));
-      const csvSet = new Set(csvTags.map((t) => t.toLowerCase()));
-
-      if (
-        currentSet.size !== csvSet.size ||
-        ![...currentSet].every((t) => csvSet.has(t))
-      ) {
-        return {
-          field: displayName,
-          currentValue: currentStr || "(none)",
-          newValue: csvStr,
-        };
-      }
-      return null;
-    }
-
-    case "valuation": {
-      const normalized = normalizeExportedCurrencyValue(csvValue);
-      const csvNum = Number(normalized);
-      // Number() rejects partial matches like "12abc" (unlike parseFloat)
-      // Also reject Infinity/-Infinity
-      if (!Number.isFinite(csvNum)) {
-        return {
-          field: displayName,
-          currentValue: String(asset.valuation ?? "(none)"),
-          newValue: csvValue,
-          warning: `"${csvValue}" is not a valid number`,
-        };
-      }
-      // Distinguish null (no valuation) from 0 (explicit zero)
-      if (asset.valuation == null) {
-        // Any valid number (including 0) is a change when current is empty
-        return {
-          field: displayName,
-          currentValue: "(none)",
-          newValue: String(csvNum),
-        };
-      }
-      if (Math.abs(csvNum - asset.valuation) > 0.001) {
-        return {
-          field: displayName,
-          currentValue: String(asset.valuation),
-          newValue: String(csvNum),
-        };
-      }
-      return null;
-    }
-
-    case "availableToBook": {
-      const csvBool = parseYesNo(csvValue);
-      if (csvBool === undefined) {
-        return {
-          field: displayName,
-          currentValue: asset.availableToBook ? "Yes" : "No",
-          newValue: csvValue,
-          warning: `Unrecognized value "${csvValue}" — expected "Yes" or "No"`,
-        };
-      }
-      if (csvBool !== asset.availableToBook) {
-        return {
-          field: displayName,
-          currentValue: asset.availableToBook ? "Yes" : "No",
-          newValue: csvBool ? "Yes" : "No",
-        };
-      }
-      return null;
-    }
-
-    default:
-      return null;
-  }
-}
-
-/** Compares a custom field value between CSV and existing asset */
-function compareCustomField(
-  cfDef: NonNullable<ParsedColumn["cfDef"]>,
-  csvValue: string,
-  asset: AssetForUpdate,
-  displayName: string
-): FieldChange | null {
-  // Find the existing custom field value on this asset
-  const existingCfv = asset.customFields.find(
-    (cf) => cf.customField.name.toLowerCase() === cfDef.name.toLowerCase()
-  );
-
-  const existingValue = existingCfv?.value as
-    | ShelfAssetCustomFieldValueType["value"]
-    | undefined;
-
-  const currentRaw = existingValue?.raw;
-  const currentStr = currentRaw != null ? String(currentRaw) : "";
-
-  switch (cfDef.type) {
-    case "TEXT":
-    case "OPTION": {
-      if (csvValue !== currentStr) {
-        return {
-          field: displayName,
-          currentValue: currentStr || "(empty)",
-          newValue: csvValue,
-        };
-      }
-      return null;
-    }
-
-    case "BOOLEAN": {
-      const csvBool = parseYesNo(csvValue);
-      if (csvBool === undefined) {
-        return {
-          field: displayName,
-          currentValue: currentStr || "(empty)",
-          newValue: csvValue,
-          warning: `Unrecognized value "${csvValue}" — expected "Yes" or "No"`,
-        };
-      }
-      // Treat truly missing values as undefined so "No" is detected as a change from empty
-      const hasStoredValue =
-        existingValue?.valueBoolean !== undefined &&
-        existingValue?.valueBoolean !== null &&
-        currentRaw !== undefined &&
-        currentRaw !== null &&
-        currentRaw !== "";
-      if (!hasStoredValue) {
-        // No existing value — any CSV boolean is a change
-        return {
-          field: displayName,
-          currentValue: "(empty)",
-          newValue: csvBool ? "Yes" : "No",
-        };
-      }
-      const currentBool =
-        existingValue?.valueBoolean ??
-        (typeof currentRaw === "string"
-          ? currentRaw.toLowerCase() === "yes"
-          : Boolean(currentRaw));
-      if (csvBool !== currentBool) {
-        return {
-          field: displayName,
-          currentValue: currentBool ? "Yes" : "No",
-          newValue: csvBool ? "Yes" : "No",
-        };
-      }
-      return null;
-    }
-
-    case "DATE": {
-      // Export format: yyyy-MM-dd
-      // Current raw value is also stored as the date string
-      const currentDate = currentStr ? currentStr.substring(0, 10) : "";
-      if (csvValue !== currentDate) {
-        // Validate format AND that the date is a real calendar date
-        // (new Date normalizes overflow — e.g. Feb 31 → Mar 3 — so we
-        // must check that the parsed date matches the original input)
-        let isValidDate = false;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(csvValue)) {
-          const [y, m, d] = csvValue.split("-").map(Number);
-          const parsed = new Date(Date.UTC(y, m - 1, d));
-          isValidDate =
-            parsed.getUTCFullYear() === y &&
-            parsed.getUTCMonth() === m - 1 &&
-            parsed.getUTCDate() === d;
-        }
-        return {
-          field: displayName,
-          currentValue: currentDate || "(empty)",
-          newValue: csvValue,
-          ...(!isValidDate && {
-            warning: `Invalid date format "${csvValue}" — must be YYYY-MM-DD (e.g. 2024-06-23)`,
-          }),
-        };
-      }
-      return null;
-    }
-
-    case "AMOUNT":
-    case "NUMBER": {
-      const normalizedCsv = normalizeExportedCurrencyValue(csvValue);
-      const csvNum = Number(normalizedCsv);
-      if (!Number.isFinite(csvNum)) {
-        return {
-          field: displayName,
-          currentValue: currentStr || "(empty)",
-          newValue: csvValue,
-          warning: `"${csvValue}" is not a valid number`,
-        };
-      }
-      // Distinguish empty/null from numeric 0
-      const currentNum = currentStr ? Number(currentStr) : NaN;
-      if (isNaN(currentNum)) {
-        // Current is empty — any valid number (including 0) is a change
-        return {
-          field: displayName,
-          currentValue: "(empty)",
-          newValue: String(csvNum),
-        };
-      }
-      if (Math.abs(csvNum - currentNum) > 0.001) {
-        return {
-          field: displayName,
-          currentValue: String(currentNum),
-          newValue: String(csvNum),
-        };
-      }
-      return null;
-    }
-
-    default:
-      return null;
-  }
-}
+// Re-export types and key functions so existing consumers don't break
+export type {
+  AssetChangePreview,
+  AssetForUpdate,
+  BulkUpdateResult,
+  FieldChange,
+  HeaderAnalysis,
+  UpdatePreview,
+} from "./import-update-types";
+export { analyzeUpdateHeaders, computeAssetDiffs } from "./import-update-diff";
+export { fetchAssetsForUpdate } from "./import-update-entities.server";
 
 // ---------------------------------------------------------------------------
 // Build Full Preview
@@ -867,6 +59,13 @@ function compareCustomField(
 
 /**
  * Orchestrates the full preview: parse headers, fetch assets, compute diffs.
+ * Returns a complete UpdatePreview with change details, warnings, and
+ * information about new entities that will be created.
+ *
+ * @param csvData - Full CSV data array (first row is headers)
+ * @param organizationId - Organization scope for the query
+ * @returns Complete preview of all changes that would be applied
+ * @throws {ShelfError} If no identifier column found or row limit exceeded
  */
 export async function buildUpdatePreview({
   csvData,
@@ -876,6 +75,17 @@ export async function buildUpdatePreview({
   organizationId: string;
 }): Promise<UpdatePreview> {
   const headers = csvData[0].map((h) => h.trim());
+  const dataRows = csvData.slice(1);
+
+  // Guard against oversized imports
+  if (dataRows.length > MAX_BULK_UPDATE_ROWS) {
+    throw new ShelfError({
+      cause: null,
+      message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
+      label: "Assets",
+      shouldBeCaptured: false,
+    });
+  }
 
   // Get org custom fields for header analysis
   const orgCustomFields = await db.customField.findMany({
@@ -897,7 +107,6 @@ export async function buildUpdatePreview({
   }
 
   // Extract all identifier values from data rows
-  const dataRows = csvData.slice(1);
   const allIds = dataRows
     .map((row) => row[headerAnalysis.idColumnIndex]?.trim())
     .filter(Boolean) as string[];
@@ -964,336 +173,21 @@ export async function buildUpdatePreview({
 }
 
 // ---------------------------------------------------------------------------
-// New Entity Detection (for preview warnings)
-// ---------------------------------------------------------------------------
-
-/**
- * Checks which categories, locations, and tags referenced in the changes
- * don't exist yet in the organization. These will be created on apply.
- */
-async function detectNewEntities(
-  assetsToUpdate: AssetChangePreview[],
-  headerAnalysis: HeaderAnalysis,
-  organizationId: string
-): Promise<{ categories: string[]; locations: string[]; tags: string[] }> {
-  const categoryNames = new Set<string>();
-  const locationNames = new Set<string>();
-  const tagNames = new Set<string>();
-
-  for (const asset of assetsToUpdate) {
-    for (const change of asset.changes) {
-      const col = headerAnalysis.updatableColumns.find(
-        (c) => c.csvHeader === change.field
-      );
-      if (!col) continue;
-
-      if (col.internalKey === "category") {
-        if (change.newValue.toLowerCase() !== "uncategorized") {
-          categoryNames.add(change.newValue.trim());
-        }
-      } else if (col.internalKey === "location") {
-        locationNames.add(change.newValue.trim());
-      } else if (col.internalKey === "tags") {
-        for (const tag of change.newValue.split(",")) {
-          const t = tag.trim();
-          if (t) tagNames.add(t);
-        }
-      }
-    }
-  }
-
-  // Batch check categories (single query instead of N)
-  const categoryNamesArr = Array.from(categoryNames);
-  const existingCats =
-    categoryNamesArr.length > 0
-      ? await db.category.findMany({
-          where: {
-            organizationId,
-            name: { in: categoryNamesArr, mode: "insensitive" },
-          },
-          select: { name: true },
-        })
-      : [];
-  const existingCatNamesLc = new Set(
-    existingCats.map((c) => c.name.toLowerCase())
-  );
-  const newCategories = categoryNamesArr.filter(
-    (n) => !existingCatNamesLc.has(n.toLowerCase())
-  );
-
-  // Batch check locations
-  const locationNamesArr = Array.from(locationNames);
-  const existingLocs =
-    locationNamesArr.length > 0
-      ? await db.location.findMany({
-          where: {
-            organizationId,
-            name: { in: locationNamesArr, mode: "insensitive" },
-          },
-          select: { name: true },
-        })
-      : [];
-  const existingLocNamesLc = new Set(
-    existingLocs.map((l) => l.name.toLowerCase())
-  );
-  const newLocations = locationNamesArr.filter(
-    (n) => !existingLocNamesLc.has(n.toLowerCase())
-  );
-
-  // Batch check tags
-  const tagNamesArr = Array.from(tagNames);
-  const existingTags =
-    tagNamesArr.length > 0
-      ? await db.tag.findMany({
-          where: {
-            organizationId,
-            name: { in: tagNamesArr, mode: "insensitive" },
-          },
-          select: { name: true },
-        })
-      : [];
-  const existingTagNamesLc = new Set(
-    existingTags.map((t) => t.name.toLowerCase())
-  );
-  const newTags = tagNamesArr.filter(
-    (n) => !existingTagNamesLc.has(n.toLowerCase())
-  );
-
-  return {
-    categories: newCategories,
-    locations: newLocations,
-    tags: newTags,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Entity Resolution Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Batch-resolves category names to IDs, creating missing ones.
- * Uses findMany + createMany + re-fetch to avoid race conditions.
- */
-async function batchResolveCategoryNames(
-  names: string[],
-  userId: string,
-  organizationId: string
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
-
-  // Handle "uncategorized" specially
-  for (const name of trimmedNames) {
-    if (name.toLowerCase() === "uncategorized") {
-      result.set(name, "uncategorized");
-    }
-  }
-
-  const namesToResolve = trimmedNames.filter(
-    (n) => n.toLowerCase() !== "uncategorized"
-  );
-  if (namesToResolve.length === 0) return result;
-
-  // Deduplicate case-insensitively — keep first spelling per lowercase key
-  const lcToOriginal = new Map<string, string>();
-  for (const name of namesToResolve) {
-    const lc = name.toLowerCase();
-    if (!lcToOriginal.has(lc)) lcToOriginal.set(lc, name);
-  }
-  const uniqueNames = [...lcToOriginal.values()];
-
-  // Batch fetch existing
-  const existing = await db.category.findMany({
-    where: {
-      organizationId,
-      name: { in: uniqueNames, mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  const lcToId = new Map<string, string>();
-  for (const cat of existing) {
-    lcToId.set(cat.name.toLowerCase(), cat.id);
-  }
-
-  // Create missing (one per unique lowercase key)
-  const missingNames = uniqueNames.filter((n) => !lcToId.has(n.toLowerCase()));
-  if (missingNames.length > 0) {
-    await db.category.createMany({
-      data: missingNames.map((name) => ({
-        name,
-        color: getRandomColor(),
-        userId,
-        organizationId,
-      })),
-      skipDuplicates: true,
-    });
-    // Re-fetch to get IDs
-    const created = await db.category.findMany({
-      where: {
-        organizationId,
-        name: { in: missingNames, mode: "insensitive" },
-      },
-      select: { id: true, name: true },
-    });
-    for (const cat of created) {
-      lcToId.set(cat.name.toLowerCase(), cat.id);
-    }
-  }
-
-  // Map all original name variants to their resolved ID
-  for (const name of namesToResolve) {
-    const id = lcToId.get(name.toLowerCase());
-    if (id) result.set(name, id);
-  }
-
-  return result;
-}
-
-/**
- * Batch-resolves location names to IDs, creating missing ones.
- * Uses findMany + createMany + re-fetch to avoid race conditions.
- */
-async function batchResolveLocationNames(
-  names: string[],
-  userId: string,
-  organizationId: string
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
-  if (trimmedNames.length === 0) return result;
-
-  // Deduplicate case-insensitively — keep first spelling per lowercase key
-  const lcToOriginal = new Map<string, string>();
-  for (const name of trimmedNames) {
-    const lc = name.toLowerCase();
-    if (!lcToOriginal.has(lc)) lcToOriginal.set(lc, name);
-  }
-  const uniqueNames = [...lcToOriginal.values()];
-
-  // Batch fetch existing
-  const existing = await db.location.findMany({
-    where: {
-      organizationId,
-      name: { in: uniqueNames, mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  const lcToId = new Map<string, string>();
-  for (const loc of existing) {
-    lcToId.set(loc.name.toLowerCase(), loc.id);
-  }
-
-  // Create missing (one per unique lowercase key)
-  const missingNames = uniqueNames.filter((n) => !lcToId.has(n.toLowerCase()));
-  if (missingNames.length > 0) {
-    await db.location.createMany({
-      data: missingNames.map((name) => ({
-        name,
-        userId,
-        organizationId,
-      })),
-      skipDuplicates: true,
-    });
-    // Re-fetch to get IDs
-    const created = await db.location.findMany({
-      where: {
-        organizationId,
-        name: { in: missingNames, mode: "insensitive" },
-      },
-      select: { id: true, name: true },
-    });
-    for (const loc of created) {
-      lcToId.set(loc.name.toLowerCase(), loc.id);
-    }
-  }
-
-  // Map all original name variants to their resolved ID
-  for (const name of trimmedNames) {
-    const id = lcToId.get(name.toLowerCase());
-    if (id) result.set(name, id);
-  }
-
-  return result;
-}
-
-/**
- * Resolves an array of tag names to their IDs, creating any that don't exist.
- * Uses batched queries to avoid N+1 round-trips.
- */
-async function resolveTagNamesToIds(
-  names: string[],
-  userId: string,
-  organizationId: string
-): Promise<{ id: string }[]> {
-  const trimmedNames = names.map((n) => n.trim()).filter((n) => n.length > 0);
-  if (trimmedNames.length === 0) return [];
-
-  // Deduplicate (case-insensitive) while keeping first occurrence
-  const seenLc = new Set<string>();
-  const uniqueNames: string[] = [];
-  for (const name of trimmedNames) {
-    const lc = name.toLowerCase();
-    if (!seenLc.has(lc)) {
-      seenLc.add(lc);
-      uniqueNames.push(name);
-    }
-  }
-
-  // Batch fetch existing tags
-  const existingTags = await db.tag.findMany({
-    where: {
-      organizationId,
-      name: { in: uniqueNames, mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-
-  const nameToId = new Map<string, string>();
-  for (const tag of existingTags) {
-    nameToId.set(tag.name.toLowerCase(), tag.id);
-  }
-
-  // Create missing tags
-  const toCreate = uniqueNames.filter((n) => !nameToId.has(n.toLowerCase()));
-  if (toCreate.length > 0) {
-    await db.tag.createMany({
-      data: toCreate.map((name) => ({
-        name,
-        userId,
-        organizationId,
-      })),
-      skipDuplicates: true,
-    });
-
-    // Re-fetch to get IDs of newly created tags
-    const newTags = await db.tag.findMany({
-      where: {
-        organizationId,
-        name: { in: toCreate, mode: "insensitive" },
-      },
-      select: { id: true, name: true },
-    });
-    for (const tag of newTags) {
-      nameToId.set(tag.name.toLowerCase(), tag.id);
-    }
-  }
-
-  // Build result preserving original order (including duplicates)
-  const result: { id: string }[] = [];
-  for (const name of trimmedNames) {
-    const id = nameToId.get(name.toLowerCase());
-    if (id) result.push({ id });
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // Apply Updates
 // ---------------------------------------------------------------------------
 
 /**
- * Applies bulk updates from an import preview.
- * Re-parses the CSV from scratch (stateless) and applies changes.
+ * Applies bulk updates from an import CSV.
+ * Re-parses the CSV from scratch (stateless) to get fresh database state,
+ * resolves all entities in batch, then applies changes per asset with
+ * partial failure handling.
+ *
+ * @param csvData - Full CSV data array (first row is headers)
+ * @param organizationId - Organization scope
+ * @param userId - User performing the import
+ * @param request - Original HTTP request (passed through to updateAsset)
+ * @returns Results summary with updated, skipped, and failed assets
+ * @throws {ShelfError} If no identifier column found or row limit exceeded
  */
 export async function applyBulkUpdatesFromImport({
   csvData,
@@ -1308,6 +202,17 @@ export async function applyBulkUpdatesFromImport({
 }): Promise<BulkUpdateResult> {
   // Re-compute preview to get fresh state
   const headers = csvData[0].map((h) => h.trim());
+  const dataRows = csvData.slice(1);
+
+  // Guard against oversized imports
+  if (dataRows.length > MAX_BULK_UPDATE_ROWS) {
+    throw new ShelfError({
+      cause: null,
+      message: `CSV contains ${dataRows.length} data rows, but the maximum is ${MAX_BULK_UPDATE_ROWS}. Please split your file into smaller batches.`,
+      label: "Assets",
+      shouldBeCaptured: false,
+    });
+  }
 
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
@@ -1326,7 +231,6 @@ export async function applyBulkUpdatesFromImport({
     });
   }
 
-  const dataRows = csvData.slice(1);
   const allIds = dataRows
     .map((row) => row[headerAnalysis.idColumnIndex]?.trim())
     .filter(Boolean) as string[];
@@ -1425,7 +329,6 @@ export async function applyBulkUpdatesFromImport({
     error: f.reason,
   }));
 
-  // Build a map from assetId → CSV row index for error reporting
   // Build row-number index by both primary and fallback identifiers
   const seenIdsForRow = new Map<string, number>();
   for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
@@ -1488,11 +391,15 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
-      // Build UpdateAssetPayload from non-location, non-availableToBook changes
-      const updatePayload: Partial<
-        Omit<UpdateAssetPayload, "id" | "userId" | "organizationId" | "request">
-      > = {};
-      const customFieldsValues: ShelfAssetCustomFieldValueType[] = [];
+      // Build update payload fields from non-location, non-availableToBook changes
+      let title: UpdateAssetPayload["title"];
+      let categoryId: UpdateAssetPayload["categoryId"];
+      let tags: UpdateAssetPayload["tags"];
+      let valuation: UpdateAssetPayload["valuation"];
+      const customFieldsValues: {
+        id: string;
+        value: ICustomFieldValueJson;
+      }[] = [];
 
       for (const change of otherChanges) {
         const col = headerAnalysis.updatableColumns.find(
@@ -1502,35 +409,52 @@ export async function applyBulkUpdatesFromImport({
 
         switch (col.internalKey) {
           case "name":
-            updatePayload.title = change.newValue;
+            title = change.newValue;
             break;
 
           case "category": {
-            const categoryId = categoryNameMap.get(change.newValue);
-            if (categoryId) {
-              updatePayload.categoryId = categoryId;
+            if (change.clearing) {
+              // Clear category by setting to "uncategorized" sentinel
+              categoryId = "uncategorized";
+            } else {
+              const resolvedCategoryId = categoryNameMap.get(change.newValue);
+              if (resolvedCategoryId) {
+                categoryId = resolvedCategoryId;
+              }
             }
             break;
           }
 
           case "tags": {
-            const tagNames = change.newValue
-              .split(",")
-              .map((t) => t.trim())
-              .filter(Boolean);
-            const tagIds = tagNames
-              .map((n) => tagNameMap.get(n.toLowerCase()))
-              .filter((id): id is string => !!id)
-              .map((id) => ({ id }));
-            updatePayload.tags = { set: tagIds };
+            if (change.clearing) {
+              // Clear all tags
+              tags = { set: [] };
+            } else {
+              const tagNames = change.newValue
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean);
+              const tagIds = tagNames
+                .map((n) => tagNameMap.get(n.toLowerCase()))
+                .filter((id): id is string => !!id)
+                .map((id) => ({ id }));
+              tags = { set: tagIds };
+            }
             break;
           }
 
           case "valuation": {
-            const normalized = normalizeExportedCurrencyValue(change.newValue);
-            const val = Number(normalized);
-            if (Number.isFinite(val)) {
-              updatePayload.valuation = val;
+            if (change.clearing) {
+              // Clear valuation by setting to 0
+              valuation = 0;
+            } else {
+              const normalized = normalizeExportedCurrencyValue(
+                change.newValue
+              );
+              const val = Number(normalized);
+              if (Number.isFinite(val)) {
+                valuation = val;
+              }
             }
             break;
           }
@@ -1540,23 +464,33 @@ export async function applyBulkUpdatesFromImport({
             if (col.kind === "customField" && col.cfDef) {
               const fullCf = cfByName.get(col.cfDef.name.toLowerCase());
               if (fullCf) {
-                // For AMOUNT/NUMBER fields, pre-normalize and validate
-                let rawValue: string = change.newValue;
-                if (fullCf.type === "AMOUNT" || fullCf.type === "NUMBER") {
-                  rawValue = normalizeExportedCurrencyValue(rawValue);
-                  // Skip if not a valid finite number (matches preview logic)
-                  if (!Number.isFinite(Number(rawValue))) continue;
-                }
-
-                const builtValue = buildCustomFieldValue(
-                  { raw: rawValue },
-                  fullCf
-                );
-                if (builtValue) {
+                if (change.clearing) {
+                  // Clear custom field by passing empty value
+                  // buildCustomFieldValue returns undefined for empty,
+                  // which signals deletion in updateAsset
                   customFieldsValues.push({
                     id: fullCf.id,
-                    value: builtValue,
-                  } as ShelfAssetCustomFieldValueType);
+                    value: { raw: "" },
+                  });
+                } else {
+                  // For AMOUNT/NUMBER fields, pre-normalize and validate
+                  let rawValue: string = change.newValue;
+                  if (fullCf.type === "AMOUNT" || fullCf.type === "NUMBER") {
+                    rawValue = normalizeExportedCurrencyValue(rawValue);
+                    // Skip if not a valid finite number (matches preview logic)
+                    if (!Number.isFinite(Number(rawValue))) continue;
+                  }
+
+                  const builtValue = buildCustomFieldValue(
+                    { raw: rawValue },
+                    fullCf
+                  );
+                  if (builtValue) {
+                    customFieldsValues.push({
+                      id: fullCf.id,
+                      value: builtValue,
+                    });
+                  }
                 }
               }
             }
@@ -1565,68 +499,86 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
-      if (customFieldsValues.length > 0) {
-        updatePayload.customFieldsValues = customFieldsValues;
-      }
-
-      // Apply main update (everything except location and availableToBook)
       // Count actual payload fields (not otherChanges.length, which may include
       // fields that were silently skipped like invalid numbers)
       let changesApplied = 0;
-      if (updatePayload.title !== undefined) changesApplied++;
-      if (updatePayload.categoryId !== undefined) changesApplied++;
-      if (updatePayload.tags !== undefined) changesApplied++;
-      if (updatePayload.valuation !== undefined) changesApplied++;
+      if (title !== undefined) changesApplied++;
+      if (categoryId !== undefined) changesApplied++;
+      if (tags !== undefined) changesApplied++;
+      if (valuation !== undefined) changesApplied++;
       changesApplied += customFieldsValues.length;
 
       const hasMainChanges =
-        updatePayload.title !== undefined ||
-        updatePayload.categoryId !== undefined ||
-        updatePayload.tags !== undefined ||
-        updatePayload.valuation !== undefined ||
-        (updatePayload.customFieldsValues &&
-          updatePayload.customFieldsValues.length > 0);
+        title !== undefined ||
+        categoryId !== undefined ||
+        tags !== undefined ||
+        valuation !== undefined ||
+        customFieldsValues.length > 0;
 
       if (hasMainChanges) {
-        await updateAsset({
+        const payload: UpdateAssetPayload = {
           id: assetDbId,
           userId,
           organizationId,
           request,
-          ...updatePayload,
-        } as UpdateAssetPayload);
+          title,
+          categoryId,
+          tags,
+          valuation,
+          customFieldsValues:
+            customFieldsValues.length > 0
+              ? (customFieldsValues as UpdateAssetPayload["customFieldsValues"])
+              : undefined,
+        };
+        await updateAsset(payload);
       }
 
       // Handle location separately to catch kit constraint
       if (locationChange) {
         try {
-          const locationId = locationNameMap.get(locationChange.newValue);
-          if (!locationId) {
-            throw new ShelfError({
-              cause: null,
-              message: `Location "${locationChange.newValue}" could not be resolved`,
-              label: "Assets",
-              shouldBeCaptured: false,
-            });
+          if (locationChange.clearing) {
+            // Clear location by setting newLocationId to null
+            const locationPayload: UpdateAssetPayload = {
+              id: assetDbId,
+              userId,
+              organizationId,
+              request,
+              newLocationId: null,
+              currentLocationId: existingAsset.location?.id ?? undefined,
+            };
+            await updateAsset(locationPayload);
+            changesApplied++;
+          } else {
+            const locationId = locationNameMap.get(locationChange.newValue);
+            if (!locationId) {
+              throw new ShelfError({
+                cause: null,
+                message: `Location "${locationChange.newValue}" could not be resolved`,
+                label: "Assets",
+                shouldBeCaptured: false,
+              });
+            }
+            const locationPayload: UpdateAssetPayload = {
+              id: assetDbId,
+              userId,
+              organizationId,
+              request,
+              newLocationId: locationId,
+              currentLocationId: existingAsset.location?.id ?? undefined,
+            };
+            await updateAsset(locationPayload);
+            changesApplied++;
           }
-          await updateAsset({
-            id: assetDbId,
-            userId,
-            organizationId,
-            request,
-            newLocationId: locationId,
-            currentLocationId: existingAsset.location?.id ?? undefined,
-          } as UpdateAssetPayload);
-          changesApplied++;
         } catch (cause) {
-          // If location fails due to kit, track it but don't double-count
-          const msg = isLikeShelfError(cause)
-            ? (cause as { message: string }).message
-            : "Location update failed";
-          if (!msg.includes("kit")) {
+          // If location fails due to kit constraint, track it but continue.
+          // The kit constraint error sets additionalData.kitId.
+          const isKitConstraint =
+            isLikeShelfError(cause) &&
+            !!(cause as ShelfError).additionalData?.kitId;
+          if (!isKitConstraint) {
             throw cause; // Re-throw non-kit errors
           }
-          // Kit location failure — tracked as partial if other fields applied
+          const msg = (cause as ShelfError).message;
           locationKitError = `Location change skipped: ${msg}`;
         }
       }
@@ -1646,7 +598,7 @@ export async function applyBulkUpdatesFromImport({
           }
         } catch (cause) {
           const msg = isLikeShelfError(cause)
-            ? (cause as { message: string }).message
+            ? (cause as ShelfError).message
             : "Booking availability update failed";
           // Track as partial failure if other fields already applied
           if (changesApplied > 0 || hasMainChanges) {
@@ -1697,7 +649,7 @@ export async function applyBulkUpdatesFromImport({
       }
     } catch (cause) {
       const msg = isLikeShelfError(cause)
-        ? (cause as { message: string }).message
+        ? (cause as ShelfError).message
         : "Unknown error";
       failed.push({
         id: matchId,

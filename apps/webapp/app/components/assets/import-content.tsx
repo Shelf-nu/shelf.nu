@@ -1,10 +1,17 @@
+/**
+ * @file Import content components for CSV asset import.
+ * Provides the main ImportContent layout and FileForm for file upload
+ * with client-side validation, preview, and confirmation flow.
+ *
+ * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
+ */
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
+import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
-import { isFormProcessing } from "~/utils/form";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
 import Icon from "../icons/icon";
@@ -23,6 +30,10 @@ import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
+/**
+ * Main content component for the CSV asset import page.
+ * Displays instructions, rules, and embeds the FileForm for upload.
+ */
 export const ImportContent = () => {
   const { canUseBarcodes } = useBarcodePermissions();
 
@@ -258,13 +269,24 @@ export const ImportContent = () => {
   );
 };
 
+/**
+ * File upload form with confirmation dialog for CSV asset import.
+ * Handles file selection, "I AGREE" confirmation, and displays
+ * import errors or success state.
+ *
+ * @param intent - The form intent value sent to the action
+ * @param url - Optional custom action URL for the form
+ */
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
-  const [agreed, setAgreed] = useState<"I AGREE" | "">("");
+  // Widened to `string` so toUpperCase() doesn't need a cast.
+  // The "I AGREE" check happens at submit time.
+  const [agreed, setAgreed] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcherWithReset<typeof action>();
 
-  const { data, state } = fetcher;
-  const disabled = isFormProcessing(state) || agreed !== "I AGREE";
+  const { data } = fetcher;
+  const isSubmitting = useDisabled(fetcher);
+  const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
   //
 
@@ -333,9 +355,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   autoFocus
                   name="agree"
                   value={agreed}
-                  onChange={(e) =>
-                    setAgreed(e.target.value.toUpperCase() as any)
-                  }
+                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
                   placeholder="I AGREE"
                   pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
                   required
@@ -510,7 +530,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   }}
                   disabled={disabled}
                 >
-                  {isFormProcessing(fetcher.state) ? "Importing..." : "Import"}
+                  {isSubmitting ? "Importing..." : "Import"}
                 </Button>
               </>
             )}

@@ -329,6 +329,7 @@ export async function exportAssetsFromIndexToCsv({
   });
   const csvData = buildCsvExportDataFromAssets({
     assets,
+    // "name" is always present in column settings (included by default in schema generation)
     columns: settings.columns as Column[],
     currentOrganization,
     request,

@@ -7,6 +7,7 @@
  */
 import type { ClientValidation } from "./helpers";
 import Icon from "../../icons/icon";
+import { AlertIcon } from "../../icons/library";
 
 // ---------------------------------------------------------------------------
 // Summary Pill (used in both preview and results)
@@ -42,6 +43,14 @@ export function SummaryPill({
 // Client Validation Feedback
 // ---------------------------------------------------------------------------
 
+/**
+ * Displays client-side CSV validation results after a file is selected.
+ * Shows the detected identifier column, column/row counts, and any
+ * validation warnings (e.g. missing required columns, encoding issues).
+ *
+ * @param validation - The client-side validation result from CSV parsing
+ * @param fileName - Name of the uploaded file, shown as context
+ */
 export function ClientValidationFeedback({
   validation,
   fileName,
@@ -75,7 +84,7 @@ export function ClientValidationFeedback({
         <div className="mt-2 space-y-1">
           {validation.warnings.map((w, i) => (
             <p key={i} className="text-amber-600">
-              ⚠ {w}
+              <AlertIcon className="inline-block size-4" /> {w}
             </p>
           ))}
         </div>
@@ -88,6 +97,12 @@ export function ClientValidationFeedback({
 // Defected Headers Table (shown on import errors)
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders a table of unrecognized CSV headers and their error messages.
+ * Shown when the server rejects certain column headers during import.
+ *
+ * @param data - Array of objects with incorrectHeader and errorMessage fields
+ */
 export function DefectedHeadersTable({
   data,
 }: {

@@ -15,6 +15,7 @@ import { PREVIEW_DISPLAY_LIMIT } from "./helpers";
 import { SummaryPill } from "./shared";
 import { SpreadsheetPreview } from "./spreadsheet-preview";
 import Input from "../../forms/input";
+import { AlertIcon } from "../../icons/library";
 import { Button } from "../../shared/button";
 import {
   AlertDialog,
@@ -47,6 +48,7 @@ export function PreviewDisplay({
   selectedFile,
   onReanalyze,
   isReanalyzing,
+  onReset,
 }: {
   preview: UpdatePreview;
   formRef: React.RefObject<HTMLFormElement | null>;
@@ -57,6 +59,7 @@ export function PreviewDisplay({
   selectedFile: File | null;
   onReanalyze: () => void;
   isReanalyzing: boolean;
+  onReset: () => void;
 }) {
   const totalChanges = preview.totalFieldChanges;
   const totalAssets = preview.assetsToUpdate.length;
@@ -222,7 +225,8 @@ export function PreviewDisplay({
       {hasNewEntities && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
           <p className="mb-2 font-medium text-amber-800">
-            ⚠ New items will be created
+            <AlertIcon className="inline-block size-4" /> New items will be
+            created
           </p>
           <p className="mb-2 text-sm text-amber-700">
             The following items don't exist yet and will be created
@@ -303,12 +307,14 @@ export function PreviewDisplay({
 
       {/* Spreadsheet-style change grid */}
       {preview.assetsToUpdate.length > 0 && (
-        <SpreadsheetPreview
-          assets={preview.assetsToUpdate}
-          columns={preview.updatableColumns}
-          displayLimit={PREVIEW_DISPLAY_LIMIT}
-          totalChanges={totalChanges}
-        />
+        <div>
+          <SpreadsheetPreview
+            assets={preview.assetsToUpdate}
+            columns={preview.updatableColumns}
+            displayLimit={PREVIEW_DISPLAY_LIMIT}
+            totalChanges={totalChanges}
+          />
+        </div>
       )}
 
       {/* Skipped assets (collapsible) */}
@@ -342,7 +348,7 @@ export function PreviewDisplay({
 
       {/* Apply confirmation */}
       {preview.assetsToUpdate.length > 0 && (
-        <>
+        <div className="mt-2 flex items-center gap-3">
           <AlertDialog
             onOpenChange={(open) => {
               if (!open) {
@@ -351,7 +357,7 @@ export function PreviewDisplay({
             }}
           >
             <AlertDialogTrigger asChild>
-              <Button type="button" className="mt-2">
+              <Button type="button">
                 Apply {totalChanges} change
                 {totalChanges !== 1 ? "s" : ""} to {totalAssets} asset
                 {totalAssets !== 1 ? "s" : ""}
@@ -368,7 +374,7 @@ export function PreviewDisplay({
                   </strong>{" "}
                   across <strong>{totalAssets}</strong> asset
                   {totalAssets !== 1 ? "s" : ""}. This action cannot be undone.
-                  Empty cells will be left unchanged.
+                  Empty cells will clear existing values where applicable.
                 </AlertDialogDescription>
                 {hasNewEntities && (
                   <AlertDialogDescription>
@@ -454,7 +460,10 @@ export function PreviewDisplay({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </>
+          <Button type="button" variant="secondary" onClick={onReset}>
+            Start over
+          </Button>
+        </div>
       )}
 
       {preview.assetsToUpdate.length === 0 && (

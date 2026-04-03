@@ -109,7 +109,7 @@ export default function AssetsImport() {
   return (
     <div className="h-full">
       <Header />
-      <div className="mx-auto h-auto w-full max-w-screen-lg px-4 py-10">
+      <div className="mx-auto h-auto w-full px-4 py-10">
         <ImportContent />
       </div>
     </div>
