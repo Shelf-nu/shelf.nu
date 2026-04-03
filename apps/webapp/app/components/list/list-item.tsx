@@ -28,6 +28,19 @@ const CHROMIUM_HOVER_FIX = {
   backgroundAttachment: "initial",
 } as const;
 
+/**
+ * Renders a table row for list views with optional navigation and animation.
+ *
+ * Uses a plain `<tr>` by default for performance. When `motionProps` are
+ * provided (e.g. kit expand/collapse), renders a framer-motion `motion.tr`.
+ *
+ * @param item - The data item for this row (must have an `id`).
+ * @param children - Content to render inside the row.
+ * @param navigate - Optional click handler; receives item id and data.
+ * @param className - Additional CSS classes for the row.
+ * @param motionProps - When provided, enables framer-motion animations.
+ * @see {@link ListItemProps}
+ */
 export const ListItem = memo(function ListItem({
   item,
   children,

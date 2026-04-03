@@ -1,3 +1,5 @@
+/* eslint-disable no-console -- This module's purpose is to emit timing data */
+
 /**
  * Lightweight server-side performance tracking for route loaders.
  *
@@ -68,44 +70,46 @@ export function createPerfTracker(routeName: string) {
      * Dev: colored console output. Prod: structured JSON.
      */
     report() {
-      const totalMs = performance.now() - routeStart;
+      try {
+        const totalMs = performance.now() - routeStart;
 
-      if (NODE_ENV === "development") {
-        const sorted = [...entries].sort((a, b) => b.durationMs - a.durationMs);
-        const lines = sorted.map((e) => {
-          const bar = "█".repeat(
-            Math.max(1, Math.round((e.durationMs / totalMs) * 30))
+        if (NODE_ENV === "development") {
+          const sorted = [...entries].sort(
+            (a, b) => b.durationMs - a.durationMs
           );
-          const color =
-            e.durationMs > 100
-              ? "\x1b[31m" // red >100ms
-              : e.durationMs > 30
-              ? "\x1b[33m" // yellow >30ms
-              : "\x1b[32m"; // green
-          return `  ${color}${bar}\x1b[0m ${e.label}: ${e.durationMs.toFixed(
-            1
-          )}ms (started +${e.startMs.toFixed(0)}ms)`;
-        });
+          const lines = sorted.map((e) => {
+            const bar = "█".repeat(
+              Math.max(1, Math.round((e.durationMs / totalMs) * 30))
+            );
+            const color =
+              e.durationMs > 100
+                ? "\x1b[31m" // red >100ms
+                : e.durationMs > 30
+                  ? "\x1b[33m" // yellow >30ms
+                  : "\x1b[32m"; // green
+            return `  ${color}${bar}\x1b[0m ${e.label}: ${e.durationMs.toFixed(1)}ms (started +${e.startMs.toFixed(0)}ms)`;
+          });
 
-        console.log(
-          `\n\x1b[36m⏱ ${routeName}\x1b[0m — ${totalMs.toFixed(
-            0
-          )}ms total\n${lines.join("\n")}`
-        );
-      } else {
-        // Structured log for production monitoring (Sentry, Datadog, etc.)
-        console.log(
-          JSON.stringify({
-            type: "perf",
-            route: routeName,
-            totalMs: Math.round(totalMs),
-            operations: entries.map((e) => ({
-              label: e.label,
-              ms: Math.round(e.durationMs),
-              startMs: Math.round(e.startMs),
-            })),
-          })
-        );
+          console.log(
+            `\n\x1b[36m⏱ ${routeName}\x1b[0m — ${totalMs.toFixed(0)}ms total\n${lines.join("\n")}`
+          );
+        } else {
+          // Structured log for production monitoring (Sentry, Datadog, etc.)
+          console.log(
+            JSON.stringify({
+              type: "perf",
+              route: routeName,
+              totalMs: Math.round(totalMs),
+              operations: entries.map((e) => ({
+                label: e.label,
+                ms: Math.round(e.durationMs),
+                startMs: Math.round(e.startMs),
+              })),
+            })
+          );
+        }
+      } catch {
+        // Perf reporting must never break the loader
       }
     },
 
