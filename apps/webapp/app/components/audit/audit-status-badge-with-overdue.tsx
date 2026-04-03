@@ -24,6 +24,7 @@ export function AuditStatusBadgeWithOverdue({
     dueDate &&
     status !== "COMPLETED" &&
     status !== "CANCELLED" &&
+    status !== "ARCHIVED" &&
     new Date(dueDate) < new Date();
 
   return (
