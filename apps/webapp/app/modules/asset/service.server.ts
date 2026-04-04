@@ -3152,31 +3152,29 @@ export async function refreshExpiredAssetImages<
         return null;
       }
 
-      const newMainImageUrl = await createSignedUrl({
-        filename: mainImagePath,
-        bucketName: "assets",
-      });
+      // Refresh main image and thumbnail in parallel — they're independent
+      // Supabase signed URL calls. This halves latency for assets with thumbnails.
+      const thumbnailPath = asset.thumbnailImage
+        ? extractStoragePath(asset.thumbnailImage, "assets")
+        : null;
 
-      // Refresh thumbnail if present — isolated so failure doesn't block mainImage
-      let newThumbnailUrl: string | null = null;
-      if (asset.thumbnailImage) {
-        try {
-          const thumbnailPath = extractStoragePath(
-            asset.thumbnailImage,
-            "assets"
-          );
-          if (thumbnailPath) {
-            newThumbnailUrl = await createSignedUrl({
+      const [newMainImageUrl, newThumbnailUrl] = await Promise.all([
+        createSignedUrl({
+          filename: mainImagePath,
+          bucketName: "assets",
+        }),
+        thumbnailPath
+          ? createSignedUrl({
               filename: thumbnailPath,
               bucketName: "assets",
-            });
-          }
-        } catch {
-          Logger.info(
-            `Failed to refresh thumbnail for asset ${asset.id}, proceeding with mainImage only`
-          );
-        }
-      }
+            }).catch(() => {
+              Logger.info(
+                `Failed to refresh thumbnail for asset ${asset.id}, proceeding with mainImage only`
+              );
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
 
       const newExpiration = oneDayFromNow();
 
@@ -4294,9 +4292,11 @@ export async function getEntitiesWithSelectedValues({
       where: { organizationId, id: { notIn: selectedCategoryIds } },
       take: allSelectedEntries.includes("category") ? undefined : 12,
     }),
-    db.category.findMany({
-      where: { organizationId, id: { in: selectedCategoryIds } },
-    }),
+    selectedCategoryIds.length > 0
+      ? db.category.findMany({
+          where: { organizationId, id: { in: selectedCategoryIds } },
+        })
+      : Promise.resolve([]),
     db.category.count({ where: { organizationId } }),
     /** Categories end */
 
@@ -4313,17 +4313,19 @@ export async function getEntitiesWithSelectedValues({
       take: allSelectedEntries.includes("tag") ? undefined : 12,
       orderBy: { name: "asc" },
     }),
-    db.tag.findMany({
-      where: {
-        organizationId,
-        id: { in: selectedTagIds },
-        OR: [
-          { useFor: { isEmpty: true } },
-          { useFor: { has: TagUseFor.ASSET } },
-        ],
-      },
-      orderBy: { name: "asc" },
-    }),
+    selectedTagIds.length > 0
+      ? db.tag.findMany({
+          where: {
+            organizationId,
+            id: { in: selectedTagIds },
+            OR: [
+              { useFor: { isEmpty: true } },
+              { useFor: { has: TagUseFor.ASSET } },
+            ],
+          },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([]),
     db.tag.count({
       where: {
         organizationId,
@@ -4340,9 +4342,11 @@ export async function getEntitiesWithSelectedValues({
       where: { organizationId, id: { notIn: selectedLocationIds } },
       take: allSelectedEntries.includes("location") ? undefined : 12,
     }),
-    db.location.findMany({
-      where: { organizationId, id: { in: selectedLocationIds } },
-    }),
+    selectedLocationIds.length > 0
+      ? db.location.findMany({
+          where: { organizationId, id: { in: selectedLocationIds } },
+        })
+      : Promise.resolve([]),
     db.location.count({ where: { organizationId } }),
     /** Location end */
   ]);
