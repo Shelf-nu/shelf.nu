@@ -369,23 +369,20 @@ export async function advancedModeLoader({
       organizationId
     );
 
-  const {
-    tags,
-    totalTags,
-    categories,
-    totalCategories,
-    locations,
-    totalLocations,
-  } = await getEntitiesWithSelectedValues({
-    organizationId,
-    allSelectedEntries,
-    selectedTagIds: selectedTags,
-    selectedCategoryIds: selectedCategory,
-    selectedLocationIds: selectedLocation,
-  });
-
-  /** Query tierLimit, assets & Asset index settings */
+  // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
+  // categories, locations). Its output is only used in the final response
+  // payload — no other query depends on it. Running it inside Promise.all
+  // lets it overlap with the asset query instead of blocking it.
+  /** Query entities, tierLimit, assets & more — all in parallel */
   const [
+    {
+      tags,
+      totalTags,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+    },
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
@@ -398,6 +395,13 @@ export async function advancedModeLoader({
     totalBookings,
     advNotifyData,
   ] = await Promise.all([
+    getEntitiesWithSelectedValues({
+      organizationId,
+      allSelectedEntries,
+      selectedTagIds: selectedTags,
+      selectedCategoryIds: selectedCategory,
+      selectedLocationIds: selectedLocation,
+    }),
     getOrganizationTierLimit({
       organizationId,
       organizations,
