@@ -122,9 +122,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         request,
       }),
       initializePerPageCookieOnLayout(request),
-      installPwaPromptCookie.parse(request.headers.get("Cookie")).then(
-        (c: any) => c || {}
-      ),
+      installPwaPromptCookie
+        .parse(request.headers.get("Cookie"))
+        .then((c) => (c ?? {}) as { hidden?: boolean }),
     ]);
 
     const {
