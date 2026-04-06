@@ -328,13 +328,10 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
-  // Pass both assets and columns to the build function
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: [
-      { name: "name", visible: true, position: 0 },
-      ...(settings.columns as Column[]),
-    ],
+    // "name" is always present in column settings (included by default in schema generation)
+    columns: settings.columns as Column[],
     currentOrganization,
     request,
   });

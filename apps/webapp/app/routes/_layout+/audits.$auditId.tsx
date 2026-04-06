@@ -21,6 +21,7 @@ import {
   getAuditSessionDetails,
   updateAuditSession,
   cancelAuditSession,
+  archiveAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -126,6 +127,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         organizationId,
         userId,
         hints,
+      });
+
+      return payload({ success: true });
+    }
+
+    if (intent === "archive-audit") {
+      // Only admin/owner can archive — UI gates this, but enforce server-side
+      // to prevent direct POST bypass by self-service/base roles
+      if (isSelfServiceOrBase) {
+        throw new ShelfError({
+          cause: null,
+          message: "You do not have permission to archive audits.",
+          additionalData: { userId, auditId },
+          label,
+          status: 403,
+        });
+      }
+
+      await archiveAuditSession({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
       });
 
       return payload({ success: true });
@@ -255,6 +278,7 @@ export default function AuditDetailsPage() {
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
+  const isArchived = session.status === AuditStatus.ARCHIVED;
   const isCreator = session.createdById === userId;
 
   // Check if current user is assigned to this audit
@@ -297,23 +321,29 @@ export default function AuditDetailsPage() {
           {/* Show actions dropdown to anyone who can view the audit (for PDF download) */}
           {(isAdminOrOwner || isCreator || isAssignee) && <ActionsDropdown />}
 
-          {!isCompleted && !isCancelled && canScanAndComplete && (
-            <Button
-              to={`/audits/${session.id}/scan`}
-              variant={"secondary"}
-              type={"button"}
-            >
-              {hasScans ? "Continue scanning" : "Start scanning"}
-            </Button>
-          )}
+          {!isCompleted &&
+            !isCancelled &&
+            !isArchived &&
+            canScanAndComplete && (
+              <Button
+                to={`/audits/${session.id}/scan`}
+                variant={"secondary"}
+                type={"button"}
+              >
+                {hasScans ? "Continue scanning" : "Start scanning"}
+              </Button>
+            )}
 
-          {!isCompleted && !isCancelled && canScanAndComplete && (
-            <CompleteAuditDialog
-              disabled={!hasScans}
-              auditName={session.name}
-              stats={stats}
-            />
-          )}
+          {!isCompleted &&
+            !isCancelled &&
+            !isArchived &&
+            canScanAndComplete && (
+              <CompleteAuditDialog
+                disabled={!hasScans}
+                auditName={session.name}
+                stats={stats}
+              />
+            )}
         </div>
       </Header>
       <HorizontalTabs items={items} />
