@@ -167,6 +167,7 @@ export default function ListAssetContent({
                     id={item.id}
                     status={contextStatus}
                     availableToBook={item.availableToBook}
+                    asset={item}
                   />
                 )}
               </div>

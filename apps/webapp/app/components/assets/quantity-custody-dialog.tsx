@@ -13,7 +13,7 @@
  */
 
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
@@ -36,17 +36,27 @@ import { resolveTeamMemberName } from "~/utils/user";
 export interface QuantityCustodyDialogProps {
   /** The ID of the asset to assign custody for */
   assetId: string;
-  /** The trigger element that opens the dialog */
-  trigger: ReactNode;
+  /** The trigger element that opens the dialog. Omit when using controlled mode. */
+  trigger?: ReactNode;
   /** Optional unit of measure label (e.g., "pcs", "liters") */
   unitOfMeasure?: string | null;
   /** Maximum quantity available for checkout */
   availableQuantity?: number;
+  /** Controlled open state — when provided, the dialog is externally controlled */
+  open?: boolean;
+  /** Callback when the dialog open state changes (controlled mode) */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
  * Dialog for assigning quantity custody of a QUANTITY_TRACKED asset
  * to a team member.
+ *
+ * Supports two modes:
+ * - **Uncontrolled** (default): Pass a `trigger` element. The dialog manages
+ *   its own open/close state via `AlertDialogTrigger`.
+ * - **Controlled**: Pass `open` and `onOpenChange` props. Useful when the
+ *   dialog must render outside a parent popover to avoid portal conflicts.
  *
  * Uses a fetcher to POST to `/api/assets/assign-quantity-custody`.
  * The dialog auto-closes on successful submission and resets its form fields.
@@ -59,8 +69,22 @@ export function QuantityCustodyDialog({
   trigger,
   unitOfMeasure,
   availableQuantity,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: QuantityCustodyDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = useCallback(
+    (v: boolean) => {
+      if (isControlled) {
+        controlledOnOpenChange?.(v);
+      } else {
+        setInternalOpen(v);
+      }
+    },
+    [isControlled, controlledOnOpenChange]
+  );
   /** Track the selected team member ID for the hidden input */
   const [selectedTeamMemberId, setSelectedTeamMemberId] = useState<
     string | null
@@ -74,18 +98,20 @@ export function QuantityCustodyDialog({
 
   /** Close the dialog and reset state after a successful submission */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) {
+    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
       setSelectedTeamMemberId(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, setOpen]);
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+      {trigger ? (
+        <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+      ) : null}
 
-      <AlertDialogContent>
+      <AlertDialogContent onEscapeKeyDown={() => setOpen(false)}>
         <AlertDialogHeader>
           <AlertDialogTitle>Assign Quantity Custody</AlertDialogTitle>
           <AlertDialogDescription>

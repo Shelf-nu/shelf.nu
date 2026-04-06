@@ -15,9 +15,15 @@
 
 import type React from "react";
 import type { ConsumptionType } from "@prisma/client";
-import { Badge } from "~/components/shared/badge";
+import { TriangleAlertIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { tw } from "~/utils/tw";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
 
@@ -39,8 +45,6 @@ export interface QuantityOverviewCardProps {
   inCustodyQuantity?: number;
   /** Whether the user has permission to adjust quantity */
   canUpdate?: boolean;
-  /** When true, the quick-adjust dialog opens automatically (e.g., QR scan) */
-  autoOpenAdjust?: boolean;
   /** Optional additional CSS class names */
   className?: string;
 }
@@ -61,18 +65,38 @@ function formatWithUnit(value: number, unit: string | null): string {
  *
  * @param props.label - Row label displayed on the left
  * @param props.value - Row value displayed on the right
+ * @param props.warning - When true, renders the value in amber with a warning icon
  */
 function OverviewRow({
   label,
   value,
+  warning,
 }: {
   label: string;
   value: React.ReactNode;
+  warning?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 last:border-b-0">
       <span className="text-[14px] text-gray-600">{label}</span>
-      <span className="text-[14px] font-medium text-gray-900">{value}</span>
+      <span className="flex items-center gap-1.5 text-[14px] font-medium text-gray-900">
+        {warning ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TriangleAlertIcon className="size-4 text-amber-500" />
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                <p className="text-xs">
+                  Low stock — an email alert has been sent to the workspace
+                  owner.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
+        {value}
+      </span>
     </div>
   );
 }
@@ -96,7 +120,6 @@ export function QuantityOverviewCard({
   availableQuantity,
   inCustodyQuantity,
   canUpdate = false,
-  autoOpenAdjust = false,
   className,
 }: QuantityOverviewCardProps) {
   const qty = quantity ?? 0;
@@ -121,38 +144,30 @@ export function QuantityOverviewCard({
     <Card className={tw("my-3 p-0", className)}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <h3 className="text-[14px] font-semibold text-gray-900">
-            Quantity Overview
-          </h3>
-          {isLowStock ? (
-            <Badge color="#f59e0b" withDot={false}>
-              Low Stock
-            </Badge>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[14px] font-medium text-gray-700">
-            {available} / {formatWithUnit(qty, unit)}
-          </span>
-          {canUpdate ? (
-            <QuickAdjustDialog
-              assetId={assetId}
-              unitOfMeasure={unitOfMeasure}
-              autoOpen={autoOpenAdjust}
-              trigger={
-                <Button type="button" variant="secondary" size="sm">
-                  Adjust
-                </Button>
-              }
-            />
-          ) : null}
-        </div>
+        <h3 className="text-[14px] font-semibold text-gray-900">
+          Quantity Overview
+        </h3>
+        {canUpdate ? (
+          <QuickAdjustDialog
+            assetId={assetId}
+            unitOfMeasure={unitOfMeasure}
+            availableQuantity={available}
+            trigger={
+              <Button type="button" variant="secondary" size="sm">
+                Adjust
+              </Button>
+            }
+          />
+        ) : null}
       </div>
 
       {/* Detail rows */}
       <OverviewRow label="Total quantity" value={formatWithUnit(qty, unit)} />
-      <OverviewRow label="Available" value={formatWithUnit(available, unit)} />
+      <OverviewRow
+        label="Available"
+        value={formatWithUnit(available, unit)}
+        warning={isLowStock}
+      />
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
       <OverviewRow label="Unit of measure" value={unit ?? "—"} />
       {minQuantity != null ? (

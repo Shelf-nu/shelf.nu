@@ -282,6 +282,7 @@ export function BookingAssetsSidebar({
                                             availableToBook={
                                               asset.availableToBook
                                             }
+                                            asset={asset}
                                           />
                                         </div>
                                       </div>
@@ -350,6 +351,7 @@ export function BookingAssetsSidebar({
                                     id={asset.id}
                                     status={asset.status}
                                     availableToBook={asset.availableToBook}
+                                    asset={asset}
                                   />
                                 </div>
                               </div>

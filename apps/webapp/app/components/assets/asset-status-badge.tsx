@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Booking } from "@prisma/client";
+import type { AssetType, Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
@@ -12,6 +12,12 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "../shared/hover-card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 import { UnavailableBadge } from "../shared/unavailable-badge";
 import When from "../when/when";
 
@@ -48,15 +54,54 @@ export const assetStatusColorMap = (
   }
 };
 
+/**
+ * Minimal asset shape needed for quantity-aware status display.
+ * Kept lightweight so any call site with the asset object can pass it.
+ */
+interface QuantityAwareAsset {
+  type?: AssetType | null;
+  quantity?: number | null;
+  custody?:
+    | Array<{ quantity?: number; [key: string]: unknown }>
+    | { quantity?: number; [key: string]: unknown }
+    | null;
+  /** Allow additional properties so any asset-like object can be passed */
+  [key: string]: unknown;
+}
+
+/**
+ * Computes quantity breakdown from an asset's custody records.
+ * Returns null for non-quantity-tracked assets.
+ */
+function getQuantityData(asset?: QuantityAwareAsset | null) {
+  if (!asset || asset.type !== "QUANTITY_TRACKED") return null;
+  const total = asset.quantity ?? 0;
+  const custodyArray = Array.isArray(asset.custody)
+    ? asset.custody
+    : asset.custody
+    ? [asset.custody]
+    : [];
+  const inCustody = custodyArray.reduce((sum, c) => sum + (c.quantity ?? 0), 0);
+  return { total, inCustody, available: total - inCustody };
+}
+
 export function AssetStatusBadge({
   id,
   status,
   availableToBook = true,
+  asset,
 }: {
   id: string;
   status: ExtendedAssetStatus;
   availableToBook: boolean;
+  /**
+   * When provided, the badge auto-detects quantity-tracked assets and
+   * renders a quantity-aware status (e.g., "Partial custody") with a
+   * tooltip showing the breakdown. No effect for individual assets.
+   */
+  asset?: QuantityAwareAsset | null;
 }) {
+  const quantityData = useMemo(() => getQuantityData(asset), [asset]);
   // Fetch the booking from API when asset is CHECKED_OUT
   // The API correctly finds the booking where asset is checked out
   // (excluding bookings where it's been partially checked in)
@@ -72,6 +117,44 @@ export function AssetStatusBadge({
 
     return data;
   }, [data, status]);
+
+  /**
+   * For quantity-tracked assets, compute a display status from custody data:
+   * - All available → "Available" (green)
+   * - Some in custody → "Partial custody" (blue) with tooltip
+   * - All in custody → "In custody" (blue)
+   */
+  if (quantityData && quantityData.inCustody > 0) {
+    const isFullCustody = quantityData.available === 0;
+    const label = isFullCustody ? "In custody" : "Partial custody";
+    const colors = BADGE_COLORS.blue;
+
+    return (
+      <span className="flex items-center gap-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Badge color={colors.bg} textColor={colors.text}>
+                  {label}
+                </Badge>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">
+                {quantityData.inCustody} of {quantityData.total} in custody
+                {" — "}
+                {quantityData.available} available
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        {!availableToBook && (
+          <UnavailableBadge title="This asset is marked as unavailable for bookings" />
+        )}
+      </span>
+    );
+  }
 
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil

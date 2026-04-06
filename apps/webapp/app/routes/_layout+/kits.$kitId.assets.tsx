@@ -185,6 +185,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
+                asset={item}
               />
             </div>
           </div>

@@ -220,7 +220,7 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn id={item.id} status={item.status} />;
+      return <StatusColumn id={item.id} status={item.status} asset={item} />;
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -405,10 +405,23 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
+function StatusColumn({
+  id,
+  status,
+  asset,
+}: {
+  id: string;
+  status: AssetStatus;
+  asset?: AdvancedIndexAsset;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge id={id} status={status} availableToBook={true} />
+      <AssetStatusBadge
+        id={id}
+        status={status}
+        availableToBook={true}
+        asset={asset}
+      />
     </Td>
   );
 }

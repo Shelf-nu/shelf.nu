@@ -174,6 +174,7 @@ export default function DuplicateAsset() {
                   id={asset.id}
                   status={asset.status}
                   availableToBook={asset.availableToBook}
+                  asset={asset}
                 />
               </div>
             </div>

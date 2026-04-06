@@ -15,13 +15,17 @@
  * @see {@link file://./assets.bulk-assign-custody.ts} - Similar API route pattern
  */
 
+import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
+import { createNote } from "~/modules/note/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -68,8 +72,29 @@ export async function action({ context, request }: ActionFunctionArgs) {
       note,
     });
 
-    /** Build a human-readable notification message */
+    /** Build and create an audit note on the asset */
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    const actor = wrapUserLinkForNote(user);
     const sign = direction === "add" ? "+" : "-";
+    const categoryLabel = category.toLowerCase();
+    const noteContent = note
+      ? `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}). *"${note}"*`
+      : `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
+
+    await createNote({
+      content: noteContent,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+
     sendNotification({
       title: `Quantity adjusted: ${sign}${quantity}`,
       message: "The asset quantity has been updated successfully.",

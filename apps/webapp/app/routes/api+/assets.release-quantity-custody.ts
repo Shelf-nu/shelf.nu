@@ -10,12 +10,20 @@
  * @see {@link file://./assets.assign-quantity-custody.ts} — Counterpart checkout route
  */
 
+import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { releaseQuantity } from "~/modules/asset/service.server";
+import { createNote } from "~/modules/note/service.server";
+import { getTeamMember } from "~/modules/team-member/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -54,6 +62,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ReleaseQuantityCustodySchema
     );
 
+    /** Fetch team member with user info for the audit note */
+    const teamMember = await getTeamMember({
+      id: teamMemberId,
+      organizationId,
+      include: { user: true },
+    });
+
     await releaseQuantity({
       assetId,
       teamMemberId,
@@ -61,6 +76,39 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       note,
+    });
+
+    /** Build and create an audit note on the asset */
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    const actor = wrapUserLinkForNote(user);
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: {
+        name: teamMember.name,
+        user: teamMember.user
+          ? {
+              id: teamMember.user.id,
+              firstName: teamMember.user.firstName,
+              lastName: teamMember.user.lastName,
+            }
+          : null,
+      },
+    });
+
+    const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
+    const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+
+    await createNote({
+      content: noteContent,
+      type: "UPDATE",
+      userId,
+      assetId,
     });
 
     sendNotification({

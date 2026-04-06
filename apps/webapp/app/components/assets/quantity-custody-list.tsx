@@ -212,7 +212,7 @@ function ReleaseButton({
 
   /** Close the dialog after a successful release */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) {
+    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
       formRef.current?.reset();
     }
@@ -221,16 +221,12 @@ function ReleaseButton({
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="secondary"
-          className="py-1 text-xs text-error-600 hover:text-error-700"
-        >
+        <Button type="button" variant="secondary" className="py-1 text-xs">
           Release
         </Button>
       </AlertDialogTrigger>
 
-      <AlertDialogContent>
+      <AlertDialogContent onEscapeKeyDown={() => setOpen(false)}>
         <AlertDialogHeader>
           <AlertDialogTitle>Release Quantity</AlertDialogTitle>
           <AlertDialogDescription>

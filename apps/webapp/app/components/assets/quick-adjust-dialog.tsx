@@ -13,7 +13,7 @@
  */
 
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -34,16 +34,26 @@ import { isFormProcessing } from "~/utils/form";
 export interface QuickAdjustDialogProps {
   /** The ID of the asset to adjust */
   assetId: string;
-  /** The trigger element that opens the dialog */
-  trigger: ReactNode;
+  /** The trigger element that opens the dialog. Omit when using controlled mode. */
+  trigger?: ReactNode;
   /** Optional unit of measure label (e.g., "pcs", "liters") */
   unitOfMeasure?: string | null;
-  /** When true, the dialog opens automatically on mount (e.g., after QR scan) */
-  autoOpen?: boolean;
+  /** Maximum quantity that can be removed (available = total - inCustody) */
+  availableQuantity?: number;
+  /** Controlled open state — when provided, the dialog is externally controlled */
+  open?: boolean;
+  /** Callback when the dialog open state changes (controlled mode) */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
  * Dialog for quickly adding or removing stock from a quantity-tracked asset.
+ *
+ * Supports two modes:
+ * - **Uncontrolled** (default): Pass a `trigger` element. The dialog manages
+ *   its own open/close state via `AlertDialogTrigger`.
+ * - **Controlled**: Pass `open` and `onOpenChange` props. Useful when the
+ *   dialog must render outside a parent popover to avoid portal conflicts.
  *
  * Uses a fetcher to POST to `/api/assets/adjust-quantity`. The dialog
  * auto-closes on successful submission and resets its form fields.
@@ -55,9 +65,25 @@ export function QuickAdjustDialog({
   assetId,
   trigger,
   unitOfMeasure,
-  autoOpen = false,
+  availableQuantity,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: QuickAdjustDialogProps) {
-  const [open, setOpen] = useState(autoOpen);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = useCallback(
+    (v: boolean) => {
+      if (isControlled) {
+        controlledOnOpenChange?.(v);
+      } else {
+        setInternalOpen(v);
+      }
+    },
+    [isControlled, controlledOnOpenChange]
+  );
+  /** Client-side validation error for the quantity field */
+  const [quantityError, setQuantityError] = useState<string | null>(null);
   const fetcher = useFetcher({ key: "adjust-quantity" });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
@@ -65,24 +91,49 @@ export function QuickAdjustDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
+  /** Server-side error message from the action response */
+  const serverError =
+    fetcher.data?.error != null
+      ? (fetcher.data.error as { message?: string })?.message
+      : null;
+
   /** Close the dialog and reset the form after a successful submission */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) {
+    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
+      setQuantityError(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, setOpen]);
 
   /**
    * Submits the adjustment form with the given direction and category.
    * "Add" maps to direction=add, category=RESTOCK.
    * "Remove" maps to direction=subtract, category=LOSS.
+   *
+   * For "subtract", validates that the quantity does not exceed the
+   * available amount (total minus in-custody).
    */
   function handleSubmit(direction: "add" | "subtract") {
     const form = formRef.current;
     if (!form) return;
 
     const formData = new FormData(form);
+    const qty = Number(formData.get("quantity"));
+
+    /** Client-side guard: can't remove more than available */
+    if (
+      direction === "subtract" &&
+      availableQuantity != null &&
+      qty > availableQuantity
+    ) {
+      setQuantityError(
+        `Cannot remove ${qty} ${unitLabel}. Only ${availableQuantity} available (the rest is in custody).`
+      );
+      return;
+    }
+
+    setQuantityError(null);
     formData.set("direction", direction);
     formData.set("category", direction === "add" ? "RESTOCK" : "LOSS");
 
@@ -94,9 +145,11 @@ export function QuickAdjustDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+      {trigger ? (
+        <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+      ) : null}
 
-      <AlertDialogContent>
+      <AlertDialogContent onEscapeKeyDown={() => setOpen(false)}>
         <AlertDialogHeader>
           <AlertDialogTitle>Adjust Quantity</AlertDialogTitle>
           <AlertDialogDescription>
@@ -123,6 +176,8 @@ export function QuickAdjustDialog({
               required
               autoFocus
               data-dialog-initial-focus
+              error={quantityError || serverError || undefined}
+              onChange={() => setQuantityError(null)}
             />
 
             <Input
@@ -135,7 +190,7 @@ export function QuickAdjustDialog({
           </div>
         </fetcher.Form>
 
-        <AlertDialogFooter className="mt-4 gap-2">
+        <AlertDialogFooter className="mt-4 ">
           <AlertDialogCancel asChild>
             <Button type="button" variant="secondary" disabled={isSubmitting}>
               Cancel
@@ -147,7 +202,6 @@ export function QuickAdjustDialog({
             variant="secondary"
             onClick={() => handleSubmit("subtract")}
             disabled={disabled}
-            className="text-error-600 hover:text-error-700"
           >
             {isSubmitting ? "Removing..." : "Remove"}
           </Button>

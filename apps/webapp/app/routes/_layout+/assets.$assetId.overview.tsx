@@ -1,5 +1,10 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, AssetType, CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  CustomFieldType,
+  OrganizationRoles,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -31,7 +36,6 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -46,6 +50,7 @@ import { getPrimaryCustody } from "~/modules/custody/utils";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -101,6 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      role,
     } = await requirePermission({
       userId,
       request,
@@ -163,6 +169,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       };
     }
 
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members for the custody
+     * dialog. Self-service users are scoped to only their own record.
+     */
+    const { teamMembers, totalTeamMembers } =
+      asset.type === AssetType.QUANTITY_TRACKED
+        ? await getTeamMembersForQuantityCustody({
+            organizationId,
+            request,
+            userId,
+            isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          })
+        : { teamMembers: [], totalTeamMembers: 0 };
+
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     const currentBooking: any = null;
 
@@ -198,6 +218,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrObj,
       reminders,
       quantityData,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -274,16 +296,6 @@ export default function AssetOverview() {
     userId,
     quantityData,
   } = useLoaderData<typeof loader>();
-  const [searchParams] = useSearchParams();
-
-  /**
-   * When the user arrives via QR scan (ref=qr) and the asset is
-   * quantity-tracked, auto-open the quick-adjust dialog so the user
-   * can immediately add/remove stock.
-   */
-  const isQrScanRef =
-    searchParams.get("ref") === "qr" &&
-    asset?.type === AssetType.QUANTITY_TRACKED;
 
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
@@ -683,17 +695,19 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
-                ?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-          />
+          {asset?.type !== AssetType.QUANTITY_TRACKED ? (
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
+                  ?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+            />
+          ) : null}
 
           {asset?.type === AssetType.QUANTITY_TRACKED ? (
             <QuantityOverviewCard
@@ -705,7 +719,6 @@ export default function AssetOverview() {
               availableQuantity={quantityData?.available}
               inCustodyQuantity={quantityData?.inCustody}
               canUpdate={canUpdateAvailability}
-              autoOpenAdjust={isQrScanRef}
             />
           ) : null}
 

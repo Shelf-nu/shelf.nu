@@ -1,4 +1,4 @@
-import { BarcodeType } from "@prisma/client";
+import { AssetType, BarcodeType, OrganizationRoles } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -31,6 +31,7 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -69,12 +70,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, role } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      }
+    );
 
     const asset = await getAsset({
       id,
@@ -88,6 +91,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members so the
+     * QuantityCustodyDialog in the actions dropdown has initial data.
+     */
+    const { teamMembers, totalTeamMembers } =
+      asset.type === AssetType.QUANTITY_TRACKED
+        ? await getTeamMembersForQuantityCustody({
+            organizationId,
+            request,
+            userId,
+            isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          })
+        : { teamMembers: [], totalTeamMembers: 0 };
+
     const header: HeaderData = {
       title: asset.title,
     };
@@ -95,6 +112,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       asset,
       header,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -353,6 +372,7 @@ export default function AssetDetailsPage() {
               id={asset.id}
               status={asset.status}
               availableToBook={asset.availableToBook}
+              asset={asset}
             />
           </div>
         }

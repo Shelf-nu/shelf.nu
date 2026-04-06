@@ -216,3 +216,28 @@ Phase 2 was browser-tested and verified working:
 - Remove stock via quick-adjust — needs manual verification
 - Low-stock email delivery — needs verification
 - Concurrent operations — needs verification
+
+## Known Issues
+
+### Duplicate rows in advanced asset index for multi-custodian quantity assets
+
+**Problem:** When a quantity-tracked asset has multiple custody records (multiple
+custodians), it shows as duplicate rows in the advanced index view. This is because
+the raw SQL query in `asset/query.server.ts` does a `LEFT JOIN` on `Custody` and
+the `GROUP BY` includes `cu.id`, so each custody record produces a separate row.
+
+**Root cause:** `assetQueryJoins` (line 1866) joins custody 1:1 per row, and the
+`GROUP BY` in `service.server.ts` (line 907) groups by `cu.id, tm.name, u.id, ...`
+— grouping per custody record instead of per asset.
+
+**Fix needed:** Replace the direct custody LEFT JOIN with a lateral subquery or
+correlated subquery that aggregates all custody records into a single JSON array
+per asset. This way each asset produces exactly one row regardless of how many
+custodians it has. The custody column in the index should show multiple custodians
+(e.g., "Project Engineer (4), Self Service (7)") rather than duplicating the row.
+
+**Files to change:**
+
+- `app/modules/asset/query.server.ts` — `assetQueryJoins` and custody CASE block
+- `app/modules/asset/service.server.ts` — GROUP BY clause (remove `cu.id`, `tm.name`, `u.id`, etc.)
+- Asset index UI components — custody column renderer to handle multiple custodians

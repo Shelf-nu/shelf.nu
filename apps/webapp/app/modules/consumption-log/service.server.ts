@@ -309,15 +309,27 @@ export async function adjustQuantity({
 
       const currentQuantity = asset.quantity ?? 0;
 
-      /** Step 3: For subtraction, ensure we don't go below zero */
-      if (direction === "subtract" && quantity > currentQuantity) {
-        throw new ShelfError({
-          cause: null,
-          message: `Cannot subtract ${quantity} units. The asset only has ${currentQuantity} total units.`,
-          label,
-          status: 400,
-          additionalData: { assetId, quantity, currentQuantity },
+      /** Step 3: For subtraction, ensure the new total doesn't drop below in-custody */
+      if (direction === "subtract") {
+        const custodySum = await tx.custody.aggregate({
+          where: { assetId },
+          _sum: { quantity: true },
         });
+        const inCustody = custodySum._sum.quantity ?? 0;
+        const maxRemovable = currentQuantity - inCustody;
+
+        if (quantity > maxRemovable) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              inCustody > 0
+                ? `Cannot remove ${quantity} units. Only ${maxRemovable} available (${inCustody} currently in custody).`
+                : `Cannot remove ${quantity} units. The asset only has ${currentQuantity} total units.`,
+            label,
+            status: 400,
+            additionalData: { assetId, quantity, currentQuantity, inCustody },
+          });
+        }
       }
 
       /** Step 4: Compute the new total quantity */

@@ -169,6 +169,7 @@ export const AssetsList = ({
                           availableToBook={
                             resource.extendedProps?.availableToBook
                           }
+                          asset={resource.extendedProps}
                         />
                         <CategoryBadge
                           category={resource.extendedProps?.category}
@@ -268,6 +269,7 @@ export const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  asset={item}
                 />
               </div>
             </div>

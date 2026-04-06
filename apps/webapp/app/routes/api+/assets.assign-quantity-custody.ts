@@ -10,15 +10,22 @@
  * @see {@link file://./assets.bulk-assign-custody.ts} — Similar pattern for bulk custody
  */
 
+import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { checkOutQuantity } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
+import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import {
+  wrapCustodianForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -61,7 +68,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const teamMember = await getTeamMember({
       id: teamMemberId,
       organizationId,
-      select: { id: true, name: true, userId: true },
+      include: { user: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -96,6 +103,42 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       note,
+    });
+
+    /** Build and create an audit note on the asset */
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    const actor = wrapUserLinkForNote(user);
+    const custodianDisplay = wrapCustodianForNote({
+      teamMember: {
+        name: teamMember.name,
+        user: teamMember.user
+          ? {
+              id: teamMember.user.id,
+              firstName: teamMember.user.firstName,
+              lastName: teamMember.user.lastName,
+            }
+          : null,
+      },
+    });
+
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const baseLine = isSelfService
+      ? `${actor} took custody of **${quantity}** unit(s).`
+      : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
+    const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+
+    await createNote({
+      content: noteContent,
+      type: "UPDATE",
+      userId,
+      assetId,
     });
 
     sendNotification({
