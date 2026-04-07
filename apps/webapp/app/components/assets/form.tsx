@@ -20,6 +20,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
   loader,
@@ -102,13 +103,13 @@ export const NewAssetFormSchema = z.object({
   minQuantity: z
     .string()
     .optional()
-    .transform((val) => (val === "" || val === undefined ? undefined : +val))
+    .transform((val) => (val === "" || val === undefined ? null : +val))
     .pipe(
       z
         .number({ invalid_type_error: "Min quantity must be a number" })
         .int("Min quantity must be a whole number")
-        .nonnegative("Min quantity cannot be negative")
-        .optional()
+        .positive("Min quantity must be at least 1")
+        .nullable()
     ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
@@ -249,7 +250,7 @@ export const AssetForm = ({
   const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
     assetType ?? AssetType.INDIVIDUAL
   );
-  const isQuantityTracked = selectedAssetType === AssetType.QUANTITY_TRACKED;
+  const isQtyTracked = isQuantityTracked(selectedAssetType);
   const [consumptionTypeError, setConsumptionTypeError] = useState<
     string | undefined
   >();
@@ -314,7 +315,7 @@ export const AssetForm = ({
           const hasBarcodeErrors = barcodesInputRef.current?.hasErrors();
 
           // Validate consumption type for quantity-tracked assets
-          if (isQuantityTracked) {
+          if (isQtyTracked) {
             const formData = new FormData(e.currentTarget);
             if (!formData.get("consumptionType")) {
               setConsumptionTypeError("Please select a consumption type");
@@ -388,7 +389,7 @@ export const AssetForm = ({
           />
         </FormRow>
 
-        <When truthy={isQuantityTracked}>
+        <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
               rowLabel="Quantity"
@@ -441,7 +442,7 @@ export const AssetForm = ({
                 hideLabel
                 name="minQuantity"
                 disabled={disabled}
-                min={0}
+                min={1}
                 step={1}
                 className="w-full"
                 defaultValue={minQuantity ?? ""}

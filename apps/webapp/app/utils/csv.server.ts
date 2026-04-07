@@ -26,6 +26,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   BarcodeField,
   Column,
@@ -487,7 +488,7 @@ export const buildCsvExportDataFromAssets = ({
 
           case "quantity":
             value =
-              asset.type === "QUANTITY_TRACKED" && asset.quantity != null
+              isQuantityTracked(asset) && asset.quantity != null
                 ? `${asset.quantity}${
                     asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
                   }`
@@ -495,10 +496,9 @@ export const buildCsvExportDataFromAssets = ({
             break;
           case "type":
             // Handled by default column logic — asset.type is a direct string field
-            value =
-              asset.type === "QUANTITY_TRACKED"
-                ? "Tracked by quantity"
-                : "Individual";
+            value = isQuantityTracked(asset)
+              ? "Tracked by quantity"
+              : "Individual";
             break;
           case "assetModel":
             value = asset.assetModelName ?? "";

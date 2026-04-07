@@ -38,7 +38,10 @@ export const AdjustQuantitySchema = z.object({
   quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
   category: z.enum(["RESTOCK", "ADJUSTMENT", "LOSS"]),
   direction: z.enum(["add", "subtract"]),
-  note: z.string().optional(),
+  note: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {

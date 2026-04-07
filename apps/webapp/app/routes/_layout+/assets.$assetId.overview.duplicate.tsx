@@ -53,6 +53,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      include: {
+        custody: { select: { quantity: true } },
+      },
     });
 
     return payload({

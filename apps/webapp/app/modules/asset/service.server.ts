@@ -31,6 +31,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -143,6 +144,7 @@ import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
+  createAssetQuantityChangeNote,
   createAssetValuationChangeNote,
   createNote,
   createTagChangeNoteIfNeeded,
@@ -163,6 +165,10 @@ const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
     },
   },
   valuation: true,
+  quantity: true,
+  minQuantity: true,
+  consumptionType: true,
+  unitOfMeasure: true,
   organization: {
     select: {
       currency: true,
@@ -998,7 +1004,7 @@ export async function createAsset({
   assetModelId?: string;
 }) {
   // Server-side validation for quantity-tracked assets
-  if (type === "QUANTITY_TRACKED") {
+  if (isQuantityTracked(type)) {
     if (!quantity || quantity <= 0) {
       throw new ShelfError({
         cause: null,
@@ -1333,7 +1339,11 @@ export async function updateAsset({
       typeof title !== "undefined" ||
         typeof description !== "undefined" ||
         typeof categoryId !== "undefined" ||
-        typeof valuation !== "undefined"
+        typeof valuation !== "undefined" ||
+        typeof quantity !== "undefined" ||
+        typeof minQuantity !== "undefined" ||
+        typeof consumptionType !== "undefined" ||
+        typeof unitOfMeasure !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -1631,6 +1641,19 @@ export async function updateAsset({
           newValuation: asset.valuation,
           currency: assetBeforeUpdate.organization.currency,
           locale: getLocale(request),
+          loadUserForNotes,
+        }),
+        createAssetQuantityChangeNote({
+          assetId: asset.id,
+          userId,
+          previousQuantity: assetBeforeUpdate.quantity,
+          newQuantity: quantity,
+          previousMinQuantity: assetBeforeUpdate.minQuantity,
+          newMinQuantity: minQuantity,
+          previousConsumptionType: assetBeforeUpdate.consumptionType,
+          newConsumptionType: consumptionType,
+          previousUnitOfMeasure: assetBeforeUpdate.unitOfMeasure,
+          newUnitOfMeasure: unitOfMeasure,
           loadUserForNotes,
         }),
       ]);
@@ -3548,13 +3571,13 @@ export async function bulkCheckOutAssets({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user, custodianTeamMember] = await Promise.all([
+    const [allAssets, user, custodianTeamMember] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: resolvedIds },
           organizationId,
         },
-        select: { id: true, title: true, status: true },
+        select: { id: true, title: true, status: true, type: true },
       }),
       getUserByID(userId, {
         select: {
@@ -3579,6 +3602,23 @@ export async function bulkCheckOutAssets({
         },
       }),
     ]);
+
+    /**
+     * Filter out QUANTITY_TRACKED assets — they require per-asset
+     * quantity input and cannot participate in bulk custody operations.
+     */
+    const assets = allAssets.filter((a) => a.type !== "QUANTITY_TRACKED");
+    const skippedQuantityTracked = allAssets.length - assets.length;
+
+    if (assets.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must be assigned custody individually with a specific quantity.",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
 
     const assetsNotAvailable = assets.some(
       (asset) => asset.status !== "AVAILABLE"
@@ -3643,7 +3683,7 @@ export async function bulkCheckOutAssets({
       });
     });
 
-    return true;
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -3684,7 +3724,7 @@ export async function bulkCheckInAssets({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user] = await Promise.all([
+    const [allAssets, user] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: resolvedIds },
@@ -3693,6 +3733,7 @@ export async function bulkCheckInAssets({
         select: {
           id: true,
           title: true,
+          type: true,
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
@@ -3707,6 +3748,23 @@ export async function bulkCheckInAssets({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    /**
+     * Filter out QUANTITY_TRACKED assets — they require per-asset
+     * quantity input and cannot participate in bulk custody operations.
+     */
+    const assets = allAssets.filter((a) => a.type !== "QUANTITY_TRACKED");
+    const skippedQuantityTracked = allAssets.length - assets.length;
+
+    if (assets.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must have custody released individually.",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
 
     const hasAssetsWithoutCustody = assets.some(
       (asset) => !hasCustody(asset.custody)
@@ -3762,7 +3820,7 @@ export async function bulkCheckInAssets({
       });
     });
 
-    return true;
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const message =
       cause instanceof ShelfError

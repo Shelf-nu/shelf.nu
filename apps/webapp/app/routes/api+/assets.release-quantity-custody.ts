@@ -11,6 +11,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { releaseQuantity } from "~/modules/asset/service.server";
@@ -18,7 +19,7 @@ import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   wrapCustodianForNote,
@@ -38,7 +39,10 @@ export const ReleaseQuantityCustodySchema = z.object({
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
-  note: z.string().optional(),
+  note: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -48,7 +52,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -68,6 +72,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       include: { user: true },
     });
+
+    /** Self-service users can only release their own custody */
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      teamMember.userId !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self-service users can only release their own custody.",
+        additionalData: { userId, assetId, teamMemberId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     await releaseQuantity({
       assetId,

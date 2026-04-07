@@ -1,18 +1,18 @@
 import { useState } from "react";
-import { AssetType } from "@prisma/client";
 import {
   Popover,
   PopoverContent,
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { AlarmClockIcon } from "lucide-react";
+import { AlarmClockIcon, ArrowUpDownIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
@@ -40,9 +40,19 @@ const ConditionalActionsDropdown = () => {
   const [isAdjustQuantityDialogOpen, setIsAdjustQuantityDialogOpen] =
     useState(false);
 
-  const isQuantityTracked = asset.type === AssetType.QUANTITY_TRACKED;
+  const isQtyTracked = isQuantityTracked(asset);
   const assetCanBeReleased = hasCustody(asset.custody);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+
+  /** Compute available quantity for quantity-tracked assets */
+  const quantityAvailable = isQtyTracked
+    ? (asset.quantity ?? 0) -
+      (asset.custody?.reduce(
+        (sum: number, c: { quantity?: number }) => sum + (c.quantity ?? 0),
+        0
+      ) ?? 0)
+    : 0;
+  const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
   const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
   const user = useUserData();
@@ -128,7 +138,7 @@ const ConditionalActionsDropdown = () => {
             <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
               <When
                 truthy={
-                  isQuantityTracked &&
+                  isQtyTracked &&
                   userHasPermission({
                     roles,
                     entity: PermissionEntity.asset,
@@ -149,7 +159,7 @@ const ConditionalActionsDropdown = () => {
                     }}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon="settings" /> Adjust quantity
+                      <ArrowUpDownIcon className="size-5" /> Adjust quantity
                     </span>
                   </Button>
                 </div>
@@ -165,14 +175,22 @@ const ConditionalActionsDropdown = () => {
                   className="border-b px-0 py-1 md:p-0"
                   aria-disabled={custodyActionDisabled}
                 >
-                  {isQuantityTracked ? (
+                  {isQtyTracked ? (
                     <Button
                       type="button"
                       role="button"
                       variant="link"
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                       width="full"
-                      disabled={custodyActionDisabled}
+                      disabled={
+                        custodyActionDisabled ||
+                        (noneAvailable
+                          ? {
+                              reason:
+                                "All units are currently in custody. Release some before assigning more.",
+                            }
+                          : false)
+                      }
                       onClick={() => {
                         handleMenuClose();
                         setIsQuantityCustodyDialogOpen(true);

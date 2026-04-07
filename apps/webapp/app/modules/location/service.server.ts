@@ -170,6 +170,7 @@ export async function getLocation(
               },
               custody: {
                 select: {
+                  quantity: true,
                   custodian: {
                     select: {
                       id: true,

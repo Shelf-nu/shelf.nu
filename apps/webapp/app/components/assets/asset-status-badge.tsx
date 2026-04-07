@@ -3,6 +3,7 @@ import type { AssetType, Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
 import { Badge } from "../shared/badge";
@@ -71,16 +72,18 @@ interface QuantityAwareAsset {
 
 /**
  * Computes quantity breakdown from an asset's custody records.
- * Returns null for non-quantity-tracked assets.
+ * Returns null for non-quantity-tracked assets or when custody data
+ * is not available.
  */
 function getQuantityData(asset?: QuantityAwareAsset | null) {
-  if (!asset || asset.type !== "QUANTITY_TRACKED") return null;
+  if (!asset || !isQuantityTracked(asset)) return null;
   const total = asset.quantity ?? 0;
   const custodyArray = Array.isArray(asset.custody)
     ? asset.custody
     : asset.custody
     ? [asset.custody]
     : [];
+  if (custodyArray.length === 0) return null;
   const inCustody = custodyArray.reduce((sum, c) => sum + (c.quantity ?? 0), 0);
   return { total, inCustody, available: total - inCustody };
 }
@@ -97,11 +100,14 @@ export function AssetStatusBadge({
   /**
    * When provided, the badge auto-detects quantity-tracked assets and
    * renders a quantity-aware status (e.g., "Partial custody") with a
-   * tooltip showing the breakdown. No effect for individual assets.
+   * tooltip showing the breakdown. The asset must include `type`,
+   * `quantity`, and `custody` fields for quantity display to work.
+   * Falls back to standard status if data is missing.
    */
   asset?: QuantityAwareAsset | null;
 }) {
   const quantityData = useMemo(() => getQuantityData(asset), [asset]);
+
   // Fetch the booking from API when asset is CHECKED_OUT
   // The API correctly finds the booking where asset is checked out
   // (excluding bookings where it's been partially checked in)
@@ -119,10 +125,11 @@ export function AssetStatusBadge({
   }, [data, status]);
 
   /**
-   * For quantity-tracked assets, compute a display status from custody data:
-   * - All available → "Available" (green)
+   * For quantity-tracked assets with custody data, display a
+   * quantity-aware status:
+   * - All available → falls through to standard "Available" (green)
    * - Some in custody → "Partial custody" (blue) with tooltip
-   * - All in custody → "In custody" (blue)
+   * - All in custody → "In custody" (blue) with tooltip
    */
   if (quantityData && quantityData.inCustody > 0) {
     const isFullCustody = quantityData.available === 0;

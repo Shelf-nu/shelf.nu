@@ -60,6 +60,14 @@ export interface QuantityCustodyListProps {
   unitOfMeasure?: string | null;
   /** Quantity currently available for checkout */
   availableQuantity?: number;
+  /** Whether the current user is self-service */
+  isSelfService?: boolean;
+  /** The current user's ID (used for self-service filtering) */
+  currentUserId?: string;
+  /** Whether the user has permission to view other people's custody */
+  canViewAllCustody?: boolean;
+  /** Whether the user has permission to assign/release custody */
+  canCustody?: boolean;
 }
 
 /**
@@ -77,9 +85,37 @@ export function QuantityCustodyList({
   assetId,
   unitOfMeasure,
   availableQuantity,
+  isSelfService = false,
+  currentUserId,
+  canViewAllCustody = true,
+  canCustody = true,
 }: QuantityCustodyListProps) {
   const unitLabel = unitOfMeasure || "units";
-  const records = custody ?? [];
+  const allRecords = custody ?? [];
+
+  /**
+   * Filter visible custody records based on permissions.
+   * Self-service/base users who can't view all custody only see
+   * their own records.
+   */
+  const records = canViewAllCustody
+    ? allRecords
+    : allRecords.filter((r) => r.custodian.userId === currentUserId);
+
+  /** Number of custody records hidden due to permission restrictions */
+  const hiddenCount = allRecords.length - records.length;
+
+  const noneAvailable = availableQuantity != null && availableQuantity <= 0;
+
+  /**
+   * Self-service users can only release their own custody.
+   * Admins/owners can release anyone's.
+   */
+  const canRelease = (record: CustodyRecord) => {
+    if (!canCustody) return false;
+    if (isSelfService) return record.custodian.userId === currentUserId;
+    return true;
+  };
 
   return (
     <Card className={tw("my-3 p-0")}>
@@ -88,30 +124,53 @@ export function QuantityCustodyList({
         <h3 className="text-[14px] font-semibold text-gray-900">
           Custody Breakdown
         </h3>
-        <QuantityCustodyDialog
-          assetId={assetId}
-          unitOfMeasure={unitOfMeasure}
-          availableQuantity={availableQuantity}
-          trigger={
-            <Button type="button" variant="secondary" className="py-1 text-xs">
-              Assign
-            </Button>
-          }
-        />
+        {canCustody ? (
+          <QuantityCustodyDialog
+            assetId={assetId}
+            unitOfMeasure={unitOfMeasure}
+            availableQuantity={availableQuantity}
+            trigger={
+              <Button
+                type="button"
+                variant="secondary"
+                className="py-1 text-xs"
+                disabled={
+                  noneAvailable
+                    ? {
+                        reason:
+                          "All units are currently in custody. Release some before assigning more.",
+                      }
+                    : false
+                }
+              >
+                Assign
+              </Button>
+            }
+          />
+        ) : null}
       </div>
 
       {/* List of custodians */}
       {records.length > 0 ? (
-        <ul>
-          {records.map((record) => (
-            <CustodyRow
-              key={record.custodian.id}
-              record={record}
-              assetId={assetId}
-              unitLabel={unitLabel}
-            />
-          ))}
-        </ul>
+        <>
+          <ul>
+            {records.map((record) => (
+              <CustodyRow
+                key={record.custodian.id}
+                record={record}
+                assetId={assetId}
+                unitLabel={unitLabel}
+                canRelease={canRelease(record)}
+              />
+            ))}
+          </ul>
+          {hiddenCount > 0 ? (
+            <div className="border-t border-gray-100 px-4 py-3 text-[12px] text-gray-500">
+              +{hiddenCount} other {hiddenCount === 1 ? "person" : "people"}{" "}
+              also {hiddenCount === 1 ? "has" : "have"} custody of this asset.
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="px-4 py-6 text-center text-sm text-gray-500">
           No custody assigned.
@@ -135,6 +194,8 @@ interface CustodyRowProps {
   record: CustodyRecord;
   assetId: string;
   unitLabel: string;
+  /** Whether the current user can release this custody record */
+  canRelease?: boolean;
 }
 
 /**
@@ -145,7 +206,12 @@ interface CustodyRowProps {
  *
  * @param props - The custody record and context
  */
-function CustodyRow({ record, assetId, unitLabel }: CustodyRowProps) {
+function CustodyRow({
+  record,
+  assetId,
+  unitLabel,
+  canRelease = true,
+}: CustodyRowProps) {
   const custodianName = resolveTeamMemberName(record.custodian);
   const quantity = record.quantity ?? 1;
 
@@ -170,12 +236,14 @@ function CustodyRow({ record, assetId, unitLabel }: CustodyRowProps) {
         </div>
       </div>
 
-      <ReleaseButton
-        assetId={assetId}
-        teamMemberId={record.custodian.id}
-        maxQuantity={quantity}
-        unitLabel={unitLabel}
-      />
+      {canRelease ? (
+        <ReleaseButton
+          assetId={assetId}
+          teamMemberId={record.custodian.id}
+          maxQuantity={quantity}
+          unitLabel={unitLabel}
+        />
+      ) : null}
     </li>
   );
 }

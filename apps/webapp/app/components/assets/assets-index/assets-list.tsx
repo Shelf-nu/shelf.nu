@@ -27,6 +27,7 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
@@ -316,7 +317,7 @@ export const ListAssetContent = ({
 
       {/* Quantity */}
       <Td>
-        {item.type === "QUANTITY_TRACKED" && item.quantity != null ? (
+        {isQuantityTracked(item) && item.quantity != null ? (
           <span>
             {item.quantity}
             {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}

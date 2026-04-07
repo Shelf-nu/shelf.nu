@@ -3112,6 +3112,8 @@ export async function getBookings(params: {
             select: {
               title: true,
               id: true,
+              type: true,
+              quantity: true,
               custody: true,
               availableToBook: true,
               kitId: true,

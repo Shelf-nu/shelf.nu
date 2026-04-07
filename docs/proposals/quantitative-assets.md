@@ -752,3 +752,24 @@ Self Service (7)").
   CASE block (lines ~1866, ~1772)
 - `app/modules/asset/service.server.ts` — GROUP BY clause (line ~907)
 - Asset index UI components — custody column renderer
+
+### 2. Low-stock email recipient is hardcoded to workspace owner
+
+**Severity:** Medium (poor UX, not a bug)
+
+**Problem:** Low-stock email alerts are always sent to the workspace
+owner. In many organizations the owner is not the person responsible
+for inventory management, so the alert goes to the wrong person.
+
+**Required fix:** Add a workspace setting that allows the owner/admin
+to configure which team member(s) receive low-stock email alerts.
+This could be a multi-select of admins/owners in Workspace Settings,
+similar to how booking notification recipients are configured.
+
+**Files to change:**
+
+- Schema: add a low-stock notification recipients relation or setting
+  on `Organization` or a new workspace settings model
+- `app/modules/consumption-log/low-stock.server.ts` — currently sends
+  to org owner; update to read from the configured recipients
+- Workspace Settings UI — add a section for low-stock alert recipients

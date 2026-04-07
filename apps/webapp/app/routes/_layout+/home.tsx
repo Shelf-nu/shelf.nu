@@ -221,7 +221,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           where: { organizationId },
           orderBy: { createdAt: "desc" },
           take: 5,
-          include: { category: true },
+          include: {
+            category: true,
+            custody: { select: { quantity: true } },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({

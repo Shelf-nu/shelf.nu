@@ -1,4 +1,4 @@
-import { AssetType, BarcodeType, OrganizationRoles } from "@prisma/client";
+import { BarcodeType, OrganizationRoles } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -25,6 +25,7 @@ import {
   getAsset,
   relinkAssetQrCode,
 } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
@@ -95,15 +96,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * For QUANTITY_TRACKED assets, fetch team members so the
      * QuantityCustodyDialog in the actions dropdown has initial data.
      */
-    const { teamMembers, totalTeamMembers } =
-      asset.type === AssetType.QUANTITY_TRACKED
-        ? await getTeamMembersForQuantityCustody({
-            organizationId,
-            request,
-            userId,
-            isSelfService: role === OrganizationRoles.SELF_SERVICE,
-          })
-        : { teamMembers: [], totalTeamMembers: 0 };
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
 
     const header: HeaderData = {
       title: asset.title,

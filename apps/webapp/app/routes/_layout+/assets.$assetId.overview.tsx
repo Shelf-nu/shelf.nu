@@ -1,7 +1,6 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import {
   AssetStatus,
-  AssetType,
   CustomFieldType,
   OrganizationRoles,
 } from "@prisma/client";
@@ -44,6 +43,7 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -62,7 +62,10 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import {
+  userCanViewSpecificCustody,
+  userHasCustodyViewPermission,
+} from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -156,7 +159,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       available: number;
     } | null = null;
 
-    if (asset.type === AssetType.QUANTITY_TRACKED) {
+    if (isQuantityTracked(asset)) {
       const custodySum = await db.custody.aggregate({
         where: { assetId: asset.id },
         _sum: { quantity: true },
@@ -173,15 +176,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * For QUANTITY_TRACKED assets, fetch team members for the custody
      * dialog. Self-service users are scoped to only their own record.
      */
-    const { teamMembers, totalTeamMembers } =
-      asset.type === AssetType.QUANTITY_TRACKED
-        ? await getTeamMembersForQuantityCustody({
-            organizationId,
-            request,
-            userId,
-            isSelfService: role === OrganizationRoles.SELF_SERVICE,
-          })
-        : { teamMembers: [], totalTeamMembers: 0 };
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
 
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     const currentBooking: any = null;
@@ -316,12 +318,21 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles } = useUserRoleHelper();
+  const { roles, isSelfService } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  const canViewAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: currentOrganization,
   });
 
   return (
@@ -695,7 +706,7 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {asset?.type !== AssetType.QUANTITY_TRACKED ? (
+          {!isQuantityTracked(asset) ? (
             <CustodyCard
               booking={booking}
               custody={asset?.custody || null}
@@ -709,7 +720,7 @@ export default function AssetOverview() {
             />
           ) : null}
 
-          {asset?.type === AssetType.QUANTITY_TRACKED ? (
+          {isQuantityTracked(asset) ? (
             <QuantityOverviewCard
               assetId={asset.id}
               quantity={asset.quantity ?? null}
@@ -722,12 +733,16 @@ export default function AssetOverview() {
             />
           ) : null}
 
-          {asset?.type === AssetType.QUANTITY_TRACKED ? (
+          {isQuantityTracked(asset) ? (
             <QuantityCustodyList
               custody={asset.custody}
               assetId={asset.id}
               unitOfMeasure={asset.unitOfMeasure}
               availableQuantity={quantityData?.available}
+              isSelfService={isSelfService}
+              currentUserId={userId}
+              canViewAllCustody={canViewAllCustody}
+              canCustody={canCustody}
             />
           ) : null}
 

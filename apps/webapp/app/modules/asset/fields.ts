@@ -149,6 +149,7 @@ export const assetIndexFields = ({
     location: LOCATION_WITH_HIERARCHY,
     custody: {
       select: {
+        quantity: true,
         custodian: {
           select: {
             name: true,

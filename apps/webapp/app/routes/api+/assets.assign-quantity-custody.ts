@@ -40,7 +40,10 @@ export const AssignQuantityCustodySchema = z.object({
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
-  note: z.string().optional(),
+  note: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {

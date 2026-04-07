@@ -1774,6 +1774,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           jsonb_build_array(
             jsonb_build_object(
               'name', tm.name,
+              'quantity', cu.quantity,
               'custodian', jsonb_build_object(
                 'name', tm.name,
                 'user', CASE

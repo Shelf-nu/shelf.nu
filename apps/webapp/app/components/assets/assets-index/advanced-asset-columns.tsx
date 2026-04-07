@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
-import { AssetType, CustomFieldType } from "@prisma/client";
+import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
   Popover,
@@ -42,6 +42,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   ColumnLabelKey,
   BarcodeField,
@@ -181,7 +182,7 @@ export function AdvancedIndexColumn({
                   >
                     {item.title}
                   </Link>
-                  {item.type === AssetType.QUANTITY_TRACKED ? (
+                  {isQuantityTracked(item) ? (
                     <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
                       QTY
                     </span>
@@ -327,7 +328,7 @@ export function AdvancedIndexColumn({
     case "type":
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
-          {item.type === AssetType.QUANTITY_TRACKED ? (
+          {isQuantityTracked(item) ? (
             <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
               QTY
             </span>
@@ -347,7 +348,7 @@ export function AdvancedIndexColumn({
     case "quantity":
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
-          {item.type === AssetType.QUANTITY_TRACKED && item.quantity != null ? (
+          {isQuantityTracked(item) && item.quantity != null ? (
             `${item.quantity}${
               item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
             }`
