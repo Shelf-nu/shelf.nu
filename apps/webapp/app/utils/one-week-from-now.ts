@@ -8,6 +8,11 @@ export const oneDayFromNow = () => {
   return new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000);
 };
 
+export const threeDaysFromNow = () => {
+  const now = new Date();
+  return new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+};
+
 export const oneMinuteFromNow = () => {
   const now = new Date();
   return new Date(now.getTime() + 1 * 60 * 1000);

@@ -1213,6 +1213,9 @@ model Booking {
   @@index([custodianTeamMemberId])
   @@index([custodianUserId])
   @@index([organizationId])
+  // Speeds up status filtering when joining from Asset → Booking
+  // (e.g. fetching ONGOING/OVERDUE bookings for asset custodian display)
+  @@index([status])
 }
 
 model BookingSettings {

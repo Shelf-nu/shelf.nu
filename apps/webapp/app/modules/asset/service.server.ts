@@ -97,7 +97,7 @@ import {
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
-import { oneDayFromNow } from "~/utils/one-week-from-now";
+import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   createSignedUrl,
   parseFileFormData,
@@ -2143,49 +2143,57 @@ export async function getPaginatedAndFilterableAssets({
   const { perPage } = cookie;
 
   try {
-    const {
-      tags,
-      totalTags,
-      categories,
-      totalCategories,
-      locations,
-      totalLocations,
-    } = await getEntitiesWithSelectedValues({
-      organizationId,
-      allSelectedEntries: getAllEntries,
-      selectedCategoryIds: categoriesIds,
-      selectedTagIds: tagsIds,
-      selectedLocationIds: locationIds,
-    });
-
-    const teamMembersData = await getTeamMemberForCustodianFilter({
-      organizationId,
-      selectedTeamMembers: teamMemberIds,
-      getAll: getAllEntries.includes("teamMember"),
-      filterByUserId: isSelfService,
-      userId,
-    });
-
-    const { assets, totalAssets } = await getAssets({
-      organizationId,
-      page,
-      perPage,
-      orderBy,
-      orderDirection,
-      search,
-      categoriesIds,
-      tagsIds,
-      status,
-      bookingFrom: bookingFrom ?? undefined,
-      bookingTo: bookingTo ?? undefined,
-      hideUnavailable,
-      unhideAssetsBookigIds,
-      locationIds,
-      teamMemberIds,
-      extraInclude,
-      assetKitFilter,
-      availableToBookOnly: isSelfService,
-    });
+    /**
+     * These three queries are independent (no data flows between them),
+     * so we run them in parallel to reduce total loader latency.
+     */
+    const [
+      {
+        tags,
+        totalTags,
+        categories,
+        totalCategories,
+        locations,
+        totalLocations,
+      },
+      teamMembersData,
+      { assets, totalAssets },
+    ] = await Promise.all([
+      getEntitiesWithSelectedValues({
+        organizationId,
+        allSelectedEntries: getAllEntries,
+        selectedCategoryIds: categoriesIds,
+        selectedTagIds: tagsIds,
+        selectedLocationIds: locationIds,
+      }),
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll: getAllEntries.includes("teamMember"),
+        filterByUserId: isSelfService,
+        userId,
+      }),
+      getAssets({
+        organizationId,
+        page,
+        perPage,
+        orderBy,
+        orderDirection,
+        search,
+        categoriesIds,
+        tagsIds,
+        status,
+        bookingFrom: bookingFrom ?? undefined,
+        bookingTo: bookingTo ?? undefined,
+        hideUnavailable,
+        unhideAssetsBookigIds,
+        locationIds,
+        teamMemberIds,
+        extraInclude,
+        assetKitFilter,
+        availableToBookOnly: isSelfService,
+      }),
+    ]);
 
     const totalPages = Math.ceil(totalAssets / perPage);
 
@@ -2958,114 +2966,95 @@ export async function updateAssetBookingAvailability({
   }
 }
 
-export async function updateAssetsWithBookingCustodians<T extends Asset>(
-  assets: T[]
-) {
-  try {
-    /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
-    const checkedOutAssetsIds = assets
-      .filter((a) => a.status === "CHECKED_OUT")
-      .map((a) => a.id);
+/**
+ * Enriches CHECKED_OUT assets with booking custodian info as a synthetic `custody` property.
+ *
+ * Previously this made a separate DB query (N+1 pattern). Now the booking custodian
+ * data is included in the initial asset query via `assetIndexFields`, so this function
+ * just reads `asset.bookings[0]` directly — no DB call needed.
+ *
+ * @param assets - Assets with `bookings` already included from the initial query
+ * @returns The same assets array with `custody.custodian` added for checked-out assets
+ */
+export function updateAssetsWithBookingCustodians<
+  T extends Asset & {
+    bookings?: Array<{
+      id: string;
+      custodianTeamMember?: { name: string } | null;
+      custodianUser?: {
+        firstName: string | null;
+        lastName: string | null;
+        displayName: string | null;
+        profilePicture: string | null;
+      } | null;
+      [key: string]: unknown;
+    }>;
+  },
+>(assets: T[]) {
+  const checkedOutAssetsIds = assets
+    .filter((a) => a.status === "CHECKED_OUT")
+    .map((a) => a.id);
 
-    if (checkedOutAssetsIds.length > 0) {
-      /** We query again the assets that are checked-out so we can get the user via the booking*/
-
-      const assetsWithCustodians = await db.asset.findMany({
-        where: {
-          id: {
-            in: checkedOutAssetsIds,
-          },
-        },
-        select: {
-          id: true,
-          bookings: {
-            where: {
-              status: {
-                in: ["ONGOING", "OVERDUE"],
-              },
-            },
-            select: {
-              id: true,
-              custodianTeamMember: true,
-              custodianUser: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  profilePicture: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
-      /**
-       * We take the first booking of the array and extract the user from it and add it to the asset
-       */
-      assets = assets.map((a) => {
-        const assetWithUser = assetsWithCustodians.find(
-          (awu) => awu.id === a.id
-        );
-        const booking = assetWithUser?.bookings[0];
-        const custodianUser = booking?.custodianUser;
-        const custodianTeamMember = booking?.custodianTeamMember;
-
-        if (checkedOutAssetsIds.includes(a.id)) {
-          /** If there is a custodian user, use its data to display the name */
-          if (custodianUser) {
-            return {
-              ...a,
-              custody: {
-                custodian: {
-                  name: `${custodianUser?.firstName || ""} ${
-                    custodianUser?.lastName || ""
-                  }`, // Concatenate firstName and lastName to form the name property with default values
-                  user: {
-                    firstName: custodianUser?.firstName || "",
-                    lastName: custodianUser?.lastName || "",
-                    profilePicture: custodianUser?.profilePicture || null,
-                  },
-                },
-              },
-            };
-          }
-
-          /** If there is a custodian teamMember, use its name */
-          if (custodianTeamMember) {
-            return {
-              ...a,
-              custody: {
-                custodian: {
-                  name: custodianTeamMember.name,
-                },
-              },
-            };
-          }
-
-          /** Data integrity edge case: asset is CHECKED_OUT but booking has no custodian assigned */
-          Logger.warn(
-            new ShelfError({
-              cause: null,
-              message: "Couldn't find custodian for asset",
-              additionalData: { asset: a },
-              label,
-            })
-          );
-        }
-
-        return a;
-      });
-    }
+  if (checkedOutAssetsIds.length === 0) {
     return assets;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Fail to update assets with booking custodians",
-      additionalData: { assets },
-      label,
-    });
   }
+
+  /**
+   * Map over assets and use the already-included bookings data
+   * to build the same custody shape the UI expects.
+   */
+  return assets.map((a) => {
+    if (!checkedOutAssetsIds.includes(a.id)) {
+      return a;
+    }
+
+    const booking = a.bookings?.[0];
+    const custodianUser = booking?.custodianUser;
+    const custodianTeamMember = booking?.custodianTeamMember;
+
+    /** If there is a custodian user, use its data to display the name */
+    if (custodianUser) {
+      return {
+        ...a,
+        custody: {
+          custodian: {
+            name: `${custodianUser?.firstName || ""} ${
+              custodianUser?.lastName || ""
+            }`,
+            user: {
+              firstName: custodianUser?.firstName || "",
+              lastName: custodianUser?.lastName || "",
+              profilePicture: custodianUser?.profilePicture || null,
+            },
+          },
+        },
+      };
+    }
+
+    /** If there is a custodian teamMember, use its name */
+    if (custodianTeamMember) {
+      return {
+        ...a,
+        custody: {
+          custodian: {
+            name: custodianTeamMember.name,
+          },
+        },
+      };
+    }
+
+    /** Data integrity edge case: asset is CHECKED_OUT but booking has no custodian assigned */
+    Logger.warn(
+      new ShelfError({
+        cause: null,
+        message: "Couldn't find custodian for asset",
+        additionalData: { asset: a },
+        label,
+      })
+    );
+
+    return a;
+  });
 }
 
 /**
@@ -3178,7 +3167,9 @@ export async function refreshExpiredAssetImages<
         }
       }
 
-      const newExpiration = oneDayFromNow();
+      // 72h expiration reduces how often users hit the refresh path,
+      // which blocks the loader while it generates new signed URLs.
+      const newExpiration = threeDaysFromNow();
 
       const updateData: {
         mainImage: string;
