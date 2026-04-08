@@ -1,6 +1,5 @@
 import type React from "react";
 import type { ReactNode } from "react";
-import { memo } from "react";
 import type { MotionProps } from "framer-motion";
 import { motion } from "framer-motion";
 import { tw } from "~/utils/tw";
@@ -41,7 +40,7 @@ const CHROMIUM_HOVER_FIX = {
  * @param motionProps - When provided, enables framer-motion animations.
  * @see {@link ListItemProps}
  */
-export const ListItem = memo(function ListItem({
+export const ListItem = function ListItem({
   item,
   children,
   navigate,
@@ -108,4 +107,4 @@ export const ListItem = memo(function ListItem({
       {children}
     </tr>
   );
-});
+};

@@ -62,10 +62,7 @@ export const AssetsList = ({
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
-  const advancedExtraProps = useMemo(
-    () => ({ columns }),
-    [columns]
-  );
+  const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
   const { isBase } = useUserRoleHelper();
@@ -199,7 +196,9 @@ export const AssetsList = ({
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
               headerChildren={headerChildren}
-              extraItemComponentProps={modeIsSimple ? undefined : advancedExtraProps}
+              extraItemComponentProps={
+                modeIsSimple ? undefined : advancedExtraProps
+              }
             />
           )}
         </ListContentWrapper>

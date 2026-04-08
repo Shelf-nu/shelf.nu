@@ -46,7 +46,6 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
-import { createPerfTracker } from "~/utils/perf.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -64,55 +63,51 @@ export const links: LinksFunction = () => [
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const perf = createPerfTracker("assets._index");
   try {
     /** Validate permissions and fetch user */
-    const [permissionData, user] = await perf.measure("permissions+user", () =>
-      Promise.all([
-        requirePermission({
-          userId,
-          request,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.read,
-        }),
-        db.user
-          .findUniqueOrThrow({
-            where: {
-              id: userId,
-            },
-            select: {
-              firstName: true,
-              displayName: true,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message:
-                "We can't find your user data. Please try again or contact support.",
-              additionalData: { userId },
-              label: "Assets",
-            });
-          }),
-      ])
-    );
-
-    const {
-      organizationId,
-      organizations,
-      currentOrganization,
-      role,
-      canUseBarcodes,
-    } = permissionData;
-
-    const settings = await perf.measure("getAssetIndexSettings", () =>
-      getAssetIndexSettings({
-        userId,
+    const [
+      {
         organizationId,
-        canUseBarcodes,
+        organizations,
+        currentOrganization,
         role,
-      })
-    );
+        canUseBarcodes,
+      },
+      user,
+    ] = await Promise.all([
+      requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.read,
+      }),
+      db.user
+        .findUniqueOrThrow({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+            displayName: true,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "We can't find your user data. Please try again or contact support.",
+            additionalData: { userId },
+            label: "Assets",
+          });
+        }),
+    ]);
+
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
+    });
     const mode = settings.mode;
 
     /** For base and self service users, we dont allow to view the advanced index */
@@ -133,35 +128,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const result =
-      mode === "SIMPLE"
-        ? await perf.measure("simpleModeLoader", () =>
-            simpleModeLoader({
-              request,
-              userId,
-              organizationId,
-              organizations,
-              role,
-              currentOrganization,
-              user,
-              settings,
-            })
-          )
-        : await perf.measure("advancedModeLoader", () =>
-            advancedModeLoader({
-              request,
-              userId,
-              organizationId,
-              organizations,
-              role,
-              currentOrganization,
-              user,
-              settings,
-            })
-          );
-
-    perf.report();
-    return result;
+    return mode === "SIMPLE"
+      ? await simpleModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        })
+      : await advancedModeLoader({
+          request,
+          userId,
+          organizationId,
+          organizations,
+          role,
+          currentOrganization,
+          user,
+          settings,
+        });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });
