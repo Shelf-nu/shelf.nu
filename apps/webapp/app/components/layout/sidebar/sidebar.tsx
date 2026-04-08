@@ -129,6 +129,10 @@ const SidebarProvider = forwardRef<
         const openState =
           typeof value === "function" ? value(openRef.current) : value;
 
+        // Update ref immediately so rapid toggles read the latest state
+        // before React re-renders (e.g. CMD+B pressed twice fast).
+        openRef.current = openState;
+
         if (setOpenProp) {
           setOpenProp(openState);
         } else {
