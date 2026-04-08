@@ -141,8 +141,12 @@ export default function InlineEntityCreationDialog({
                   if (data?.assetModel) {
                     onCreated?.({
                       type: "assetModel",
-                      entity: data.assetModel,
-                    } as any);
+                      entity: {
+                        id: data.assetModel.id,
+                        name: data.assetModel.name,
+                        description: data.assetModel.description,
+                      },
+                    });
                   }
                   setOpen(false);
                 }}

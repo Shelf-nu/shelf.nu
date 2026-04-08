@@ -88,8 +88,7 @@ function OverviewRow({
               </TooltipTrigger>
               <TooltipContent side="left">
                 <p className="text-xs">
-                  Low stock — an email alert has been sent to the workspace
-                  owner.
+                  Low stock — the workspace owner will be notified.
                 </p>
               </TooltipContent>
             </Tooltip>

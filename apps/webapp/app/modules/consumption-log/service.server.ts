@@ -44,7 +44,14 @@ type CreateConsumptionLogArgs = {
   bookingId?: string;
   /** Optional team member who received/returned items */
   custodianId?: string;
-  /** Optional Prisma transaction client for transactional operations */
+  /**
+   * Optional Prisma interactive transaction client.
+   * Typed as `any` because Prisma doesn't export a clean type for
+   * `$transaction()` callbacks on extended PrismaClient instances —
+   * the tx type is `Omit<ExtendedClient, ...>` which isn't assignable
+   * to `Prisma.TransactionClient` or `typeof db`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx?: any;
 };
 

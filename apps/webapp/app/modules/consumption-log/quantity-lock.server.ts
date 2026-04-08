@@ -25,7 +25,8 @@ import { ShelfError } from "~/utils/error";
  * @throws {ShelfError} If the asset is not found (404)
  */
 export async function lockAssetForQuantityUpdate(
-  tx: any, // Prisma interactive transaction client
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
   assetId: string
 ): Promise<Asset> {
   const result = await tx.$queryRaw<Asset[]>`

@@ -221,7 +221,14 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn id={item.id} status={item.status} asset={item} />;
+      return (
+        <StatusColumn
+          id={item.id}
+          status={item.status}
+          availableToBook={item.availableToBook}
+          asset={item}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -409,10 +416,12 @@ function TextColumn({
 function StatusColumn({
   id,
   status,
+  availableToBook,
   asset,
 }: {
   id: string;
   status: AssetStatus;
+  availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
 }) {
   return (
@@ -420,7 +429,7 @@ function StatusColumn({
       <AssetStatusBadge
         id={id}
         status={status}
-        availableToBook={true}
+        availableToBook={availableToBook ?? true}
         asset={asset}
       />
     </Td>
