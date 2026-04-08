@@ -93,6 +93,15 @@ const SidebarProvider = forwardRef<
     // Debounce cookie persistence so rapid CMD+B toggling only fires
     // one request with the final state, instead of a POST per toggle.
     const persistTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+    // Clean up debounce timer on unmount to prevent stale submissions
+    useEffect(
+      () => () => {
+        clearTimeout(persistTimerRef.current);
+      },
+      []
+    );
+
     const persistSidebarState = useCallback(
       (openState: boolean) => {
         clearTimeout(persistTimerRef.current);
@@ -109,27 +118,26 @@ const SidebarProvider = forwardRef<
       [sidebarTogglerFetcher]
     );
 
+    // Track current open state in a ref so setOpen doesn't need
+    // `open` or `_open` in its dependency array. This keeps setOpen,
+    // toggleSidebar, and the keyboard useEffect stable across toggles.
+    const openRef = useRef(open);
+    openRef.current = open;
+
     const setOpen = useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
-        // Use functional updater to read current state without depending
-        // on `open` in the deps array. This prevents the setOpen → toggleSidebar
-        // → useEffect re-attachment cascade on every toggle.
-        _setOpen((prev) => {
-          const current = openProp ?? prev;
-          const openState =
-            typeof value === "function" ? value(current) : value;
+        const openState =
+          typeof value === "function" ? value(openRef.current) : value;
 
-          if (setOpenProp) {
-            setOpenProp(openState);
-          }
+        if (setOpenProp) {
+          setOpenProp(openState);
+        } else {
+          _setOpen(openState);
+        }
 
-          // Persist to cookie (fires after state update)
-          persistSidebarState(openState);
-
-          return openState;
-        });
+        persistSidebarState(openState);
       },
-      [openProp, setOpenProp, persistSidebarState]
+      [setOpenProp, persistSidebarState]
     );
 
     // Helper to toggle the sidebar.
