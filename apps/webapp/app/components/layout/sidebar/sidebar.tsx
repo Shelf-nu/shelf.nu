@@ -82,7 +82,7 @@ const SidebarProvider = forwardRef<
     const isMobile = useIsMobile();
     const [openMobile, setOpenMobile] = useState(false);
 
-    const sidebarTogglerFetcher = useFetcher();
+    const sidebarTogglerFetcher = useFetcher({ key: "sidebar-toggler" });
     const isSidebarToggling = isFormProcessing(sidebarTogglerFetcher.state);
 
     // This is the internal state of the sidebar.
