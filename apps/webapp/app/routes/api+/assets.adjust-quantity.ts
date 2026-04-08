@@ -23,8 +23,9 @@ import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -75,31 +76,42 @@ export async function action({ context, request }: ActionFunctionArgs) {
       note,
     });
 
-    /** Build and create an audit note on the asset */
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      } satisfies Prisma.UserSelect,
-    });
+    /** Best-effort audit note — don't fail the action if note creation fails */
+    try {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
 
-    const actor = wrapUserLinkForNote(user);
-    const sign = direction === "add" ? "+" : "-";
-    const categoryLabel = category.toLowerCase();
-    const noteContent = note
-      ? `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}). *"${note}"*`
-      : `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
+      const actor = wrapUserLinkForNote(user);
+      const sign = direction === "add" ? "+" : "-";
+      const categoryLabel = category.toLowerCase();
+      const noteContent = note
+        ? `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}). *"${note}"*`
+        : `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
 
-    await createNote({
-      content: noteContent,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
+      await createNote({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetId,
+      });
+    } catch (noteError) {
+      Logger.error(
+        new ShelfError({
+          cause: noteError,
+          message: "Failed to create audit note for quantity operation",
+          label: "Assets",
+          additionalData: { assetId, userId },
+        })
+      );
+    }
 
     sendNotification({
-      title: `Quantity adjusted: ${sign}${quantity}`,
+      title: `Quantity adjusted: ${direction === "add" ? "+" : "-"}${quantity}`,
       message: "The asset quantity has been updated successfully.",
       icon: { name: "success", variant: "success" },
       senderId: userId,

@@ -241,3 +241,29 @@ custodians it has. The custody column in the index should show multiple custodia
 - `app/modules/asset/query.server.ts` — `assetQueryJoins` and custody CASE block
 - `app/modules/asset/service.server.ts` — GROUP BY clause (remove `cu.id`, `tm.name`, `u.id`, etc.)
 - Asset index UI components — custody column renderer to handle multiple custodians
+
+### Kit custody assigns only 1 unit for quantity-tracked assets
+
+**Problem:** When a quantity-tracked asset is added to a kit that already
+has custody, the inherited custody record is created with `quantity: 1`
+(the default) instead of the asset's full tracked quantity. The asset
+gets marked `IN_CUSTODY` while only 1 unit is actually assigned.
+
+**Files to change:**
+
+- `app/modules/kit/service.server.ts` — the `custody.create` inside
+  `assetsToInheritStatus` map (~line 2256) needs to set `quantity`
+  from the asset's tracked amount
+
+### Kit removal wipes all custody for quantity-tracked assets
+
+**Problem:** Removing a quantity-tracked asset from an in-custody kit
+deletes ALL custody rows via `custody: { deleteMany: {} }` and forces
+`AVAILABLE` status. This erases unrelated quantity custody allocations
+that have nothing to do with the kit.
+
+**Files to change:**
+
+- `app/routes/_layout+/kits.$kitId.tsx` (~line 297) — needs a
+  quantity-aware release path that only removes the kit-related
+  custody record, not all of them

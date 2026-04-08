@@ -19,6 +19,7 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
+  OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -3705,12 +3706,15 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  role,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /** The role of the user performing the operation, used for self-service validation */
+  role?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3764,6 +3768,28 @@ export async function bulkCheckInAssets({
         label: "Assets",
         shouldBeCaptured: false,
       });
+    }
+
+    /** Self-service users can only release custody of their own assets */
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      const custodies = await db.custody.findMany({
+        where: {
+          assetId: { in: assets.map((a) => a.id) },
+        },
+        select: { custodian: { select: { userId: true } } },
+      });
+      if (custodies.some((c) => c.custodian.userId !== userId)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message:
+            "Self-service users can only release custody of their own assets.",
+          additionalData: { userId },
+          label: "Assets",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     const hasAssetsWithoutCustody = assets.some(
@@ -4815,9 +4841,32 @@ export async function releaseQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
 
-      /** Step 2: Find the custody record for this asset-teamMember pair */
+      /** Step 2: Validate asset belongs to the organization */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /** Step 3: Validate the asset is quantity-tracked */
+      if (asset.type !== "QUANTITY_TRACKED") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only quantity-tracked assets support quantity custody operations.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /** Step 4: Find the custody record for this asset-teamMember pair */
       const custody = await tx.custody.findUnique({
         where: {
           assetId_teamMemberId: { assetId, teamMemberId },
@@ -4834,7 +4883,7 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 3: Validate the release quantity does not exceed custodied amount */
+      /** Step 5: Validate the release quantity does not exceed custodied amount */
       if (quantity > custody.quantity) {
         throw new ShelfError({
           cause: null,
@@ -4850,7 +4899,7 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 4: Delete the custody record if releasing full amount, else decrement */
+      /** Step 6: Delete the custody record if releasing full amount, else decrement */
       if (quantity === custody.quantity) {
         await tx.custody.delete({
           where: {
@@ -4868,7 +4917,7 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 5: Create an immutable audit log entry */
+      /** Step 7: Create an immutable audit log entry */
       await createConsumptionLog({
         assetId,
         category: "RETURN",
@@ -4879,7 +4928,7 @@ export async function releaseQuantity({
         tx,
       });
 
-      /** Step 6: Return the refreshed asset */
+      /** Step 8: Return the refreshed asset */
       return tx.asset.findUniqueOrThrow({
         where: { id: assetId },
       });

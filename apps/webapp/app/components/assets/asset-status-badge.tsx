@@ -108,12 +108,11 @@ export function AssetStatusBadge({
 }) {
   const quantityData = useMemo(() => getQuantityData(asset), [asset]);
 
-  // Fetch the booking from API when asset is CHECKED_OUT
-  // The API correctly finds the booking where asset is checked out
-  // (excluding bookings where it's been partially checked in)
+  // Fetch the booking from API when asset is CHECKED_OUT.
+  // Skip for quantity-tracked assets — they never have bookings.
   const { data } = useApiQuery<Booking>({
     api: `/api/assets/${id}/ongoing-booking`,
-    enabled: status === AssetStatus.CHECKED_OUT,
+    enabled: status === AssetStatus.CHECKED_OUT && !quantityData,
   });
 
   const bookingToShow = useMemo(() => {

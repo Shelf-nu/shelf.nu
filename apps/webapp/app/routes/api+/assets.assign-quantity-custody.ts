@@ -22,6 +22,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
@@ -108,41 +109,52 @@ export async function action({ context, request }: ActionFunctionArgs) {
       note,
     });
 
-    /** Build and create an audit note on the asset */
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      } satisfies Prisma.UserSelect,
-    });
+    /** Best-effort audit note — don't fail the action if note creation fails */
+    try {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      });
 
-    const actor = wrapUserLinkForNote(user);
-    const custodianDisplay = wrapCustodianForNote({
-      teamMember: {
-        name: teamMember.name,
-        user: teamMember.user
-          ? {
-              id: teamMember.user.id,
-              firstName: teamMember.user.firstName,
-              lastName: teamMember.user.lastName,
-            }
-          : null,
-      },
-    });
+      const actor = wrapUserLinkForNote(user);
+      const custodianDisplay = wrapCustodianForNote({
+        teamMember: {
+          name: teamMember.name,
+          user: teamMember.user
+            ? {
+                id: teamMember.user.id,
+                firstName: teamMember.user.firstName,
+                lastName: teamMember.user.lastName,
+              }
+            : null,
+        },
+      });
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-    const baseLine = isSelfService
-      ? `${actor} took custody of **${quantity}** unit(s).`
-      : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
-    const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      const baseLine = isSelfService
+        ? `${actor} took custody of **${quantity}** unit(s).`
+        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
+      const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
 
-    await createNote({
-      content: noteContent,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
+      await createNote({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetId,
+      });
+    } catch (noteError) {
+      Logger.error(
+        new ShelfError({
+          cause: noteError,
+          message: "Failed to create audit note for quantity operation",
+          label: "Assets",
+          additionalData: { assetId, userId },
+        })
+      );
+    }
 
     sendNotification({
       title: `${quantity} unit(s) assigned to ${teamMember.name}`,
