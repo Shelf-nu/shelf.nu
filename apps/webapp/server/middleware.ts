@@ -68,6 +68,10 @@ export function protect({
   publicPaths: string[];
   onFailRedirectTo: string;
 }) {
+  // Pre-compile public path regexes once at middleware creation time
+  // instead of recompiling on every request.
+  const compiledPublicPaths = publicPaths.map((p) => pathToRegexp(p));
+
   return createMiddleware(async (c, next) => {
     // Skip authentication for internal Remix/framework routes (manifest, etc.)
     // These are created by lazy route discovery and should never require auth
@@ -83,7 +87,7 @@ export function protect({
       ? c.req.path.slice(0, -5)
       : c.req.path;
 
-    const isPublic = pathMatch(publicPaths, pathToCheck);
+    const isPublic = pathMatchCompiled(compiledPublicPaths, pathToCheck);
 
     if (isPublic) {
       return next();
@@ -121,15 +125,13 @@ export function protect({
   });
 }
 
-function pathMatch(paths: string[], requestPath: string) {
-  for (const path of paths) {
-    const regex = pathToRegexp(path);
-
+/** Match against pre-compiled regexes (used by protect middleware) */
+function pathMatchCompiled(compiledPatterns: RegExp[], requestPath: string) {
+  for (const regex of compiledPatterns) {
     if (regex.test(requestPath)) {
       return true;
     }
   }
-
   return false;
 }
 
