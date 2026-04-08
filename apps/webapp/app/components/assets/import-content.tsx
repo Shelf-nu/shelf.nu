@@ -1,12 +1,20 @@
+/**
+ * @file Import content components for CSV asset import.
+ * Provides the main ImportContent layout and FileForm for file upload
+ * with client-side validation, preview, and confirmation flow.
+ *
+ * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
+ */
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
+import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
-import { isFormProcessing } from "~/utils/form";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -22,14 +30,37 @@ import { WarningBox } from "../shared/warning-box";
 import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
+/**
+ * Main content component for the CSV asset import page.
+ * Displays instructions, rules, and embeds the FileForm for upload.
+ */
 export const ImportContent = () => {
   const { canUseBarcodes } = useBarcodePermissions();
 
   return (
-    <div className="text-left">
-      <h3>Import your own content</h3>
+    <div className="w-full text-left">
+      <h3>Import assets</h3>
+
+      {/* Intent fork */}
+      <div className="my-4 flex gap-3 rounded-md border border-gray-200 bg-gray-50 p-4">
+        <Icon
+          icon="switch"
+          size="xs"
+          className="mt-0.5 shrink-0 text-gray-500"
+        />
+        <p className="text-[14px] text-gray-600">
+          <b>Want to update existing assets instead?</b> If you've exported
+          assets from the Asset Index and made changes in Excel, you can
+          re-import them to bulk update.{" "}
+          <Button variant="link" to="/assets/import-update">
+            Go to bulk update →
+          </Button>
+        </p>
+      </div>
+
+      <h4>Create new assets from CSV</h4>
       <p>
-        Import your own content by placing it in the csv file. Here you can{" "}
+        Upload a CSV file to create new assets. Start with our{" "}
         <Button
           variant="link"
           to={
@@ -40,9 +71,11 @@ export const ImportContent = () => {
           target="_blank"
           download
         >
-          download our CSV template.
+          CSV template
         </Button>{" "}
+        — each row becomes a new asset.
       </p>
+
       <WarningBox className="my-4">
         <>
           <strong>IMPORTANT</strong>: Do not use data exported from asset backup
@@ -50,172 +83,177 @@ export const ImportContent = () => {
           get corrupted data.
         </>
       </WarningBox>
-      <h4>Base rules and limitations</h4>
-      <ul className="list-inside list-disc">
-        <li>
-          You must use <b>, (comma)</b> or <b>; (semicolon)</b> as a delimiter
-          in your csv file
-        </li>
-        <li>Each row represents a new asset that will be created</li>
-        <li>
-          Columns such as <b>kit, category, location & custodian</b> represent
-          just the name of the related entry. As an example, if you put the
-          category <b>Laptops</b> we will look for an existing category with
-          that name and link the asset to it. If it doesn't exist, we will
-          create it.
-        </li>
-        <li>
-          Columns such as <b>tags</b> represent the names of a collection of
-          entries. To assign multiple tags, just seperate their names with
-          comas. If the tag doesn't exist, we will create it.
-        </li>
-        <li>
-          The content you are importing will <b>NOT</b> be merged with existing
-          assets. A new asset will be created for each valid row in the sheet.
-        </li>
-      </ul>
 
-      <h4 className="mt-2">Importing Custom fields</h4>
-      <div>
-        To import custom fields, prefix your column heading with <b>"cf: "</b>,{" "}
-        <br />
-        add the type followed by a coma from one of the allowed types:
-        <ul className="list-inside list-disc pl-4">
-          <li>
-            <b>text</b> - default if no type is passed
-          </li>
-          <li>
-            <b>boolean</b> - choose a yes or no value
-          </li>
-          <li>
-            <b>option</b> - you dont have to have the options created, we create
-            option(both the field and the option) while importing if the option
-            doesnt exisit.
-          </li>
-          <li>
-            <b>multiline text</b>
-          </li>
-          <li>
-            <b>date</b> - must be in <b>YYYY-MM-DD</b> format
-          </li>
-          <li>
-            <b>amount</b> - for currency values (e.g., 1234.56 - no currency
-            symbols)
-          </li>
-          <li>
-            <b>number</b> - for numeric values including negatives (e.g.,
-            -123.45)
-          </li>
-        </ul>
-        If no type is mentioned <b>"text"</b> is used as default type.
-      </div>
-      <div>
-        This is how a sample header looks like for custom field with name{" "}
-        <b>"purchase date"</b> and type <b>"date"</b> :{" "}
-        <b>"cf:purchase date, type:date"</b>
-      </div>
-
-      <h4 className="mt-2">Importing with QR codes</h4>
-      <div>
-        You also have the option to se a Shelf QR code for each asset. This is
-        very valuable if you already have Shelf QR codes printed and you want to
-        link them to the assets you are importing.
-        <br />
-        This feature comes with the following limitations:
-        <ul className="list-inside list-disc pl-4">
-          <li>
-            <b>Existing code</b> - the QR code needs to already exist in shelf
-          </li>
-          <li>
-            <b>No duplicate codes</b> - the qrId needs to be unique for each
-            asset
-          </li>
-          <li>
-            <b>No linked codes</b> - the qrId needs not be linked to any asset
-            or kit
-          </li>
-          <li>
-            <b>QR ownership</b> - the QR code needs to be either unclaimed or
-            belong to the organization you are trying to import it to.
-          </li>
-        </ul>
-        If no <b>"qrId"</b> is used a new QR code will be generated.
-        <br />
-        If you are interesting in receiving some unclaimed or unlinked codes,
-        feel free to get in touch with support and we can provide those for you.
-      </div>
-
-      <When truthy={canUseBarcodes}>
-        <h4 className="mt-2">Importing with Barcodes</h4>
-        <div>
-          You can also import assets with barcodes using the barcode columns.
-          This feature supports three barcode types: <b>Code128</b>,{" "}
-          <b>Code39</b>, and <b>DataMatrix</b>.
-          <br />
-          <br />
-          <b>Barcode column format:</b>
-          <ul className="list-inside list-disc pl-4">
-            <li>
-              <b>barcode_Code128</b> - For Code128 barcodes (4-40 characters,
-              supports letters, numbers, and symbols like dashes)
-            </li>
-            <li>
-              <b>barcode_Code39</b> - For Code39 barcodes (4-43 characters)
-            </li>
-            <li>
-              <b>barcode_DataMatrix</b> - For DataMatrix barcodes (4-100
-              characters)
-            </li>
-            <li>
-              <b>barcode_ExternalQR</b> - For external QR codes (1-2048
-              characters, URLs, text, or any external QR content)
-            </li>
-            <li>
-              <b>barcode_EAN13</b> - For retail barcodes (13-digit product
-              identification codes))
-            </li>
-          </ul>
-          <br />
-          <b>Important rules:</b>
-          <ul className="list-inside list-disc pl-4">
-            <li>
-              <b>Multiple barcodes</b> - Use comma separation for multiple
-              barcodes of the same type (e.g., "ABC123,DEF456")
-            </li>
-            <li>
-              <b>Unique values</b> - Each barcode value must be unique within
-              your organization
-            </li>
-            <li>
-              <b>Character restrictions</b> - Code39 and DataMatrix allow only
-              letters and numbers, Code128 supports most symbols
-            </li>
-            <li>
-              <b>Case insensitive</b> - Values will be automatically converted
-              to uppercase
-            </li>
-          </ul>
-          Leave barcode columns empty if you don't want to assign barcodes to
-          specific assets.
+      <div className="my-5 flex flex-col gap-4">
+        {/* Base rules */}
+        <div className="flex gap-3">
+          <Icon
+            icon="write"
+            size="xs"
+            className="mt-0.5 shrink-0 text-gray-500"
+          />
+          <div>
+            <h5 className="font-semibold">Base rules</h5>
+            <ul className="list-inside list-disc text-[14px] text-gray-600">
+              <li>
+                Use <b>, (comma)</b> or <b>; (semicolon)</b> as delimiter
+              </li>
+              <li>
+                Columns like <b>kit, category, location & custodian</b>{" "}
+                represent the name of the related entry — if it doesn't exist,
+                we'll create it
+              </li>
+              <li>
+                <b>Tags</b> can be comma-separated — missing tags will be
+                created automatically
+              </li>
+              <li>
+                Each row creates a <b>new</b> asset — existing assets will not
+                be merged or overwritten
+              </li>
+            </ul>
+          </div>
         </div>
-      </When>
 
-      <div>
-        <h4 className="mt-2">Extra considerations</h4>
-        <ul className="list-inside list-disc pl-4">
-          <li>
-            The first row of the sheet will be ignored. Use it to describe the
-            columns as in the example sheet.
-          </li>
-          <li>
-            If any of the data in the file is invalid, the whole import will
-            fail
-          </li>
-        </ul>
+        {/* Custom fields */}
+        <div className="flex gap-3">
+          <Icon
+            icon="settings"
+            size="xs"
+            className="mt-0.5 shrink-0 text-gray-500"
+          />
+          <div>
+            <h5 className="font-semibold">Custom fields</h5>
+            <p className="text-[14px] text-gray-600">
+              Prefix your column heading with <b>"cf: "</b> and add the type
+              after a comma. Supported types:
+            </p>
+            <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
+              <li>
+                <b>text</b> (default), <b>boolean</b>, <b>option</b>,{" "}
+                <b>multiline text</b>
+              </li>
+              <li>
+                <b>date</b> — must be YYYY-MM-DD
+              </li>
+              <li>
+                <b>amount</b> — currency values, no symbols (e.g., 1234.56)
+              </li>
+              <li>
+                <b>number</b> — numeric values including negatives
+              </li>
+            </ul>
+            <p className="mt-1 text-[14px] text-gray-600">
+              Example header: <b>"cf:purchase date, type:date"</b>
+            </p>
+          </div>
+        </div>
+
+        {/* QR codes */}
+        <div className="flex gap-3">
+          <Icon
+            icon="scanQR"
+            size="xs"
+            className="mt-0.5 shrink-0 text-gray-500"
+          />
+          <div>
+            <h5 className="font-semibold">QR codes</h5>
+            <p className="text-[14px] text-gray-600">
+              You can link a Shelf QR code to each asset. This is useful if you
+              already have QR codes printed and want to connect them to the
+              assets you're importing. Limitations:
+            </p>
+            <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
+              <li>
+                <b>Existing code</b> — the QR code must already exist in Shelf
+              </li>
+              <li>
+                <b>No duplicates</b> — each qrId must be unique per asset
+              </li>
+              <li>
+                <b>No linked codes</b> — the qrId must not already be linked to
+                another asset or kit
+              </li>
+              <li>
+                <b>QR ownership</b> — the code must be unclaimed or belong to
+                your organization
+              </li>
+            </ul>
+            <p className="mt-1 text-[14px] text-gray-600">
+              If no <b>"qrId"</b> is provided, a new QR code will be generated.
+              Need unclaimed or unlinked codes? Contact support and we can
+              provide them.
+            </p>
+          </div>
+        </div>
+
+        {/* Barcodes */}
+        <When truthy={canUseBarcodes}>
+          <div className="flex gap-3">
+            <Icon
+              icon="barcode"
+              size="xs"
+              className="mt-0.5 shrink-0 text-gray-500"
+            />
+            <div>
+              <h5 className="font-semibold">Barcodes</h5>
+              <p className="text-[14px] text-gray-600">
+                Import assets with barcodes using these columns:
+              </p>
+              <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
+                <li>
+                  <b>barcode_Code128</b> — 4-40 characters, supports letters,
+                  numbers, and symbols
+                </li>
+                <li>
+                  <b>barcode_Code39</b> — 4-43 characters
+                </li>
+                <li>
+                  <b>barcode_DataMatrix</b> — 4-100 characters
+                </li>
+                <li>
+                  <b>barcode_ExternalQR</b> — 1-2048 characters (URLs, text, or
+                  any external QR content)
+                </li>
+                <li>
+                  <b>barcode_EAN13</b> — 13-digit product identification codes
+                </li>
+              </ul>
+              <p className="mt-1 text-[14px] text-gray-600">
+                <b>Rules:</b> Use comma separation for multiple barcodes of the
+                same type (e.g., "ABC123,DEF456"). Each value must be unique in
+                your organization. Code39 and DataMatrix allow only letters and
+                numbers; Code128 supports most symbols. Values are automatically
+                converted to uppercase. Leave barcode columns empty if you don't
+                want to assign barcodes.
+              </p>
+            </div>
+          </div>
+        </When>
+
+        {/* Extra considerations */}
+        <div className="flex gap-3">
+          <Icon
+            icon="question"
+            size="xs"
+            className="mt-0.5 shrink-0 text-gray-500"
+          />
+          <div>
+            <h5 className="font-semibold">Good to know</h5>
+            <ul className="list-inside list-disc text-[14px] text-gray-600">
+              <li>
+                The first row is used as column headers — it won't be imported
+              </li>
+              <li>
+                If any data in the file is invalid, the whole import will fail
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
 
-      <div className="mt-2 w-full">
-        For more help, you can use our{" "}
+      <p className="text-[14px] text-gray-500">
+        Need help preparing your file? Try our{" "}
         <Button
           variant="link"
           to="https://www.shelf.nu/csv-helper"
@@ -224,20 +262,31 @@ export const ImportContent = () => {
           CSV Helper Tool
         </Button>
         .
-      </div>
+      </p>
 
       <FileForm intent={"content"} />
     </div>
   );
 };
 
+/**
+ * File upload form with confirmation dialog for CSV asset import.
+ * Handles file selection, "I AGREE" confirmation, and displays
+ * import errors or success state.
+ *
+ * @param intent - The form intent value sent to the action
+ * @param url - Optional custom action URL for the form
+ */
 export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
-  const [agreed, setAgreed] = useState<"I AGREE" | "">("");
+  // Widened to `string` so toUpperCase() doesn't need a cast.
+  // The "I AGREE" check happens at submit time.
+  const [agreed, setAgreed] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcherWithReset<typeof action>();
 
-  const { data, state } = fetcher;
-  const disabled = isFormProcessing(state) || agreed !== "I AGREE";
+  const { data } = fetcher;
+  const isSubmitting = useDisabled(fetcher);
+  const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
   //
 
@@ -306,9 +355,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   autoFocus
                   name="agree"
                   value={agreed}
-                  onChange={(e) =>
-                    setAgreed(e.target.value.toUpperCase() as any)
-                  }
+                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
                   placeholder="I AGREE"
                   pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
                   required
@@ -483,7 +530,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   }}
                   disabled={disabled}
                 >
-                  {isFormProcessing(fetcher.state) ? "Importing..." : "Import"}
+                  {isSubmitting ? "Importing..." : "Import"}
                 </Button>
               </>
             )}
