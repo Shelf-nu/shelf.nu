@@ -336,7 +336,7 @@ describe("generateWhereClause - special filter values", () => {
   });
 });
 
-describe("assetQueryFragment - custody output", () => {
+describe("assetQueryFragment", () => {
   /**
    * Helper to extract SQL string from Prisma.Sql for testing.
    * Joins the strings array to get a readable representation.
@@ -345,24 +345,61 @@ describe("assetQueryFragment - custody output", () => {
     return sql.strings.join("?");
   }
 
-  it("only includes booking custody when asset status is CHECKED_OUT", () => {
-    const fragment = assetQueryFragment();
-    const sql = getFragmentSqlString(fragment);
+  describe("custody output", () => {
+    it("only includes booking custody when asset status is CHECKED_OUT", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
 
-    // The CASE WHEN for booking-based custody must be guarded by CHECKED_OUT
-    expect(sql).toContain(
-      "WHEN b.id IS NOT NULL AND a.status = 'CHECKED_OUT' THEN"
-    );
+      // The CASE WHEN for booking-based custody must be guarded by CHECKED_OUT
+      expect(sql).toContain(
+        "WHEN b.id IS NOT NULL AND a.status = 'CHECKED_OUT' THEN"
+      );
+    });
+
+    it("includes direct custody without CHECKED_OUT guard", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // Direct custody (via Custody table) should not require CHECKED_OUT
+      expect(sql).toContain("WHEN cu.id IS NOT NULL THEN");
+      expect(sql).not.toContain(
+        "WHEN cu.id IS NOT NULL AND a.status = 'CHECKED_OUT'"
+      );
+    });
   });
 
-  it("includes direct custody without CHECKED_OUT guard", () => {
-    const fragment = assetQueryFragment();
-    const sql = getFragmentSqlString(fragment);
+  describe("withCustomFieldDefinitions option", () => {
+    it("includes full definitions by default (matches AdvancedIndexAsset type)", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
 
-    // Direct custody (via Custody table) should not require CHECKED_OUT
-    expect(sql).toContain("WHEN cu.id IS NOT NULL THEN");
-    expect(sql).not.toContain(
-      "WHEN cu.id IS NOT NULL AND a.status = 'CHECKED_OUT'"
-    );
+      // Default should include all definition columns
+      expect(sql).toContain("helpText");
+      expect(sql).toContain("cf.required");
+      expect(sql).toContain("cf.options");
+      expect(sql).toContain("categories");
+      expect(sql).toContain("_CategoryToCustomField");
+      expect(sql).toContain("Category");
+    });
+
+    it("excludes full definitions when withCustomFieldDefinitions is false", () => {
+      const fragment = assetQueryFragment({
+        withCustomFieldDefinitions: false,
+      });
+      const sql = getFragmentSqlString(fragment);
+
+      // Should include basic custom field columns
+      expect(sql).toContain("customField");
+      expect(sql).toContain("cf.id");
+      expect(sql).toContain("cf.name");
+      expect(sql).toContain("cf.type");
+
+      // Should NOT include definition-only columns
+      expect(sql).not.toContain("helpText");
+      expect(sql).not.toContain("cf.required");
+      expect(sql).not.toContain("cf.options");
+      expect(sql).not.toContain("categories");
+      expect(sql).not.toContain("_CategoryToCustomField");
+    });
   });
 });
