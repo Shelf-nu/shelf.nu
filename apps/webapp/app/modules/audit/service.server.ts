@@ -2375,6 +2375,11 @@ function getAuditWhereInput({
 
   if (status) {
     where.status = status;
+  } else {
+    // Mirror the index loader: exclude ARCHIVED by default when no
+    // explicit status filter is set, so select-all never pulls in
+    // audits the user didn't see in the list
+    where.status = { notIn: [AuditStatus.ARCHIVED] };
   }
 
   // Respect the active search term so select-all only targets the
@@ -2443,11 +2448,31 @@ export async function bulkArchiveAudits({
     }
 
     await db.$transaction(async (tx) => {
-      // Update all matching audits to ARCHIVED
-      await tx.auditSession.updateMany({
-        where: { id: { in: audits.map((a) => a.id) } },
+      // Keep terminal-state predicate on the write to guard against
+      // concurrent status changes between the read and this update,
+      // mirroring the single-item archiveAuditSession() pattern
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: { in: audits.map((a) => a.id) },
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
         data: { status: AuditStatus.ARCHIVED },
       });
+
+      if (result.count !== audits.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some audits could not be archived because their status changed. Please refresh and try again.",
+          label,
+          additionalData: {
+            expected: audits.length,
+            actual: result.count,
+            organizationId,
+          },
+          status: 409,
+        });
+      }
 
       // Fetch user info once for activity notes
       const user = await tx.user.findFirst({
