@@ -84,10 +84,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    // Run user fetch, organization selection, and cookie parsing in parallel.
-    // getUserByID and getSelectedOrganization are independent — both only
-    // need userId/request, not each other's results.
-    const [user, orgData, userPrefsCookie, pwaPromptCookie] = await Promise.all([
+    // Run user fetch and cookie parsing in parallel — these are independent
+    // and safe to run before the onboarding guard.
+    // NOTE: getSelectedOrganization is intentionally NOT included here.
+    // It can throw when a user has no org membership, and the onboarding
+    // guard (user.onboarded check) must run first to redirect non-onboarded
+    // users before org resolution is attempted.
+    const [user, userPrefsCookie, pwaPromptCookie] = await Promise.all([
       getUserByID(userId, {
         select: {
           id: true,
@@ -117,23 +120,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
         } satisfies Prisma.UserSelect,
       }),
-      getSelectedOrganization({
-        userId: authSession.userId,
-        request,
-      }),
       initializePerPageCookieOnLayout(request),
       installPwaPromptCookie
         .parse(request.headers.get("Cookie"))
         .then((c) => (c ?? {}) as { hidden?: boolean }),
     ]);
-
-    const {
-      organizationId,
-      organizations,
-      currentOrganization,
-      cookieRefreshNeeded,
-      noVisibleOrganizations,
-    } = orgData;
 
     let subscription = null;
 
@@ -148,6 +139,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (!user.onboarded) {
       return redirect("onboarding");
     }
+
+    // Org resolution runs after the onboarding guard — safe now since
+    // we know the user is onboarded and should have org membership.
+    const {
+      organizationId,
+      organizations,
+      currentOrganization,
+      cookieRefreshNeeded,
+      noVisibleOrganizations,
+    } = await getSelectedOrganization({
+      userId: authSession.userId,
+      request,
+    });
 
     // SSO user with no team orgs — redirect to a friendly pending page
     if (noVisibleOrganizations) {
