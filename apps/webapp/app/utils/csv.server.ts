@@ -327,7 +327,6 @@ export async function exportAssetsFromIndexToCsv({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
   });
-  // Pass both assets and columns to the build function
   const csvData = buildCsvExportDataFromAssets({
     assets,
     columns: [
