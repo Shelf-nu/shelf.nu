@@ -1,7 +1,11 @@
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import type { AuditAssignment, AuditSession } from "@prisma/client";
+import type {
+  AuditAssignment,
+  AuditSession,
+  Organization,
+} from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
@@ -15,6 +19,7 @@ import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -2337,6 +2342,129 @@ export async function archiveAuditSession({
       cause,
       message: "Failed to archive audit session",
       additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Builds a Prisma WHERE clause for audits based on the current URL search
+ * params. Used by bulk operations when the user selects "all" items across
+ * pages so the operation respects any active filters.
+ */
+function getAuditWhereInput({
+  organizationId,
+  currentSearchParams,
+}: {
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+}): Prisma.AuditSessionWhereInput {
+  const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+  if (!currentSearchParams) {
+    return where;
+  }
+
+  const searchParams = new URLSearchParams(currentSearchParams);
+
+  const status =
+    searchParams.get("status") === "ALL"
+      ? null
+      : (searchParams.get("status") as AuditStatus);
+
+  if (status) {
+    where.status = status;
+  }
+
+  return where;
+}
+
+/**
+ * Archives multiple audit sessions in a single transaction.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) will be archived.
+ * Creates an activity note on each archived audit.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ *
+ * @param params.auditIds - Array of audit IDs (or containing ALL_SELECTED_KEY)
+ * @param params.organizationId - Scoping organization
+ * @param params.userId - The user performing the archive (for activity notes)
+ * @param params.currentSearchParams - Serialized URL params for select-all filtering
+ * @throws {ShelfError} If any selected audit is not in a terminal state
+ */
+export async function bulkArchiveAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** When all items are selected, resolve from filters instead of IDs */
+    const where: Prisma.AuditSessionWhereInput = auditIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAuditWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: auditIds }, organizationId };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    const someNotTerminal = audits.some(
+      (a) =>
+        a.status !== AuditStatus.COMPLETED && a.status !== AuditStatus.CANCELLED
+    );
+
+    if (someNotTerminal) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some audits are not in a completed or cancelled state. Only completed or cancelled audits can be archived.",
+        label,
+        additionalData: { auditIds, organizationId },
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      // Update all matching audits to ARCHIVED
+      await tx.auditSession.updateMany({
+        where: { id: { in: audits.map((a) => a.id) } },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      // Fetch user info once for activity notes
+      const user = await tx.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, displayName: true },
+      });
+
+      // Create an activity note on each archived audit
+      await tx.auditNote.createMany({
+        data: audits.map((a) => ({
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE" as const,
+          userId,
+          auditSessionId: a.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk archive audits",
+      additionalData: { auditIds, organizationId, userId },
       label,
       status: 500,
     });
