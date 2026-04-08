@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
@@ -88,25 +89,47 @@ const SidebarProvider = forwardRef<
     // We use openProp and setOpenProp for control from outside the component.
     const [_open, _setOpen] = useState(defaultOpen);
     const open = openProp ?? _open;
+
+    // Debounce cookie persistence so rapid CMD+B toggling only fires
+    // one request with the final state, instead of a POST per toggle.
+    const persistTimerRef = useRef<ReturnType<typeof setTimeout>>();
+    const persistSidebarState = useCallback(
+      (openState: boolean) => {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = setTimeout(() => {
+          const formData = new FormData();
+          formData.append("minimizeSidebar", openState ? "close" : "open");
+
+          void sidebarTogglerFetcher.submit(formData, {
+            method: "POST",
+            action: "/api/user/prefs/minimized-sidebar",
+          });
+        }, 300);
+      },
+      [sidebarTogglerFetcher]
+    );
+
     const setOpen = useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
-        const openState = typeof value === "function" ? value(open) : value;
-        if (setOpenProp) {
-          setOpenProp(openState);
-        } else {
-          _setOpen(openState);
-        }
+        // Use functional updater to read current state without depending
+        // on `open` in the deps array. This prevents the setOpen → toggleSidebar
+        // → useEffect re-attachment cascade on every toggle.
+        _setOpen((prev) => {
+          const current = openProp ?? prev;
+          const openState =
+            typeof value === "function" ? value(current) : value;
 
-        /* Setting state of sidebar in cookies (userPrefs) */
-        const formData = new FormData();
-        formData.append("minimizeSidebar", openState ? "close" : "open");
+          if (setOpenProp) {
+            setOpenProp(openState);
+          }
 
-        void sidebarTogglerFetcher.submit(formData, {
-          method: "POST",
-          action: "/api/user/prefs/minimized-sidebar",
+          // Persist to cookie (fires after state update)
+          persistSidebarState(openState);
+
+          return openState;
         });
       },
-      [open, setOpenProp, sidebarTogglerFetcher]
+      [openProp, setOpenProp, persistSidebarState]
     );
 
     // Helper to toggle the sidebar.
