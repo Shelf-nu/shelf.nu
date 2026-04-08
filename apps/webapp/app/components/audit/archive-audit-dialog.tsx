@@ -1,11 +1,11 @@
 /**
- * @file Cancel Audit Dialog
+ * @file Archive Audit Dialog
  *
- * Renders a confirmation dialog for cancelling an active audit session.
- * Used by the actions dropdown on the audit detail page when the current
- * user is the audit creator and the audit is not yet completed or cancelled.
- * Submits the "cancel-audit" intent via a scoped fetcher to avoid
- * cross-form interference with other dialogs on the page.
+ * Renders a confirmation dialog for archiving a completed audit session.
+ * Used by the actions dropdown on the audit detail page when the audit
+ * is in a terminal state (COMPLETED or CANCELLED). Submits the
+ * "archive-audit" intent via a scoped
+ * fetcher to avoid cross-form interference with other dialogs on the page.
  *
  * @see {@link file://./actions-dropdown.tsx} - Triggers this dialog
  * @see {@link file://../../routes/_layout+/audits.$auditId.tsx} - Action handler
@@ -23,12 +23,10 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
-import { tw } from "~/utils/tw";
-import { AlertIcon } from "../icons/library";
 
-/** Props for the {@link CancelAuditDialog} component. */
-type CancelAuditDialogProps = {
-  /** Display name of the audit being cancelled */
+/** Props for the {@link ArchiveAuditDialog} component. */
+type ArchiveAuditDialogProps = {
+  /** Display name of the audit being archived */
   auditName: string;
   /** Whether the dialog is currently visible */
   open: boolean;
@@ -37,16 +35,16 @@ type CancelAuditDialogProps = {
 };
 
 /**
- * Confirmation dialog for cancelling an active audit.
+ * Confirmation dialog for archiving a completed audit.
  * Uses a fetcher so its response is scoped and doesn't
  * interfere with other forms on the audit detail page.
  */
-export function CancelAuditDialog({
+export function ArchiveAuditDialog({
   auditName,
   open,
   onClose,
-}: CancelAuditDialogProps) {
-  const fetcher = useFetcher({ key: "cancel-audit" });
+}: ArchiveAuditDialogProps) {
+  const fetcher = useFetcher({ key: "archive-audit" });
   const disabled = useDisabled(fetcher);
 
   /** Stabilize onClose in a ref to avoid stale closures in the effect */
@@ -63,15 +61,11 @@ export function CancelAuditDialog({
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <div className="mx-auto md:m-0">
-            <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
-              <AlertIcon />
-            </span>
-          </div>
-          <AlertDialogTitle>Cancel {auditName}</AlertDialogTitle>
+          <AlertDialogTitle>Archive {auditName}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to cancel this audit? This action cannot be
-            undone.
+            Are you sure you want to archive this audit? Archived audits are
+            hidden from the default list view but can still be found using the
+            status filter. This action cannot be undone.
             {fetcher.data && "error" in fetcher.data && fetcher.data.error && (
               <span className="mt-2 block text-sm text-error-500">
                 {fetcher.data.error.message}
@@ -83,20 +77,14 @@ export function CancelAuditDialog({
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
               <Button type="button" variant="secondary" disabled={disabled}>
-                Close
+                Cancel
               </Button>
             </AlertDialogCancel>
 
             <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="cancel-audit" />
-              <Button
-                type="submit"
-                className={tw(
-                  "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-                )}
-                disabled={disabled}
-              >
-                Cancel audit
+              <input type="hidden" name="intent" value="archive-audit" />
+              <Button type="submit" disabled={disabled}>
+                Archive
               </Button>
             </fetcher.Form>
           </div>

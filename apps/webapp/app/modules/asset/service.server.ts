@@ -881,6 +881,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${assetQueryFragment({
           withBookings: getBookings || isUpcomingBookingsColumnVisible,
           withBarcodes: canUseBarcodes,
+          withCustomFieldDefinitions: false,
         })}
         ${customFieldSelect}
         ${assetQueryJoins}

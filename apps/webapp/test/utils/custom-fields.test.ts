@@ -192,4 +192,48 @@ describe("buildCustomFieldValue", () => {
       buildCustomFieldValue({ raw: "1E5" }, customField)
     ).toThrowError(ShelfError);
   });
+
+  describe("BOOLEAN type", () => {
+    const booleanField: CustomField = {
+      ...baseCustomField,
+      name: "Active",
+      type: "BOOLEAN",
+    } as CustomField;
+
+    it('accepts "yes" case-insensitively with whitespace trimming', () => {
+      expect(buildCustomFieldValue({ raw: "yes" }, booleanField)).toEqual({
+        raw: "yes",
+        valueBoolean: true,
+      });
+      expect(buildCustomFieldValue({ raw: "YES" }, booleanField)).toEqual({
+        raw: "YES",
+        valueBoolean: true,
+      });
+      expect(buildCustomFieldValue({ raw: " Yes " }, booleanField)).toEqual({
+        raw: " Yes ",
+        valueBoolean: true,
+      });
+    });
+
+    it('accepts "no" case-insensitively', () => {
+      expect(buildCustomFieldValue({ raw: "no" }, booleanField)).toEqual({
+        raw: "no",
+        valueBoolean: false,
+      });
+      expect(buildCustomFieldValue({ raw: "NO" }, booleanField)).toEqual({
+        raw: "NO",
+        valueBoolean: false,
+      });
+    });
+
+    it("returns undefined for unrecognized boolean strings", () => {
+      expect(
+        buildCustomFieldValue({ raw: "invalid" }, booleanField)
+      ).toBeUndefined();
+      expect(
+        buildCustomFieldValue({ raw: "true" }, booleanField)
+      ).toBeUndefined();
+      expect(buildCustomFieldValue({ raw: "1" }, booleanField)).toBeUndefined();
+    });
+  });
 });

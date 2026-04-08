@@ -1478,6 +1478,7 @@ enum AuditStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+  ARCHIVED
 }
 
 enum AuditAssetStatus {
