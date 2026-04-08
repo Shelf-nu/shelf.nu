@@ -10,12 +10,11 @@
  * @see {@link file://../../routes/_layout+/audits._index.tsx} - Consuming page
  */
 import { useAtomValue } from "jotai";
-import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -74,8 +73,7 @@ function ConditionalDropdown() {
 
   const { roles } = useUserRoleHelper();
 
-  const navigation = useNavigation();
-  const isLoading = isFormProcessing(navigation.state);
+  const isLoading = useDisabled();
 
   const disabled = selectedAudits.length === 0;
 
@@ -106,6 +104,8 @@ function ConditionalDropdown() {
           className={tw(
             "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-700/50  transition duration-300 ease-in-out md:hidden"
           )}
+          onClick={closeMenu}
+          aria-hidden="true"
         />
       )}
 
