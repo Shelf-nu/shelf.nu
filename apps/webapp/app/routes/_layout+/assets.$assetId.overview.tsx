@@ -34,7 +34,6 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -45,6 +44,7 @@ import {
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -160,16 +160,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } | null = null;
 
     if (isQuantityTracked(asset)) {
-      const custodySum = await db.custody.aggregate({
-        where: { assetId: asset.id },
-        _sum: { quantity: true },
-      });
-      const inCustody = custodySum._sum.quantity ?? 0;
-      quantityData = {
-        total: asset.quantity ?? 0,
-        inCustody,
-        available: (asset.quantity ?? 0) - inCustody,
-      };
+      quantityData = await computeAvailableQuantity(asset.id);
     }
 
     /**

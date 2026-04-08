@@ -7,6 +7,7 @@ import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
@@ -72,6 +73,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
       },
     });
+
+    /**
+     * Quantity-tracked assets use the quantity-aware release flow
+     * on the asset overview page, not this modal.
+     */
+    if (isQuantityTracked(asset)) {
+      return redirect(`/assets/${assetId}`);
+    }
 
     if (!hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
@@ -149,6 +158,23 @@ export const action = async ({
         },
       },
     });
+    /**
+     * Block quantity-tracked assets — they must use the
+     * quantity-aware release flow, not this generic one.
+     */
+    if (isQuantityTracked(assetWithCustody)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Quantity-tracked assets must have custody released individually through the quantity release flow.",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     const custodyRecord = getPrimaryCustody(assetWithCustody.custody);
 
     if (isSelfService) {

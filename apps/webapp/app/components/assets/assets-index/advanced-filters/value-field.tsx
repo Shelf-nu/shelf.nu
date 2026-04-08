@@ -1186,8 +1186,10 @@ function AssetModelEnumField({
                         if (id === "without-model") {
                           return "No model";
                         }
-                        const model = (data as any).assetModels?.find(
-                          (m: any) => m.id === id
+                        const models =
+                          "assetModels" in data ? data.assetModels : [];
+                        const model = models?.find(
+                          (m: { id: string; name: string }) => m.id === id
                         );
                         return model?.name || "";
                       })
