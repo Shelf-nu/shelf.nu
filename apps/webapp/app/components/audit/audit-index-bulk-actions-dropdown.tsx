@@ -16,6 +16,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
+import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -58,10 +59,18 @@ export default function AuditIndexBulkActionsDropdown() {
 function ConditionalDropdown() {
   const selectedAudits = useAtomValue(selectedBulkItemsAtom);
 
-  /** Archive is only valid for COMPLETED or CANCELLED audits */
-  const someNotArchivable = selectedAudits.some(
-    (a) => a.status !== "COMPLETED" && a.status !== "CANCELLED"
-  );
+  /**
+   * Archive is only valid for COMPLETED or CANCELLED audits.
+   * When "select all across pages" is active, the selection contains the
+   * ALL_SELECTED_KEY sentinel (which has no status) — skip it so the
+   * Archive button stays enabled; the server validates statuses anyway.
+   */
+  const allSelected = isSelectingAllItems(selectedAudits);
+  const someNotArchivable =
+    !allSelected &&
+    selectedAudits.some(
+      (a) => a.status !== "COMPLETED" && a.status !== "CANCELLED"
+    );
 
   const { roles } = useUserRoleHelper();
 

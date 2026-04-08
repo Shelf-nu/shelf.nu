@@ -15,7 +15,7 @@ import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { bulkArchiveAudits } from "~/modules/audit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -45,12 +45,24 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-archive": PermissionAction.update,
     };
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: intentToActionMap[intent],
     });
+
+    // Archiving audits requires admin/owner — self-service/base roles have
+    // audit "update" but must not be able to archive via direct POST
+    if (isSelfServiceOrBase) {
+      throw new ShelfError({
+        cause: null,
+        message: "You do not have permission to archive audits.",
+        additionalData: { userId },
+        label: "Audit",
+        status: 403,
+      });
+    }
 
     switch (intent) {
       case "bulk-archive": {

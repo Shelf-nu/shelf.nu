@@ -2377,6 +2377,16 @@ function getAuditWhereInput({
     where.status = status;
   }
 
+  // Respect the active search term so select-all only targets the
+  // filtered subset the user sees, not every audit in the org
+  const search = searchParams.get("s");
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
   return where;
 }
 
