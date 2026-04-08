@@ -2362,11 +2362,9 @@ function getAuditWhereInput({
 }): Prisma.AuditSessionWhereInput {
   const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-  if (!currentSearchParams) {
-    return where;
-  }
-
-  const searchParams = new URLSearchParams(currentSearchParams);
+  // Always parse params — even when empty/null, we need to apply
+  // default filters (e.g. exclude ARCHIVED) to mirror the index loader
+  const searchParams = new URLSearchParams(currentSearchParams ?? "");
 
   const status =
     searchParams.get("status") === "ALL"
