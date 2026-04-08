@@ -102,6 +102,8 @@ const SidebarProvider = forwardRef<
       []
     );
 
+    /** Debounced persistence — waits 300ms before POSTing so rapid
+     *  toggles only send one request with the final state. */
     const persistSidebarState = useCallback(
       (openState: boolean) => {
         clearTimeout(persistTimerRef.current);
