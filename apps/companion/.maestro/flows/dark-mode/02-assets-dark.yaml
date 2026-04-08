@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Dark Mode - Assets Screen"
 tags:
   - dark-mode
@@ -22,7 +22,9 @@ tags:
 - tapOn: "Theme: Dark"
 
 # Navigate to Assets tab
-- tapOn: "Assets"
+- tapOn:
+    text: "Assets"
+    index: 1
 
 # Wait for Assets screen to load
 - extendedWaitUntil:

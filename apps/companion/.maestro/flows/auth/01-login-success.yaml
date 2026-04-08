@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Auth - Login Success"
 tags:
   - auth
@@ -15,11 +15,11 @@ tags:
 - tapOn:
     text: "Quick Actions"
 
-# Verify dashboard KPI cards are visible (a11y labels include the value)
-- assertVisible: "Total Assets.*"
-- assertVisible: "My Custody.*"
-- assertVisible: "Categories.*"
-- assertVisible: "Locations.*"
+# Verify compact KPI chips are visible
+- assertVisible: "Assets"
+- assertVisible: "Custody"
+- assertVisible: "Categories"
+- assertVisible: "Locations"
 
 # Verify Quick Actions section and buttons
 - assertVisible: "Quick Actions"

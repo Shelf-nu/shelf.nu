@@ -24,6 +24,9 @@ tsconfig.tsbuildinfo
 
 **/coverage
 
+# Benchmark results (regenerated on each run)
+**/benchmarks/results.json
+
 # Supabase
 **/supabase/.branches
 **/supabase/.temp

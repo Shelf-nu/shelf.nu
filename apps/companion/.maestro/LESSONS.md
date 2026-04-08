@@ -136,3 +136,54 @@ Fill in `env/test.env` with real IDs from your test organization. The IDs must r
 - Each flow takes ~40-55s (login overhead: ~25s per flow)
 
 <!-- Future entries appended below -->
+
+---
+
+## Run: 2026-04-02 12:57:08
+
+**Result:** 25/31 passed (6 failed, 0 skipped)
+
+**Failed:**
+
+- `auth/02-login-validation`
+- `auth/03-forgot-password`
+- `assets/01-list-loads`
+- `assets/02-search-filter`
+- `assets/04-create-asset`
+- `assets/06-pagination`
+
+**Observations:**
+
+- <!-- Add observations here -->
+
+**Opportunities:**
+
+- <!-- Add improvement ideas here -->
+
+---
+
+## Run: 2026-04-02 14:00:38
+
+**Result:** 31/31 passed (0 failed, 0 skipped)
+
+**Observations:**
+
+- <!-- Add observations here -->
+
+**Opportunities:**
+
+- <!-- Add improvement ideas here -->
+
+---
+
+## Run: 2026-04-03 14:38:07
+
+**Result:** 37/37 passed (0 failed, 0 skipped)
+
+**Observations:**
+
+- <!-- Add observations here -->
+
+**Opportunities:**
+
+- <!-- Add improvement ideas here -->

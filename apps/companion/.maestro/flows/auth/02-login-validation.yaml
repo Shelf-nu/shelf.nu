@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Auth - Login Validation"
 tags:
   - auth
@@ -21,7 +21,7 @@ tags:
 - tapOn:
     id: "email-input"
 - inputText: "test@invalid.com"
-- hideKeyboard
+- tapOn: "Welcome back"
 - tapOn:
     id: "sign-in-button"
 - extendedWaitUntil:
@@ -35,7 +35,7 @@ tags:
     id: "password-input"
 - inputText: "wrongpassword123"
 # Note: onSubmitEditing may auto-submit; also tap sign-in as fallback
-- hideKeyboard
+- tapOn: "Welcome back"
 - tapOn:
     id: "sign-in-button"
     optional: true

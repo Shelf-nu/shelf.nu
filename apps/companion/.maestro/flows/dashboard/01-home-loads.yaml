@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Dashboard - Home Loads"
 tags:
   - dashboard
@@ -14,11 +14,11 @@ tags:
 - tapOn:
     text: "Quick Actions"
 
-# Verify KPI cards (a11y labels include the value, e.g. "Total Assets: 0")
-- assertVisible: "Total Assets.*"
-- assertVisible: "My Custody.*"
-- assertVisible: "Categories.*"
-- assertVisible: "Locations.*"
+# Verify compact KPI chips (label text: Assets, Custody, Categories, Locations)
+- assertVisible: "Assets"
+- assertVisible: "Custody"
+- assertVisible: "Categories"
+- assertVisible: "Locations"
 
 # Verify Quick Actions section and buttons
 - assertVisible: "Quick Actions"

@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Assets - Search and Filter"
 tags:
   - assets
@@ -14,7 +14,9 @@ tags:
     text: "Quick Actions"
 
 # Navigate to Assets tab
-- tapOn: "Assets"
+- tapOn:
+    text: "Assets"
+    index: 1
 
 # Wait for Assets screen to load
 - extendedWaitUntil:

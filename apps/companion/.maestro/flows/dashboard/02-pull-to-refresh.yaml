@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 name: "Dashboard - Pull to Refresh"
 tags:
   - dashboard
@@ -14,7 +14,7 @@ tags:
     text: "Quick Actions"
 
 # Verify initial load
-- assertVisible: "Total Assets.*"
+- assertVisible: "Assets"
 
 # Pull to refresh (swipe down from middle of screen)
 - swipe:
@@ -24,6 +24,6 @@ tags:
 # Wait for refresh to complete — use tapOn for reliable detection
 - tapOn:
     text: "Quick Actions"
-- assertVisible: "Total Assets.*"
+- assertVisible: "Assets"
 
 - takeScreenshot: dashboard-after-refresh

@@ -1,5 +1,5 @@
-appId: com.shelf.companion
-name: "Settings - Theme Toggle"
+appId: com.shelf.companion.carlos
+name: "Settings - Theme Toggle and Scan Sound"
 tags:
   - settings
 
@@ -32,3 +32,15 @@ tags:
 # Tap System theme (a11y: "Theme: System")
 - tapOn: "Theme: System.*"
 - takeScreenshot: settings-theme-system
+
+# Scroll down to Scanner section
+- scrollUntilVisible:
+    element:
+      text: "SCANNER"
+    direction: DOWN
+    timeout: 5000
+
+# Verify scan sound toggle exists (a11y: "Toggle scan sound")
+- assertVisible: "Scan sound"
+- assertVisible: "Toggle scan sound"
+- takeScreenshot: settings-scan-sound

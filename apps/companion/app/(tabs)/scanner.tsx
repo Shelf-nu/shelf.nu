@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
@@ -142,6 +143,10 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  // Dev-mode scan injection (stripped from production builds)
+  const [devScanInput, setDevScanInput] = useState("");
+  const [devScanVisible, setDevScanVisible] = useState(false);
 
   // Cooldown (shared hook)
   const {
@@ -1010,6 +1015,63 @@ function ScannerContent() {
           </View>
         </View>
 
+        {/* ── Dev Scan Injection (DEV only) ───────────── */}
+        {__DEV__ && (
+          <View style={styles.devScanContainer}>
+            {devScanVisible ? (
+              <View style={styles.devScanRow}>
+                <TextInput
+                  testID="dev-scan-input"
+                  style={styles.devScanInput}
+                  value={devScanInput}
+                  onChangeText={setDevScanInput}
+                  placeholder="QR ID or barcode value"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                />
+                <TouchableOpacity
+                  testID="dev-scan-submit"
+                  style={styles.devScanButton}
+                  onPress={() => {
+                    if (devScanInput.trim()) {
+                      handleBarCodeScanned({ data: devScanInput.trim() });
+                      setDevScanInput("");
+                    }
+                  }}
+                  accessibilityLabel="Inject scan"
+                >
+                  <Ionicons name="scan" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.devScanClose}
+                  onPress={() => setDevScanVisible(false)}
+                  accessibilityLabel="Close dev scanner"
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                testID="dev-scan-toggle"
+                style={styles.devScanToggle}
+                onPress={() => setDevScanVisible(true)}
+                accessibilityLabel="Open dev scanner input"
+              >
+                <Ionicons name="code-working-outline" size={14} color="#fff" />
+                <Text style={styles.devScanToggleText}>DEV SCAN</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* ── Batch Drawer ────────────────────────────── */}
         {showBatchDrawer && (
           <BatchDrawer
@@ -1226,5 +1288,56 @@ const useStyles = createStyles((colors) => ({
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+
+  // ── Dev Scan Injection (DEV only) ───────────────
+  devScanContainer: {
+    position: "absolute" as const,
+    bottom: 90,
+    left: spacing.md,
+    right: spacing.md,
+    zIndex: 999,
+  },
+  devScanRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    borderRadius: borderRadius.md,
+    padding: spacing.xs,
+    gap: spacing.xs,
+  },
+  devScanInput: {
+    flex: 1,
+    color: "#fff",
+    fontSize: fontSize.sm,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  devScanButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm,
+  },
+  devScanClose: {
+    padding: spacing.xs,
+  },
+  devScanToggle: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    alignSelf: "center" as const,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    gap: 4,
+  },
+  devScanToggleText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 10,
+    fontWeight: "700" as const,
+    letterSpacing: 1,
   },
 }));

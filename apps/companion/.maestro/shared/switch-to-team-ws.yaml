@@ -1,0 +1,20 @@
+appId: com.shelf.companion.carlos
+---
+# Shared flow: Switch to Team WS workspace
+# Must be run after login — navigates to Settings, taps workspace card,
+# selects Team WS, then returns to Home.
+#
+# NOTE: Workspace card inner texts are not individually accessible.
+# Use point tap at (50%,32%) to hit the workspace area on Settings screen.
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "WORKSPACE"
+    timeout: 8000
+- tapOn:
+    point: "50%,32%"
+- tapOn: "Team WS"
+- waitForAnimationToEnd
+- tapOn: "Home"
+- tapOn:
+    text: "Quick Actions"

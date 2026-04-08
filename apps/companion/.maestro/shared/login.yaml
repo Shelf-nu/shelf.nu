@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 ---
 # Shared login flow — used as initFlow by every test
 # Clears app state, launches, connects to dev server, and signs in
@@ -51,8 +51,9 @@ appId: com.shelf.companion
     id: "password-input"
 - inputText: ${SHELF_TEST_PASSWORD}
 
-# Dismiss keyboard and sign in (optional — login may already fire via onSubmitEditing)
-- hideKeyboard
+# Dismiss keyboard by tapping on static text (hideKeyboard & back are unreliable on iOS)
+- tapOn: "Welcome back"
+# Sign in (optional — login may already fire via onSubmitEditing)
 - tapOn:
     id: "sign-in-button"
     optional: true

@@ -98,7 +98,7 @@ echo -e "${GREEN}✓ Simulator log collection started (PID: $LOG_PID)${NC}"
 echo ""
 
 # ─── Define test suites ────────────────────────────────────────────
-SUITES=(auth dashboard assets scanner bookings audits settings)
+SUITES=(auth dashboard assets scanner bookings audits settings roles)
 PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0

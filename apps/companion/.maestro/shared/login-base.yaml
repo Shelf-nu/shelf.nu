@@ -1,0 +1,55 @@
+appId: com.shelf.companion.carlos
+---
+# Shared login flow for BASE user
+# User: carlitos.virreira+basebase@gmail.com
+# Role: Base on Team WS workspace
+
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss any pending deep link alerts from previous test runs
+- tapOn:
+    text: "Cancel"
+    optional: true
+
+# Expo dev client launcher — tap the dev server to load the app
+- assertVisible: "http://localhost:8081"
+- tapOn: "http://localhost:8081"
+
+# Dismiss Expo developer menu overlays if they appear
+- tapOn:
+    text: "Continue"
+    optional: true
+- swipe:
+    direction: DOWN
+    duration: 500
+
+# Wait for login screen
+- extendedWaitUntil:
+    visible:
+      id: "email-input"
+    timeout: 120000
+
+# Enter base user credentials
+- tapOn:
+    id: "email-input"
+- inputText: ${SHELF_TEST_BASE_EMAIL}
+
+- tapOn:
+    id: "password-input"
+- inputText: ${SHELF_TEST_BASE_PASSWORD}
+
+# Dismiss keyboard by tapping on static text
+- tapOn: "Welcome back"
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for main app to load
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 30000
+
+- tapOn: "Home"
+- waitForAnimationToEnd

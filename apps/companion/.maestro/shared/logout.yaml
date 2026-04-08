@@ -1,4 +1,4 @@
-appId: com.shelf.companion
+appId: com.shelf.companion.carlos
 ---
 # Shared logout flow — navigates to Settings and signs out
 # Note: The tapOn commands here provide tree refreshes between steps
