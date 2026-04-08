@@ -1746,14 +1746,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         END,
         NULL
       ) AS custody,
-      ${
-        withCustomFieldDefinitions
-          ? Prisma.sql`(
+      (
         SELECT jsonb_agg(
           jsonb_build_object(
             'id', acfv.id,
             'value', acfv.value,
-            'customField', jsonb_build_object(
+            'customField', ${
+              withCustomFieldDefinitions
+                ? Prisma.sql`jsonb_build_object(
               'id', cf.id,
               'name', cf.name,
               'helpText', cf."helpText",
@@ -1766,30 +1766,19 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 JOIN public."Category" cat ON ccf."A" = cat.id
                 WHERE ccf."B" = cf.id
               )
-            )
-          )
-        )
-        FROM public."AssetCustomFieldValue" acfv
-        JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
-        WHERE acfv."assetId" = a.id AND cf.active = true
-      ) AS "customFields",`
-          : Prisma.sql`(
-        SELECT jsonb_agg(
-          jsonb_build_object(
-            'id', acfv.id,
-            'value', acfv.value,
-            'customField', jsonb_build_object(
+            )`
+                : Prisma.sql`jsonb_build_object(
               'id', cf.id,
               'name', cf.name,
               'type', cf.type
-            )
+            )`
+            }
           )
         )
         FROM public."AssetCustomFieldValue" acfv
         JOIN public."CustomField" cf ON acfv."customFieldId" = cf.id
         WHERE acfv."assetId" = a.id AND cf.active = true
-      ) AS "customFields",`
-      }
+      ) AS "customFields",
       (
         SELECT jsonb_build_object(
           'id', ar.id,
