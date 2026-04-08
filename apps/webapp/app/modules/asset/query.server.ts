@@ -1503,10 +1503,11 @@ export type AssetQueryOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
   /**
-   * When true, includes full custom field definitions (helpText, required,
-   * options, categories) in each custom field value. When false (default),
-   * only includes id, name, and type — sufficient for table display and
-   * avoids expensive categories subquery per field per asset.
+   * When true (default), includes full custom field definitions (helpText,
+   * required, options, categories) in each custom field value — matching
+   * the AdvancedIndexAsset type contract. Set to false for table views
+   * that only need id, name, and type, avoiding the expensive categories
+   * subquery per field per asset.
    */
   withCustomFieldDefinitions?: boolean;
 };
@@ -1521,7 +1522,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   const {
     withBookings = false,
     withBarcodes = false,
-    withCustomFieldDefinitions = false,
+    withCustomFieldDefinitions = true,
   } = options;
 
   const bookingsSelect = withBookings

@@ -369,8 +369,23 @@ describe("assetQueryFragment", () => {
   });
 
   describe("withCustomFieldDefinitions option", () => {
-    it("excludes full definitions by default (lightweight query)", () => {
+    it("includes full definitions by default (matches AdvancedIndexAsset type)", () => {
       const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // Default should include all definition columns
+      expect(sql).toContain("helpText");
+      expect(sql).toContain("cf.required");
+      expect(sql).toContain("cf.options");
+      expect(sql).toContain("categories");
+      expect(sql).toContain("_CategoryToCustomField");
+      expect(sql).toContain("Category");
+    });
+
+    it("excludes full definitions when withCustomFieldDefinitions is false", () => {
+      const fragment = assetQueryFragment({
+        withCustomFieldDefinitions: false,
+      });
       const sql = getFragmentSqlString(fragment);
 
       // Should include basic custom field columns
@@ -385,23 +400,6 @@ describe("assetQueryFragment", () => {
       expect(sql).not.toContain("cf.options");
       expect(sql).not.toContain("categories");
       expect(sql).not.toContain("_CategoryToCustomField");
-    });
-
-    it("includes full definitions when withCustomFieldDefinitions is true", () => {
-      const fragment = assetQueryFragment({
-        withCustomFieldDefinitions: true,
-      });
-      const sql = getFragmentSqlString(fragment);
-
-      // Should include all definition columns
-      expect(sql).toContain("helpText");
-      expect(sql).toContain("cf.required");
-      expect(sql).toContain("cf.options");
-      expect(sql).toContain("categories");
-
-      // Should include the categories subquery join
-      expect(sql).toContain("_CategoryToCustomField");
-      expect(sql).toContain("Category");
     });
   });
 });
