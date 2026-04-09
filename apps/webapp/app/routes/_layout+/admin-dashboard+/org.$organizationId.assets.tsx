@@ -58,7 +58,10 @@ export const loader = async ({
       organizationId,
     });
 
-    assets = await updateAssetsWithBookingCustodians(assets);
+    // Synchronous — no DB call. Booking custodian data is already included
+    // in the initial asset query (via assetIndexFields), so this just reshapes
+    // it into the `custody.custodian` structure the UI expects.
+    assets = updateAssetsWithBookingCustodians(assets);
     const modelName = {
       singular: "asset",
       plural: "assets",

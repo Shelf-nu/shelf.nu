@@ -229,9 +229,14 @@ export async function simpleModeLoader({
     ? teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
-  assets = await updateAssetsWithBookingCustodians(assets);
+  // Synchronous — no DB call. Booking custodian data is already included
+  // in the initial asset query (via assetIndexFields), so this just reshapes
+  // it into the `custody.custodian` structure the UI expects.
+  assets = updateAssetsWithBookingCustodians(assets);
 
-  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  // Refresh expired signed URLs before returning so users never see broken images.
+  // Runs after the main query completes but is awaited to ensure fresh URLs.
+  // With 72h expiration, this path is hit infrequently.
   try {
     assets = await refreshExpiredAssetImages(assets);
   } catch (cause) {
@@ -387,14 +392,7 @@ export async function advancedModeLoader({
   // lets it overlap with the asset query instead of blocking it.
   /** Query entities, tierLimit, assets & more — all in parallel */
   const [
-    {
-      tags,
-      totalTags,
-      categories,
-      totalCategories,
-      locations,
-      totalLocations,
-    },
+    { tags, totalTags, categories, totalCategories, locations, totalLocations },
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
@@ -510,7 +508,8 @@ export async function advancedModeLoader({
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
-  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  // Refresh expired signed URLs before returning so users never see broken images.
+  // With 72h expiration, this path is hit infrequently.
   let refreshedAssets = assets;
   try {
     refreshedAssets = await refreshExpiredAssetImages(assets);
@@ -520,7 +519,7 @@ export async function advancedModeLoader({
         cause,
         message: "Failed to batch refresh expired asset images",
         label: "Assets",
-        additionalData: { assetCount: assets.length },
+        additionalData: { assetCount: refreshedAssets.length },
         shouldBeCaptured: true,
       })
     );
