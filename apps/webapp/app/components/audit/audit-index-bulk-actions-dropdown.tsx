@@ -83,8 +83,6 @@ function ConditionalDropdown() {
     action: PermissionAction.update,
   });
 
-  const archiveDisabled = someNotArchivable || !canArchiveAudit;
-
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -172,7 +170,11 @@ function ConditionalDropdown() {
                 label="Archive"
                 onClick={closeMenu}
                 disabled={
-                  archiveDisabled
+                  !canArchiveAudit
+                    ? {
+                        reason: "You don't have permission to archive audits.",
+                      }
+                    : someNotArchivable
                     ? {
                         reason:
                           "Some of the selected audits are not completed or cancelled. You can only archive audits that are completed or cancelled.",
