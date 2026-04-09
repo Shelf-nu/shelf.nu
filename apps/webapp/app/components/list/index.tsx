@@ -161,12 +161,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               {headerChildren}
             </ListHeader>
             <tbody>
-              {items.map((item, i) => (
-                <ListItem
-                  item={item}
-                  key={`${item.id}-${i}`}
-                  navigate={navigate}
-                >
+              {items.map((item) => (
+                <ListItem item={item} key={item.id} navigate={navigate}>
                   {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
                   <ItemComponent
                     item={item}

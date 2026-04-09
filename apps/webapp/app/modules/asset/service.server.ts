@@ -25,6 +25,7 @@ import {
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import type {
   SortingDirection,
   SortingOptions,
@@ -824,6 +825,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   getBookings = false,
   canUseBarcodes = false,
   availableToBookOnly = false,
+  preParsedFilters,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -834,6 +836,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   getBookings?: boolean;
   canUseBarcodes?: boolean;
   availableToBookOnly?: boolean;
+  /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
+  preParsedFilters?: Filter[];
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -855,11 +859,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = Math.min(Math.max(perPage, 1), 100);
-    const parsedFilters = await parseFiltersWithHierarchy(
-      filters,
-      settingColumns,
-      organizationId
-    );
+    const parsedFilters =
+      preParsedFilters ??
+      (await parseFiltersWithHierarchy(
+        filters,
+        settingColumns,
+        organizationId
+      ));
 
     const whereClause = generateWhereClause(
       organizationId,
