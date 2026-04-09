@@ -941,7 +941,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           cu.id IS NOT NULL
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
@@ -951,7 +951,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           )
         )`;
@@ -964,7 +964,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ${filter.value}
@@ -981,7 +981,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           )
         )`;
@@ -992,7 +992,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           cu.id IS NOT NULL
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
@@ -1005,7 +1005,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ${filter.value}
@@ -1041,7 +1041,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           cu.id IS NOT NULL
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
@@ -1055,7 +1055,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
-              JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+              JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
             )
           )`;
@@ -1069,7 +1069,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           (cu.id IS NULL AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
-              JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+              JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
             )
           ))
@@ -1080,7 +1080,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           )
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
             AND (
               b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
@@ -1105,7 +1105,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
@@ -1131,9 +1131,9 @@ function addUpcomingBookingsFilter(
   filter: Filter
 ): Prisma.Sql {
   const bookingExistsSubquery = Prisma.sql`EXISTS (
-    SELECT 1 FROM public."_AssetToBooking" atb
-    JOIN public."Booking" bk ON atb."B" = bk.id
-    WHERE atb."A" = a.id
+    SELECT 1 FROM public."BookingAsset" atb
+    JOIN public."Booking" bk ON atb."bookingId" = bk.id
+    WHERE atb."assetId" = a.id
     AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
   )`;
 
@@ -1146,9 +1146,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND NOT ${bookingExistsSubquery}`;
       }
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ${filter.value}
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1161,9 +1161,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
       }
       return Prisma.sql`${whereClause} AND NOT EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ${filter.value}
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1205,9 +1205,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND (
           NOT ${bookingExistsSubquery}
           OR EXISTS (
-            SELECT 1 FROM public."_AssetToBooking" atb
-            JOIN public."Booking" bk ON atb."B" = bk.id
-            WHERE atb."A" = a.id
+            SELECT 1 FROM public."BookingAsset" atb
+            JOIN public."Booking" bk ON atb."bookingId" = bk.id
+            WHERE atb."assetId" = a.id
             AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
             AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
           )
@@ -1219,9 +1219,9 @@ function addUpcomingBookingsFilter(
         ", "
       );
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1654,14 +1654,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ),
         '[]'::jsonb
       )
-      FROM public."_AssetToBooking" atb
-      JOIN public."Booking" bk ON atb."B" = bk.id
+      FROM public."BookingAsset" atb
+      JOIN public."Booking" bk ON atb."bookingId" = bk.id
       LEFT JOIN public."TeamMember" ctm ON bk."custodianTeamMemberId" = ctm.id
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
       LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
       WHERE 
-        atb."A" = a.id 
+        atb."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ) AS bookings`
     : Prisma.sql``;
@@ -1870,7 +1870,7 @@ export const assetQueryJoins = Prisma.sql`
   LEFT JOIN LATERAL (
     SELECT b.*
     FROM public."Booking" b
-    JOIN public."_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+    JOIN public."BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
     WHERE b.status IN ('ONGOING', 'OVERDUE')
     LIMIT 1
   ) b ON TRUE

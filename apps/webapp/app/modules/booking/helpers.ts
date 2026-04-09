@@ -223,21 +223,25 @@ export function formatBookingDuration(from: Date, to: Date): string {
 }
 
 /**
- * Core logic for determining if an asset has booking conflicts
- * Used by both isAssetAlreadyBooked and kit-related functions
+ * Core logic for determining if an asset has booking conflicts.
+ * Assets now reference bookings through the BookingAsset pivot table,
+ * so we traverse `asset.bookingAssets[].booking` instead of the
+ * old implicit `asset.bookings[]`.
+ *
+ * Used by both isAssetAlreadyBooked and kit-related functions.
  */
 export function hasAssetBookingConflicts(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {
-  if (!asset.bookings?.length) return false;
+  if (!asset.bookingAssets?.length) return false;
 
-  const conflictingBookings = asset.bookings.filter(
-    (b) => b.id !== currentBookingId
-  );
+  const conflictingBookings = asset.bookingAssets
+    .map((ba) => ba.booking)
+    .filter((b) => b.id !== currentBookingId);
 
   if (conflictingBookings.length === 0) return false;
 
@@ -260,13 +264,16 @@ export function hasAssetBookingConflicts(
 }
 
 /**
- * Determines if an asset is already booked and unavailable for the current booking context
- * Handles partial check-in logic properly
+ * Determines if an asset is already booked and unavailable for the current booking context.
+ * Handles partial check-in logic properly.
+ *
+ * Uses the BookingAsset pivot relation (`asset.bookingAssets[].booking`)
+ * instead of the removed implicit `asset.bookings[]`.
  */
 export function isAssetAlreadyBooked(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {

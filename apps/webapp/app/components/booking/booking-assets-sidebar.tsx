@@ -18,35 +18,41 @@ import KitImage from "../kits/kit-image";
 
 type BookingWithAssets = Prisma.BookingGetPayload<{
   include: {
-    assets: {
+    bookingAssets: {
       select: {
         id: true;
-        title: true;
-        availableToBook: true;
-        custody: true;
-        kitId: true;
-        status: true;
-        mainImage: true;
-        thumbnailImage: true;
-        mainImageExpiration: true;
-        category: {
+        quantity: true;
+        asset: {
           select: {
             id: true;
-            name: true;
-            color: true;
-          };
-        };
-        kit: {
-          select: {
-            id: true;
-            name: true;
-            image: true;
-            imageExpiration: true;
+            title: true;
+            availableToBook: true;
+            custody: true;
+            kitId: true;
+            status: true;
+            mainImage: true;
+            thumbnailImage: true;
+            mainImageExpiration: true;
             category: {
               select: {
                 id: true;
                 name: true;
                 color: true;
+              };
+            };
+            kit: {
+              select: {
+                id: true;
+                name: true;
+                image: true;
+                imageExpiration: true;
+                category: {
+                  select: {
+                    id: true;
+                    name: true;
+                    color: true;
+                  };
+                };
               };
             };
           };
@@ -62,11 +68,12 @@ interface BookingAssetsSidebarProps {
 }
 
 // Group assets by kits and individual assets - similar to the original pagination structure
-function groupAssets(assets: BookingWithAssets["assets"]) {
+function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
   const itemsMap = new Map();
   const individualAssets: any[] = [];
 
-  assets.forEach((asset) => {
+  bookingAssets.forEach((ba) => {
+    const asset = ba.asset;
     if (asset.kitId && asset.kit) {
       // Asset belongs to a kit
       const kitId = asset.kitId;
@@ -104,7 +111,7 @@ export function BookingAssetsSidebar({
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
 
-  const paginatedItems = groupAssets(booking.assets);
+  const paginatedItems = groupAssets(booking.bookingAssets);
 
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev) => ({
@@ -113,7 +120,7 @@ export function BookingAssetsSidebar({
     }));
   };
 
-  const hasItems = booking.assets.length > 0;
+  const hasItems = booking.bookingAssets.length > 0;
   const defaultTrigger = (
     <Button
       type="button"
@@ -121,7 +128,7 @@ export function BookingAssetsSidebar({
       onClick={hasItems ? () => setIsOpen(true) : undefined}
       className={!hasItems ? "hover:text-gray cursor-default no-underline" : ""}
     >
-      {booking.assets.length} assets
+      {booking.bookingAssets.length} assets
     </Button>
   );
 
@@ -136,8 +143,9 @@ export function BookingAssetsSidebar({
               Assets in "{booking.name}"
             </SheetTitle>
             <SheetDescription className="text-left">
-              {booking.assets.length}{" "}
-              {booking.assets.length === 1 ? "asset" : "assets"} in this booking
+              {booking.bookingAssets.length}{" "}
+              {booking.bookingAssets.length === 1 ? "asset" : "assets"} in this
+              booking
             </SheetDescription>
           </SheetHeader>
 

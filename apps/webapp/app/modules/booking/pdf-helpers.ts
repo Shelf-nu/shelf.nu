@@ -80,7 +80,9 @@ export async function fetchAllPdfRelatedData(
     const [assets, organization] = await Promise.all([
       db.asset.findMany({
         where: {
-          id: { in: booking?.assets.map((a) => a.id) || [] },
+          id: {
+            in: booking?.bookingAssets.map((ba) => ba.assetId) || [],
+          },
         },
         include: {
           category: {
@@ -139,7 +141,7 @@ export async function fetchAllPdfRelatedData(
       booking,
       assets: sortedAssets,
       totalValue: calculateTotalValueOfAssets({
-        assets: booking.assets,
+        assets: booking.bookingAssets.map((ba) => ba.asset),
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),

@@ -102,8 +102,9 @@ export function AvailabilityLabel({
     hasAssetBookingConflicts(asset, booking.id) &&
     !["ONGOING", "OVERDUE"].includes(booking.status)
   ) {
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -150,8 +151,9 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -261,8 +263,8 @@ export function getKitAvailabilityStatus(
 ) {
   const bookings = kit.assets
     .map((asset) => {
-      if (asset?.bookings.length) {
-        return asset.bookings;
+      if (asset?.bookingAssets.length) {
+        return asset.bookingAssets.map((ba) => ba.booking);
       }
       return null;
     })
@@ -313,8 +315,10 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
     kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 

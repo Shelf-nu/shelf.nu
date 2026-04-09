@@ -228,7 +228,6 @@ model Asset {
   reports      ReportFound[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
-  bookings        Booking[]
   bookingAssets   BookingAsset[]
   consumptionLogs ConsumptionLog[]
   reminders       AssetReminder[]
@@ -1270,8 +1269,7 @@ model ConsumptionLog {
 
 /**
  * Explicit pivot table between Booking and Asset.
- * In Phase 1 this coexists with the implicit M2M (Booking.assets / Asset.bookings).
- * In Phase 3 the implicit M2M will be replaced by this table via a rename migration.
+ * Replaces the implicit M2M (_AssetToBooking) via a rename migration in Phase 3.
  */
 model BookingAsset {
   id        String  @id @default(cuid())
@@ -1307,7 +1305,6 @@ model Booking {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  assets          Asset[] // Implicit M2M — will be replaced by bookingAssets in Phase 3
   bookingAssets   BookingAsset[]
   consumptionLogs ConsumptionLog[]
   notes           BookingNote[]

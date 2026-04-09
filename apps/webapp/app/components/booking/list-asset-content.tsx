@@ -53,18 +53,20 @@ export default function ListAssetContent({
   const isCheckedOut = useMemo(
     () =>
       (item.status === AssetStatus.CHECKED_OUT &&
-        !item.bookings.some((b) => b.id === booking.id) &&
+        !item.bookingAssets.some((ba) => ba.booking.id === booking.id) &&
         // Only exclude assets from current booking if current booking is ONGOING/OVERDUE
         !(
-          booking.assets.some((asset) => asset.id === item.id) &&
+          booking.bookingAssets.some(
+            (ba: { assetId: string }) => ba.assetId === item.id
+          ) &&
           (booking.status === "ONGOING" || booking.status === "OVERDUE")
         )) ??
       false,
     [
       item.status,
-      item.bookings,
+      item.bookingAssets,
       booking.id,
-      booking.assets,
+      booking.bookingAssets,
       item.id,
       booking.status,
     ]

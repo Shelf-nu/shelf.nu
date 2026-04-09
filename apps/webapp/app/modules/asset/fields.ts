@@ -82,24 +82,30 @@ export const getAssetOverviewFields = (
     },
     assetModel: { select: { id: true, name: true } },
     kit: { select: { id: true, name: true, status: true } },
-    bookings: {
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
-        // Exclude bookings where this asset has been partially checked in
-        NOT: {
-          partialCheckins: {
-            some: {
-              assetIds: { has: assetId },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+          // Exclude bookings where this asset has been partially checked in
+          NOT: {
+            partialCheckins: {
+              some: {
+                assetIds: { has: assetId },
+              },
             },
           },
         },
       },
-      select: {
-        id: true,
-        name: true,
-        from: true,
-        custodianTeamMember: true,
-        custodianUser: true,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            name: true,
+            from: true,
+            custodianTeamMember: true,
+            custodianUser: true,
+          },
+        },
       },
     },
   } satisfies Prisma.AssetInclude;
@@ -198,26 +204,32 @@ export const assetIndexFields = ({
   if (bookingTo && bookingFrom && unavailableBookingStatuses) {
     return {
       ...fields,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: { in: unavailableBookingStatuses },
-          OR: [
-            {
-              from: { lte: bookingTo },
-              to: { gte: bookingFrom },
-            },
-            {
-              from: { gte: bookingFrom },
-              to: { lte: bookingTo },
-            },
-          ],
+          booking: {
+            status: { in: unavailableBookingStatuses },
+            OR: [
+              {
+                from: { lte: bookingTo },
+                to: { gte: bookingFrom },
+              },
+              {
+                from: { gte: bookingFrom },
+                to: { lte: bookingTo },
+              },
+            ],
+          },
         },
-        select: {
-          from: true,
-          to: true,
-          status: true,
-          id: true,
-          name: true,
+        include: {
+          booking: {
+            select: {
+              from: true,
+              to: true,
+              status: true,
+              id: true,
+              name: true,
+            },
+          },
         },
       },
     } satisfies Prisma.AssetInclude;

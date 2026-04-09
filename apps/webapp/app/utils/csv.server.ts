@@ -679,9 +679,13 @@ export async function exportBookingsFromIndexToCsv({
         where: { id: { in: bookingsIds }, organizationId },
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          assets: {
+          bookingAssets: {
             select: {
-              title: true,
+              asset: {
+                select: {
+                  title: true,
+                },
+              },
             },
           },
           tags: { select: { name: true } },
@@ -901,8 +905,8 @@ type FlexibleAsset = Partial<Asset> & {
   title: string;
 };
 
-type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
-  assets: FlexibleAsset[];
+type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
+  bookingAssets: { asset: FlexibleAsset }[];
   tags: Pick<Tag, "name">[];
 };
 
@@ -946,8 +950,8 @@ export const buildCsvExportDataFromBookings = (
   bookings.forEach((booking) => {
     // Get the first asset's title if available
     const firstAsset =
-      booking.assets && booking.assets.length > 0
-        ? booking.assets[0]
+      booking.bookingAssets && booking.bookingAssets.length > 0
+        ? booking.bookingAssets[0].asset
         : { title: "No assets" };
 
     // First add the main booking row (including the first asset)
@@ -1029,14 +1033,14 @@ export const buildCsvExportDataFromBookings = (
     rows.push(bookingRow);
 
     // Then add remaining asset rows if the booking has more than one asset
-    if (booking.assets && booking.assets.length > 1) {
+    if (booking.bookingAssets && booking.bookingAssets.length > 1) {
       // Start from the second asset (index 1)
-      booking.assets.slice(1).forEach((asset) => {
+      booking.bookingAssets.slice(1).forEach((ba) => {
         // Create an asset row with empty values for all columns except 'asset'
         const assetRow = Object.keys(headers).map((column) => {
           if (column === "asset") {
             // Assuming asset has a title property
-            return formatValueForCsv(asset.title || "Unnamed Asset", false);
+            return formatValueForCsv(ba.asset.title || "Unnamed Asset", false);
           }
           // Empty values for all other columns
           return formatValueForCsv("", false);

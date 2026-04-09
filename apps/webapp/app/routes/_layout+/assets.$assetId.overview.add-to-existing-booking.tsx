@@ -102,11 +102,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds
     );
 
-    const bookingAssets = (
-      "assets" in bookingInfo ? bookingInfo.assets : []
-    ).map((asset) => asset.id);
+    const bookingAssetIds = (
+      "bookingAssets" in bookingInfo ? bookingInfo.bookingAssets : []
+    ).map((ba) => ba.asset.id);
 
-    if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
+    if (
+      bookingAssetIds.length > 0 &&
+      intersected(bookingAssetIds, finalAssetIds)
+    ) {
       throw new ShelfError({
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,

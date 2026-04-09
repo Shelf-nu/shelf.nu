@@ -12,11 +12,9 @@ import { fileURLToPath } from "url";
  * Indexes that should be protected from being dropped during migrations.
  * These are crucial for performance in many-to-many relationship queries.
  *
- * _AssetToBooking_Asset_idx: Optimizes booking availability checks
  * _AssetToTag_asset_idx: Optimizes tag filtering operations
  */
 const PROTECTED_INDEXES = [
-  "_AssetToBooking_Asset_idx", // Critical for booking availability checks
   "_AssetToTag_asset_idx", // Critical for tag filtering performance
 ] as const;
 

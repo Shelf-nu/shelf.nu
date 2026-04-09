@@ -145,9 +145,9 @@ export function BookingUpdatesEmailTemplate({
             </p>
             {assets
               .slice(0, BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT)
-              .map((asset) => (
+              .map((bookingAsset) => (
                 <div
-                  key={asset.id}
+                  key={bookingAsset.id}
                   style={{
                     padding: "6px 0",
                     borderBottom: "1px solid #EAECF0",
@@ -161,9 +161,9 @@ export function BookingUpdatesEmailTemplate({
                       fontWeight: "500",
                     }}
                   >
-                    {asset.title}
+                    {bookingAsset.asset.title}
                   </span>
-                  {asset.category?.name && (
+                  {bookingAsset.asset.category?.name && (
                     <span
                       style={{
                         ...styles.p,
@@ -172,7 +172,7 @@ export function BookingUpdatesEmailTemplate({
                         fontSize: "13px",
                       }}
                     >
-                      · {asset.category.name}
+                      · {bookingAsset.asset.category.name}
                     </span>
                   )}
                 </div>

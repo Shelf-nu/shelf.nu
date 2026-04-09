@@ -176,11 +176,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    const bookingAsset =
+      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
     const currentBooking: any = null;
 
-    if (booking && booking.from) {
-      asset.bookings = [currentBooking];
+    if (bookingAsset && bookingAsset.booking.from) {
+      asset.bookingAssets = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
@@ -291,8 +292,8 @@ export default function AssetOverview() {
   } = useLoaderData<typeof loader>();
 
   const booking =
-    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
-      ? asset?.bookings[0]
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
+      ? asset?.bookingAssets[0]?.booking
       : undefined;
 
   const customFieldsValues =

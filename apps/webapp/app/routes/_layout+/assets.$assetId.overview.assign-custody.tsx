@@ -77,14 +77,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             id: true,
           },
         },
-        bookings: {
+        bookingAssets: {
           where: {
-            status: {
-              in: [BookingStatus.RESERVED],
+            booking: {
+              status: {
+                in: [BookingStatus.RESERVED],
+              },
             },
           },
-          select: {
-            id: true,
+          include: {
+            booking: {
+              select: {
+                id: true,
+              },
+            },
           },
         },
       },
@@ -313,7 +319,7 @@ export function links() {
 
 export default function Custody() {
   const { asset, teamMembers } = useLoaderData<typeof loader>();
-  const firstReservedBookingId = asset?.bookings?.[0]?.id;
+  const firstReservedBookingId = asset?.bookingAssets?.[0]?.booking?.id;
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);

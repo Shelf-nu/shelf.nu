@@ -29,24 +29,28 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
     },
   },
   _count: {
-    select: { assets: true },
+    select: { bookingAssets: true },
   },
 };
 
 /**
  * Extended include for reservation emails — adds minimal asset fields
- * for displaying booked items in the email.
+ * (via the BookingAsset pivot) for displaying booked items in the email.
  * Only used in reserveBooking(), NOT in other email flows.
  */
 export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
   ...BOOKING_INCLUDE_FOR_EMAIL,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      category: {
+  bookingAssets: {
+    include: {
+      asset: {
         select: {
-          name: true,
+          id: true,
+          title: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
     },
@@ -54,18 +58,18 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets for reservation email, inferred from Prisma include
+ * Type for a booking with bookingAssets for reservation email, inferred from Prisma include
  */
 type BookingForReservationEmail = Prisma.BookingGetPayload<{
   include: typeof BOOKING_INCLUDE_FOR_RESERVATION_EMAIL;
 }>;
 
 /**
- * Type for assets as returned in reservation emails.
+ * Type for a single BookingAsset pivot row as returned in reservation emails.
  * Inferred from the Prisma include to ensure type safety.
  */
 export type ReservationEmailAsset =
-  BookingForReservationEmail["assets"][number];
+  BookingForReservationEmail["bookingAssets"][number];
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
@@ -79,46 +83,50 @@ export const BOOKING_COMMON_INCLUDE = {
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      availableToBook: true,
-      status: true,
-      kitId: true,
-      valuation: true,
-      category: {
+  bookingAssets: {
+    include: {
+      asset: {
         select: {
           id: true,
-          name: true,
-          color: true,
-        },
-      },
-      kit: {
-        select: {
-          name: true,
+          title: true,
+          availableToBook: true,
+          status: true,
+          kitId: true,
+          valuation: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
+          kit: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
     },
     orderBy: [
-      { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
-      { createdAt: "asc" }, // Then by creation order as fallback
+      { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
+      { asset: { createdAt: "asc" } }, // Then by creation order as fallback
     ],
   },
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
+ * Type for a booking with bookingAssets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
  */
 type BookingWithAssets = Prisma.BookingGetPayload<{
   include: typeof BOOKING_WITH_ASSETS_INCLUDE;
 }>;
 
 /**
- * Type for assets as returned by BOOKING_WITH_ASSETS_INCLUDE
- * Inferred from the Prisma include to ensure type safety
+ * Type for a single BookingAsset pivot row as returned by BOOKING_WITH_ASSETS_INCLUDE.
+ * Inferred from the Prisma include to ensure type safety.
  */
-export type BookingAsset = BookingWithAssets["assets"][number];
+export type BookingAsset = BookingWithAssets["bookingAssets"][number];
 
 /**
  * This enum represents the types of different events that can be scheduled for a booking using PgBoss

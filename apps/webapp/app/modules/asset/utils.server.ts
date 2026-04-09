@@ -540,9 +540,17 @@ export function getAssetsWhereInput({
         },
       },
       {
-        bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+        bookingAssets: {
+          some: {
+            booking: { custodianTeamMemberId: { in: teamMemberIds } },
+          },
+        },
       },
-      { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+      {
+        bookingAssets: {
+          some: { booking: { custodianUserId: { in: teamMemberIds } } },
+        },
+      },
       ...(teamMemberIds.includes("without-custody")
         ? [{ custody: { none: {} } }]
         : []),

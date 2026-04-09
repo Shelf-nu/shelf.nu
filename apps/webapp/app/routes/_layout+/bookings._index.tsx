@@ -375,28 +375,32 @@ const ListBookingsContent = ({
 }: {
   item: Prisma.BookingGetPayload<{
     include: {
-      assets: {
-        select: {
-          id: true;
-          title: true;
-          availableToBook: true;
-          custody: true;
-          kitId: true;
-          status: true;
-          mainImage: true;
-          thumbnailImage: true;
-          mainImageExpiration: true;
-          category: {
+      bookingAssets: {
+        include: {
+          asset: {
             select: {
               id: true;
-              name: true;
-              color: true;
-            };
-          };
-          kit: {
-            select: {
-              id: true;
-              name: true;
+              title: true;
+              availableToBook: true;
+              custody: true;
+              kitId: true;
+              status: true;
+              mainImage: true;
+              thumbnailImage: true;
+              mainImageExpiration: true;
+              category: {
+                select: {
+                  id: true;
+                  name: true;
+                  color: true;
+                };
+              };
+              kit: {
+                select: {
+                  id: true;
+                  name: true;
+                };
+              };
             };
           };
         };
@@ -419,8 +423,8 @@ const ListBookingsContent = ({
   }>;
 }) => {
   const hasUnavaiableAssets =
-    item.assets.some(
-      (asset) => !asset.availableToBook || hasCustody(asset.custody)
+    item.bookingAssets.some(
+      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
   return (

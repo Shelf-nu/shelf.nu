@@ -116,21 +116,25 @@ export async function getLocation(
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianUserId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
@@ -1175,11 +1179,13 @@ export async function getLocationKits(
         {
           assets: {
             some: {
-              bookings: {
+              bookingAssets: {
                 some: {
-                  custodianTeamMemberId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  booking: {
+                    custodianTeamMemberId: { in: teamMemberIds },
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    },
                   },
                 },
               },
@@ -1189,11 +1195,13 @@ export async function getLocationKits(
         {
           assets: {
             some: {
-              bookings: {
+              bookingAssets: {
                 some: {
-                  custodianUserId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  booking: {
+                    custodianUserId: { in: teamMemberIds },
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    },
                   },
                 },
               },

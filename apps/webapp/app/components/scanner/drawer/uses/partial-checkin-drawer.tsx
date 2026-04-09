@@ -73,7 +73,9 @@ export default function PartialCheckinDrawer({
     .map((item) => item?.data as KitFromQr);
 
   // List of asset IDs for the form - only include assets that are actually in the booking
-  const bookingAssetIds = new Set(booking.assets.map((a) => a.id));
+  const bookingAssetIds = new Set(
+    booking.bookingAssets.map((ba) => ba.assetId)
+  );
 
   // Get assets that have already been checked in (should be excluded from count)
   const checkedInAssetIds = new Set(
@@ -99,7 +101,7 @@ export default function PartialCheckinDrawer({
 
   // Check if this would be a final check-in (all remaining assets are being checked in)
   const remainingAssetCount =
-    partialCheckinProgress?.uncheckedCount || booking.assets.length;
+    partialCheckinProgress?.uncheckedCount || booking.bookingAssets.length;
   const isFinalCheckin =
     assetIdsForCheckin.length === remainingAssetCount &&
     remainingAssetCount > 0;
@@ -378,7 +380,8 @@ export default function PartialCheckinDrawer({
         <div className="text-right">
           <span className="block text-gray-600">
             {assetIdsForCheckin.length}/
-            {partialCheckinProgress?.uncheckedCount || booking.assets.length}{" "}
+            {partialCheckinProgress?.uncheckedCount ||
+              booking.bookingAssets.length}{" "}
             Assets scanned
           </span>
           <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
@@ -386,7 +389,7 @@ export default function PartialCheckinDrawer({
               value={
                 (assetIdsForCheckin.length /
                   (partialCheckinProgress?.uncheckedCount ||
-                    booking.assets.length)) *
+                    booking.bookingAssets.length)) *
                 100
               }
             />
@@ -413,7 +416,9 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const items = useAtomValue(scannedItemsAtom);
 
   // Check if asset is in this booking
-  const isInBooking = booking.assets.some((a) => a.id === asset.id);
+  const isInBooking = booking.bookingAssets.some(
+    (ba) => ba.assetId === asset.id
+  );
 
   // Check if asset is already checked in within this booking using centralized helper
   const isAlreadyCheckedIn = isAssetPartiallyCheckedIn(
@@ -436,11 +441,12 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const isLastKitAssetInBooking =
     !!asset.kitId &&
     (() => {
-      const kitAssetsInBooking = booking.assets.filter(
-        (a) => a.kitId === asset.kitId
+      const kitBookingAssets = booking.bookingAssets.filter(
+        (ba) => ba.asset?.kitId === asset.kitId
       );
       return (
-        kitAssetsInBooking.length === 1 && kitAssetsInBooking[0].id === asset.id
+        kitBookingAssets.length === 1 &&
+        kitBookingAssets[0].assetId === asset.id
       );
     })();
 
@@ -519,7 +525,9 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const items = useAtomValue(scannedItemsAtom);
 
   // Check how many assets from this kit are in the booking
-  const bookingAssetIds = new Set(booking.assets.map((a) => a.id));
+  const bookingAssetIds = new Set(
+    booking.bookingAssets.map((ba) => ba.assetId)
+  );
   const kitAssetsInBooking = kit.assets.filter((a) =>
     bookingAssetIds.has(a.id)
   );

@@ -44,8 +44,9 @@ export function useKitAvailabilityData(items: Items) {
 
     items.forEach((kit) => {
       kit.assets.forEach((asset) => {
-        if (asset.bookings) {
-          asset.bookings.forEach((booking) => {
+        if ("bookingAssets" in asset && asset.bookingAssets) {
+          (asset.bookingAssets as Array<{ booking: Booking }>).forEach((ba) => {
+            const booking = ba.booking;
             const key = `${booking.id}-${kit.id}`;
             if (!allBookings.has(key)) {
               allBookings.set(key, { ...booking, kitId: kit.id });

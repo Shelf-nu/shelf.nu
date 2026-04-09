@@ -96,7 +96,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type AssetWithBooking = Asset & {
-  bookings: Booking[];
+  bookingAssets: { booking: Booking }[];
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
@@ -193,7 +193,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
+    const bookingKitIds = getKitIdsByAssets(
+      booking.bookingAssets.map((ba) => ba.asset)
+    );
 
     return payload({
       header: {
@@ -272,12 +274,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: assetsWhere,
         select: { id: true },
       });
-      const bookingAssets = await db.asset.findMany({
+      const bookingAssetRows = await db.bookingAsset.findMany({
         where: {
-          id: { notIn: removedAssetIds },
-          bookings: { some: { id: bookingId } },
+          bookingId,
+          assetId: { notIn: removedAssetIds },
         },
-        select: { id: true },
+        select: { assetId: true },
       });
 
       /**
@@ -288,7 +290,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds = [
         ...new Set([
           ...allAssets.map((asset) => asset.id),
-          ...bookingAssets.map((asset) => asset.id),
+          ...bookingAssetRows.map((ba) => ba.assetId),
         ]),
       ];
     }
@@ -309,8 +311,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           status: true,
           /** We need to get the original assets that were part of the booking before the update so we can compare */
-          assets: {
-            select: { id: true },
+          bookingAssets: {
+            select: { assetId: true },
           },
         },
       })
@@ -345,7 +347,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
     // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
+    const existingAssetIds = booking.bookingAssets.map((ba) => ba.assetId);
 
     // Filter out existing assets to get only newly added ones
     const newAssetIds = assetIds.filter(
@@ -488,8 +490,11 @@ export default function AddAssetsToNewBooking() {
 
   /** Assets with kits has to be handled from manage-kits */
   const bookingAssets = useMemo(
-    () => booking.assets.filter((asset) => !asset.kitId),
-    [booking.assets]
+    () =>
+      booking.bookingAssets
+        .filter((ba) => !ba.asset.kitId)
+        .map((ba) => ba.asset),
+    [booking.bookingAssets]
   );
 
   const removedAssets = useMemo(

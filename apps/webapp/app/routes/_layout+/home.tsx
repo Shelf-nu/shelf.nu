@@ -166,7 +166,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -183,7 +183,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -197,7 +197,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -211,7 +211,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 

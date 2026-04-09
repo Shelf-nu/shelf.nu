@@ -107,23 +107,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               id: true,
               status: true,
               custody: { select: { id: true } },
-              bookings: {
+              bookingAssets: {
                 where: {
-                  status: { in: ["ONGOING", "OVERDUE"] },
+                  booking: {
+                    status: { in: ["ONGOING", "OVERDUE"] },
+                  },
                 },
                 select: {
-                  id: true,
-                  name: true,
-                  from: true,
-                  status: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
+                  booking: {
                     select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                      email: true,
+                      id: true,
+                      name: true,
+                      from: true,
+                      status: true,
+                      custodianTeamMember: true,
+                      custodianUser: {
+                        select: {
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                          email: true,
+                        },
+                      },
                     },
                   },
                 },

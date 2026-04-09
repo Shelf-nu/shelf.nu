@@ -233,7 +233,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Check if there might be partial check-ins by looking at asset statuses OR booking status
     // We need to check both AVAILABLE assets (already partially checked in) AND
     // ONGOING/OVERDUE bookings (could have partial check-ins)
-    const hasAvailableAssets = booking.assets.some(
+    /** Flatten bookingAssets pivot to a plain assets array for downstream use */
+    const bookingAssets = booking.bookingAssets.map((ba) => ba.asset);
+
+    const hasAvailableAssets = bookingAssets.some(
       (asset) => asset.status === "AVAILABLE"
     );
     const canHavePartialCheckins = ["ONGOING", "OVERDUE"].includes(
@@ -247,21 +250,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
-    const enhancedBooking = booking;
+    let sortedBookingAssets = bookingAssets;
 
     // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
     // For other sort options, the database orderBy is sufficient
     const isStatusSort = !orderBy || orderBy === "status";
     if (isStatusSort) {
-      enhancedBooking.assets = sortBookingAssets(
-        enhancedBooking.assets,
+      sortedBookingAssets = sortBookingAssets(
+        bookingAssets,
         partialCheckinDetails
       );
     }
 
     // Use helper to group assets by kit and sort them
     const sortedAssets = groupAndSortAssetsByKit(
-      enhancedBooking.assets,
+      sortedBookingAssets,
       orderBy,
       orderDirection
     );
@@ -270,7 +273,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
-      assets: Array<(typeof enhancedBooking.assets)[0]>;
+      assets: Array<(typeof sortedBookingAssets)[0]>;
     }> = [];
 
     const processedKitIds = new Set<string>();
@@ -355,44 +358,49 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
-          bookings: {
+          bookingAssets: {
             where: {
-              ...(booking.from && booking.to
-                ? {
-                    OR: [
-                      // Rule 1: RESERVED bookings always conflict
-                      {
-                        status: "RESERVED",
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                      // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
-                      {
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                    ],
-                  }
-                : {}),
+              booking: {
+                ...(booking.from && booking.to
+                  ? {
+                      OR: [
+                        // Rule 1: RESERVED bookings always conflict
+                        {
+                          status: "RESERVED",
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                        // Rule 2: ONGOING/OVERDUE bookings
+                        {
+                          status: { in: ["ONGOING", "OVERDUE"] },
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
+            include: {
+              booking: true,
             },
           },
         },
@@ -401,7 +409,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       /** Calculate booking flags considering all assets */
       getBookingFlags({
         id: booking.id,
-        assetIds: booking.assets.map((a) => a.id),
+        assetIds: bookingAssets.map((a) => a.id),
         from: booking.from,
         to: booking.to,
       }),
@@ -444,7 +452,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const assetCategories = enhancedBooking.assets
+    const assetCategories = bookingAssets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -465,13 +473,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
-    // not the filtered count from booking.assets (which may be filtered by status)
+    // not the filtered count from bookingAssets (which may be filtered by status)
     // So we need to get the unfiltered asset count
-    const totalBookingAssets = await db.asset.count({
+    const totalBookingAssets = await db.bookingAsset.count({
       where: {
-        bookings: {
-          some: { id: booking.id },
-        },
+        bookingId: booking.id,
       },
     });
 
@@ -498,7 +504,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         currentOrganization,
         header,
-        booking: enhancedBooking,
+        booking,
         modelName,
         items: enrichedPaginatedItems,
         page,
@@ -511,7 +517,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: paginationItems.filter((item) => item.type === "kit").length,
         totalValue: calculateTotalValueOfAssets({
-          assets: enhancedBooking.assets,
+          assets: bookingAssets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
@@ -696,7 +702,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         content: `${actor} deleted booking ${deletedBookingLink}.`,
         type: "UPDATE",
         userId: userId,
-        assetIds: deletedBooking.assets.map((a) => a.id),
+        assetIds: deletedBooking.bookingAssets.map(
+          (ba: { asset: { id: string } }) => ba.asset.id
+        ),
       });
 
       sendNotification({
@@ -863,7 +871,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: booking.bookingAssets.map((ba) => ba.assetId),
         });
 
         sendNotification({
@@ -936,7 +944,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: booking.bookingAssets.map((ba) => ba.asset.id),
         });
 
         sendNotification({
@@ -1050,7 +1058,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }`,
           type: "UPDATE",
           userId,
-          assetIds: cancelledBooking.assets.map((a) => a.id),
+          assetIds: cancelledBooking.bookingAssets.map(
+            (ba: { assetId: string }) => ba.assetId
+          ),
         });
 
         sendNotification({

@@ -117,6 +117,9 @@ vitest.mock("~/database/db.server", () => ({
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    bookingAsset: {
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
@@ -217,10 +220,25 @@ const mockBookingData = {
   to: futureToDate,
   createdAt: futureCreatedAt,
   updatedAt: futureCreatedAt,
-  assets: [
-    { id: "asset-1", kitId: null },
-    { id: "asset-2", kitId: null },
-    { id: "asset-3", kitId: "kit-1" },
+  bookingAssets: [
+    {
+      asset: { id: "asset-1", kitId: null },
+      assetId: "asset-1",
+      quantity: 1,
+      id: "ba-1",
+    },
+    {
+      asset: { id: "asset-2", kitId: null },
+      assetId: "asset-2",
+      quantity: 1,
+      id: "ba-2",
+    },
+    {
+      asset: { id: "asset-3", kitId: "kit-1" },
+      assetId: "asset-3",
+      quantity: 1,
+      id: "ba-3",
+    },
   ],
   tags: [{ id: "tag-1", name: "Tag 1", color: "#123456" }],
 };
@@ -271,7 +289,9 @@ describe("createBooking", () => {
         originalFrom: futureFromDate,
         originalTo: futureToDate,
         status: "DRAFT",
-        assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
+        bookingAssets: {
+          create: [{ assetId: "asset-1" }, { assetId: "asset-2" }],
+        },
       },
       include: {
         custodianUser: true,
@@ -317,7 +337,9 @@ describe("createBooking", () => {
         originalFrom: futureFromDate,
         originalTo: futureToDate,
         status: "DRAFT",
-        assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
+        bookingAssets: {
+          create: [{ assetId: "asset-1" }, { assetId: "asset-2" }],
+        },
       },
       include: {
         custodianUser: true,
@@ -365,10 +387,25 @@ describe("partialCheckinBooking", () => {
     // Mock booking with assets for initial validation
     const bookingWithAssets = {
       ...mockBookingData,
-      assets: [
-        { id: "asset-1", kitId: null },
-        { id: "asset-2", kitId: null },
-        { id: "asset-3", kitId: null },
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", kitId: null },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+        },
+        {
+          asset: { id: "asset-2", kitId: null },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+        },
+        {
+          asset: { id: "asset-3", kitId: null },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-3",
+        },
       ],
     };
 
@@ -427,9 +464,19 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
-      assets: [
-        { id: "asset-1", kitId: null },
-        { id: "asset-2", kitId: null },
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", kitId: null },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+        },
+        {
+          asset: { id: "asset-2", kitId: null },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+        },
       ],
     });
 
@@ -462,7 +509,14 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
-      assets: [{ id: "asset-3", kitId: null }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-3", kitId: null },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t1",
+        },
+      ],
     });
 
     // Mock asset statuses for the booking's actual assets
@@ -486,16 +540,38 @@ describe("partialCheckinBooking", () => {
 
     const bookingWithKitAssets = {
       ...mockBookingData,
-      assets: [
-        { id: "asset-1", kitId: "kit-1" },
-        { id: "asset-2", kitId: "kit-1" },
-        { id: "asset-3", kitId: null }, // Extra asset to ensure partial check-in
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", kitId: "kit-1" },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t2",
+        },
+        {
+          asset: { id: "asset-2", kitId: "kit-1" },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t3",
+        },
+        {
+          asset: { id: "asset-3", kitId: null },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t4",
+        },
       ],
     };
 
     const updatedBookingWithRemainingAsset = {
       ...mockBookingData,
-      assets: [{ id: "asset-3", kitId: null }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-3", kitId: null },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t5",
+        },
+      ],
     };
 
     //@ts-expect-error missing vitest type
@@ -1350,18 +1426,28 @@ describe("reserveBooking", () => {
       status: BookingStatus.DRAFT,
       from: mockReserveParams.from,
       to: mockReserveParams.to,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          title: "Asset 1",
-          status: "AVAILABLE",
-          bookings: [], // No conflicting bookings
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [], // No conflicting bookings
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t101",
         },
         {
-          id: "asset-2",
-          title: "Asset 2",
-          status: "AVAILABLE",
-          bookings: [], // No conflicting bookings
+          asset: {
+            id: "asset-2",
+            title: "Asset 2",
+            status: "AVAILABLE",
+            bookingAssets: [], // No conflicting bookings
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t102",
         },
       ],
     };
@@ -1397,18 +1483,25 @@ describe("reserveBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          title: "Asset 1",
-          status: "CHECKED_OUT",
-          bookings: [
-            {
-              id: "other-booking",
-              status: "ONGOING",
-              name: "Conflicting Booking",
-            },
-          ],
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "CHECKED_OUT",
+            bookingAssets: [
+              {
+                booking: {
+                  id: "other-booking",
+                  status: "ONGOING",
+                  name: "Conflicting Booking",
+                },
+              },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t103",
         },
       ],
     };
@@ -1429,7 +1522,7 @@ describe("reserveBooking", () => {
       status: BookingStatus.ONGOING,
       from: mockReserveParams.from,
       to: mockReserveParams.to,
-      assets: [], // No assets to conflict
+      bookingAssets: [], // No assets to conflict
     };
     const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
 
@@ -1462,20 +1555,30 @@ describe("checkoutBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.RESERVED,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          title: "Asset 1",
-          status: "AVAILABLE",
-          bookings: [], // No conflicting bookings
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [], // No conflicting bookings
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t104",
         },
         {
-          id: "asset-2",
-          kitId: "kit-1",
-          title: "Asset 2",
-          status: "AVAILABLE",
-          bookings: [], // No conflicting bookings
+          asset: {
+            id: "asset-2",
+            kitId: "kit-1",
+            title: "Asset 2",
+            status: "AVAILABLE",
+            bookingAssets: [], // No conflicting bookings
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t105",
         },
       ],
     };
@@ -1507,19 +1610,26 @@ describe("checkoutBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.RESERVED,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          title: "Asset 1",
-          status: "CHECKED_OUT",
-          bookings: [
-            {
-              id: "other-booking",
-              status: "ONGOING",
-              name: "Conflicting Booking",
-            },
-          ],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            title: "Asset 1",
+            status: "CHECKED_OUT",
+            bookingAssets: [
+              {
+                booking: {
+                  id: "other-booking",
+                  status: "ONGOING",
+                  name: "Conflicting Booking",
+                },
+              },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t106",
         },
       ],
     };
@@ -1538,7 +1648,7 @@ describe("checkoutBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.DRAFT,
-      assets: [], // No assets to conflict
+      bookingAssets: [], // No assets to conflict
     };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
@@ -1570,18 +1680,32 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t107",
         },
         {
-          id: "asset-2",
-          kitId: "kit-1",
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-2",
+            kitId: "kit-1",
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t108",
         },
       ],
       partialCheckins: [],
@@ -1615,18 +1739,32 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t201",
         },
         {
-          id: "asset-2",
-          kitId: "kit-1",
-          status: AssetStatus.AVAILABLE,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "asset-2",
+            kitId: "kit-1",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t202",
         },
       ],
       partialCheckins: [
@@ -1658,15 +1796,20 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [
-            { id: "booking-1", status: BookingStatus.OVERDUE },
-            { id: "booking-2", status: BookingStatus.ONGOING },
-          ],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+              { booking: { id: "booking-2", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t203",
         },
       ],
       partialCheckins: [
@@ -1704,21 +1847,33 @@ describe("checkinBooking", () => {
       ...mockBookingData,
       id: "booking-b",
       status: BookingStatus.ONGOING,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-2",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [
-            { id: "booking-b", status: BookingStatus.ONGOING },
-            { id: "booking-a", status: BookingStatus.ONGOING },
-          ],
+          asset: {
+            id: "asset-2",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-b", status: BookingStatus.ONGOING } },
+              { booking: { id: "booking-a", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t109",
         },
         {
-          id: "asset-3",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-b", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-3",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-b", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t110",
         },
       ],
       partialCheckins: [], // No partial check-ins for Booking B
@@ -1763,32 +1918,58 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
-      assets: [
-        // Kit with 3 assets
+      bookingAssets: [
         {
-          id: "kit-asset-1",
-          kitId: "kit-1",
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "kit-asset-1",
+            kitId: "kit-1",
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "kit-asset-1",
+          quantity: 1,
+          id: "ba-t111",
         },
         {
-          id: "kit-asset-2",
-          kitId: "kit-1",
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "kit-asset-2",
+            kitId: "kit-1",
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "kit-asset-2",
+          quantity: 1,
+          id: "ba-t112",
         },
         {
-          id: "kit-asset-3",
-          kitId: "kit-1",
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "kit-asset-3",
+            kitId: "kit-1",
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "kit-asset-3",
+          quantity: 1,
+          id: "ba-t113",
         },
-        // Singular asset that was partially checked in
         {
-          id: "singular-asset",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.OVERDUE }],
+          asset: {
+            id: "singular-asset",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "singular-asset",
+          quantity: 1,
+          id: "ba-t114",
         },
       ],
       partialCheckins: [
@@ -1838,12 +2019,19 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t115",
         },
       ],
       partialCheckins: [],
@@ -1879,12 +2067,19 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t204",
         },
       ],
       partialCheckins: [],
@@ -1919,12 +2114,19 @@ describe("checkinBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
+      bookingAssets: [
         {
-          id: "asset-1",
-          kitId: null,
-          status: AssetStatus.CHECKED_OUT,
-          bookings: [{ id: "booking-1", status: BookingStatus.ONGOING }],
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t205",
         },
       ],
       partialCheckins: [],
@@ -2041,7 +2243,14 @@ describe("cancelBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.RESERVED,
-      assets: [{ id: "asset-1", kitId: null }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", kitId: null },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t116",
+        },
+      ],
     };
     const cancelledBooking = {
       ...mockBooking,
@@ -2159,7 +2368,20 @@ describe("duplicateBooking", () => {
 
     const originalBooking = {
       ...mockBookingData,
-      assets: [{ id: "asset-1" }, { id: "asset-2" }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1" },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t117",
+        },
+        {
+          asset: { id: "asset-2" },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t118",
+        },
+      ],
       tags: [{ id: "tag-1" }],
     };
     const duplicatedBooking = {
@@ -2205,7 +2427,14 @@ describe("revertBookingToDraft", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.RESERVED,
-      assets: [{ id: "asset-1", kitId: null }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", kitId: null },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t119",
+        },
+      ],
     };
     const draftBooking = { ...mockBooking, status: BookingStatus.DRAFT };
 
@@ -2250,9 +2479,19 @@ describe("extendBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [
-        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t120",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t121",
+        },
       ],
       partialCheckins: [],
     };
@@ -2314,7 +2553,14 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1",
       custodianUserId: "user-1",
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t122",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2394,7 +2640,14 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different user created it
       custodianUserId: "user-2", // Different user is custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t123",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2428,7 +2681,14 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-2", // Different creator
       custodianUserId: "user-1", // But user is custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t124",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2462,7 +2722,14 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       creatorId: "user-1", // User is creator
       custodianUserId: "user-2", // But different custodian
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t125",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2495,9 +2762,19 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t126",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t127",
+        },
       ],
       partialCheckins: [],
     };
@@ -2532,7 +2809,14 @@ describe("extendBooking", () => {
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t128",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2565,7 +2849,14 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.OVERDUE,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t129",
+        },
+      ],
       partialCheckins: [],
     };
 
@@ -2609,10 +2900,25 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
-        { id: "asset-3", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.AVAILABLE },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t130",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t131",
+        },
+        {
+          asset: { id: "asset-3", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t132",
+        },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
     };
@@ -2642,7 +2948,7 @@ describe("extendBooking", () => {
     expect(db.booking.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          assets: { some: { id: { in: ["asset-2", "asset-3"] } } },
+          bookingAssets: { some: { assetId: { in: ["asset-2", "asset-3"] } } },
         }),
       })
     );
@@ -2658,9 +2964,19 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.AVAILABLE },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t133",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t134",
+        },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
     };
@@ -2699,9 +3015,19 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out - has conflict
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.AVAILABLE },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t135",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t136",
+        },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
     };
@@ -2738,10 +3064,25 @@ describe("extendBooking", () => {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       to: new Date("2025-01-01T17:00:00Z"),
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-2", status: AssetStatus.AVAILABLE }, // Returned
-        { id: "asset-3", status: AssetStatus.AVAILABLE }, // Returned
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.AVAILABLE },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t137",
+        },
+        {
+          asset: { id: "asset-2", status: AssetStatus.AVAILABLE },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-t138",
+        },
+        {
+          asset: { id: "asset-3", status: AssetStatus.AVAILABLE },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-t139",
+        },
       ],
       partialCheckins: [{ assetIds: ["asset-1", "asset-2", "asset-3"] }],
     };
@@ -2770,7 +3111,7 @@ describe("removeAssets", () => {
   });
 
   it("should remove assets from booking successfully", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = {
       id: "booking-1",
@@ -2778,11 +3119,12 @@ describe("removeAssets", () => {
     };
 
     //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue({
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 2 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBooking,
       name: "Test Booking",
       status: BookingStatus.DRAFT,
-      assets: [],
     });
 
     await removeAssets({
@@ -2793,13 +3135,14 @@ describe("removeAssets", () => {
       organizationId: "org-1",
     });
 
-    expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          disconnect: [{ id: "asset-1" }, { id: "asset-2" }],
-        },
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        assetId: { in: ["asset-1", "asset-2"] },
       },
+    });
+    expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: "booking-1", organizationId: "org-1" },
       select: {
         id: true,
         name: true,
@@ -2996,7 +3339,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-1" } },
+        bookingAssets: { some: { assetId: "asset-1" } },
         partialCheckins: { none: { assetIds: { has: "asset-1" } } },
       },
     });
@@ -3025,7 +3368,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-2" } },
+        bookingAssets: { some: { assetId: "asset-2" } },
         partialCheckins: { none: { assetIds: { has: "asset-2" } } },
       },
     });
@@ -3049,7 +3392,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-3" } },
+        bookingAssets: { some: { assetId: "asset-3" } },
         partialCheckins: { none: { assetIds: { has: "asset-3" } } },
       },
     });
@@ -3071,7 +3414,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-4" } },
+        bookingAssets: { some: { assetId: "asset-4" } },
         partialCheckins: { none: { assetIds: { has: "asset-4" } } },
       },
     });
@@ -3094,7 +3437,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-5" } },
+        bookingAssets: { some: { assetId: "asset-5" } },
         partialCheckins: { none: { assetIds: { has: "asset-5" } } },
       },
     });
@@ -3115,7 +3458,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-2",
-        assets: { some: { id: "asset-6" } },
+        bookingAssets: { some: { assetId: "asset-6" } },
         partialCheckins: { none: { assetIds: { has: "asset-6" } } },
       },
     });
@@ -3162,7 +3505,7 @@ describe("getOngoingBookingForAsset", () => {
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId: "org-1",
-        assets: { some: { id: "asset-8" } },
+        bookingAssets: { some: { assetId: "asset-8" } },
         partialCheckins: { none: { assetIds: { has: "asset-8" } } },
       },
     });

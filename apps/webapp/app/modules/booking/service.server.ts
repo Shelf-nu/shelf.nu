@@ -154,7 +154,7 @@ async function sendBookingEmailToAllRecipients({
     const html = await bookingUpdatesTemplateString({
       booking,
       heading,
-      assetCount: booking._count.assets,
+      assetCount: booking._count.bookingAssets,
       hints,
       recipientReason: recipient.reason,
       recipientEmail: recipient.email,
@@ -333,14 +333,16 @@ export async function scheduleNextBookingJob({
 }
 
 async function updateBookingAssetStates(
-  booking: Booking & { assets: Pick<Asset, "id">[] },
+  booking: Booking & {
+    bookingAssets: { asset: Pick<Asset, "id"> }[];
+  },
   status: AssetStatus
 ) {
   try {
     return await db.asset.updateMany({
       where: {
         status: { not: status },
-        id: { in: booking.assets.map((a) => a.id) },
+        id: { in: booking.bookingAssets.map((ba) => ba.asset.id) },
       },
       data: { status },
     });
@@ -435,8 +437,8 @@ export async function createBooking({
      * - Booking is created from asset page
      * */
     if (assetIds.length > 0) {
-      dataToCreate.assets = {
-        connect: assetIds.map((id) => ({ id })),
+      dataToCreate.bookingAssets = {
+        create: assetIds.map((id) => ({ assetId: id })),
       };
     }
 
@@ -893,15 +895,29 @@ export async function reserveBooking({
         where: { id, organizationId },
         include: {
           ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
-          assets: {
-            select: {
-              ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.assets.select,
-              status: true,
-              bookings: createBookingConflictConditions({
-                currentBookingId: id,
-                fromDate: from,
-                toDate: to,
-              }),
+          bookingAssets: {
+            include: {
+              asset: {
+                select: {
+                  ...BOOKING_INCLUDE_FOR_RESERVATION_EMAIL.bookingAssets.include
+                    .asset.select,
+                  status: true,
+                  bookingAssets: {
+                    ...createBookingConflictConditions({
+                      currentBookingId: id,
+                      fromDate: from,
+                      toDate: to,
+                    }),
+                    select: {
+                      id: true,
+                      quantity: true,
+                      booking: {
+                        select: { id: true, status: true, name: true },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -916,10 +932,10 @@ export async function reserveBooking({
       });
 
     /** Server-side conflict validation to prevent race conditions */
-    if (from && to && bookingFound.assets) {
-      const conflictedAssets = bookingFound.assets.filter((asset) =>
-        hasAssetBookingConflicts(asset, id)
-      );
+    if (from && to && bookingFound.bookingAssets) {
+      const conflictedAssets = bookingFound.bookingAssets
+        .map((ba) => ba.asset)
+        .filter((asset) => hasAssetBookingConflicts(asset, id));
 
       if (conflictedAssets.length > 0) {
         const conflictedAssetNames = conflictedAssets
@@ -1071,7 +1087,7 @@ export async function reserveBooking({
 
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
-        assetsCount: bookingFound._count.assets,
+        assetsCount: bookingFound._count.bookingAssets,
         custodian,
         from,
         to,
@@ -1088,7 +1104,7 @@ export async function reserveBooking({
         heading: `Booking reservation for ${custodian}`,
         hints,
         templateProps: {
-          assets: bookingFound.assets,
+          assets: bookingFound.bookingAssets,
         },
       });
     }
@@ -1134,13 +1150,26 @@ export async function checkoutBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: {
+          bookingAssets: {
             include: {
-              bookings: createBookingConflictConditions({
-                currentBookingId: id,
-                fromDate: from,
-                toDate: to,
-              }),
+              asset: {
+                include: {
+                  bookingAssets: {
+                    ...createBookingConflictConditions({
+                      currentBookingId: id,
+                      fromDate: from,
+                      toDate: to,
+                    }),
+                    select: {
+                      id: true,
+                      quantity: true,
+                      booking: {
+                        select: { id: true, status: true, name: true },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
           ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -1156,10 +1185,10 @@ export async function checkoutBooking({
       });
 
     /** Server-side conflict validation to prevent race conditions */
-    if (from && to && bookingFound.assets) {
-      const conflictedAssets = bookingFound.assets.filter((asset) =>
-        hasAssetBookingConflicts(asset, id)
-      );
+    if (from && to && bookingFound.bookingAssets) {
+      const conflictedAssets = bookingFound.bookingAssets
+        .map((ba) => ba.asset)
+        .filter((asset) => hasAssetBookingConflicts(asset, id));
 
       if (conflictedAssets.length > 0) {
         const conflictedAssetNames = conflictedAssets
@@ -1180,9 +1209,9 @@ export async function checkoutBooking({
     }
 
     /** Server-side validation: Block checkout if any assets are in custody */
-    const assetsInCustody = bookingFound.assets.filter(
-      (asset) => asset.status === AssetStatus.IN_CUSTODY
-    );
+    const assetsInCustody = bookingFound.bookingAssets
+      .map((ba) => ba.asset)
+      .filter((asset) => asset.status === AssetStatus.IN_CUSTODY);
 
     if (assetsInCustody.length > 0) {
       const assetNames = assetsInCustody
@@ -1217,7 +1246,9 @@ export async function checkoutBooking({
     /**
      * Get the kitIds because we need them to update their status later on
      */
-    const kitIds = getKitIdsByAssets(bookingFound.assets);
+    const kitIds = getKitIdsByAssets(
+      bookingFound.bookingAssets.map((ba) => ba.asset)
+    );
     const hasKits = kitIds.length > 0;
 
     const isEarlyCheckout = isBookingEarlyCheckout(bookingFound.from!);
@@ -1252,7 +1283,9 @@ export async function checkoutBooking({
      * the transaction fast by avoiding heavy includes/reads. */
     const txOps = [
       db.asset.updateMany({
-        where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+        where: {
+          id: { in: bookingFound.bookingAssets.map((ba) => ba.asset.id) },
+        },
         data: { status: AssetStatus.CHECKED_OUT },
       }),
       db.booking.update({
@@ -1315,7 +1348,7 @@ export async function checkoutBooking({
     if (isExpired) {
       return await db.booking.findUniqueOrThrow({
         where: { id: bookingFound.id },
-        include: { ...BOOKING_INCLUDE_FOR_EMAIL, assets: true },
+        include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
       });
     }
 
@@ -1328,7 +1361,7 @@ export async function checkoutBooking({
     if (lessThanOneHourToCheckin) {
       await sendCheckinReminder(
         effectiveBooking,
-        bookingFound._count.assets,
+        bookingFound._count.bookingAssets,
         hints,
         organizationId
       );
@@ -1365,7 +1398,7 @@ export async function checkoutBooking({
     /** Hydrate the full booking with relations for the return payload only. */
     return await db.booking.findUniqueOrThrow({
       where: { id: bookingFound.id },
-      include: { ...BOOKING_INCLUDE_FOR_EMAIL, assets: true },
+      include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1396,16 +1429,26 @@ export async function checkinBooking({
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
-          assets: {
-            select: {
-              id: true,
-              kitId: true,
-              status: true,
-              bookings: {
-                select: { id: true, status: true },
-                where: {
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+          bookingAssets: {
+            include: {
+              asset: {
+                select: {
+                  id: true,
+                  kitId: true,
+                  status: true,
+                  bookingAssets: {
+                    select: {
+                      booking: {
+                        select: { id: true, status: true },
+                      },
+                    },
+                    where: {
+                      booking: {
+                        status: {
+                          in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -1427,7 +1470,10 @@ export async function checkinBooking({
       status: BookingStatus.COMPLETE,
     };
 
-    const kitIds = getKitIdsByAssets(bookingFound.assets);
+    /** Map bookingAssets to flat asset array for downstream logic */
+    const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
+
+    const kitIds = getKitIdsByAssets(bookingFoundAssets);
     const hasKits = kitIds.length > 0;
 
     const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
@@ -1472,8 +1518,9 @@ export async function checkinBooking({
 
     // Pre-compute linked active booking IDs outside the transaction
     const linkedActiveBookingIds = new Set<string>();
-    bookingFound.assets.forEach((asset) => {
-      (asset.bookings ?? []).forEach((linkedBooking) => {
+    bookingFoundAssets.forEach((asset) => {
+      (asset.bookingAssets ?? []).forEach((ba) => {
+        const linkedBooking = ba.booking;
         if (
           linkedBooking.id !== bookingFound.id &&
           (linkedBooking.status === BookingStatus.ONGOING ||
@@ -1507,14 +1554,15 @@ export async function checkinBooking({
     });
 
     // Pre-compute which assets to check in outside the transaction
-    const assetsToCheckin = bookingFound.assets
+    const assetsToCheckin = bookingFoundAssets
       .filter((asset) => {
         if (asset.status !== AssetStatus.CHECKED_OUT) {
           return false;
         }
 
-        const hasActiveBookingConflict = (asset.bookings ?? []).some(
-          (linkedBooking) => {
+        const hasActiveBookingConflict = (asset.bookingAssets ?? []).some(
+          (ba) => {
+            const linkedBooking = ba.booking;
             if (
               linkedBooking.id === bookingFound.id ||
               (linkedBooking.status !== BookingStatus.ONGOING &&
@@ -1546,7 +1594,7 @@ export async function checkinBooking({
     const assetsToCheckinSet = new Set(assetsToCheckin);
     const kitsToCheckin = hasKits
       ? kitIds.filter((kitId) => {
-          const kitAssetsInBooking = bookingFound.assets.filter(
+          const kitAssetsInBooking = bookingFoundAssets.filter(
             (asset) => asset.kitId === kitId
           );
           return kitAssetsInBooking.every(
@@ -1581,7 +1629,9 @@ export async function checkinBooking({
           data: dataToUpdate,
           include: {
             ...BOOKING_INCLUDE_FOR_EMAIL,
-            assets: true,
+            bookingAssets: {
+              include: { asset: { select: { id: true, kitId: true } } },
+            },
           },
         });
       },
@@ -1613,9 +1663,9 @@ export async function checkinBooking({
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
-          (updatedBooking.assets || []).filter(
-            (a) => specificAssetIds?.includes(a.id)
-          )
+          (updatedBooking.bookingAssets || [])
+            .map((ba) => ba.asset)
+            .filter((a) => specificAssetIds?.includes(a.id))
         );
         const completeKits: Array<{ id: string; name: string }> = [];
         const standaloneAssets: Array<{ id: string; title: string }> = [];
@@ -1739,7 +1789,7 @@ export async function checkinBooking({
 
       const text = completedBookingEmailContent({
         bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.assets,
+        assetsCount: updatedBooking._count.bookingAssets,
         custodian,
         from: updatedBooking.from!,
         to: updatedBooking.to!,
@@ -1796,7 +1846,13 @@ export async function partialCheckinBooking({
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        include: { assets: { select: { id: true, kitId: true } } },
+        include: {
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true, kitId: true } },
+            },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -1808,10 +1864,13 @@ export async function partialCheckinBooking({
         });
       });
 
+    /** Map bookingAssets to flat asset array for downstream logic */
+    const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
+
     // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
     // First, get the current status of all assets in the booking
     const currentAssetStatuses = await db.asset.findMany({
-      where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+      where: { id: { in: bookingFoundAssets.map((a) => a.id) } },
       select: { id: true, status: true },
     });
 
@@ -1866,7 +1925,7 @@ export async function partialCheckinBooking({
     }
 
     // Validate that all provided assetIds are actually in the booking
-    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+    const bookingAssetIds = new Set(bookingFoundAssets.map((a) => a.id));
     const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
 
     if (invalidAssetIds.length > 0) {
@@ -1881,7 +1940,7 @@ export async function partialCheckinBooking({
     }
 
     // For kits: only update kit status if ALL assets of a kit are being checked in
-    const assetsBeingCheckedIn = bookingFound.assets.filter((a) =>
+    const assetsBeingCheckedIn = bookingFoundAssets.filter((a) =>
       assetIds.includes(a.id)
     );
     const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
@@ -1889,7 +1948,7 @@ export async function partialCheckinBooking({
     // Only process kits where ALL their assets in this booking are being checked in
     const completeKitIds: string[] = [];
     for (const kitId of kitIdsBeingCheckedIn) {
-      const kitAssetsInBooking = bookingFound.assets.filter(
+      const kitAssetsInBooking = bookingFoundAssets.filter(
         (a) => a.kitId === kitId
       );
       const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
@@ -1995,15 +2054,15 @@ export async function partialCheckinBooking({
       const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
         where: { id },
         include: {
-          assets: true,
+          bookingAssets: true,
           custodianUser: true,
           custodianTeamMember: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       });
 
       const remainingCount =
-        updatedBookingForNote.assets.length - assetIds.length;
+        updatedBookingForNote.bookingAssets.length - assetIds.length;
       const isCompletingBooking = remainingCount === 0;
 
       if (isCompletingBooking) {
@@ -2012,10 +2071,10 @@ export async function partialCheckinBooking({
           where: { id },
           data: { status: BookingStatus.COMPLETE },
           include: {
-            assets: true,
+            bookingAssets: true,
             custodianUser: true,
             custodianTeamMember: true,
-            _count: { select: { assets: true } },
+            _count: { select: { bookingAssets: true } },
           },
         });
 
@@ -2138,9 +2197,9 @@ export async function updateBookingAssets({
         // N individual connect operations which cause transaction timeouts
         // for large bookings
         tx.$executeRaw`
-          INSERT INTO "_AssetToBooking" ("A", "B")
-          SELECT unnest(${validAssetIds}::text[]), ${id}
-          ON CONFLICT ("A", "B") DO NOTHING
+          INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity")
+          SELECT gen_random_uuid()::text, unnest(${validAssetIds}::text[]), ${id}, 1
+          ON CONFLICT ("bookingId", "assetId") DO NOTHING
         `,
         // Touch updatedAt since the raw INSERT doesn't update the booking row
         tx.booking.update({
@@ -2353,7 +2412,11 @@ export async function cancelBooking({
         select: {
           id: true,
           status: true,
-          assets: { select: { id: true, kitId: true } },
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true, kitId: true } },
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -2364,6 +2427,9 @@ export async function cancelBooking({
             "Booking not found. Are you sure it exists in current workspace?",
         });
       });
+
+    /** Map bookingAssets to flat asset array for downstream logic */
+    const cancelAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
     const allowedStatusForCancel: BookingStatus[] = [
       BookingStatus.ONGOING,
@@ -2379,14 +2445,14 @@ export async function cancelBooking({
       });
     }
 
-    const kitIds = getKitIdsByAssets(bookingFound.assets);
+    const kitIds = getKitIdsByAssets(cancelAssets);
     const hasKits = kitIds.length > 0;
 
     const booking = await db.$transaction(async (tx) => {
       /** If booking is ONGOING or OVERDUE, we have to make the assets available */
       if (bookingFound.status !== BookingStatus.RESERVED) {
         await tx.asset.updateMany({
-          where: { id: { in: bookingFound.assets.map((a) => a.id) } },
+          where: { id: { in: cancelAssets.map((a) => a.id) } },
           data: { status: AssetStatus.AVAILABLE },
         });
 
@@ -2403,7 +2469,7 @@ export async function cancelBooking({
         where: { id: bookingFound.id },
         data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
-          assets: true,
+          bookingAssets: true,
           ...BOOKING_INCLUDE_FOR_EMAIL,
         },
       });
@@ -2427,7 +2493,7 @@ export async function cancelBooking({
 
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
-        assetsCount: booking._count.assets,
+        assetsCount: booking._count.bookingAssets,
         custodian,
         from: booking.from!,
         to: booking.to!,
@@ -2563,7 +2629,11 @@ export async function extendBooking({
           status: true,
           to: true,
           activeSchedulerReference: true,
-          assets: { select: { id: true, status: true } },
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true, status: true } },
+            },
+          },
           from: true,
           creatorId: true,
           custodianUserId: true,
@@ -2607,12 +2677,14 @@ export async function extendBooking({
     );
 
     /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.assets.filter(
-      (asset) =>
-        (asset.status === AssetStatus.CHECKED_OUT ||
-          asset.status === AssetStatus.IN_CUSTODY) &&
-        !checkedInAssetIds.includes(asset.id)
-    );
+    const activeAssets = booking.bookingAssets
+      .map((ba) => ba.asset)
+      .filter(
+        (asset) =>
+          (asset.status === AssetStatus.CHECKED_OUT ||
+            asset.status === AssetStatus.IN_CUSTODY) &&
+          !checkedInAssetIds.includes(asset.id)
+      );
 
     /** Validate that there are still active assets to extend the booking for */
     if (activeAssets.length === 0) {
@@ -2635,7 +2707,9 @@ export async function extendBooking({
           status: {
             in: [BookingStatus.RESERVED],
           },
-          assets: { some: { id: { in: activeAssets.map((a) => a.id) } } },
+          bookingAssets: {
+            some: { assetId: { in: activeAssets.map((a) => a.id) } },
+          },
           // Check for bookings that start within the extension period
           from: {
             gt: booking.to,
@@ -2707,7 +2781,7 @@ export async function extendBooking({
 
       const text = extendBookingEmailContent({
         bookingName: updatedBooking.name,
-        assetsCount: updatedBooking._count.assets,
+        assetsCount: updatedBooking._count.bookingAssets,
         custodian,
         from: updatedBooking.from!,
         to: updatedBooking.to!,
@@ -2749,7 +2823,7 @@ export async function extendBooking({
     if (hours < 1) {
       await sendCheckinReminder(
         updatedBooking,
-        updatedBooking._count.assets,
+        updatedBooking._count.bookingAssets,
         hints,
         updatedBooking.organizationId
       );
@@ -2990,21 +3064,25 @@ export async function getBookings(params: {
           },
           // Search in asset titles, QR codes, and barcodes
           {
-            assets: {
+            bookingAssets: {
               some: {
-                OR: [
-                  { title: { contains: term, mode: "insensitive" } },
-                  {
-                    qrCodes: {
-                      some: { id: { contains: term, mode: "insensitive" } },
+                asset: {
+                  OR: [
+                    { title: { contains: term, mode: "insensitive" } },
+                    {
+                      qrCodes: {
+                        some: { id: { contains: term, mode: "insensitive" } },
+                      },
                     },
-                  },
-                  {
-                    barcodes: {
-                      some: { value: { contains: term, mode: "insensitive" } },
+                    {
+                      barcodes: {
+                        some: {
+                          value: { contains: term, mode: "insensitive" },
+                        },
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
             },
           },
@@ -3052,9 +3130,9 @@ export async function getBookings(params: {
     }
 
     if (assetIds?.length) {
-      where.assets = {
+      where.bookingAssets = {
         some: {
-          id: {
+          assetId: {
             in: assetIds,
           },
         },
@@ -3086,8 +3164,8 @@ export async function getBookings(params: {
     }
 
     if (kitId) {
-      where.assets = {
-        some: { kitId },
+      where.bookingAssets = {
+        some: { asset: { kitId } },
       };
     }
 
@@ -3108,42 +3186,46 @@ export async function getBookings(params: {
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          assets: {
-            select: {
-              title: true,
-              id: true,
-              type: true,
-              quantity: true,
-              custody: true,
-              availableToBook: true,
-              kitId: true,
-              status: true,
-              mainImage: true,
-              thumbnailImage: true,
-              mainImageExpiration: true,
-              category: {
+          bookingAssets: {
+            include: {
+              asset: {
                 select: {
+                  title: true,
                   id: true,
-                  name: true,
-                  color: true,
-                },
-              },
-              bookings: {
-                select: {
-                  id: true,
-                },
-              },
-              kit: {
-                select: {
-                  id: true,
-                  name: true,
-                  image: true,
-                  imageExpiration: true,
+                  type: true,
+                  quantity: true,
+                  custody: true,
+                  availableToBook: true,
+                  kitId: true,
+                  status: true,
+                  mainImage: true,
+                  thumbnailImage: true,
+                  mainImageExpiration: true,
                   category: {
                     select: {
                       id: true,
                       name: true,
                       color: true,
+                    },
+                  },
+                  bookingAssets: {
+                    select: {
+                      bookingId: true,
+                    },
+                  },
+                  kit: {
+                    select: {
+                      id: true,
+                      name: true,
+                      image: true,
+                      imageExpiration: true,
+                      category: {
+                        select: {
+                          id: true,
+                          name: true,
+                          color: true,
+                        },
+                      },
                     },
                   },
                 },
@@ -3201,14 +3283,14 @@ export async function removeAssets({
 }) {
   try {
     const { assetIds, id } = booking;
-    const b = await db.booking.update({
-      // First, disconnect the assets from the booking
+
+    // Remove the pivot rows for the assets being removed
+    await db.bookingAsset.deleteMany({
+      where: { bookingId: id, assetId: { in: assetIds } },
+    });
+
+    const b = await db.booking.findUniqueOrThrow({
       where: { id, organizationId },
-      data: {
-        assets: {
-          disconnect: assetIds.map((id) => ({ id })),
-        },
-      },
       select: {
         id: true,
         name: true,
@@ -3324,10 +3406,14 @@ export async function deleteBooking(
   const currentBooking = await db.booking.findUnique({
     where: { id, organizationId },
     include: {
-      assets: {
-        select: {
-          id: true,
-          kitId: true,
+      bookingAssets: {
+        include: {
+          asset: {
+            select: {
+              id: true,
+              kitId: true,
+            },
+          },
         },
       },
     },
@@ -3352,7 +3438,9 @@ export async function deleteBooking(
         ? currentBooking
         : null;
 
-    const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
+    const activeBookingAssets =
+      activeBooking?.bookingAssets.map((ba) => ba.asset) ?? [];
+    const assetWithKits = activeBookingAssets.filter((a) => !!a.kitId);
     const uniqueKitIds = new Set(
       assetWithKits.map((a) => a.kitId) as unknown as string
     );
@@ -3363,9 +3451,9 @@ export async function deleteBooking(
       include: {
         ...BOOKING_COMMON_INCLUDE,
         ...BOOKING_INCLUDE_FOR_EMAIL,
-        assets: {
-          select: {
-            id: true,
+        bookingAssets: {
+          include: {
+            asset: { select: { id: true } },
           },
         },
       },
@@ -3386,7 +3474,7 @@ export async function deleteBooking(
 
       const text = deletedBookingEmailContent({
         bookingName: b.name,
-        assetsCount: b._count.assets,
+        assetsCount: b._count.bookingAssets,
         custodian,
         from: b.from as Date,
         to: b.to as Date,
@@ -3469,7 +3557,7 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
      * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
      */
 
-    // Build assets include with optional search, status filtering, and dynamic sorting
+    // Build bookingAssets include with optional search, status filtering, and dynamic sorting
     const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
@@ -3483,15 +3571,17 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     //   assetsWhere.status = status;
     // }
 
-    const assetsInclude: Prisma.BookingInclude["assets"] = {
-      select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
-      orderBy: assetsOrderBy,
-      ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
+    const bookingAssetsInclude: Prisma.BookingInclude["bookingAssets"] = {
+      include: BOOKING_WITH_ASSETS_INCLUDE.bookingAssets.include,
+      orderBy: assetsOrderBy.map((o) => ({ asset: o })),
+      ...(Object.keys(assetsWhere).length > 0 && {
+        where: { asset: assetsWhere },
+      }),
     };
 
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
-      assets: assetsInclude,
+      bookingAssets: bookingAssetsInclude,
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
@@ -3729,43 +3819,50 @@ export async function getBookingFlags(
       category: true,
       custody: true,
       kit: true,
-      bookings: {
+      bookingAssets: {
         where: {
-          ...(booking.from && booking.to
-            ? {
-                id: { not: booking.id }, // Exclude current booking
-                OR: [
-                  // Rule 1: RESERVED bookings always conflict
-                  {
-                    status: "RESERVED",
-                    OR: [
-                      {
-                        from: { lte: booking.to },
-                        to: { gte: booking.from },
-                      },
-                      {
-                        from: { gte: booking.from },
-                        to: { lte: booking.to },
-                      },
-                    ],
-                  },
-                  // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in logic below)
-                  {
-                    status: { in: ["ONGOING", "OVERDUE"] },
-                    OR: [
-                      {
-                        from: { lte: booking.to },
-                        to: { gte: booking.from },
-                      },
-                      {
-                        from: { gte: booking.from },
-                        to: { lte: booking.to },
-                      },
-                    ],
-                  },
-                ],
-              }
-            : { id: { not: booking.id } }),
+          booking: {
+            ...(booking.from && booking.to
+              ? {
+                  id: { not: booking.id }, // Exclude current booking
+                  OR: [
+                    // Rule 1: RESERVED bookings always conflict
+                    {
+                      status: "RESERVED",
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    },
+                    // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in logic below)
+                    {
+                      status: { in: ["ONGOING", "OVERDUE"] },
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    },
+                  ],
+                }
+              : { id: { not: booking.id } }),
+          },
+        },
+        include: {
+          booking: {
+            select: { id: true, status: true },
+          },
         },
       },
     },
@@ -3780,9 +3877,10 @@ export async function getBookingFlags(
   );
 
   const hasAlreadyBookedAssets = assets.some((asset) => {
-    if (!asset.bookings || asset.bookings.length === 0) return false;
+    if (!asset.bookingAssets || asset.bookingAssets.length === 0) return false;
 
-    return asset.bookings.some((conflictingBooking) => {
+    return asset.bookingAssets.some((ba) => {
+      const conflictingBooking = ba.booking;
       // RESERVED bookings always conflict
       if (conflictingBooking.status === "RESERVED") return true;
 
@@ -3840,7 +3938,11 @@ export async function bulkDeleteBookings({
         where,
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: { select: { id: true, kitId: true } },
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true, kitId: true } },
+            },
+          },
         },
       }),
       getUserByID(userId, {
@@ -3871,8 +3973,8 @@ export async function bulkDeleteBookings({
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {
-        const allAssets = overdueOrOngoingBookings.flatMap(
-          (booking) => booking.assets
+        const allAssets = overdueOrOngoingBookings.flatMap((booking) =>
+          booking.bookingAssets.map((ba) => ba.asset)
         );
 
         const allKitIds = allAssets
@@ -3895,9 +3997,9 @@ export async function bulkDeleteBookings({
       /** Making notes for all the assets */
       const notesData = bookings
         .map((booking) =>
-          booking.assets.map((asset) => ({
+          booking.bookingAssets.map((ba) => ({
             userId,
-            assetId: asset.id,
+            assetId: ba.asset.id,
             content: `**${resolveUserDisplayName(user)}** deleted booking **${
               booking.name
             }**.`,
@@ -3931,7 +4033,7 @@ export async function bulkDeleteBookings({
 
         const text = deletedBookingEmailContent({
           bookingName: b.name,
-          assetsCount: b.assets.length,
+          assetsCount: b.bookingAssets.length,
           custodian,
           from: b.from as Date,
           to: b.to as Date,
@@ -4078,7 +4180,11 @@ export async function bulkCancelBookings({
         where,
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
-          assets: { select: { id: true, kitId: true } },
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true, kitId: true } },
+            },
+          },
         },
       }),
       getUserByID(userId, {
@@ -4136,7 +4242,9 @@ export async function bulkCancelBookings({
 
       /** Updating status of assets and kits  */
       if (ongoingOrOverdueBookings.length > 0) {
-        const allAssets = ongoingOrOverdueBookings.flatMap((b) => b.assets);
+        const allAssets = ongoingOrOverdueBookings.flatMap((b) =>
+          b.bookingAssets.map((ba) => ba.asset)
+        );
         const allKitIds = allAssets
           .filter((a) => !!a.kitId)
           .map((a) => a.kitId as string);
@@ -4164,8 +4272,8 @@ export async function bulkCancelBookings({
       });
       const notesData = bookings
         .map((b) =>
-          b.assets.map((asset) => ({
-            assetId: asset.id,
+          b.bookingAssets.map((ba) => ({
+            assetId: ba.asset.id,
             content: `${actor} cancelled booking.`,
             userId,
             type: "UPDATE" as const,
@@ -4209,7 +4317,7 @@ export async function bulkCancelBookings({
 
         const text = cancelledBookingEmailContent({
           bookingName: b.name,
-          assetsCount: b._count.assets,
+          assetsCount: b._count.bookingAssets,
           custodian,
           from: b.from as Date,
           to: b.to as Date,
@@ -4429,8 +4537,8 @@ export async function addScannedAssetsToBooking({
       const booking = await tx.booking.update({
         where: { id: bookingId, organizationId },
         data: {
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
+          bookingAssets: {
+            create: assetIds.map((id) => ({ assetId: id })),
           },
         },
         select: {
@@ -4496,7 +4604,11 @@ export async function getExistingBookingDetails(bookingId: string) {
       select: {
         id: true,
         status: true,
-        assets: { select: { id: true, title: true } },
+        bookingAssets: {
+          include: {
+            asset: { select: { id: true, title: true } },
+          },
+        },
       },
     });
 
@@ -4700,8 +4812,10 @@ export async function duplicateBooking({
         status: BookingStatus.DRAFT,
         custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
         custodianUserId: bookingToDuplicate.custodianUserId,
-        assets: {
-          connect: bookingToDuplicate.assets.map((asset) => ({ id: asset.id })),
+        bookingAssets: {
+          create: bookingToDuplicate.bookingAssets.map((ba) => ({
+            assetId: ba.assetId,
+          })),
         },
         tags: {
           connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
@@ -4940,7 +5054,7 @@ export async function getOngoingBookingForAsset({
       where: {
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
         organizationId,
-        assets: { some: { id: assetId } },
+        bookingAssets: { some: { assetId } },
         partialCheckins: { none: { assetIds: { has: assetId } } }, // Exclude bookings where this asset has been partially checked in
       },
     });

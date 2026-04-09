@@ -657,16 +657,18 @@ export async function getAssets(params: {
         where.AND = [
           // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
           {
-            bookings: {
+            bookingAssets: {
               none: {
-                ...(unhideAssetsBookigIds?.length && {
-                  id: { notIn: unhideAssetsBookigIds },
-                }),
-                status: BookingStatus.RESERVED,
-                OR: [
-                  { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                  { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                ],
+                booking: {
+                  ...(unhideAssetsBookigIds?.length && {
+                    id: { notIn: unhideAssetsBookigIds },
+                  }),
+                  status: BookingStatus.RESERVED,
+                  OR: [
+                    { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                    { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                  ],
+                },
               },
             },
           },
@@ -677,18 +679,20 @@ export async function getAssets(params: {
               { status: AssetStatus.AVAILABLE },
               // Or asset has no conflicting ONGOING/OVERDUE bookings
               {
-                bookings: {
+                bookingAssets: {
                   none: {
-                    ...(unhideAssetsBookigIds?.length && {
-                      id: { notIn: unhideAssetsBookigIds },
-                    }),
-                    status: {
-                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    booking: {
+                      ...(unhideAssetsBookigIds?.length && {
+                        id: { notIn: unhideAssetsBookigIds },
+                      }),
+                      status: {
+                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                      },
+                      OR: [
+                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                      ],
                     },
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
                   },
                 },
               },
@@ -768,23 +772,27 @@ export async function getAssets(params: {
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              /** We only get them if the booking is ongoing */
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                /** We only get them if the booking is ongoing */
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianUserId: { in: teamMemberIds },
-              /** We only get them if the booking is ongoing */
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                /** We only get them if the booking is ongoing */
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
@@ -3096,21 +3104,27 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
         },
         select: {
           id: true,
-          bookings: {
+          bookingAssets: {
             where: {
-              status: {
-                in: ["ONGOING", "OVERDUE"],
+              booking: {
+                status: {
+                  in: ["ONGOING", "OVERDUE"],
+                },
               },
             },
-            select: {
-              id: true,
-              custodianTeamMember: true,
-              custodianUser: {
+            include: {
+              booking: {
                 select: {
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  profilePicture: true,
+                  id: true,
+                  custodianTeamMember: true,
+                  custodianUser: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      displayName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             },
@@ -3125,7 +3139,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
         const assetWithUser = assetsWithCustodians.find(
           (awu) => awu.id === a.id
         );
-        const booking = assetWithUser?.bookings[0];
+        const booking = assetWithUser?.bookingAssets[0]?.booking;
         const custodianUser = booking?.custodianUser;
         const custodianTeamMember = booking?.custodianTeamMember;
 

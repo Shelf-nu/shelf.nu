@@ -162,27 +162,33 @@ export async function simpleModeLoader({
       extraInclude:
         view === "availability"
           ? {
-              bookings: {
+              bookingAssets: {
                 where: {
-                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                  booking: {
+                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                  },
                 },
-                select: {
-                  id: true,
-                  name: true,
-                  status: true,
-                  from: true,
-                  to: true,
-                  description: true,
-                  custodianTeamMember: true,
-                  custodianUser: true,
-                  tags: TAG_WITH_COLOR_SELECT,
-                  creator: {
+                include: {
+                  booking: {
                     select: {
                       id: true,
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
+                      name: true,
+                      status: true,
+                      from: true,
+                      to: true,
+                      description: true,
+                      custodianTeamMember: true,
+                      custodianUser: true,
+                      tags: TAG_WITH_COLOR_SELECT,
+                      creator: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
+                      },
                     },
                   },
                 },
