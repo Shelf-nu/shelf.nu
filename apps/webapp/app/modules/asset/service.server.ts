@@ -3060,7 +3060,7 @@ export function updateAssetsWithBookingCustodians<
       new ShelfError({
         cause: null,
         message: "Couldn't find custodian for asset",
-        additionalData: { asset: a },
+        additionalData: { assetId: a.id, status: a.status },
         label,
       })
     );
