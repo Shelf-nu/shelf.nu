@@ -201,6 +201,7 @@ export const assetIndexFields = ({
       take: 1,
       select: {
         id: true,
+        status: true,
         custodianTeamMember: true,
         custodianUser: {
           select: {

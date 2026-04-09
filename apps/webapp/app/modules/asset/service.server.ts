@@ -98,7 +98,7 @@ import {
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
-import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
+import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   createSignedUrl,
   parseFileFormData,
@@ -1713,7 +1713,7 @@ export async function updateAssetMainImage({
       id: assetId,
       mainImage: signedUrl,
       thumbnailImage: thumbnailSignedUrl,
-      mainImageExpiration: oneDayFromNow(),
+      mainImageExpiration: threeDaysFromNow(),
       userId,
       organizationId,
       request,
@@ -1982,7 +1982,7 @@ export async function duplicateAsset({
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
-                mainImageExpiration: oneDayFromNow(),
+                mainImageExpiration: threeDaysFromNow(),
               },
             });
           }
@@ -2551,7 +2551,7 @@ export async function createAssetsFromContentImport({
 
           if (path) {
             mainImage = await createSignedUrl({ filename: path });
-            mainImageExpiration = oneDayFromNow();
+            mainImageExpiration = threeDaysFromNow();
           }
         } catch (cause) {
           // This catch block should rarely be reached now since uploadImageFromUrl returns null instead of throwing
@@ -2720,7 +2720,7 @@ export async function createAssetsFromBackupImport({
             title: asset.title,
             description: asset.description || null,
             mainImage: asset.mainImage || null,
-            mainImageExpiration: oneDayFromNow(),
+            mainImageExpiration: threeDaysFromNow(),
             userId,
             organizationId,
             status: asset.status,
@@ -2978,7 +2978,7 @@ export async function updateAssetBookingAvailability({
  *
  * Previously this made a separate DB query (N+1 pattern). Now the booking custodian
  * data is included in the initial asset query via `assetIndexFields`, so this function
- * just reads `asset.bookings[0]` directly — no DB call needed.
+ * just reads the active booking from `asset.bookings` directly — no DB call needed.
  *
  * @param assets - Assets with `bookings` already included from the initial query
  * @returns The same assets array with `custody.custodian` added for checked-out assets
@@ -3015,7 +3015,13 @@ export function updateAssetsWithBookingCustodians<
       return a;
     }
 
-    const booking = a.bookings?.[0];
+    // When the availability view is active, bookings may include RESERVED
+    // entries alongside ONGOING/OVERDUE. Pick the active checkout explicitly.
+    const booking =
+      a.bookings?.find(
+        (b) =>
+          "status" in b && (b.status === "ONGOING" || b.status === "OVERDUE")
+      ) ?? a.bookings?.[0];
     const custodianUser = booking?.custodianUser;
     const custodianTeamMember = booking?.custodianTeamMember;
 
