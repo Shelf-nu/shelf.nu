@@ -104,7 +104,7 @@ import {
   parseFileFormData,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
-import { resolveTeamMemberName } from "~/utils/user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
 import {
@@ -2998,11 +2998,11 @@ export function updateAssetsWithBookingCustodians<
     }>;
   },
 >(assets: T[]) {
-  const checkedOutAssetsIds = assets
-    .filter((a) => a.status === "CHECKED_OUT")
-    .map((a) => a.id);
+  const checkedOutAssetIds = new Set(
+    assets.filter((a) => a.status === "CHECKED_OUT").map((a) => a.id)
+  );
 
-  if (checkedOutAssetsIds.length === 0) {
+  if (checkedOutAssetIds.size === 0) {
     return assets;
   }
 
@@ -3011,7 +3011,7 @@ export function updateAssetsWithBookingCustodians<
    * to build the same custody shape the UI expects.
    */
   return assets.map((a) => {
-    if (!checkedOutAssetsIds.includes(a.id)) {
+    if (!checkedOutAssetIds.has(a.id)) {
       return a;
     }
 
@@ -3025,13 +3025,12 @@ export function updateAssetsWithBookingCustodians<
         ...a,
         custody: {
           custodian: {
-            name: `${custodianUser?.firstName || ""} ${
-              custodianUser?.lastName || ""
-            }`,
+            // Prioritizes displayName, falls back to firstName + lastName
+            name: resolveUserDisplayName(custodianUser),
             user: {
-              firstName: custodianUser?.firstName || "",
-              lastName: custodianUser?.lastName || "",
-              profilePicture: custodianUser?.profilePicture || null,
+              firstName: custodianUser.firstName || "",
+              lastName: custodianUser.lastName || "",
+              profilePicture: custodianUser.profilePicture || null,
             },
           },
         },

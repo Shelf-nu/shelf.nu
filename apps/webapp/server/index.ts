@@ -73,17 +73,18 @@ export default createHonoServer<ServerEnv>({
   defaultLogger: false,
   getLoadContext,
   configure: (server) => {
+    // Measure total request duration (dev/staging only, skipped in production).
+    // Registered first so it captures time spent in all downstream middleware.
+    server.use("*", serverTiming());
+
     /**
      * Ensure host headers are present for React Router CSRF protection
-     * Must be first to ensure headers are available for all downstream middleware
+     * Must be early to ensure headers are available for all downstream middleware
      */
     server.use("*", ensureHostHeaders());
 
     // Attach a per-request AsyncLocalStorage cache for downstream loaders/actions.
     server.use("*", async (_c, next) => runWithRequestCache(() => next()));
-
-    // Measure total request duration (dev/staging only, skipped in production)
-    server.use("*", serverTiming());
 
     // Store the X-Tab-Id header so sendNotification() can tag toasts per tab.
     server.use("*", async (c, next) =>

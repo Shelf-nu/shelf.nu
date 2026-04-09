@@ -238,6 +238,16 @@ export const assetIndexFields = ({
           status: true,
           id: true,
           name: true,
+          // Custodian fields needed by updateAssetsWithBookingCustodians()
+          custodianTeamMember: true,
+          custodianUser: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
         },
       },
     } satisfies Prisma.AssetInclude;

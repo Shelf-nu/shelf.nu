@@ -392,14 +392,7 @@ export async function advancedModeLoader({
   // lets it overlap with the asset query instead of blocking it.
   /** Query entities, tierLimit, assets & more — all in parallel */
   const [
-    {
-      tags,
-      totalTags,
-      categories,
-      totalCategories,
-      locations,
-      totalLocations,
-    },
+    { tags, totalTags, categories, totalCategories, locations, totalLocations },
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
