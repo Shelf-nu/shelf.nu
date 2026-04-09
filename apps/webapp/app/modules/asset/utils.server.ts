@@ -7,6 +7,7 @@ import type {
 } from "@prisma/client";
 import _ from "lodash";
 import { z } from "zod";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
@@ -638,13 +639,13 @@ type AllSelectedValues = {
 export async function getAllSelectedValuesFromFilters(
   filters: string = "",
   columns: Column[],
-  organizationId?: string
+  organizationId?: string,
+  /** Pre-parsed filters — pass these to avoid a redundant parseFiltersWithHierarchy call */
+  preParsedFilters?: Filter[]
 ) {
-  const parsedFilters = await parseFiltersWithHierarchy(
-    filters,
-    columns,
-    organizationId
-  );
+  const parsedFilters =
+    preParsedFilters ??
+    (await parseFiltersWithHierarchy(filters, columns, organizationId));
   return parsedFilters.reduce((acc, curr) => {
     /*
      * We only have to take care of string values because most dropdown has string values only.
