@@ -14,8 +14,8 @@ export function createLoaderArgs(
     request: args.request || new Request("http://localhost:3000"),
     params: args.params || {},
     context: args.context || {},
-    // unstable_pattern must be a string route pattern, not an object
     unstable_pattern: args.unstable_pattern || "*",
+    unstable_url: args.unstable_url || new URL("http://localhost:3000"),
   };
 }
 
@@ -28,8 +28,8 @@ export function createActionArgs(
       args.request || new Request("http://localhost:3000", { method: "POST" }),
     params: args.params || {},
     context: args.context || {},
-    // unstable_pattern must be a string route pattern, not an object
     unstable_pattern: args.unstable_pattern || "*",
+    unstable_url: args.unstable_url || new URL("http://localhost:3000"),
   };
 }
 
