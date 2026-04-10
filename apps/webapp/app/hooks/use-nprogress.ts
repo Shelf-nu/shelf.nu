@@ -23,6 +23,7 @@ export function useNprogress() {
   const filteredFetchers = fetchers.filter(
     (fetcher) =>
       !excludeFetchers.includes(fetcher.key) &&
+      !fetcher.key.startsWith("inline-edit-") &&
       !fetcher.key.startsWith("toggle-star-") &&
       !fetcher.key.startsWith("delete-preset-") &&
       !fetcher.key.startsWith("audit-asset-note-") &&
