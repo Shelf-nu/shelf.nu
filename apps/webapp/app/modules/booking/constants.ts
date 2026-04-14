@@ -46,6 +46,7 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
         select: {
           id: true,
           title: true,
+          type: true,
           category: {
             select: {
               name: true,
@@ -89,6 +90,7 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
         select: {
           id: true,
           title: true,
+          type: true,
           availableToBook: true,
           status: true,
           kitId: true,

@@ -651,10 +651,28 @@ export async function getAssets(params: {
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;
-      //not assigned to team member
-      where.custody = { none: {} };
+      /**
+       * For INDIVIDUAL assets, exclude those with active custody.
+       * For QUANTITY_TRACKED assets, always show them — partial availability
+       * is checked at booking time based on available quantity.
+       */
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
+        },
+      ];
       if (bookingFrom && bookingTo) {
         where.AND = [
+          ...(Array.isArray(where.AND)
+            ? where.AND
+            : where.AND
+            ? [where.AND]
+            : []),
           // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
           {
             bookingAssets: {

@@ -4,6 +4,7 @@ import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -160,6 +161,14 @@ export default function ListAssetContent({
                 >
                   {item.title}
                 </Button>
+                {/* Show booked quantity for quantity-tracked assets */}
+                {isQuantityTracked(item) &&
+                  item.bookedQuantity != null &&
+                  item.bookedQuantity > 0 && (
+                    <span className="ml-1.5 text-xs font-medium text-gray-500">
+                      &times; {item.bookedQuantity}
+                    </span>
+                  )}
               </span>
               <div>
                 {isFinished ? (

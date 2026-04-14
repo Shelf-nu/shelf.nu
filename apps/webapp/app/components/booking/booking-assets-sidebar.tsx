@@ -10,6 +10,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/shared/sheet";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -26,6 +27,7 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
           select: {
             id: true;
             title: true;
+            type: true;
             availableToBook: true;
             custody: true;
             kitId: true;
@@ -67,13 +69,29 @@ interface BookingAssetsSidebarProps {
   trigger?: ReactNode;
 }
 
-// Group assets by kits and individual assets - similar to the original pagination structure
+/** Asset enriched with the booked quantity from the BookingAsset pivot */
+type SidebarAsset = BookingWithAssets["bookingAssets"][number]["asset"] & {
+  bookedQuantity: number;
+};
+
+/**
+ * Groups assets by kits and individual assets, similar to the original
+ * pagination structure. Preserves booked quantity from the pivot row.
+ */
 function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
-  const itemsMap = new Map();
-  const individualAssets: any[] = [];
+  const itemsMap = new Map<
+    string,
+    {
+      id: string;
+      type: "kit" | "asset";
+      assets: SidebarAsset[];
+      kit?: SidebarAsset["kit"];
+    }
+  >();
+  const individualAssets: SidebarAsset[] = [];
 
   bookingAssets.forEach((ba) => {
-    const asset = ba.asset;
+    const asset: SidebarAsset = { ...ba.asset, bookedQuantity: ba.quantity };
     if (asset.kitId && asset.kit) {
       // Asset belongs to a kit
       const kitId = asset.kitId;
@@ -247,7 +265,7 @@ export function BookingAssetsSidebar({
 
                           {/* Kit Assets (when expanded) */}
                           {isExpanded &&
-                            item.assets.map((asset: any) => (
+                            item.assets.map((asset) => (
                               <tr
                                 key={`kit-asset-${asset.id}`}
                                 className="relative border-b border-gray-200"
@@ -282,6 +300,13 @@ export function BookingAssetsSidebar({
                                           >
                                             {asset.title}
                                           </Button>
+                                          {/* Show booked quantity for quantity-tracked kit assets */}
+                                          {isQuantityTracked(asset) &&
+                                            asset.bookedQuantity > 0 && (
+                                              <span className="ml-1.5 text-xs font-medium text-gray-500">
+                                                &times; {asset.bookedQuantity}
+                                              </span>
+                                            )}
                                         </span>
                                         <div>
                                           <AssetStatusBadge
@@ -353,6 +378,13 @@ export function BookingAssetsSidebar({
                                   >
                                     {asset.title}
                                   </Button>
+                                  {/* Show booked quantity for quantity-tracked assets */}
+                                  {isQuantityTracked(asset) &&
+                                    asset.bookedQuantity > 0 && (
+                                      <span className="ml-1.5 text-xs font-medium text-gray-500">
+                                        &times; {asset.bookedQuantity}
+                                      </span>
+                                    )}
                                 </span>
                                 <div>
                                   <AssetStatusBadge

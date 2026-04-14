@@ -1,6 +1,7 @@
 import {
   BookingStatus,
   AssetStatus,
+  AssetType,
   KitStatus,
   OrganizationRoles,
 } from "@prisma/client";
@@ -424,9 +425,9 @@ describe("partialCheckinBooking", () => {
 
     const result = await partialCheckinBooking(mockPartialCheckinParams);
 
-    // Verify assets status updated (no longer disconnecting from booking)
+    // Verify assets status updated (only INDIVIDUAL assets get status reset)
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      where: { id: { in: ["asset-1", "asset-2"] }, type: AssetType.INDIVIDUAL },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -1720,7 +1721,7 @@ describe("checkinBooking", () => {
     const result = await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      where: { id: { in: ["asset-1", "asset-2"] }, type: AssetType.INDIVIDUAL },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -1785,7 +1786,7 @@ describe("checkinBooking", () => {
     await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1"] } },
+      where: { id: { in: ["asset-1"] }, type: AssetType.INDIVIDUAL },
       data: { status: AssetStatus.AVAILABLE },
     });
   });
@@ -1907,6 +1908,7 @@ describe("checkinBooking", () => {
         id: {
           in: ["asset-2", "asset-3"],
         },
+        type: AssetType.INDIVIDUAL,
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -1994,6 +1996,7 @@ describe("checkinBooking", () => {
         id: {
           in: ["kit-asset-1", "kit-asset-2", "kit-asset-3", "singular-asset"],
         },
+        type: AssetType.INDIVIDUAL,
       },
       data: { status: AssetStatus.AVAILABLE },
     });

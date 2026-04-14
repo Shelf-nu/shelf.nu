@@ -162,6 +162,7 @@ export function BookingUpdatesEmailTemplate({
                     }}
                   >
                     {bookingAsset.asset.title}
+                    {bookingAsset.quantity > 1 && ` × ${bookingAsset.quantity}`}
                   </span>
                   {bookingAsset.asset.category?.name && (
                     <span

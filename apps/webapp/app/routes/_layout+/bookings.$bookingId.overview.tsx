@@ -233,8 +233,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Check if there might be partial check-ins by looking at asset statuses OR booking status
     // We need to check both AVAILABLE assets (already partially checked in) AND
     // ONGOING/OVERDUE bookings (could have partial check-ins)
-    /** Flatten bookingAssets pivot to a plain assets array for downstream use */
-    const bookingAssets = booking.bookingAssets.map((ba) => ba.asset);
+    /**
+     * Flatten bookingAssets pivot to a plain assets array for downstream use.
+     * Preserves `bookedQuantity` from the pivot so quantity-tracked assets
+     * can display how many units were booked.
+     */
+    const bookingAssets = booking.bookingAssets.map((ba) => ({
+      ...ba.asset,
+      bookedQuantity: ba.quantity,
+    }));
 
     const hasAvailableAssets = bookingAssets.some(
       (asset) => asset.status === "AVAILABLE"
@@ -442,12 +449,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
 
-    // Enrich the paginated items with full asset details
+    // Build a lookup for booked quantities from the booking pivot
+    const bookedQuantityMap = new Map(
+      booking.bookingAssets.map((ba) => [ba.assetId, ba.quantity])
+    );
+
+    // Enrich the paginated items with full asset details and booked quantity
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
         const details = assetDetailsMap.get(asset.id);
-        return details || asset;
+        return {
+          ...(details || asset),
+          bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1,
+        };
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));

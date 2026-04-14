@@ -41,6 +41,8 @@ export interface PdfDbResult {
     "id" | "name" | "imageId" | "currency" | "updatedAt"
   >;
   assetIdToQrCodeMap: Record<string, string>;
+  /** Maps asset ID to booked quantity for quantity-tracked assets */
+  assetIdToQuantityMap: Record<string, number>;
   from?: string;
   to?: string;
   originalFrom?: string;
@@ -137,6 +139,16 @@ export async function fetchAllPdfRelatedData(
       organizationId,
       size: "small",
     });
+
+    // Build a map of asset ID to booked quantity from the pivot records.
+    // Only entries with quantity > 1 are meaningful (QUANTITY_TRACKED assets).
+    const assetIdToQuantityMap: Record<string, number> = {};
+    for (const ba of booking.bookingAssets) {
+      if (ba.quantity > 1) {
+        assetIdToQuantityMap[ba.assetId] = ba.quantity;
+      }
+    }
+
     return {
       booking,
       assets: sortedAssets,
@@ -147,6 +159,7 @@ export async function fetchAllPdfRelatedData(
       }),
       organization,
       assetIdToQrCodeMap,
+      assetIdToQuantityMap,
     };
   } catch (cause) {
     throw new ShelfError({

@@ -376,11 +376,14 @@ const ListBookingsContent = ({
   item: Prisma.BookingGetPayload<{
     include: {
       bookingAssets: {
-        include: {
+        select: {
+          id: true;
+          quantity: true;
           asset: {
             select: {
               id: true;
               title: true;
+              type: true;
               availableToBook: true;
               custody: true;
               kitId: true;
@@ -399,6 +402,15 @@ const ListBookingsContent = ({
                 select: {
                   id: true;
                   name: true;
+                  image: true;
+                  imageExpiration: true;
+                  category: {
+                    select: {
+                      id: true;
+                      name: true;
+                      color: true;
+                    };
+                  };
                 };
               };
             };

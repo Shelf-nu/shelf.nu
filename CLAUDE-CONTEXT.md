@@ -110,24 +110,65 @@
 
 ---
 
-## What's next: Phase 3 — Booking Integration
+## Phase 3 — Booking Integration (IN PROGRESS)
 
 **Goal:** Quantity-aware bookings and book-by-model.
 
-**Prerequisites (from PRD):**
+**Resolved prerequisites:**
 
-- Open Question #2: Availability communication between booking and checkout
-- Open Question #5: BookingAsset schema for book-by-model (assetModelId on BookingAsset)
+- OQ #2: Show warning at checkout if availability changed, let user proceed
+- OQ #5: Store model-level intent in `BookingModelRequest`, create `BookingAsset` rows at scan-to-assign time
 
-**Key items:**
+### Sub-phase 3a: Table Rename + Rewiring (COMPLETED)
 
-- Migrate `_AssetToBooking` → `BookingAsset` using rename strategy (ALTER TABLE RENAME — metadata-only, no data copy)
-- Rewire 18 raw SQL queries in `asset/query.server.ts` + ~60 Prisma relation usages
-- Quantity-tracked booking: reserve N units
-- Availability formula: `Available = Total − In custody − Reserved`
-- Book-by-model: reserve N from an AssetModel
-- Scan-to-assign at checkout for model-level bookings
-- Partial check-in with consumption reports (returnable assets)
+**Migration:** Renamed `_AssetToBooking` → `BookingAsset` (rename strategy, no data copy).
+
+- Dropped empty Phase 1 `BookingAsset` shell, renamed implicit M2M table
+- Columns `A`/`B` → `assetId`/`bookingId`, added `id` (text PK) + `quantity` (default 1)
+- Removed implicit M2M from Prisma schema (`Booking.assets`, `Asset.bookings`)
+- Rewired ~60 Prisma relation usages and 18 raw SQL queries
+- All `booking.assets` → `booking.bookingAssets` with nested `.asset`
+- All `asset.bookings` → `asset.bookingAssets` with nested `.booking`
+- `connect/disconnect` → `create/deleteMany` on BookingAsset
+- `_count.assets` → `_count.bookingAssets` everywhere
+- Added `normalizeBookingAssets()` adapter helper
+- Updated all tests
+
+### Sub-phase 3b: Quantity-Tracked Bookings (IN PROGRESS)
+
+**Completed:**
+
+- `computeBookingAvailableQuantity()` — `Available = Total - InCustody - Reserved`
+- `updateBookingAssets()` accepts per-asset `quantities` map
+- Manage-assets UI: quantity picker for qty-tracked assets, blue badge, availability filtering
+- Conflict detection: qty-tracked assets skip binary checks (validated at service layer)
+- Checkout validation: validates quantity availability, throws if insufficient
+- Check-in: QUANTITY_TRACKED assets don't get status reset (other bookings/custody may exist)
+- Booking overview: `bookedQuantity` attached to enriched items for display
+- Sidebar + list-asset-content: show "× N" for qty-tracked assets
+- Email: show "× N" for qty > 1
+- PDF: added "Qty" column
+- Manage-assets polish: quantities initialized from existing booking, unsaved-changes detection
+- Constants: `type: true` added to asset selects in booking includes
+
+**Needs testing/polish:**
+
+- Full end-to-end booking flow with qty-tracked assets (create → reserve → checkout → checkin)
+- Quantity display consistency across all views
+- Edge cases: fully-allocated assets, concurrent bookings on same qty asset
+
+### Sub-phase 3c: Book-by-Model (NOT STARTED)
+
+- New `BookingModelRequest` model (schema change needed)
+- Reserve by model service
+- Scan-to-assign at checkout
+- Availability accounting for model requests
+- UI: model picker, fulfillment status, scanner drawer mode
+
+### Sub-phase 3d: Calendar + Polish (NOT STARTED)
+
+- Calendar tooltip quantity info
+- Edge cases: multiple bookings from same qty pool, overdue handling
 
 ## Phase 4 — Kit, Location, and Auxiliary
 
@@ -144,6 +185,7 @@
 2. `20260401113301_add_index_to_asset_models` — Index on AssetModel
 3. `20260403135852_add_quantity_based_custody_fields` — Custody quantity + composite unique
 4. `20260403140000_add_custody_individual_unique_trigger` — DB trigger for individual asset single custody
+5. `20260409100000_rename_asset_to_booking_to_booking_asset` — Phase 3a: rename implicit M2M to explicit BookingAsset
 
 ---
 

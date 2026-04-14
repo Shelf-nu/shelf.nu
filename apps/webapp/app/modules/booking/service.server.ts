@@ -1,4 +1,9 @@
-import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  KitStatus,
+  AssetType,
+} from "@prisma/client";
 import type {
   Booking,
   Prisma,
@@ -24,6 +29,8 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -1233,6 +1240,46 @@ export async function checkoutBooking({
     }
 
     /**
+     * Validate quantity availability for QUANTITY_TRACKED assets.
+     * Between when a booking was created and checkout, other operations
+     * (custody assignments, other booking checkouts) may have consumed
+     * some units. We check here so the user gets a clear error listing
+     * which assets need their quantities adjusted before proceeding.
+     */
+    const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
+      isQuantityTracked(ba.asset)
+    );
+
+    if (qtyTrackedBookingAssets.length > 0) {
+      const insufficientQtyWarnings: string[] = [];
+
+      for (const ba of qtyTrackedBookingAssets) {
+        const { available } = await computeBookingAvailableQuantity(
+          ba.asset.id,
+          id
+        );
+
+        if (ba.quantity > available) {
+          insufficientQtyWarnings.push(
+            `"${ba.asset.title}": requested ${ba.quantity}, only ${available} available`
+          );
+        }
+      }
+
+      if (insufficientQtyWarnings.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
+            "\n"
+          )}\nPlease adjust quantities in the booking before checkout.`,
+          shouldBeCaptured: false,
+          status: 400,
+        });
+      }
+    }
+
+    /**
      * This checks if the booking end date is in the past
      * We need this because sometimes the user can checkout a booking
      * that is already overdue for check in
@@ -1608,8 +1655,14 @@ export async function checkinBooking({
     const updatedBooking = await db.$transaction(
       async (tx) => {
         if (assetsToCheckin.length > 0) {
+          // Only INDIVIDUAL assets get their status changed — QUANTITY_TRACKED
+          // assets keep their current status because other bookings or custody
+          // records may still reference the same asset row.
           await tx.asset.updateMany({
-            where: { id: { in: assetsToCheckin } },
+            where: {
+              id: { in: assetsToCheckin },
+              type: AssetType.INDIVIDUAL,
+            },
             data: { status: AssetStatus.AVAILABLE },
           });
         }
@@ -1961,9 +2014,12 @@ export async function partialCheckinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      // Update the status of checked-in assets to AVAILABLE
+      // Update the status of checked-in assets to AVAILABLE.
+      // Only INDIVIDUAL assets get their status changed — QUANTITY_TRACKED
+      // assets keep their current status because other bookings or custody
+      // records may still reference the same asset row.
       await tx.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assetIds }, type: AssetType.INDIVIDUAL },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -2139,10 +2195,13 @@ export async function updateBookingAssets({
   assetIds,
   kitIds,
   userId,
+  quantities,
 }: Pick<Booking, "id" | "organizationId"> & {
   assetIds: Asset["id"][];
   kitIds?: Kit["id"][];
   userId?: User["id"];
+  /** Optional map of assetId → quantity for QUANTITY_TRACKED assets. Defaults to 1 for any asset not in the map. */
+  quantities?: Record<string, number>;
 }) {
   try {
     const booking = await db.$transaction(async (tx) => {
@@ -2192,14 +2251,23 @@ export async function updateBookingAssets({
         });
       }
 
+      // Build a parallel array of quantities for each valid asset.
+      // Uses the quantities map if provided, otherwise defaults to 1.
+      const quantityValues = validAssetIds.map(
+        (assetId) => quantities?.[assetId] ?? 1
+      );
+
       await Promise.all([
         // Bulk insert into the join table in a single SQL statement instead of
         // N individual connect operations which cause transaction timeouts
-        // for large bookings
+        // for large bookings.
+        // Uses unnest with parallel arrays so each asset gets its own quantity.
+        // ON CONFLICT updates the quantity so QUANTITY_TRACKED assets can be
+        // adjusted without removing and re-adding the booking asset row.
         tx.$executeRaw`
           INSERT INTO "BookingAsset" ("id", "assetId", "bookingId", "quantity")
-          SELECT gen_random_uuid()::text, unnest(${validAssetIds}::text[]), ${id}, 1
-          ON CONFLICT ("bookingId", "assetId") DO NOTHING
+          SELECT gen_random_uuid()::text, unnest(${validAssetIds}::text[]), ${id}, unnest(${quantityValues}::int[])
+          ON CONFLICT ("bookingId", "assetId") DO UPDATE SET quantity = EXCLUDED.quantity
         `,
         // Touch updatedAt since the raw INSERT doesn't update the booking row
         tx.booking.update({

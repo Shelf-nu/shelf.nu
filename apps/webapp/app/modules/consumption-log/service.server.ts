@@ -16,7 +16,8 @@
  * @see {@link file://../../../packages/database/prisma/schema.prisma} — ConsumptionLog model
  */
 
-import type { ConsumptionCategory } from "@prisma/client";
+import type { ConsumptionCategory, Prisma } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -190,7 +191,7 @@ export async function getConsumptionLogs({
 /* -------------------------------------------------------------------------- */
 
 /** The breakdown of an asset's quantity by availability. */
-type AvailableQuantity = {
+export type AvailableQuantity = {
   /** Total quantity owned (asset.quantity) */
   total: number;
   /** Quantity currently assigned to custodians */
@@ -238,6 +239,86 @@ export async function computeAvailableQuantity(
       message:
         "Something went wrong while computing available quantity. Please try again or contact support.",
       additionalData: { assetId },
+      label,
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     computeBookingAvailableQuantity                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Computes available quantity for a quantity-tracked asset,
+ * factoring in both custody AND booking reservations.
+ *
+ * Available = Total - InCustody - Reserved
+ *
+ * Where Reserved = sum of BookingAsset.quantity for bookings
+ * with status RESERVED, ONGOING, or OVERDUE.
+ *
+ * This is the booking-aware counterpart of {@link computeAvailableQuantity},
+ * which only considers custody. Use this function when you need to know how
+ * many units are actually available for new bookings or checkouts.
+ *
+ * @param assetId - The ID of the asset to compute availability for
+ * @param excludeBookingId - Optional booking ID to exclude from the reserved
+ *   count. Useful when checking availability for a booking that already holds
+ *   some quantity of this asset (e.g., editing an existing booking).
+ * @returns The quantity breakdown: total, inCustody, reserved, and available
+ * @throws {ShelfError} If the asset is not found or the query fails
+ */
+export async function computeBookingAvailableQuantity(
+  assetId: string,
+  excludeBookingId?: string
+): Promise<AvailableQuantity & { reserved: number }> {
+  try {
+    /** Reuse existing custody-based availability calculation */
+    const { total, inCustody } = await computeAvailableQuantity(assetId);
+
+    /** Build the where clause for summing reserved booking quantities */
+    const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
+      assetId,
+      booking: {
+        status: {
+          in: [
+            BookingStatus.RESERVED,
+            BookingStatus.ONGOING,
+            BookingStatus.OVERDUE,
+          ],
+        },
+      },
+    };
+
+    /** Exclude a specific booking if provided (e.g., the booking being edited) */
+    if (excludeBookingId) {
+      bookingAssetWhere.bookingId = { not: excludeBookingId };
+    }
+
+    const reservedSum = await db.bookingAsset.aggregate({
+      where: bookingAssetWhere,
+      _sum: { quantity: true },
+    });
+
+    const reserved = reservedSum._sum?.quantity ?? 0;
+
+    return {
+      total,
+      inCustody,
+      reserved,
+      available: total - inCustody - reserved,
+    };
+  } catch (cause) {
+    /** Re-throw ShelfErrors as-is to preserve status/message */
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while computing booking-aware available quantity. Please try again or contact support.",
+      additionalData: { assetId, excludeBookingId },
       label,
     });
   }

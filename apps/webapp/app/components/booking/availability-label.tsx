@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import { hasCustody } from "~/modules/custody/utils";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -81,9 +82,14 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Has custody
+   * Has custody — skip for QUANTITY_TRACKED assets since they can have
+   * partial custody while still having available units for booking.
+   * The status badge and quantity picker already communicate availability.
    */
-  if (asset.custody) {
+  if (
+    hasCustody(asset.custody as Record<string, unknown>[] | null | undefined) &&
+    !isQuantityTracked(asset)
+  ) {
     return (
       <AvailabilityBadge
         badgeText={"In custody"}
