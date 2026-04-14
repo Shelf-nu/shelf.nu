@@ -12,6 +12,24 @@ import type { OnCodeDetectionSuccess } from "./code-scanner";
 // Supported barcode formats that match our BarcodeType enum
 export const SUPPORTED_BARCODE_FORMATS = Object.values(BarcodeType) as string[];
 
+/**
+ * Maps zxing-wasm v3 format variant names to our BarcodeType enum values.
+ * zxing-wasm v3 can return specific variants (e.g. "Code39Ext", "Code39Std")
+ * rather than the base family name our DB enum uses ("Code39").
+ */
+const ZXING_FORMAT_TO_BARCODE_TYPE: Record<string, BarcodeType> = {
+  // Code39 variants
+  Code39Std: BarcodeType.Code39,
+  Code39Ext: BarcodeType.Code39,
+  Code32: BarcodeType.Code39,
+  PZN: BarcodeType.Code39,
+};
+
+/** Normalizes a zxing-wasm format string to our BarcodeType enum value. */
+function normalizeZxingFormat(format: string): string {
+  return ZXING_FORMAT_TO_BARCODE_TYPE[format] ?? format;
+}
+
 // isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage
 
 /**
@@ -290,17 +308,21 @@ export const processFrame = async ({
             barcodeType: "ExternalQR",
           });
         }
-      } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
-        // It's a supported barcode type
+      } else if (
+        SUPPORTED_BARCODE_FORMATS.includes(normalizeZxingFormat(detectedFormat))
+      ) {
+        // It's a supported barcode type (or a known variant of one)
+        const normalizedFormat = normalizeZxingFormat(detectedFormat);
+
         // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
         let normalizedValue = result.text;
 
-        if (detectedFormat === "DataMatrix" && result.text.includes("(")) {
+        if (normalizedFormat === "DataMatrix" && result.text.includes("(")) {
           // For database operations, use raw data (remove parentheses)
           normalizedValue = result.text.replace(/[()]/g, "");
         }
 
-        const barcodeType = detectedFormat as BarcodeType;
+        const barcodeType = normalizedFormat as BarcodeType;
 
         await handleDetection({
           result: normalizedValue,
