@@ -1,6 +1,6 @@
 import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
 
-import { matchRequestUrl, rest } from "msw";
+import { matchRequestUrl, http, HttpResponse } from "msw";
 import { server } from "@mocks";
 import {
   SUPABASE_URL,
@@ -59,24 +59,26 @@ describe(createUserAccountForTesting.name, () => {
   it("should return null if no auth account created", async () => {
     expect.assertions(3);
     const fetchAuthAdminUserAPI = new Map();
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "POST";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "POST";
       const matchesUrl = matchRequestUrl(
-        req.url,
+        new URL(request.url),
         SUPABASE_AUTH_ADMIN_USER_API,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthAdminUserAPI.set(requestId, request.clone());
     });
     // https://mswjs.io/docs/api/setup-server/use#one-time-override
     server.use(
-      rest.post(
+      http.post(
         `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
-        async (_req, res, ctx) =>
-          res.once(
-            ctx.status(400),
-            ctx.json({ message: "create-account-error", status: 400 })
-          )
+        () =>
+          HttpResponse.json(
+            { message: "create-account-error", status: 400 },
+            { status: 400 }
+          ),
+        { once: true }
       )
     );
     const result = await createUserAccountForTesting(
@@ -88,7 +90,7 @@ describe(createUserAccountForTesting.name, () => {
     expect(result).toBeNull();
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     const [request] = fetchAuthAdminUserAPI.values();
-    expect(request.body).toEqual({
+    expect(await request.json()).toEqual({
       email: USER_EMAIL,
       password: USER_PASSWORD,
       email_confirm: true,
@@ -98,32 +100,35 @@ describe(createUserAccountForTesting.name, () => {
     expect.assertions(5);
     const fetchAuthTokenAPI = new Map();
     const fetchAuthAdminUserAPI = new Map();
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "POST";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "POST";
       const matchesUrl = matchRequestUrl(
-        req.url,
+        new URL(request.url),
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthTokenAPI.set(requestId, request.clone());
     });
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "DELETE";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "DELETE";
       const matchesUrl = matchRequestUrl(
-        req.url,
-        `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
+        new URL(request.url),
+        `${SUPABASE_AUTH_ADMIN_USER_API}/:userId`,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthAdminUserAPI.set(requestId, request.clone());
     });
     server.use(
-      rest.post(
+      http.post(
         `${SUPABASE_URL}${SUPABASE_AUTH_TOKEN_API}`,
-        async (_req, res, ctx) =>
-          res.once(
-            ctx.status(400),
-            ctx.json({ message: "sign-in-error", status: 400 })
-          )
+        () =>
+          HttpResponse.json(
+            { message: "sign-in-error", status: 400 },
+            { status: 400 }
+          ),
+        { once: true }
       )
     );
     const result = await createUserAccountForTesting(
@@ -135,7 +140,7 @@ describe(createUserAccountForTesting.name, () => {
     expect(result).toBeNull();
     expect(fetchAuthTokenAPI.size).toEqual(1);
     const [signInRequest] = fetchAuthTokenAPI.values();
-    expect(signInRequest.body).toEqual({
+    expect(await signInRequest.json()).toEqual({
       email: USER_EMAIL,
       password: USER_PASSWORD,
       gotrue_meta_security: {},
@@ -143,7 +148,7 @@ describe(createUserAccountForTesting.name, () => {
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     // expect call delete auth account with the expected user id
     const [authAdminUserReq] = fetchAuthAdminUserAPI.values();
-    expect(authAdminUserReq.url.pathname).toEqual(
+    expect(new URL(authAdminUserReq.url).pathname).toEqual(
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
@@ -151,23 +156,25 @@ describe(createUserAccountForTesting.name, () => {
     expect.assertions(4);
     const fetchAuthTokenAPI = new Map();
     const fetchAuthAdminUserAPI = new Map();
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "POST";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "POST";
       const matchesUrl = matchRequestUrl(
-        req.url,
+        new URL(request.url),
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthTokenAPI.set(requestId, request.clone());
     });
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "DELETE";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "DELETE";
       const matchesUrl = matchRequestUrl(
-        req.url,
-        `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
+        new URL(request.url),
+        `${SUPABASE_AUTH_ADMIN_USER_API}/:userId`,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthAdminUserAPI.set(requestId, request.clone());
     });
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue(null);
@@ -182,7 +189,7 @@ describe(createUserAccountForTesting.name, () => {
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     // expect call delete auth account with the expected user id
     const [authAdminUserReq] = fetchAuthAdminUserAPI.values();
-    expect(authAdminUserReq.url.pathname).toEqual(
+    expect(new URL(authAdminUserReq.url).pathname).toEqual(
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
@@ -190,23 +197,25 @@ describe(createUserAccountForTesting.name, () => {
     expect.assertions(4);
     const fetchAuthAdminUserAPI = new Map();
     const fetchAuthTokenAPI = new Map();
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "POST";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "POST";
       const matchesUrl = matchRequestUrl(
-        req.url,
+        new URL(request.url),
         SUPABASE_AUTH_ADMIN_USER_API,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthAdminUserAPI.set(requestId, request.clone());
     });
-    server.events.on("request:start", (req) => {
-      const matchesMethod = req.method === "POST";
+    server.events.on("request:start", ({ request, requestId }) => {
+      const matchesMethod = request.method === "POST";
       const matchesUrl = matchRequestUrl(
-        req.url,
+        new URL(request.url),
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-      if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
+      if (matchesMethod && matchesUrl)
+        fetchAuthTokenAPI.set(requestId, request.clone());
     });
 
     //@ts-expect-error missing vitest type
@@ -344,19 +353,20 @@ describe(createUserOrAttachOrg.name, () => {
   it("falls back to confirming existing auth account when createEmailAuthAccount fails", async () => {
     // Override: createEmailAuthAccount fails (email already in Supabase)
     server.use(
-      rest.post(
+      http.post(
         `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
-        async (_req, res, ctx) =>
-          res.once(
-            ctx.status(400),
-            ctx.json({ message: "User already registered", status: 400 })
-          )
+        () =>
+          HttpResponse.json(
+            { message: "User already registered", status: 400 },
+            { status: 400 }
+          ),
+        { once: true }
       ),
       // confirmExistingAuthAccount calls updateUserById (PUT)
-      rest.put(
+      http.put(
         `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}/:id`,
-        async (_req, res, ctx) =>
-          res.once(ctx.status(200), ctx.json(authAccount))
+        () => HttpResponse.json(authAccount, { status: 200 }),
+        { once: true }
       )
     );
 
@@ -382,13 +392,14 @@ describe(createUserOrAttachOrg.name, () => {
   it("throws when both createEmailAuthAccount and confirmExistingAuthAccount fail", async () => {
     // createEmailAuthAccount fails
     server.use(
-      rest.post(
+      http.post(
         `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
-        async (_req, res, ctx) =>
-          res.once(
-            ctx.status(400),
-            ctx.json({ message: "User already registered", status: 400 })
-          )
+        () =>
+          HttpResponse.json(
+            { message: "User already registered", status: 400 },
+            { status: 400 }
+          ),
+        { once: true }
       )
     );
 

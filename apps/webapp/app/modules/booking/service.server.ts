@@ -3126,11 +3126,6 @@ export async function getBookings(params: {
                   color: true,
                 },
               },
-              bookings: {
-                select: {
-                  id: true,
-                },
-              },
               kit: {
                 select: {
                   id: true,
