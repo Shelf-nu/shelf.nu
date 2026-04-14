@@ -114,7 +114,7 @@ describe(createUserAccountForTesting.name, () => {
       const matchesMethod = request.method === "DELETE";
       const matchesUrl = matchRequestUrl(
         new URL(request.url),
-        `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
+        `${SUPABASE_AUTH_ADMIN_USER_API}/:userId`,
         SUPABASE_URL
       ).matches;
       if (matchesMethod && matchesUrl)
@@ -170,7 +170,7 @@ describe(createUserAccountForTesting.name, () => {
       const matchesMethod = request.method === "DELETE";
       const matchesUrl = matchRequestUrl(
         new URL(request.url),
-        `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
+        `${SUPABASE_AUTH_ADMIN_USER_API}/:userId`,
         SUPABASE_URL
       ).matches;
       if (matchesMethod && matchesUrl)

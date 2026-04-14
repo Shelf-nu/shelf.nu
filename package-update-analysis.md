@@ -23,12 +23,12 @@
 
 | Category            | Count           |
 | ------------------- | --------------- |
-| Patch/minor (safe)  | 19 packages     |
+| Patch/minor (safe)  | 21 packages     |
 | Major — Trivial     | 18 packages     |
 | Major — Moderate    | 8 packages      |
 | Major — Significant | 6 packages      |
 | Major — Blocked     | 5 packages      |
-| **Total outdated**  | **56 packages** |
+| **Total outdated**  | **58 packages** |
 
 ---
 
@@ -139,7 +139,7 @@ These cannot be upgraded until their dependencies are upgraded first.
 
 ### Batch 1 — Safe updates (patch/minor + trivial majors)
 
-All 19 patch/minor updates plus all 18 Tier 1 trivial major updates. Run `pnpm webapp:validate` after each sub-group.
+All 21 patch/minor updates plus all 18 Tier 1 trivial major updates. Run `pnpm webapp:validate` after each sub-group.
 
 ### Batch 2 — Moderate majors
 

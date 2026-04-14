@@ -3,9 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import useApiQuery from "./use-api-query";
 
 // why: testing hook behavior without making actual network requests
-// Use spyOn so the mock is installed after MSW 2's fetch interception
 const mockFetch = vi.fn();
-vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
 
 const waitForAsyncUpdate = (assertion: () => void | Promise<void>) =>
   // Testing Library defaults to a 50ms polling interval to avoid pegging the CPU
@@ -18,11 +16,13 @@ const waitForAsyncUpdate = (assertion: () => void | Promise<void>) =>
 
 describe("useApiQuery", () => {
   beforeEach(() => {
+    // Use spyOn so the mock is installed after MSW 2's fetch interception
+    vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
     mockFetch.mockClear();
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("should start with initial state", () => {
