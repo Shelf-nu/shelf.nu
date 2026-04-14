@@ -70,7 +70,7 @@ export function protect({
 }) {
   // Pre-compile public path regexes once at middleware creation time
   // instead of recompiling on every request.
-  const compiledPublicPaths = publicPaths.map((p) => pathToRegexp(p));
+  const compiledPublicPaths = publicPaths.map((p) => pathToRegexp(p).regexp);
 
   return createMiddleware(async (c, next) => {
     // Skip authentication for internal Remix/framework routes (manifest, etc.)
