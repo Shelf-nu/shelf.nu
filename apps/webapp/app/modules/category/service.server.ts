@@ -197,6 +197,7 @@ export async function getCategory({
         "The category you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      status: 404,
     });
   }
 }

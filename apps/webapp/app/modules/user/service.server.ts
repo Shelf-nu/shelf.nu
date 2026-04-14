@@ -1219,12 +1219,20 @@ export async function softDeleteUser(id: User["id"]) {
     });
 
     if (error) {
-      throw new ShelfError({
-        cause: error,
-        message: "Failed to delete Auth user",
-        additionalData: { id, error },
-        label: "Auth",
-      });
+      // If the auth user is already gone (e.g., deleted externally),
+      // that's fine — we can proceed with the rest of the cleanup
+      const isUserNotFound =
+        error.status === 404 ||
+        ("code" in error && error.code === "user_not_found");
+
+      if (!isUserNotFound) {
+        throw new ShelfError({
+          cause: error,
+          message: "Failed to delete Auth user",
+          additionalData: { id, error },
+          label: "Auth",
+        });
+      }
     }
   } catch (cause) {
     if (
