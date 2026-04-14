@@ -290,12 +290,7 @@ export const processFrame = async ({
             barcodeType: "ExternalQR",
           });
         }
-      } else if (
-        SUPPORTED_BARCODE_FORMATS.includes(detectedFormat) ||
-        detectedFormat === "EAN-13"
-      ) {
-        // Note: zxing returns "EAN-13" but PostgreSQL enums can't contain dashes,
-        // so our enum uses "EAN13". Map the scanner format to our enum value.
+      } else if (SUPPORTED_BARCODE_FORMATS.includes(detectedFormat)) {
         // It's a supported barcode type
         // Handle GS1 DataMatrix formatting - zxing-wasm adds parentheses for GS1 data
         let normalizedValue = result.text;
@@ -305,11 +300,7 @@ export const processFrame = async ({
           normalizedValue = result.text.replace(/[()]/g, "");
         }
 
-        // Map zxing format names to our BarcodeType enum values
-        const barcodeType =
-          detectedFormat === "EAN-13"
-            ? "EAN13"
-            : (detectedFormat as BarcodeType);
+        const barcodeType = detectedFormat as BarcodeType;
 
         await handleDetection({
           result: normalizedValue,
