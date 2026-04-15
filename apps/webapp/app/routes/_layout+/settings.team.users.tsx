@@ -19,14 +19,12 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { db } from "~/database/db.server";
-
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
 import {
@@ -41,27 +39,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
-    });
-
-    /** Get the organization */
-    const organization = await db.organization.findFirst({
-      where: { id: organizationId },
-      include: { owner: true },
-    });
-
-    if (!organization) {
-      throw new ShelfError({
-        cause: null,
-        message: "Organization not found",
-        additionalData: { organizationId, userId },
-        label: "Team",
+    /**
+     * requirePermission already fetches the current organization via
+     * ORGANIZATION_SELECT_FIELDS, so we reuse it instead of making a
+     * separate db.organization.findFirst() call.
+     */
+    const { organizationId, currentOrganization: organization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.teamMember,
+        action: PermissionAction.read,
       });
-    }
 
     /** Cannot manage users for PERSONAL organization */
     if (organization?.type === "PERSONAL") {

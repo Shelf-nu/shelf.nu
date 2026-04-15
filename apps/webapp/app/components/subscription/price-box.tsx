@@ -16,12 +16,7 @@ import {
 } from "../shared/tooltip";
 
 export const PriceBox = ({ price }: { price: PriceType }) => {
-  const amount =
-    price.unit_amount != null
-      ? price?.recurring?.interval === "year"
-        ? price.unit_amount / 10
-        : price.unit_amount
-      : null;
+  const amount = price.unit_amount ?? null;
 
   const { shelf_tier } = price.product.metadata;
 
@@ -49,23 +44,16 @@ export const PriceBox = ({ price }: { price: PriceType }) => {
                 currency: price.currency,
                 maximumFractionDigits: 0,
               })}
-              {price.recurring ? <span>/mo</span> : null}
+              {price.recurring ? (
+                <span>
+                  /{price.recurring.interval === "year" ? "yr" : "mo"}
+                </span>
+              ) : null}
             </div>
             <div className="text-xs text-gray-500">
-              {price?.recurring?.interval === "year" && (
-                <>
-                  <span>
-                    Billed annually{" "}
-                    {(amount / 10).toLocaleString("en-US", {
-                      style: "currency",
-                      currency: price.currency,
-                      maximumFractionDigits: 0,
-                    })}
-                  </span>
-                </>
-              )}
+              {price?.recurring?.interval === "year" && "Billed annually"}
 
-              {price?.recurring?.interval === "month" && `Billed montly`}
+              {price?.recurring?.interval === "month" && "Billed monthly"}
 
               {shelf_tier === "tier_2" && (
                 <div className="flex items-center justify-center gap-1">

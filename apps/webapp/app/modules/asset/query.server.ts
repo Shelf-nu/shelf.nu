@@ -1573,6 +1573,14 @@ export function generateCustomFieldSelect(
 export type AssetQueryOptions = {
   withBookings?: boolean;
   withBarcodes?: boolean;
+  /**
+   * When true (default), includes full custom field definitions (helpText,
+   * required, options, categories) in each custom field value — matching
+   * the AdvancedIndexAsset type contract. Set to false for table views
+   * that only need id, name, and type, avoiding the expensive categories
+   * subquery per field per asset.
+   */
+  withCustomFieldDefinitions?: boolean;
 };
 
 export type AssetReturnOptions = {
@@ -1582,7 +1590,11 @@ export type AssetReturnOptions = {
 
 // Convert to functions that accept options
 export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
-  const { withBookings = false, withBarcodes = false } = options;
+  const {
+    withBookings = false,
+    withBarcodes = false,
+    withCustomFieldDefinitions = true,
+  } = options;
 
   const bookingsSelect = withBookings
     ? Prisma.sql`,
@@ -1818,7 +1830,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
           jsonb_build_object(
             'id', acfv.id,
             'value', acfv.value,
-            'customField', jsonb_build_object(
+            'customField', ${
+              withCustomFieldDefinitions
+                ? Prisma.sql`jsonb_build_object(
               'id', cf.id,
               'name', cf.name,
               'helpText', cf."helpText",
@@ -1831,7 +1845,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 JOIN public."Category" cat ON ccf."A" = cat.id
                 WHERE ccf."B" = cf.id
               )
-            )
+            )`
+                : Prisma.sql`jsonb_build_object(
+              'id', cf.id,
+              'name', cf.name,
+              'type', cf.type
+            )`
+            }
           )
         )
         FROM public."AssetCustomFieldValue" acfv
