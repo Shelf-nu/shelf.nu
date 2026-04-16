@@ -39,9 +39,13 @@ const label = "Booking";
 /**
  * Asserts that the given booking exists and belongs to the supplied organization.
  *
- * This is the service-layer defense-in-depth guard that prevents cross-organization
- * note writes. Every `create*BookingNote` / `deleteBookingNote` helper runs this
- * before mutating the notes table.
+ * This is the service-layer defense-in-depth guard used by the booking-note
+ * CREATE helpers (`createBookingNote`, `createSystemBookingNote`) to prevent
+ * cross-organization note writes before touching the notes table.
+ *
+ * Delete operations enforce organization (and booking) scope through the
+ * relational `where` filter on `db.bookingNote.deleteMany` rather than by
+ * calling this helper directly — see {@link deleteBookingNote}.
  *
  * @throws {ShelfError} 404 if the booking does not exist in `organizationId`
  */
@@ -232,24 +236,29 @@ export async function getBookingNotes({
 }
 
 /**
- * Deletes a booking note with user + organization authorization.
+ * Deletes a booking note with user + booking + organization authorization.
  *
  * SECURITY:
  * - Users can only delete their own manual notes (matches on `userId`)
- * - Deletion is additionally scoped to a booking in `organizationId`, so a compromised
- *   noteId from another workspace cannot be deleted through this path.
+ * - Deletion is scoped to the specific booking referenced in the URL
+ *   (`bookingId`) AND that booking's organization, so a compromised `noteId`
+ *   from a different booking — even in the same workspace — cannot be deleted
+ *   through a route handler bound to another booking.
  * - System-generated notes cannot be deleted (userId is null ⇒ cannot match)
  *
  * @param id - Note ID to delete
+ * @param bookingId - Booking the note must belong to (typically the route's `:bookingId` param)
  * @param userId - User ID (must match note creator)
  * @param organizationId - Organization the note's booking must belong to
  * @returns Delete operation result (0 if the note did not match the constraints)
  */
 export async function deleteBookingNote({
   id,
+  bookingId,
   userId,
   organizationId,
 }: Pick<BookingNote, "id"> & {
+  bookingId: Booking["id"];
   userId: User["id"];
   organizationId: string;
 }) {
@@ -258,7 +267,7 @@ export async function deleteBookingNote({
       where: {
         id,
         userId,
-        booking: { organizationId },
+        booking: { id: bookingId, organizationId },
       },
     });
     return result;
@@ -266,7 +275,7 @@ export async function deleteBookingNote({
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the booking note",
-      additionalData: { id, userId, organizationId },
+      additionalData: { id, bookingId, userId, organizationId },
       label,
     });
   }

@@ -14,6 +14,10 @@ import { db } from "~/database/db.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import type * as HttpServerModule from "~/utils/http.server";
 import * as httpServer from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import * as rolesServer from "~/utils/roles.server";
 
 import { action } from "./bookings.$bookingId.activity";
@@ -171,6 +175,59 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
     });
   });
 
+  it("requests `bookingNote.create` permission on POST", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "own-booking",
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "own-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ content: "ok" });
+
+    await action(
+      createActionArgs({
+        request: makeRequest("POST"),
+        params: { bookingId: "own-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect(rolesServer.requirePermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: PermissionEntity.bookingNote,
+        action: PermissionAction.create,
+      })
+    );
+  });
+
+  it("requests `bookingNote.delete` permission on DELETE (not `create`)", async () => {
+    // Guards against a regression where the DELETE branch inherited the
+    // POST permission check, letting roles with only `bookingNote.create`
+    // delete notes they shouldn't be able to touch.
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "own-booking",
+    } as any);
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "own-booking",
+    });
+    vi.mocked(httpServer.parseData).mockReturnValue({ noteId: "note-abc" });
+
+    await action(
+      createActionArgs({
+        request: makeRequest("DELETE"),
+        params: { bookingId: "own-booking" },
+        context: mockContext,
+      })
+    );
+
+    expect(rolesServer.requirePermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: PermissionEntity.bookingNote,
+        action: PermissionAction.delete,
+      })
+    );
+  });
+
   it("deletes a note and forwards organizationId to the service on the happy path", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "own-booking",
@@ -190,6 +247,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
 
     expect(bookingNoteService.deleteBookingNote).toHaveBeenCalledWith({
       id: "note-abc",
+      bookingId: "own-booking",
       userId: "user-attacker",
       organizationId: "org-attacker",
     });

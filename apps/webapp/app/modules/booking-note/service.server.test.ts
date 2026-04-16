@@ -200,12 +200,13 @@ describe("BookingNote Service", () => {
   });
 
   describe("deleteBookingNote", () => {
-    it("scopes the delete to both userId and the booking's organization", async () => {
+    it("scopes the delete to userId, the route's bookingId, AND the booking's organization", async () => {
       //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.deleteMany.mockResolvedValue({ count: 1 });
 
       const result = await deleteBookingNote({
         id: "note-1",
+        bookingId: "booking-1",
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -214,7 +215,7 @@ describe("BookingNote Service", () => {
         where: {
           id: "note-1",
           userId: "user-1",
-          booking: { organizationId: "org-1" },
+          booking: { id: "booking-1", organizationId: "org-1" },
         },
       });
       expect(result).toEqual({ count: 1 });
@@ -226,6 +227,24 @@ describe("BookingNote Service", () => {
 
       const result = await deleteBookingNote({
         id: "cross-org-note",
+        bookingId: "booking-1",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(result).toEqual({ count: 0 });
+    });
+
+    it("returns 0 deletions when noteId belongs to a different booking in the same org (no-op)", async () => {
+      // The relational where { booking: { id: bookingId, organizationId } }
+      // means a note on booking B cannot be deleted via a handler bound to
+      // booking A, even when both bookings sit in the same workspace.
+      //@ts-expect-error missing vitest type
+      mockDb.db.bookingNote.deleteMany.mockResolvedValue({ count: 0 });
+
+      const result = await deleteBookingNote({
+        id: "note-on-booking-B",
+        bookingId: "booking-A",
         userId: "user-1",
         organizationId: "org-1",
       });

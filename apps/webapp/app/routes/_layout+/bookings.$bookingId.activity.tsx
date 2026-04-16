@@ -84,11 +84,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    const method = getActionMethod(request);
+
+    if (method !== "POST" && method !== "DELETE") {
+      throw notAllowedMethod(method);
+    }
+
+    /*
+     * Permission required depends on the HTTP verb: POST creates a note,
+     * DELETE removes one. Using a single `bookingNote.create` check for both
+     * would let a role with only `create` delete notes it authored even when
+     * the permission matrix does not grant `bookingNote.delete` to that role
+     * (BASE / SELF_SERVICE have `create` + `read` but not `delete`).
+     */
+    const requiredAction =
+      method === "DELETE" ? PermissionAction.delete : PermissionAction.create;
+
     const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
-      action: PermissionAction.create,
+      action: requiredAction,
     });
 
     /*
@@ -116,8 +132,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    const method = getActionMethod(request);
-
     switch (method) {
       case "POST": {
         const { content } = parseData(
@@ -128,18 +142,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        sendNotification({
-          title: "Note created",
-          message: "Your note has been created successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: userId,
-        });
-
         await createBookingNote({
           content,
           userId,
           bookingId,
           organizationId,
+        });
+
+        sendNotification({
+          title: "Note created",
+          message: "Your note has been created successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
         });
 
         return payload({ success: true });
@@ -156,6 +170,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         await deleteBookingNote({
           id: noteId,
+          bookingId,
           userId,
           organizationId,
         });
