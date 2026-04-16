@@ -161,14 +161,6 @@ export default function ListAssetContent({
                 >
                   {item.title}
                 </Button>
-                {/* Show booked quantity for quantity-tracked assets */}
-                {isQuantityTracked(item) &&
-                  item.bookedQuantity != null &&
-                  item.bookedQuantity > 0 && (
-                    <span className="ml-1.5 text-xs font-medium text-gray-500">
-                      &times; {item.bookedQuantity}
-                    </span>
-                  )}
               </span>
               <div>
                 {isFinished ? (
@@ -185,6 +177,13 @@ export default function ListAssetContent({
             </div>
           </div>
         </div>
+      </Td>
+
+      {/* Booked quantity — shows the number for qty-tracked assets, empty for individual */}
+      <Td className={tw("text-center", isKitAsset ? "bg-gray-50/50" : "")}>
+        {isQuantityTracked(item) && item.bookedQuantity
+          ? item.bookedQuantity
+          : null}
       </Td>
 
       {/* If asset status is different than available, we need to show a label */}

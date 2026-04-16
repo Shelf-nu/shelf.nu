@@ -681,9 +681,17 @@ export async function exportBookingsFromIndexToCsv({
           ...BOOKING_COMMON_INCLUDE,
           bookingAssets: {
             select: {
+              /**
+               * `quantity` and `asset.type` are needed so the CSV builder
+               * can render `"Title × N"` for QUANTITY_TRACKED assets.
+               * Without these the row would silently show just the
+               * title and drop the booked quantity.
+               */
+              quantity: true,
               asset: {
                 select: {
                   title: true,
+                  type: true,
                 },
               },
             },
@@ -906,7 +914,12 @@ type FlexibleAsset = Partial<Asset> & {
 };
 
 type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
-  bookingAssets: { asset: FlexibleAsset }[];
+  /**
+   * `quantity` is optional so the type accepts bookings fetched without it
+   * (falls back to "no quantity annotation" in the renderer), but both
+   * query paths in `exportBookingsFromIndexToCsv` now populate it.
+   */
+  bookingAssets: { quantity?: number; asset: FlexibleAsset }[];
   tags: Pick<Tag, "name">[];
 };
 
@@ -916,6 +929,29 @@ type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
  * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
+/**
+ * Render a booking-asset row label for the CSV "Assets" column.
+ *
+ * For QUANTITY_TRACKED assets we append `" × N"` so the exported sheet
+ * shows the booked quantity — matching the display convention used in
+ * booking emails and the booking PDF. INDIVIDUAL assets render as just
+ * the title (quantity is implicitly 1).
+ *
+ * Falls back gracefully when the asset type or quantity is missing
+ * (e.g. older tests or legacy fixtures that don't provide those fields).
+ */
+const formatBookingAssetForCsv = (ba: {
+  quantity?: number;
+  asset: FlexibleAsset;
+}): string => {
+  const title = ba.asset.title || "Unnamed Asset";
+  const isQtyTracked = ba.asset.type === "QUANTITY_TRACKED";
+  if (isQtyTracked && ba.quantity != null && ba.quantity > 0) {
+    return `${title} × ${ba.quantity}`;
+  }
+  return title;
+};
+
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
   request: Request
@@ -948,11 +984,11 @@ export const buildCsvExportDataFromBookings = (
   const rows: string[][] = [];
 
   bookings.forEach((booking) => {
-    // Get the first asset's title if available
-    const firstAsset =
+    // Get the first asset label (with qty annotation for qty-tracked assets)
+    const firstAssetLabel =
       booking.bookingAssets && booking.bookingAssets.length > 0
-        ? booking.bookingAssets[0].asset
-        : { title: "No assets" };
+        ? formatBookingAssetForCsv(booking.bookingAssets[0])
+        : "No assets";
 
     // First add the main booking row (including the first asset)
     const bookingRow = Object.keys(headers).map((column) => {
@@ -1015,8 +1051,8 @@ export const buildCsvExportDataFromBookings = (
           value = booking.description ?? "";
           break;
         case "asset":
-          // Include the first asset title in the main booking row
-          value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
+          // Include the first asset label (with "× N" for qty-tracked) in the main row
+          value = firstAssetLabel;
           break;
 
         case "tags":
@@ -1039,8 +1075,8 @@ export const buildCsvExportDataFromBookings = (
         // Create an asset row with empty values for all columns except 'asset'
         const assetRow = Object.keys(headers).map((column) => {
           if (column === "asset") {
-            // Assuming asset has a title property
-            return formatValueForCsv(ba.asset.title || "Unnamed Asset", false);
+            // Renders "× N" suffix for qty-tracked assets via the shared helper
+            return formatValueForCsv(formatBookingAssetForCsv(ba), false);
           }
           // Empty values for all other columns
           return formatValueForCsv("", false);

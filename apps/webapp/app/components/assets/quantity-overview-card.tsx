@@ -3,11 +3,12 @@
  *
  * Displays a summary of quantity-tracking information for QUANTITY_TRACKED assets
  * on the asset detail overview page. Shows total quantity, available units,
- * units in custody, unit of measure, optional low-stock alert threshold,
- * and the consumption behavior mode.
+ * units in custody, reserved/checked-out booking quantities, unit of measure,
+ * optional low-stock alert threshold, and the consumption behavior mode.
  *
  * Availability and in-custody values are computed by the loader from actual
- * custody records and passed as props. Falls back to total/0 if not provided.
+ * custody records and booking reservations, then passed as props.
+ * Falls back to total/0 if not provided.
  *
  * @see {@link file://./../../routes/_layout+/assets.$assetId.overview.tsx} - Asset overview page
  * @see {@link file://./asset-custody-card.tsx} - Similar sidebar card pattern
@@ -39,10 +40,25 @@ export interface QuantityOverviewCardProps {
   minQuantity: number | null;
   /** Consumption behavior: ONE_WAY (used up) or TWO_WAY (returnable) */
   consumptionType: ConsumptionType | null;
-  /** Computed available quantity (total - inCustody), provided by the loader */
+  /**
+   * Booking-aware availability (total - inCustody - reserved - checkedOut),
+   * shown on the "Available" row. This is what's available to reserve for a
+   * future booking.
+   */
   availableQuantity?: number;
+  /**
+   * Physical availability (total - inCustody). Used as the cap for the
+   * QuickAdjustDialog's "Remove" operation — subtracting reservations here
+   * would wrongly block valid total-quantity adjustments when future
+   * bookings exist. Falls back to `availableQuantity` when not provided.
+   */
+  custodyAvailableQuantity?: number;
   /** Computed quantity currently in custody, provided by the loader */
   inCustodyQuantity?: number;
+  /** Quantity reserved in upcoming bookings (RESERVED status) */
+  reservedQuantity?: number;
+  /** Quantity checked out via active bookings (ONGOING/OVERDUE status) */
+  checkedOutQuantity?: number;
   /** Whether the user has permission to adjust quantity */
   canUpdate?: boolean;
   /** Optional additional CSS class names */
@@ -103,9 +119,10 @@ function OverviewRow({
 /**
  * Sidebar card showing quantity-tracking details for a QUANTITY_TRACKED asset.
  *
- * Displays total quantity, availability, custody count, unit of measure,
- * optional low-stock threshold, and consumption behavior mode. Shows a
- * "Low Stock" badge when quantity is at or below the configured minimum.
+ * Displays total quantity, availability, custody count, booking reservations
+ * (reserved and checked-out), unit of measure, optional low-stock threshold,
+ * and consumption behavior mode. Shows a "Low Stock" badge when quantity is
+ * at or below the configured minimum.
  *
  * @param props - Quantity fields from the asset record
  * @returns Card element, or null if quantity data is missing
@@ -117,15 +134,21 @@ export function QuantityOverviewCard({
   minQuantity,
   consumptionType,
   availableQuantity,
+  custodyAvailableQuantity,
   inCustodyQuantity,
+  reservedQuantity,
+  checkedOutQuantity,
   canUpdate = false,
   className,
 }: QuantityOverviewCardProps) {
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
+  const reserved = reservedQuantity ?? 0;
+  const checkedOut = checkedOutQuantity ?? 0;
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
-  const available = availableQuantity ?? qty;
+  const available =
+    availableQuantity ?? qty - (inCustodyQuantity ?? 0) - reserved - checkedOut;
   const inCustody = inCustodyQuantity ?? 0;
 
   /** Low stock when a threshold is set and available quantity is at or below it */
@@ -150,7 +173,7 @@ export function QuantityOverviewCard({
           <QuickAdjustDialog
             assetId={assetId}
             unitOfMeasure={unitOfMeasure}
-            availableQuantity={available}
+            availableQuantity={custodyAvailableQuantity ?? available}
             trigger={
               <Button type="button" variant="secondary" size="sm">
                 Adjust
@@ -168,6 +191,18 @@ export function QuantityOverviewCard({
         warning={isLowStock}
       />
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
+      {reserved > 0 ? (
+        <OverviewRow
+          label="Reserved (bookings)"
+          value={formatWithUnit(reserved, unit)}
+        />
+      ) : null}
+      {checkedOut > 0 ? (
+        <OverviewRow
+          label="Checked out (bookings)"
+          value={formatWithUnit(checkedOut, unit)}
+        />
+      ) : null}
       <OverviewRow label="Unit of measure" value={unit ?? "—"} />
       {minQuantity != null ? (
         <OverviewRow

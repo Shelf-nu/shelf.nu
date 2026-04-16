@@ -157,15 +157,110 @@
 - Quantity display consistency across all views
 - Edge cases: fully-allocated assets, concurrent bookings on same qty asset
 
-### Sub-phase 3c: Book-by-Model (NOT STARTED)
+### Sub-phase 3c: Quantity-aware Check-in (NOT STARTED)
+
+**Goal:** Make check-in respect `BookingAsset.quantity` and `Asset.consumptionType`.
+Today both the quick and explicit check-in paths treat every asset as binary
+(scanned or not), ignoring booked quantities and consumption behavior. The PRD
+calls this out ("7 returned, 3 consumed") but it was never wired in Phase 3b.
+
+**Scheduling note:** This must land **before** sub-phase 3d (book-by-model).
+Book-by-model will also flow through check-in, so we need the quantity-aware
+check-in plumbing in place first to avoid re-doing it for both paths.
+
+**Gap (see the "Current state" report for line-level details):**
+
+| Behavior                                         | Quick check-in | Explicit check-in |
+| ------------------------------------------------ | -------------- | ----------------- |
+| Accept a return quantity                         | ❌             | ❌                |
+| Branch on `consumptionType`                      | ❌             | ❌                |
+| Write `ConsumptionLog` (RETURN / LOSS / CONSUME) | ❌             | ❌                |
+| Decrement `Asset.quantity` for ONE_WAY consume   | ❌             | ❌                |
+| Validate return qty ≤ booked qty                 | ❌             | ❌                |
+| Prompt the user in the drawer UI                 | ❌             | ❌                |
+
+**Files in scope:**
+
+- Service: `app/modules/booking/service.server.ts`
+  - `partialCheckinBooking()` (~line 1773)
+  - `checkinBooking()` (~line 1381)
+  - `checkinAssets()` wrapper (~line 4865)
+- Route: `app/routes/_layout+/bookings.$bookingId.overview.checkin-assets.tsx`
+  (action + `partialCheckinAssetsSchema` — currently only `assetIds`)
+- UI: `app/components/scanner/drawer/uses/partial-checkin-drawer.tsx`
+- Existing infra to reuse:
+  - `createConsumptionLog()` in `app/modules/consumption-log/service.server.ts`
+  - `lockAssetForQuantityUpdate()` in `app/modules/consumption-log/quantity-lock.server.ts`
+  - The `ConsumptionLog.bookingId` relation already exists for audit trail
+
+**Behavior spec:**
+
+- **TWO_WAY (returnable):**
+  - Per qty-tracked row in the drawer: number input, default = `BookingAsset.quantity`,
+    min = 0, max = `BookingAsset.quantity`.
+  - If `returned < booked`: write two logs in one transaction — `RETURN` for
+    the returned count, `LOSS` for the remainder — and decrement
+    `Asset.quantity` by the lost delta.
+  - If `returned == booked`: single `RETURN` log, `Asset.quantity` unchanged.
+- **ONE_WAY (consumable):**
+  - No input. Drawer shows "X units will be consumed" as informational.
+  - Single log with category `CONSUME` (new enum value — see open question),
+    `Asset.quantity` decremented by `BookingAsset.quantity`.
+- **INDIVIDUAL assets:** unchanged — current binary flow is correct.
+- `BookingAsset.quantity` is **not** mutated on check-in; it stays as the
+  historical record of what was booked. Flow-back is captured in
+  `ConsumptionLog`.
+
+**Concurrency:** All pool-mutating steps (log write + `Asset.quantity`
+decrement + `BookingAsset` update + status flip) happen in a single
+`db.$transaction` with `lockAssetForQuantityUpdate()`, matching the Phase 2
+pattern from `checkOutQuantity`.
+
+**Activity notes:**
+
+- Asset-side: "<user> returned **N** / consumed **M** units via <booking>"
+- Booking-side system note: summary line listing returned/consumed counts per
+  asset (use `wrapAssetsWithDataForNote` helper for the list, append qty
+  annotations — same pattern we just standardized in `manage-assets`).
+
+**Schema changes (candidate):**
+
+- Add `CONSUME` to `ConsumptionCategory` enum. Current values are
+  `CHECKOUT | RETURN | RESTOCK | ADJUSTMENT | LOSS`. Overloading `LOSS` for
+  intentional consumption would muddy low-stock / loss reporting later.
+
+**Open questions (resolve before coding):**
+
+1. New `CONSUME` category vs. reusing `LOSS`?
+2. For TWO_WAY partial returns, auto-decrement `Asset.quantity` for the
+   missing units, or flag them for explicit follow-up (a separate
+   "mark-as-lost" step)?
+3. Multiple partial check-ins from the same booking: allowed? If yes,
+   `PartialBookingCheckin` already records per-asset slices — we can sum.
+4. How does "early check-in" (date before booking end) interact here —
+   anything extra to validate?
+
+**Test coverage to add:**
+
+- Unit: `partialCheckinBooking` across each `(type × consumptionType ×
+returnedQty)` matrix.
+- Integration: `checkin-assets` route with qty-tracked assets (happy path,
+  partial return, over-return rejection, consume path).
+- Regression: INDIVIDUAL asset check-in path unchanged.
+
+---
+
+### Sub-phase 3d: Book-by-Model (NOT STARTED)
 
 - New `BookingModelRequest` model (schema change needed)
 - Reserve by model service
 - Scan-to-assign at checkout
 - Availability accounting for model requests
 - UI: model picker, fulfillment status, scanner drawer mode
+- Depends on sub-phase 3c so model-based bookings check in with the same
+  quantity/consumption semantics as direct qty bookings.
 
-### Sub-phase 3d: Calendar + Polish (NOT STARTED)
+### Sub-phase 3e: Calendar + Polish (NOT STARTED)
 
 - Calendar tooltip quantity info
 - Edge cases: multiple bookings from same qty pool, overdue handling

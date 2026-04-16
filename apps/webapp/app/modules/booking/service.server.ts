@@ -1481,6 +1481,7 @@ export async function checkinBooking({
               asset: {
                 select: {
                   id: true,
+                  type: true,
                   kitId: true,
                   status: true,
                   bookingAssets: {
@@ -1655,9 +1656,7 @@ export async function checkinBooking({
     const updatedBooking = await db.$transaction(
       async (tx) => {
         if (assetsToCheckin.length > 0) {
-          // Only INDIVIDUAL assets get their status changed — QUANTITY_TRACKED
-          // assets keep their current status because other bookings or custody
-          // records may still reference the same asset row.
+          // INDIVIDUAL assets always get reset to AVAILABLE
           await tx.asset.updateMany({
             where: {
               id: { in: assetsToCheckin },
@@ -1665,6 +1664,41 @@ export async function checkinBooking({
             },
             data: { status: AssetStatus.AVAILABLE },
           });
+
+          // QUANTITY_TRACKED assets: only reset to AVAILABLE if they have
+          // no other active bookings (ONGOING/OVERDUE) and no custody records
+          const qtyAssetIds = bookingFoundAssets
+            .filter(
+              (a) =>
+                a.type === "QUANTITY_TRACKED" && assetsToCheckin.includes(a.id)
+            )
+            .map((a) => a.id);
+
+          if (qtyAssetIds.length > 0) {
+            for (const assetId of qtyAssetIds) {
+              const [otherBookings, custodyCount] = await Promise.all([
+                tx.bookingAsset.count({
+                  where: {
+                    assetId,
+                    bookingId: { not: id },
+                    booking: {
+                      status: {
+                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                      },
+                    },
+                  },
+                }),
+                tx.custody.count({ where: { assetId } }),
+              ]);
+
+              if (otherBookings === 0 && custodyCount === 0) {
+                await tx.asset.update({
+                  where: { id: assetId },
+                  data: { status: AssetStatus.AVAILABLE },
+                });
+              }
+            }
+          }
         }
         /* If there are any kits associated with the booking, then update their status */
         if (hasKits) {
@@ -1902,7 +1936,7 @@ export async function partialCheckinBooking({
         include: {
           bookingAssets: {
             include: {
-              asset: { select: { id: true, kitId: true } },
+              asset: { select: { id: true, type: true, kitId: true } },
             },
           },
         },
@@ -2014,14 +2048,43 @@ export async function partialCheckinBooking({
     }
 
     const updatedBooking = await db.$transaction(async (tx) => {
-      // Update the status of checked-in assets to AVAILABLE.
-      // Only INDIVIDUAL assets get their status changed — QUANTITY_TRACKED
-      // assets keep their current status because other bookings or custody
-      // records may still reference the same asset row.
+      // INDIVIDUAL assets always get reset to AVAILABLE
       await tx.asset.updateMany({
         where: { id: { in: assetIds }, type: AssetType.INDIVIDUAL },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      // QUANTITY_TRACKED assets: only reset to AVAILABLE if they have
+      // no other active bookings and no custody records
+      const qtyCheckinIds = bookingFoundAssets
+        .filter((a) => a.type === "QUANTITY_TRACKED" && assetIds.includes(a.id))
+        .map((a) => a.id);
+
+      if (qtyCheckinIds.length > 0) {
+        for (const assetId of qtyCheckinIds) {
+          const [otherBookings, custodyCount] = await Promise.all([
+            tx.bookingAsset.count({
+              where: {
+                assetId,
+                bookingId: { not: id },
+                booking: {
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
+                },
+              },
+            }),
+            tx.custody.count({ where: { assetId } }),
+          ]);
+
+          if (otherBookings === 0 && custodyCount === 0) {
+            await tx.asset.update({
+              where: { id: assetId },
+              data: { status: AssetStatus.AVAILABLE },
+            });
+          }
+        }
+      }
 
       // Only update kit status for kits that are completely checked in
       if (completeKitIds.length > 0) {
@@ -4881,8 +4944,20 @@ export async function duplicateBooking({
         custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
         custodianUserId: bookingToDuplicate.custodianUserId,
         bookingAssets: {
+          /**
+           * Preserve per-asset booked quantity when duplicating. Without
+           * this the pivot row falls back to the schema default of 1,
+           * which silently drops reservation sizes for QUANTITY_TRACKED
+           * assets (bug reported during Phase 3b testing).
+           *
+           * Note: we copy the intent verbatim — the duplicate starts in
+           * DRAFT and availability is re-validated at checkout, so an
+           * over-reservation here is surfaced to the user at the right
+           * time instead of being silently truncated now.
+           */
           create: bookingToDuplicate.bookingAssets.map((ba) => ({
             assetId: ba.assetId,
+            quantity: ba.quantity,
           })),
         },
         tags: {

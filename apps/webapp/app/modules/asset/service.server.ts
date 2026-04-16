@@ -668,32 +668,44 @@ export async function getAssets(params: {
         },
       ];
       if (bookingFrom && bookingTo) {
+        /**
+         * Booking overlap filters only apply to INDIVIDUAL assets.
+         * QUANTITY_TRACKED assets can have multiple overlapping bookings
+         * as long as total reserved doesn't exceed available quantity.
+         * Availability is validated at booking time, not at filter time.
+         */
         where.AND = [
           ...(Array.isArray(where.AND)
             ? where.AND
             : where.AND
             ? [where.AND]
             : []),
-          // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
-          {
-            bookingAssets: {
-              none: {
-                booking: {
-                  ...(unhideAssetsBookigIds?.length && {
-                    id: { notIn: unhideAssetsBookigIds },
-                  }),
-                  status: BookingStatus.RESERVED,
-                  OR: [
-                    { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                    { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                  ],
-                },
-              },
-            },
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT assets
+          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
           {
             OR: [
+              { type: "QUANTITY_TRACKED" },
+              {
+                bookingAssets: {
+                  none: {
+                    booking: {
+                      ...(unhideAssetsBookigIds?.length && {
+                        id: { notIn: unhideAssetsBookigIds },
+                      }),
+                      status: BookingStatus.RESERVED,
+                      OR: [
+                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
+          {
+            OR: [
+              { type: "QUANTITY_TRACKED" },
               // Either asset is AVAILABLE (checked in from partial check-in)
               { status: AssetStatus.AVAILABLE },
               // Or asset has no conflicting ONGOING/OVERDUE bookings

@@ -193,6 +193,7 @@ export function BookingAssetsColumn() {
                   <ListHeader hideFirstColumn>
                     <BulkListHeader itemsGetter={itemsGetter} />
                     <Th>Name</Th>
+                    <Th>Qty</Th>
                     <Th> </Th>
                     <Th>Category</Th>
                     <Th>Tags</Th>

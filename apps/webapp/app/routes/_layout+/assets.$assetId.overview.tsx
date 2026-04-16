@@ -34,6 +34,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -150,17 +151,62 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
     /**
      * Compute quantity availability for QUANTITY_TRACKED assets.
-     * Sums all custody records to determine how many units are currently
-     * checked out, then derives available = total - inCustody.
+     * Sums custody records AND booking reservations to determine how many
+     * units are currently available. Booking reservations are split into
+     * "reserved" (RESERVED status) and "checked out" (ONGOING/OVERDUE).
      */
     let quantityData: {
       total: number;
       inCustody: number;
+      reserved: number;
+      checkedOut: number;
+      /**
+       * Booking-aware availability: how many units can be reserved for a
+       * *future* booking. Subtracts everything that's already spoken for —
+       * in-custody + reserved in other bookings + checked-out.
+       */
       available: number;
+      /**
+       * Physical availability: how many units are *actually* on the shelf
+       * right now (not currently held by anyone). Used to cap custody
+       * assignment and total-quantity adjustments — operations that can
+       * validly happen even when future reservations exist. Subtracts
+       * only in-custody, never reservations.
+       */
+      custodyAvailable: number;
     } | null = null;
 
     if (isQuantityTracked(asset)) {
-      quantityData = await computeAvailableQuantity(asset.id);
+      const [custodyData, reservedSum, checkedOutSum] = await Promise.all([
+        computeAvailableQuantity(asset.id),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: "RESERVED" },
+          },
+          _sum: { quantity: true },
+        }),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
+
+      const reserved = reservedSum._sum?.quantity ?? 0;
+      const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+
+      quantityData = {
+        total: custodyData.total,
+        inCustody: custodyData.inCustody,
+        reserved,
+        checkedOut,
+        available:
+          custodyData.total - custodyData.inCustody - reserved - checkedOut,
+        custodyAvailable: custodyData.total - custodyData.inCustody,
+      };
     }
 
     /**
@@ -720,7 +766,10 @@ export default function AssetOverview() {
               minQuantity={asset.minQuantity ?? null}
               consumptionType={asset.consumptionType ?? null}
               availableQuantity={quantityData?.available}
+              custodyAvailableQuantity={quantityData?.custodyAvailable}
               inCustodyQuantity={quantityData?.inCustody}
+              reservedQuantity={quantityData?.reserved}
+              checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}
             />
           ) : null}
@@ -730,7 +779,7 @@ export default function AssetOverview() {
               custody={asset.custody}
               assetId={asset.id}
               unitOfMeasure={asset.unitOfMeasure}
-              availableQuantity={quantityData?.available}
+              availableQuantity={quantityData?.custodyAvailable}
               isSelfService={isSelfService}
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
