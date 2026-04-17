@@ -454,7 +454,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking.bookingAssets.map((ba) => [ba.assetId, ba.quantity])
     );
 
-    // Enrich the paginated items with full asset details and booked quantity
+    /**
+     * Phase 3c: sum already-dispositioned units per qty-tracked asset for
+     * this booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
+     * Attached to each enriched item below so the row UI can:
+     *   - show "Partially checked in" when `dispositioned > 0 && remaining > 0`
+     *   - render `remaining / booked` in the Qty column for partials
+     *   - show the fully-reconciled state once `dispositioned == booked`
+     *
+     * Only queries qty-tracked asset ids (empty query short-circuits).
+     */
+    const qtyAssetIdsInBooking = booking.bookingAssets
+      .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
+      .map((ba) => ba.assetId);
+
+    const dispositionSums =
+      qtyAssetIdsInBooking.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["assetId"],
+            where: {
+              bookingId: booking.id,
+              assetId: { in: qtyAssetIdsInBooking },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+    const dispositionedByAsset = new Map<string, number>(
+      dispositionSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
+    );
+
+    // Enrich the paginated items with full asset details, booked quantity,
+    // and qty-tracked disposition progress.
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
@@ -462,6 +493,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         return {
           ...(details || asset),
           bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1,
+          dispositionedQuantity: dispositionedByAsset.get(asset.id) ?? 0,
         };
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,

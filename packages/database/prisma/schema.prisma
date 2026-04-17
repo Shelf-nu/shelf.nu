@@ -276,7 +276,9 @@ enum ConsumptionCategory {
   RETURN // Items returned from a custodian or booking
   RESTOCK // New stock added (shipment arrived, manual increase)
   ADJUSTMENT // Manual correction (inventory count, error fix)
-  LOSS // Items reported lost or damaged
+  LOSS // Items reported lost or missing (will not be returned)
+  CONSUME // Items used as intended (ONE_WAY consumables — e.g. AA batteries, latex gloves)
+  DAMAGE // Items returned but unusable — distinct from LOSS for reporting
 }
 
 model AssetFilterPreset {

@@ -168,10 +168,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       available: number;
       /**
        * Physical availability: how many units are *actually* on the shelf
-       * right now (not currently held by anyone). Used to cap custody
-       * assignment and total-quantity adjustments — operations that can
-       * validly happen even when future reservations exist. Subtracts
-       * only in-custody, never reservations.
+       * right now — not held by a custodian AND not currently checked out
+       * on an active booking. Used to cap custody assignment and
+       * total-quantity adjustments. Reservations (future bookings) do
+       * NOT subtract from this because the units are still physically
+       * present until that booking is checked out. `CHECKED_OUT` via a
+       * booking DOES subtract, because those units are semantically held
+       * by the booking custodian until they're checked back in.
        */
       custodyAvailable: number;
     } | null = null;
@@ -205,7 +208,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         checkedOut,
         available:
           custodyData.total - custodyData.inCustody - reserved - checkedOut,
-        custodyAvailable: custodyData.total - custodyData.inCustody,
+        custodyAvailable:
+          custodyData.total - custodyData.inCustody - checkedOut,
       };
     }
 

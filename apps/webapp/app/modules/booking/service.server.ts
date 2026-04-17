@@ -30,7 +30,11 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  computeBookingAvailableQuantity,
+  createConsumptionLog,
+} from "~/modules/consumption-log/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -1458,6 +1462,148 @@ export async function checkoutBooking({
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                 Quantity-aware check-in helpers (Phase 3c)                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Category values from `ConsumptionLog` that count toward a booking's
+ * per-asset "dispositioned so far" total. Any log with one of these
+ * categories + the booking's id + an asset id consumes one slice of that
+ * asset's booked quantity.
+ *
+ * - RETURN: unit came back to the pool (no `Asset.quantity` change)
+ * - CONSUME: unit used as intended (ONE_WAY; pool decrement)
+ * - LOSS / DAMAGE: unit gone (pool decrement, distinct for reporting)
+ *
+ * "Pending" units are *absence* of logs — tracked implicitly via
+ * `remaining = BookingAsset.quantity − Σ(these categories)`.
+ */
+const CHECKIN_DISPOSITION_CATEGORIES = [
+  "RETURN",
+  "CONSUME",
+  "LOSS",
+  "DAMAGE",
+] as const;
+
+/**
+ * Returns how many units of a QUANTITY_TRACKED asset still need to be
+ * accounted for in a booking.
+ *
+ * `remaining = BookingAsset.quantity − Σ(RETURN+CONSUME+LOSS+DAMAGE logs
+ * for this (bookingId, assetId) pair)`.
+ *
+ * The result is clamped to 0 as a defence-in-depth — if `BookingAsset
+ * .quantity` is reduced below what's already been logged (which the
+ * manage-assets guardrail should prevent), `remaining` would otherwise go
+ * negative and confuse downstream callers.
+ *
+ * Safe to call inside a transaction — accepts a Prisma tx client.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking to measure against
+ * @param assetId - Asset whose remaining quantity we want
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeBookingAssetRemaining(
+  tx: any,
+  bookingId: Booking["id"],
+  assetId: Asset["id"]
+): Promise<number> {
+  const [pivot, loggedSum] = await Promise.all([
+    tx.bookingAsset.findUnique({
+      where: { bookingId_assetId: { bookingId, assetId } },
+      select: { quantity: true },
+    }),
+    tx.consumptionLog.aggregate({
+      where: {
+        assetId,
+        bookingId,
+        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+      },
+      _sum: { quantity: true },
+    }),
+  ]);
+
+  const booked = pivot?.quantity ?? 0;
+  const logged = loggedSum._sum?.quantity ?? 0;
+  return Math.max(0, booked - logged);
+}
+
+/**
+ * Determines whether a booking has been fully checked in across all of
+ * its assets.
+ *
+ * For `INDIVIDUAL` assets: each must appear in at least one
+ * `PartialBookingCheckin.assetIds` row for this booking (existing
+ * mechanism, unchanged).
+ *
+ * For `QUANTITY_TRACKED` assets: each must have
+ * `computeBookingAssetRemaining` equal to 0 — i.e. every booked unit has
+ * been dispositioned (returned, consumed, lost, or damaged).
+ *
+ * Called by both `partialCheckinBooking` and `checkinBooking` to decide
+ * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
+ * prevents the two code paths from drifting.
+ *
+ * @param tx - Prisma transaction client
+ * @param bookingId - Booking to evaluate
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function isBookingFullyCheckedIn(
+  tx: any,
+  bookingId: Booking["id"]
+): Promise<boolean> {
+  const [bookingAssets, partialCheckins] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId },
+      select: {
+        assetId: true,
+        quantity: true,
+        asset: { select: { id: true, type: true } },
+      },
+    }),
+    tx.partialBookingCheckin.findMany({
+      where: { bookingId },
+      select: { assetIds: true },
+    }),
+  ]);
+
+  if (bookingAssets.length === 0) {
+    // An empty booking has nothing to check in — treat as complete.
+    return true;
+  }
+
+  const individuallyCheckedInIds = new Set<string>();
+  for (const row of partialCheckins) {
+    for (const id of row.assetIds as string[]) {
+      individuallyCheckedInIds.add(id);
+    }
+  }
+
+  for (const ba of bookingAssets) {
+    const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
+
+    if (!isQtyTrackedAsset) {
+      // INDIVIDUAL: must be in a partial-checkin session.
+      if (!individuallyCheckedInIds.has(ba.assetId)) return false;
+      continue;
+    }
+
+    // QUANTITY_TRACKED: must have zero remaining.
+    const remaining = await computeBookingAssetRemaining(
+      tx,
+      bookingId,
+      ba.assetId
+    );
+    if (remaining > 0) return false;
+  }
+
+  return true;
+}
+
+/* -------------------------------------------------------------------------- */
+
 export async function checkinBooking({
   id,
   organizationId,
@@ -1465,11 +1611,19 @@ export async function checkinBooking({
   intentChoice,
   userId,
   specificAssetIds,
+  checkins,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
   specificAssetIds?: string[];
+  /**
+   * Phase 3c: optional per-asset dispositions. When omitted, qty-tracked
+   * assets on the booking default to "return all remaining" (TWO_WAY) or
+   * "consume all remaining" (ONE_WAY) — the happy-path when the user hits
+   * the big Check-in button without opening the scanner drawer.
+   */
+  checkins?: CheckinDispositionInput[];
 }) {
   try {
     const bookingFound = await db.booking
@@ -1482,6 +1636,8 @@ export async function checkinBooking({
                 select: {
                   id: true,
                   type: true,
+                  consumptionType: true,
+                  title: true,
                   kitId: true,
                   status: true,
                   bookingAssets: {
@@ -1653,8 +1809,189 @@ export async function checkinBooking({
         })
       : [];
 
+    /**
+     * Phase 3c: build the lookup of explicit per-asset dispositions.
+     * Qty-tracked assets without an explicit entry will auto-fill their
+     * remaining slice inside the transaction (default: RETURN all for
+     * TWO_WAY, CONSUME all for ONE_WAY). This is the "big Check-in
+     * button" happy path — everything's back.
+     */
+    const explicitDispositionByAsset = new Map<string, CheckinDispositionInput>(
+      checkins?.map((d) => [d.assetId, d]) ?? []
+    );
+
+    /** Qty-tracked assets in this booking — candidates for disposition. */
+    const qtyTrackedBookingAssets = bookingFoundAssets.filter(
+      (a) => a.type === AssetType.QUANTITY_TRACKED
+    );
+
+    /**
+     * Per-asset disposition summary populated inside the transaction
+     * (used AFTER the transaction for the quantity-aware activity note).
+     */
+    type CheckinQtySummary = {
+      assetId: string;
+      title: string;
+      returned: number;
+      consumed: number;
+      lost: number;
+      damaged: number;
+    };
+
+    const qtySummariesRef: { value: CheckinQtySummary[] } = { value: [] };
+
     const updatedBooking = await db.$transaction(
       async (tx) => {
+        /**
+         * Per-qty-tracked-asset disposition work. Runs FIRST so the
+         * pool-drain guard can read the current `Asset.quantity` before
+         * downstream status flips. Uses the Phase 2 row-lock pattern.
+         */
+        /**
+         * ConsumptionLog rows require an attributed user. `checkinBooking`
+         * permits `userId === undefined` (legacy signature), but we can't
+         * write logs without one. If the booking has qty-tracked assets
+         * with remaining units, userId must be provided.
+         */
+        if (qtyTrackedBookingAssets.length > 0 && !userId) {
+          // Check if any qty-tracked asset actually has work to do.
+          for (const asset of qtyTrackedBookingAssets) {
+            const remaining = await computeBookingAssetRemaining(
+              tx,
+              id,
+              asset.id
+            );
+            if (remaining > 0) {
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message:
+                  "Internal error: userId is required to check in a booking with quantity-tracked assets.",
+              });
+            }
+          }
+        }
+
+        for (const asset of qtyTrackedBookingAssets) {
+          const remaining = await computeBookingAssetRemaining(
+            tx,
+            id,
+            asset.id
+          );
+          if (remaining <= 0) continue; // Already reconciled.
+
+          const locked = await lockAssetForQuantityUpdate(tx, asset.id);
+          const explicit = explicitDispositionByAsset.get(asset.id);
+
+          // Determine the effective disposition. Explicit wins; otherwise
+          // auto-fill based on consumptionType.
+          const disposition: CheckinDispositionInput = explicit ?? {
+            assetId: asset.id,
+            ...(asset.consumptionType === "ONE_WAY"
+              ? { consumed: remaining }
+              : { returned: remaining }),
+          };
+
+          const claimed = sumDisposition(disposition);
+
+          if (claimed === 0) {
+            // Explicit disposition with no quantities — equivalent to
+            // "leave everything pending". Fine, just skip.
+            continue;
+          }
+
+          if (claimed > remaining) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot check in ${claimed} units for "${locked.title}". Only ${remaining} remaining on this booking.`,
+              shouldBeCaptured: false,
+            });
+          }
+
+          const poolDecrement =
+            (disposition.consumed ?? 0) +
+            (disposition.lost ?? 0) +
+            (disposition.damaged ?? 0);
+
+          if (poolDecrement > 0) {
+            const custodyAgg = await tx.custody.aggregate({
+              where: { assetId: asset.id },
+              _sum: { quantity: true },
+            });
+            const inCustody = custodyAgg._sum?.quantity ?? 0;
+            const projected = (locked.quantity ?? 0) - poolDecrement;
+            if (projected < inCustody) {
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message: `Cannot remove ${poolDecrement} units from "${locked.title}" — ${inCustody} are currently in custody and would be left uncovered.`,
+                shouldBeCaptured: false,
+              });
+            }
+          }
+
+          if ((disposition.returned ?? 0) > 0) {
+            await createConsumptionLog({
+              assetId: asset.id,
+              category: "RETURN",
+              quantity: disposition.returned!,
+              userId: userId!,
+              bookingId: id,
+              tx,
+            });
+          }
+          if ((disposition.consumed ?? 0) > 0) {
+            await createConsumptionLog({
+              assetId: asset.id,
+              category: "CONSUME",
+              quantity: disposition.consumed!,
+              userId: userId!,
+              bookingId: id,
+              tx,
+            });
+          }
+          if ((disposition.lost ?? 0) > 0) {
+            await createConsumptionLog({
+              assetId: asset.id,
+              category: "LOSS",
+              quantity: disposition.lost!,
+              userId: userId!,
+              bookingId: id,
+              tx,
+            });
+          }
+          if ((disposition.damaged ?? 0) > 0) {
+            await createConsumptionLog({
+              assetId: asset.id,
+              category: "DAMAGE",
+              quantity: disposition.damaged!,
+              userId: userId!,
+              bookingId: id,
+              tx,
+            });
+          }
+
+          if (poolDecrement > 0) {
+            await tx.asset.update({
+              where: { id: asset.id },
+              data: { quantity: { decrement: poolDecrement } },
+            });
+          }
+
+          qtySummariesRef.value.push({
+            assetId: asset.id,
+            title: locked.title,
+            returned: disposition.returned ?? 0,
+            consumed: disposition.consumed ?? 0,
+            lost: disposition.lost ?? 0,
+            damaged: disposition.damaged ?? 0,
+          });
+        }
+
         if (assetsToCheckin.length > 0) {
           // INDIVIDUAL assets always get reset to AVAILABLE
           await tx.asset.updateMany({
@@ -1827,6 +2164,95 @@ export async function checkinBooking({
     }
 
     /**
+     * Phase 3c: per-asset notes for qty-tracked dispositions applied in
+     * this check-in. Wrapped in try/catch — activity logging must never
+     * fail a successful check-in. See the matching pattern in
+     * `partialCheckinBooking` and `manage-assets`.
+     */
+    if (userId && qtySummariesRef.value.length > 0) {
+      try {
+        const actorUser = await getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: actorUser?.firstName,
+          lastName: actorUser?.lastName,
+        });
+
+        /**
+         * Shared booking link — per-asset notes point back to the booking
+         * so the asset's activity feed shows which booking consumed /
+         * returned / lost the units.
+         */
+        const bookingLink = wrapLinkForNote(
+          `/bookings/${updatedBooking.id}`,
+          updatedBooking.name
+        );
+
+        for (const summary of qtySummariesRef.value) {
+          const parts: string[] = [];
+          if (summary.returned > 0)
+            parts.push(`returned **${summary.returned}**`);
+          if (summary.consumed > 0)
+            parts.push(`consumed **${summary.consumed}**`);
+          if (summary.lost > 0) parts.push(`**${summary.lost}** lost`);
+          if (summary.damaged > 0) parts.push(`**${summary.damaged}** damaged`);
+
+          if (parts.length > 0) {
+            await createNotes({
+              content: `${actor} via check-in on ${bookingLink}: ${parts.join(
+                ", "
+              )}.`,
+              type: "UPDATE",
+              userId,
+              assetIds: [summary.assetId],
+            });
+          }
+        }
+
+        // Booking-side summary for qty-tracked totals (appended to the
+        // existing status transition note context).
+        const totals = qtySummariesRef.value.reduce(
+          (acc, s) => ({
+            returned: acc.returned + s.returned,
+            consumed: acc.consumed + s.consumed,
+            lost: acc.lost + s.lost,
+            damaged: acc.damaged + s.damaged,
+          }),
+          { returned: 0, consumed: 0, lost: 0, damaged: 0 }
+        );
+        const bits: string[] = [];
+        if (totals.returned > 0) bits.push(`${totals.returned} returned`);
+        if (totals.consumed > 0) bits.push(`${totals.consumed} consumed`);
+        if (totals.lost > 0) bits.push(`${totals.lost} lost`);
+        if (totals.damaged > 0) bits.push(`${totals.damaged} damaged`);
+        if (bits.length > 0) {
+          await createSystemBookingNote({
+            bookingId: updatedBooking.id,
+            content: `${actor} dispositioned quantity-tracked assets: ${bits.join(
+              ", "
+            )}.`,
+          });
+        }
+      } catch (noteError) {
+        Logger.error(
+          new ShelfError({
+            cause: noteError,
+            message: "Failed to write quantity check-in activity notes",
+            label,
+            additionalData: { userId, bookingId: id },
+          })
+        );
+      }
+    }
+
+    /**
      * At this point when user is checking in the booking,
      * we just have to cancel all active scheduler (if there is any).
      * Because, if the only possible case is OVERDUE, and if it was OVERDUE
@@ -1907,20 +2333,87 @@ export async function checkinBooking({
   }
 }
 
+/**
+ * Per-asset disposition entry accepted by the check-in service functions.
+ *
+ * See `checkinDispositionSchema` in
+ * `components/scanner/drawer/uses/partial-checkin-drawer.tsx` for the
+ * corresponding Zod schema / payload documentation.
+ */
+export type CheckinDispositionInput = {
+  assetId: string;
+  returned?: number;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+};
+
+/**
+ * Sum of all "claimed" units in a single check-in disposition — i.e. the
+ * ones that reduce `remaining` for the (booking, asset) pair. Pending
+ * units are never submitted explicitly; they emerge from the gap between
+ * remaining and this sum.
+ */
+function sumDisposition(d: CheckinDispositionInput): number {
+  return (
+    (d.returned ?? 0) + (d.consumed ?? 0) + (d.lost ?? 0) + (d.damaged ?? 0)
+  );
+}
+
 export async function partialCheckinBooking({
   id,
   organizationId,
   assetIds,
+  checkins,
   userId,
   hints,
   intentChoice,
 }: Pick<Booking, "id" | "organizationId"> & {
-  assetIds: Asset["id"][];
+  /** Legacy payload — asset IDs only, no per-asset quantities. */
+  assetIds?: Asset["id"][];
+  /** Phase 3c payload — per-asset dispositions (takes precedence). */
+  checkins?: CheckinDispositionInput[];
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
+    /**
+     * Resolve the effective per-asset payload. Callers MAY pass `checkins`
+     * directly (new drawer flow) or `assetIds` (legacy callers / pure
+     * INDIVIDUAL flows). When only `assetIds` is provided we synthesize a
+     * `checkins` array with no quantities — qty-tracked assets in that
+     * list will be rejected below.
+     */
+    const dispositions: CheckinDispositionInput[] =
+      checkins && checkins.length > 0
+        ? checkins
+        : (assetIds ?? []).map((assetId) => ({ assetId }));
+
+    if (dispositions.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: "No assets provided for check-in.",
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Derived flat asset-id list used by the existing kit/status logic. */
+    const effectiveAssetIds = dispositions.map((d) => d.assetId);
+
+    /**
+     * True when any disposition in this payload carries non-zero quantity
+     * fields. Used to decide whether to skip the "all remaining scanned →
+     * redirect to checkinBooking" early-exit: per-asset qty logic must run
+     * in this function's transaction so we don't split the work across
+     * two services.
+     */
+    const hasQuantityDispositions = dispositions.some(
+      (d) => sumDisposition(d) > 0
+    );
+
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -1936,7 +2429,9 @@ export async function partialCheckinBooking({
         include: {
           bookingAssets: {
             include: {
-              asset: { select: { id: true, type: true, kitId: true } },
+              asset: {
+                select: { id: true, type: true, kitId: true },
+              },
             },
           },
         },
@@ -1954,67 +2449,16 @@ export async function partialCheckinBooking({
     /** Map bookingAssets to flat asset array for downstream logic */
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
-    // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
-    // First, get the current status of all assets in the booking
-    const currentAssetStatuses = await db.asset.findMany({
-      where: { id: { in: bookingFoundAssets.map((a) => a.id) } },
-      select: { id: true, status: true },
-    });
-
-    // Find assets that are still CHECKED_OUT (not yet checked in)
-    const checkedOutAssets = currentAssetStatuses.filter(
-      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    /** Types keyed by assetId — lets per-asset branches pick the right code path. */
+    const assetTypeById = new Map<string, AssetType>(
+      bookingFoundAssets.map((a) => [a.id, a.type])
     );
 
-    const checkedOutAssetIds = new Set(checkedOutAssets.map((a) => a.id));
-    const providedAssetIds = new Set(assetIds);
-
-    // Check if we're checking in all remaining CHECKED_OUT assets
-    if (
-      checkedOutAssetIds.size > 0 &&
-      checkedOutAssetIds.size === providedAssetIds.size &&
-      [...checkedOutAssetIds].every((id) => providedAssetIds.has(id))
-    ) {
-      // DON'T create PartialBookingCheckin record when doing complete check-in redirect
-      // The checkinBooking function will handle the completion properly
-      // Creating the record here would cause checkinBooking to filter out the current assets
-
-      // Create notes before complete check-in since this was initiated as explicit check-in
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
-      const noteContent = `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`;
-      await createNotes({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetIds,
-      });
-
-      // Do complete check-in with specific asset information for enhanced messaging
-      const completedBooking = await checkinBooking({
-        id,
-        organizationId,
-        hints,
-        intentChoice,
-        userId,
-        specificAssetIds: assetIds,
-      });
-
-      return {
-        booking: completedBooking,
-        checkedInAssetCount: assetIds.length,
-        remainingAssetCount: 0,
-        isComplete: true,
-      };
-    }
-
-    // Validate that all provided assetIds are actually in the booking
+    // Validate that every asset in the payload is actually on the booking.
     const bookingAssetIds = new Set(bookingFoundAssets.map((a) => a.id));
-    const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
-
+    const invalidAssetIds = effectiveAssetIds.filter(
+      (id_) => !bookingAssetIds.has(id_)
+    );
     if (invalidAssetIds.length > 0) {
       throw new ShelfError({
         cause: null,
@@ -2023,16 +2467,88 @@ export async function partialCheckinBooking({
         message: `Some assets are not part of this booking: ${invalidAssetIds.join(
           ", "
         )}`,
+        shouldBeCaptured: false,
       });
     }
 
-    // For kits: only update kit status if ALL assets of a kit are being checked in
+    // Qty-tracked assets MUST carry at least one non-zero disposition.
+    // The drawer surfaces this as a blocker before submission, but we
+    // defend server-side too.
+    for (const d of dispositions) {
+      const isQty = assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED;
+      if (isQty && sumDisposition(d) === 0) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message:
+            "Quantity-tracked assets must include at least one non-zero disposition (returned, consumed, lost, or damaged).",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    // Early exit: legacy "all remaining CHECKED_OUT assets scanned → redirect
+    // to full check-in" path. Only safe when no qty dispositions are in play,
+    // because per-asset qty work needs to run in this function's transaction
+    // (so we don't split consumption-log writes across two services).
+    if (!hasQuantityDispositions) {
+      const currentAssetStatuses = await db.asset.findMany({
+        where: { id: { in: bookingFoundAssets.map((a) => a.id) } },
+        select: { id: true, status: true },
+      });
+      const checkedOutAssetIds = new Set(
+        currentAssetStatuses
+          .filter((a) => a.status === AssetStatus.CHECKED_OUT)
+          .map((a) => a.id)
+      );
+      const providedAssetIds = new Set(effectiveAssetIds);
+
+      if (
+        checkedOutAssetIds.size > 0 &&
+        checkedOutAssetIds.size === providedAssetIds.size &&
+        [...checkedOutAssetIds].every((id_) => providedAssetIds.has(id_))
+      ) {
+        // Don't create a PartialBookingCheckin row — the redirect to
+        // `checkinBooking` handles completion itself.
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        });
+        await createNotes({
+          content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
+          type: "UPDATE",
+          userId,
+          assetIds: effectiveAssetIds,
+        });
+
+        const completedBooking = await checkinBooking({
+          id,
+          organizationId,
+          hints,
+          intentChoice,
+          userId,
+          specificAssetIds: effectiveAssetIds,
+        });
+
+        return {
+          booking: completedBooking,
+          checkedInAssetCount: effectiveAssetIds.length,
+          remainingAssetCount: 0,
+          isComplete: true,
+        };
+      }
+    }
+
+    // For kits: only flip kit status if ALL of its assets are being checked
+    // in this session. Qty-tracked assets aren't kitted, so this logic only
+    // applies to individuals.
     const assetsBeingCheckedIn = bookingFoundAssets.filter((a) =>
-      assetIds.includes(a.id)
+      effectiveAssetIds.includes(a.id)
     );
     const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
 
-    // Only process kits where ALL their assets in this booking are being checked in
     const completeKitIds: string[] = [];
     for (const kitId of kitIdsBeingCheckedIn) {
       const kitAssetsInBooking = bookingFoundAssets.filter(
@@ -2047,46 +2563,196 @@ export async function partialCheckinBooking({
       }
     }
 
-    const updatedBooking = await db.$transaction(async (tx) => {
-      // INDIVIDUAL assets always get reset to AVAILABLE
-      await tx.asset.updateMany({
-        where: { id: { in: assetIds }, type: AssetType.INDIVIDUAL },
-        data: { status: AssetStatus.AVAILABLE },
-      });
+    /**
+     * Per-asset disposition summary — populated inside the transaction as
+     * each qty-tracked asset is processed. Used AFTER the transaction for
+     * activity notes (kept outside the tx so a markdoc hiccup can't roll
+     * back a valid check-in).
+     */
+    type QtyDispositionSummary = {
+      assetId: string;
+      title: string;
+      returned: number;
+      consumed: number;
+      lost: number;
+      damaged: number;
+      /** Units still outstanding after this session (implicit "pending"). */
+      pendingAfter: number;
+    };
 
-      // QUANTITY_TRACKED assets: only reset to AVAILABLE if they have
-      // no other active bookings and no custody records
-      const qtyCheckinIds = bookingFoundAssets
-        .filter((a) => a.type === "QUANTITY_TRACKED" && assetIds.includes(a.id))
-        .map((a) => a.id);
+    const txResult = await db.$transaction(async (tx) => {
+      /**
+       * Phase 3c: per-asset quantity dispositions for QUANTITY_TRACKED
+       * assets. Runs before the status updates so the pool-drain guard
+       * can read the current `Asset.quantity`. Uses the Phase 2 row-lock
+       * pattern to serialize concurrent check-in sessions on the same
+       * asset.
+       */
+      const qtySummaries: QtyDispositionSummary[] = [];
+      const fullyReconciledQtyAssetIds: string[] = [];
 
-      if (qtyCheckinIds.length > 0) {
-        for (const assetId of qtyCheckinIds) {
-          const [otherBookings, custodyCount] = await Promise.all([
-            tx.bookingAsset.count({
-              where: {
-                assetId,
-                bookingId: { not: id },
-                booking: {
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
-            }),
-            tx.custody.count({ where: { assetId } }),
-          ]);
+      for (const disp of dispositions) {
+        if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
+          continue;
+        }
 
-          if (otherBookings === 0 && custodyCount === 0) {
-            await tx.asset.update({
-              where: { id: assetId },
-              data: { status: AssetStatus.AVAILABLE },
+        const lockedAsset = await lockAssetForQuantityUpdate(tx, disp.assetId);
+
+        /**
+         * Re-query remaining inside the transaction, AFTER the lock. This
+         * closes the race with another check-in session that committed
+         * between our loader read and our tx start.
+         */
+        const remaining = await computeBookingAssetRemaining(
+          tx,
+          id,
+          disp.assetId
+        );
+        const claimed = sumDisposition(disp);
+
+        if (claimed > remaining) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label,
+            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${remaining} remaining on this booking.`,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const poolDecrement =
+          (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
+
+        /**
+         * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
+         * sum. Mirrors the invariant from `adjustQuantity` — we never let
+         * the physical pool drop below what team members are holding.
+         */
+        if (poolDecrement > 0) {
+          const custodyAgg = await tx.custody.aggregate({
+            where: { assetId: disp.assetId },
+            _sum: { quantity: true },
+          });
+          const inCustody = custodyAgg._sum?.quantity ?? 0;
+          const projected = (lockedAsset.quantity ?? 0) - poolDecrement;
+          if (projected < inCustody) {
+            throw new ShelfError({
+              cause: null,
+              status: 400,
+              label,
+              message: `Cannot remove ${poolDecrement} units from "${lockedAsset.title}" — ${inCustody} are currently in custody and would be left uncovered.`,
+              shouldBeCaptured: false,
             });
           }
         }
+
+        // One ConsumptionLog per non-zero category, all scoped to this booking.
+        if ((disp.returned ?? 0) > 0) {
+          await createConsumptionLog({
+            assetId: disp.assetId,
+            category: "RETURN",
+            quantity: disp.returned!,
+            userId,
+            bookingId: id,
+            tx,
+          });
+        }
+        if ((disp.consumed ?? 0) > 0) {
+          await createConsumptionLog({
+            assetId: disp.assetId,
+            category: "CONSUME",
+            quantity: disp.consumed!,
+            userId,
+            bookingId: id,
+            tx,
+          });
+        }
+        if ((disp.lost ?? 0) > 0) {
+          await createConsumptionLog({
+            assetId: disp.assetId,
+            category: "LOSS",
+            quantity: disp.lost!,
+            userId,
+            bookingId: id,
+            tx,
+          });
+        }
+        if ((disp.damaged ?? 0) > 0) {
+          await createConsumptionLog({
+            assetId: disp.assetId,
+            category: "DAMAGE",
+            quantity: disp.damaged!,
+            userId,
+            bookingId: id,
+            tx,
+          });
+        }
+
+        // Decrement the pool for CONSUME/LOSS/DAMAGE only. RETURN leaves
+        // the pool alone — the unit is back where it came from.
+        if (poolDecrement > 0) {
+          await tx.asset.update({
+            where: { id: disp.assetId },
+            data: { quantity: { decrement: poolDecrement } },
+          });
+        }
+
+        const pendingAfter = remaining - claimed;
+        if (pendingAfter === 0) {
+          fullyReconciledQtyAssetIds.push(disp.assetId);
+        }
+
+        qtySummaries.push({
+          assetId: disp.assetId,
+          title: lockedAsset.title,
+          returned: disp.returned ?? 0,
+          consumed: disp.consumed ?? 0,
+          lost: disp.lost ?? 0,
+          damaged: disp.damaged ?? 0,
+          pendingAfter,
+        });
       }
 
-      // Only update kit status for kits that are completely checked in
+      // ---- Individual asset status updates (unchanged) ----
+      const individualAssetIds = effectiveAssetIds.filter(
+        (id_) => assetTypeById.get(id_) === AssetType.INDIVIDUAL
+      );
+      if (individualAssetIds.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: individualAssetIds } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
+
+      // QUANTITY_TRACKED assets: only reset status to AVAILABLE if they
+      // have no other active bookings and no custody records. Matches the
+      // Phase 3b behavior so pools shared across bookings don't flicker.
+      const qtyCheckinIds = effectiveAssetIds.filter(
+        (id_) => assetTypeById.get(id_) === AssetType.QUANTITY_TRACKED
+      );
+      for (const assetId of qtyCheckinIds) {
+        const [otherBookings, custodyCount] = await Promise.all([
+          tx.bookingAsset.count({
+            where: {
+              assetId,
+              bookingId: { not: id },
+              booking: {
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
+              },
+            },
+          }),
+          tx.custody.count({ where: { assetId } }),
+        ]);
+        if (otherBookings === 0 && custodyCount === 0) {
+          await tx.asset.update({
+            where: { id: assetId },
+            data: { status: AssetStatus.AVAILABLE },
+          });
+        }
+      }
+
       if (completeKitIds.length > 0) {
         await tx.kit.updateMany({
           where: { id: { in: completeKitIds } },
@@ -2094,83 +2760,36 @@ export async function partialCheckinBooking({
         });
       }
 
-      // Create partial check-in record for tracking
+      /**
+       * PartialBookingCheckin session row. `assetIds` intentionally only
+       * lists assets FULLY reconciled in this session:
+       *   - INDIVIDUAL: always included (presence = checked in).
+       *   - QUANTITY_TRACKED: only when `remaining` hit zero.
+       *
+       * Partially-reconciled qty-tracked assets are tracked via
+       * ConsumptionLog instead — that's the source of truth for
+       * "how much has flowed back". The "touched" signal for the drawer
+       * (so the scanner can mark an asset as already-handled) should key
+       * off consumption-log presence, not just this row.
+       */
+      const sessionReconciledAssetIds = [
+        ...individualAssetIds,
+        ...fullyReconciledQtyAssetIds,
+      ];
       await tx.partialBookingCheckin.create({
         data: {
           bookingId: id,
           checkedInById: userId,
-          assetIds,
-          checkinCount: assetIds.length,
+          assetIds: sessionReconciledAssetIds,
+          checkinCount: sessionReconciledAssetIds.length,
         },
       });
 
-      // Create audit notes for each checked-in asset using createNotes
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
-      const noteContent = `${actor} checked in via partial check-in.`;
-      await createNotes({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetIds,
-      });
+      // Determine completion uniformly via the shared helper — keeps
+      // individual + qty-tracked semantics in one place.
+      const bookingIsComplete = await isBookingFullyCheckedIn(tx, id);
 
-      // BOOKING ACTIVITY LOG: Log partial check-in activity
-      // Get the kit and standalone asset data for consistent formatting
-      const assetsWithKitInfo = await tx.asset.findMany({
-        where: { id: { in: assetIds } },
-        select: {
-          id: true,
-          title: true,
-          kit: { select: { id: true, name: true } },
-        },
-      });
-
-      // Separate complete kits from individual assets
-      const completeKits: Array<{ id: string; name: string }> = [];
-      const standaloneAssets: Array<{ id: string; title: string }> = [];
-      const processedKitIds = new Set<string>();
-
-      for (const asset of assetsWithKitInfo) {
-        if (
-          asset.kit &&
-          completeKitIds.includes(asset.kit.id) &&
-          !processedKitIds.has(asset.kit.id)
-        ) {
-          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
-          processedKitIds.add(asset.kit.id);
-        } else if (!asset.kit) {
-          standaloneAssets.push({ id: asset.id, title: asset.title });
-        }
-      }
-
-      const hasKits = completeKits.length > 0;
-      const hasAssets = standaloneAssets.length > 0;
-
-      let itemsDescription = "";
-      if (hasKits && hasAssets) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked in"
-        );
-        itemsDescription = `${assetContent} and ${kitContent}`;
-      } else if (hasKits) {
-        const kitContent = wrapKitsWithDataForNote(completeKits, "checked in");
-        itemsDescription = kitContent;
-      } else if (hasAssets) {
-        const assetContent = wrapAssetsWithDataForNote(
-          standaloneAssets,
-          "checked in"
-        );
-        itemsDescription = assetContent;
-      }
-
-      // Get the updated booking with all original assets first to calculate remaining count
-      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
+      const updatedBookingSnapshot = await tx.booking.findUniqueOrThrow({
         where: { id },
         include: {
           bookingAssets: true,
@@ -2180,12 +2799,7 @@ export async function partialCheckinBooking({
         },
       });
 
-      const remainingCount =
-        updatedBookingForNote.bookingAssets.length - assetIds.length;
-      const isCompletingBooking = remainingCount === 0;
-
-      if (isCompletingBooking) {
-        // Update booking status to COMPLETE
+      if (bookingIsComplete) {
         const completedBooking = await tx.booking.update({
           where: { id },
           data: { status: BookingStatus.COMPLETE },
@@ -2197,50 +2811,224 @@ export async function partialCheckinBooking({
           },
         });
 
-        // Create combined completion message
+        return {
+          booking: completedBooking,
+          previousStatus: updatedBookingSnapshot.status,
+          isComplete: true as const,
+          qtySummaries,
+          individualAssetIds,
+          completeKitIds,
+        };
+      }
+
+      return {
+        booking: updatedBookingSnapshot,
+        previousStatus: updatedBookingSnapshot.status,
+        isComplete: false as const,
+        qtySummaries,
+        individualAssetIds,
+        completeKitIds,
+      };
+    });
+
+    /**
+     * Activity notes — best-effort, OUTSIDE the transaction.
+     *
+     * Wrapped in try/catch matching the pattern from manage-assets:
+     * the check-in itself is already persisted, so a note rendering
+     * failure must not propagate as a user-facing error. Any failure is
+     * captured server-side via `Logger.error`.
+     */
+    try {
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+
+      /**
+       * Shared booking link used by every asset-side note below so the
+       * activity feed on each asset tells the reader which booking the
+       * check-in was for (and jumps straight to it via a markdoc link).
+       */
+      const bookingLink = wrapLinkForNote(
+        `/bookings/${txResult.booking.id}`,
+        txResult.booking.name
+      );
+
+      /**
+       * Per-row asset note summarizing this session's disposition.
+       * Only generated for qty-tracked assets that actually had activity
+       * this session; individual assets get the short "checked in" note
+       * to preserve current behavior.
+       */
+      for (const summary of txResult.qtySummaries) {
+        const parts: string[] = [];
+        if (summary.returned > 0)
+          parts.push(`returned **${summary.returned}**`);
+        if (summary.consumed > 0)
+          parts.push(`consumed **${summary.consumed}**`);
+        if (summary.lost > 0) parts.push(`**${summary.lost}** lost`);
+        if (summary.damaged > 0) parts.push(`**${summary.damaged}** damaged`);
+        if (summary.pendingAfter > 0) {
+          parts.push(`**${summary.pendingAfter}** still pending`);
+        }
+
+        await createNotes({
+          content: `${actor} via partial check-in on ${bookingLink}: ${parts.join(
+            ", "
+          )}.`,
+          type: "UPDATE",
+          userId,
+          assetIds: [summary.assetId],
+        });
+      }
+
+      if (txResult.individualAssetIds.length > 0) {
+        await createNotes({
+          content: `${actor} checked in via partial check-in on ${bookingLink}.`,
+          type: "UPDATE",
+          userId,
+          assetIds: txResult.individualAssetIds,
+        });
+      }
+
+      // Booking-side summary note (one per session).
+      const assetIdsTouched = [
+        ...txResult.individualAssetIds,
+        ...txResult.qtySummaries.map((s) => s.assetId),
+      ];
+      const assetsWithKitInfo =
+        assetIdsTouched.length > 0
+          ? await db.asset.findMany({
+              where: { id: { in: assetIdsTouched } },
+              select: {
+                id: true,
+                title: true,
+                kit: { select: { id: true, name: true } },
+              },
+            })
+          : [];
+
+      const completeKits: Array<{ id: string; name: string }> = [];
+      const standaloneAssets: Array<{ id: string; title: string }> = [];
+      const processedKitIds = new Set<string>();
+      for (const asset of assetsWithKitInfo) {
+        if (
+          asset.kit &&
+          txResult.completeKitIds.includes(asset.kit.id) &&
+          !processedKitIds.has(asset.kit.id)
+        ) {
+          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+          processedKitIds.add(asset.kit.id);
+        } else if (!asset.kit) {
+          standaloneAssets.push({ id: asset.id, title: asset.title });
+        }
+      }
+
+      const hasKits = completeKits.length > 0;
+      const hasAssets = standaloneAssets.length > 0;
+      let itemsDescription = "";
+      if (hasKits && hasAssets) {
+        itemsDescription = `${wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        )} and ${wrapKitsWithDataForNote(completeKits, "checked in")}`;
+      } else if (hasKits) {
+        itemsDescription = wrapKitsWithDataForNote(completeKits, "checked in");
+      } else if (hasAssets) {
+        itemsDescription = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked in"
+        );
+      }
+
+      // Qty disposition totals for the booking note (condensed, only
+      // non-zero fields rendered).
+      const qtyTotals = txResult.qtySummaries.reduce(
+        (acc, s) => ({
+          returned: acc.returned + s.returned,
+          consumed: acc.consumed + s.consumed,
+          lost: acc.lost + s.lost,
+          damaged: acc.damaged + s.damaged,
+          pending: acc.pending + s.pendingAfter,
+        }),
+        { returned: 0, consumed: 0, lost: 0, damaged: 0, pending: 0 }
+      );
+      const qtyParts: string[] = [];
+      if (qtyTotals.returned > 0)
+        qtyParts.push(`${qtyTotals.returned} returned`);
+      if (qtyTotals.consumed > 0)
+        qtyParts.push(`${qtyTotals.consumed} consumed`);
+      if (qtyTotals.lost > 0) qtyParts.push(`${qtyTotals.lost} lost`);
+      if (qtyTotals.damaged > 0) qtyParts.push(`${qtyTotals.damaged} damaged`);
+      if (qtyTotals.pending > 0) qtyParts.push(`${qtyTotals.pending} pending`);
+      const qtyTail = qtyParts.length > 0 ? ` (${qtyParts.join(", ")})` : "";
+
+      if (txResult.isComplete) {
         const fromStatusBadge = wrapBookingStatusForNote(
-          updatedBookingForNote.status,
-          completedBooking.custodianUserId || undefined
+          txResult.previousStatus,
+          txResult.booking.custodianUserId || undefined
         );
         const toStatusBadge = wrapBookingStatusForNote(
           BookingStatus.COMPLETE,
-          completedBooking.custodianUserId || undefined
+          txResult.booking.custodianUserId || undefined
         );
-
         await createSystemBookingNote({
           bookingId: id,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
-
-        return {
-          booking: completedBooking,
-          checkedInAssetCount: assetIds.length,
-          remainingAssetCount: 0,
-          isComplete: true,
-        };
       } else {
-        // Regular partial check-in
-        const remainingText = ` (Remaining: ${remainingCount})`;
-
         await createSystemBookingNote({
           bookingId: id,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}.`,
         });
-
-        return {
-          booking: updatedBookingForNote,
-          checkedInAssetCount: assetIds.length,
-          remainingAssetCount: remainingCount,
-          isComplete: false,
-        };
       }
-    });
+    } catch (noteError) {
+      Logger.error(
+        new ShelfError({
+          cause: noteError,
+          message: "Failed to write check-in activity notes",
+          label,
+          additionalData: { userId, bookingId: id },
+        })
+      );
+    }
 
-    return updatedBooking;
+    // Compute a coarse "remaining" count for the toast: bookingAssets not
+    // yet fully reconciled. Individuals count as remaining if not in any
+    // PartialBookingCheckin session; qty-tracked count as remaining if
+    // `computeBookingAssetRemaining > 0`.
+    const outstandingBookingAssets = await db.bookingAsset.findMany({
+      where: { bookingId: id },
+      select: {
+        assetId: true,
+        asset: { select: { type: true } },
+      },
+    });
+    const allSessions = await db.partialBookingCheckin.findMany({
+      where: { bookingId: id },
+      select: { assetIds: true },
+    });
+    const reconciledIndividualIds = new Set<string>(
+      allSessions.flatMap((s) => s.assetIds as string[])
+    );
+    let remainingAssetCount = 0;
+    for (const ba of outstandingBookingAssets) {
+      if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
+        const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
+        if (rem > 0) remainingAssetCount += 1;
+      } else if (!reconciledIndividualIds.has(ba.assetId)) {
+        remainingAssetCount += 1;
+      }
+    }
+
+    return {
+      booking: txResult.booking,
+      checkedInAssetCount: effectiveAssetIds.length,
+      remainingAssetCount,
+      isComplete: txResult.isComplete,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -5136,7 +5924,7 @@ export async function checkinAssets({
   userId: string;
   authSession: AuthSession;
 }) {
-  const { assetIds, checkinIntentChoice, returnJson } = parseData(
+  const { assetIds, checkins, checkinIntentChoice, returnJson } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
       checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
@@ -5146,24 +5934,44 @@ export async function checkinAssets({
         .transform((val) => val === "true"),
     })
   );
+
+  /**
+   * At least one of `assetIds` (legacy) or `checkins` (Phase 3c) must be
+   * present. The drawer sends one of the two depending on whether the
+   * booking has qty-tracked assets in play.
+   */
+  if (
+    (!assetIds || assetIds.length === 0) &&
+    (!checkins || checkins.length === 0)
+  ) {
+    throw new ShelfError({
+      cause: null,
+      status: 400,
+      label,
+      message: "No assets provided for check-in.",
+      shouldBeCaptured: false,
+    });
+  }
+
   const hints = getClientHint(request);
 
   const result = await partialCheckinBooking({
     id: bookingId,
     organizationId,
     assetIds,
+    checkins,
     userId,
     hints,
     intentChoice: checkinIntentChoice,
   });
 
+  /** Effective count of assets touched in this session — for toast messaging. */
+  const touchedCount = checkins?.length ?? assetIds?.length ?? 0;
+  const plural = touchedCount === 1 ? "" : "s";
+
   const notificationMessage = result.isComplete
-    ? `Successfully checked in ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
-      } and completed the booking.`
-    : `Successfully checked in ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
-      } from booking.`;
+    ? `Successfully checked in ${touchedCount} asset${plural} and completed the booking.`
+    : `Successfully checked in ${touchedCount} asset${plural} from booking.`;
 
   sendNotification({
     title: result.isComplete ? "Booking completed" : "Assets checked in",
@@ -5176,9 +5984,7 @@ export async function checkinAssets({
   if (returnJson) {
     return payload({
       success: true,
-      message: `Successfully checked in ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
-      }`,
+      message: `Successfully checked in ${touchedCount} asset${plural}`,
     });
   }
 

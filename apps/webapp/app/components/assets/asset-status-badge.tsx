@@ -34,6 +34,10 @@ export const userFriendlyAssetStatus = (status: ExtendedAssetStatus) => {
       return "Checked out";
     case "PARTIALLY_CHECKED_IN":
       return "Already checked in";
+    case "PARTIALLY_CHECKED_IN_QTY":
+      // Qty-tracked: some units dispositioned, some still outstanding.
+      // Distinct wording so users know the asset isn't fully done.
+      return "Partially checked in";
     default:
       return "Available";
   }
@@ -47,6 +51,10 @@ export const assetStatusColorMap = (
       return BADGE_COLORS.blue;
     case "PARTIALLY_CHECKED_IN":
       return BADGE_COLORS.blue;
+    case "PARTIALLY_CHECKED_IN_QTY":
+      // Amber to signal "action still required" — there's work left on
+      // this row, unlike the solid blue "done for this row" state.
+      return BADGE_COLORS.amber;
     case AssetStatus.CHECKED_OUT:
       return BADGE_COLORS.violet;
     default:

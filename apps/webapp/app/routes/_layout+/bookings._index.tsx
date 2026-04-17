@@ -5,7 +5,14 @@ import type {
   LoaderFunctionArgs,
   ShouldRevalidateFunction,
 } from "react-router";
-import { data, redirect, Link, Outlet, useMatches } from "react-router";
+import {
+  data,
+  redirect,
+  Link,
+  Outlet,
+  useMatches,
+  useLoaderData,
+} from "react-router";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { BookingAssetsSidebar } from "~/components/booking/booking-assets-sidebar";
 import BookingFilters from "~/components/booking/booking-filters";
@@ -190,6 +197,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
+    /**
+     * Phase 3c: compute a per-booking map of `assetId → dispositionedQty`
+     * (sum of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
+     * every qty-tracked asset currently visible on this page. Feeds the
+     * `BookingAssetsSidebar` so it can render the same qty progress
+     * indicator and "Partially checked in" badge the overview page uses.
+     *
+     * Strategy: one aggregate query scoped to the bookingIds on this
+     * page (at most `perPage` bookings, so bounded). Then we bucket the
+     * rows by bookingId and store a Map<string, Record<string, number>>
+     * keyed by bookingId. Empty record for bookings with no activity.
+     */
+    const bookingIdsOnPage = bookings.map((b) => b.id);
+    const dispositionRows =
+      bookingIdsOnPage.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["bookingId", "assetId"],
+            where: {
+              bookingId: { in: bookingIdsOnPage },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+    const dispositionedByBooking: Record<string, Record<string, number>> = {};
+    for (const row of dispositionRows) {
+      if (!row.bookingId) continue;
+      if (!dispositionedByBooking[row.bookingId]) {
+        dispositionedByBooking[row.bookingId] = {};
+      }
+      dispositionedByBooking[row.bookingId][row.assetId] =
+        row._sum.quantity ?? 0;
+    }
+
     const header: HeaderData = {
       title: "Bookings",
     };
@@ -210,6 +251,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         hasActiveFilters,
+        dispositionedByBooking,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
@@ -384,6 +426,7 @@ const ListBookingsContent = ({
               id: true;
               title: true;
               type: true;
+              consumptionType: true;
               availableToBook: true;
               custody: true;
               kitId: true;
@@ -439,6 +482,16 @@ const ListBookingsContent = ({
       (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
+  /**
+   * Pull this booking's slice of the page-wide dispositioned-quantity
+   * map so the sidebar can render qty progress + partial-checkin badge.
+   * Reading from loader data here (instead of threading a prop through
+   * `<List ItemComponent=…>`) keeps the list plumbing unchanged.
+   */
+  const loaderData = useLoaderData<typeof loader>();
+  const dispositionedByAsset =
+    loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
+
   return (
     <>
       {/* Item */}
@@ -486,7 +539,10 @@ const ListBookingsContent = ({
 
       {/* Assets count */}
       <Td>
-        <BookingAssetsSidebar booking={item} />
+        <BookingAssetsSidebar
+          booking={item}
+          dispositionedByAsset={dispositionedByAsset}
+        />
       </Td>
 
       <Td className="max-w-62">

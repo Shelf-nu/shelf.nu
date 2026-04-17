@@ -4778,23 +4778,58 @@ export async function checkOutQuantity({
         });
       }
 
-      /** Step 4: Compute available quantity within the transaction */
+      /**
+       * Step 4: Compute available quantity within the transaction.
+       *
+       * `available = total − inCustody − checkedOutViaBooking`
+       *
+       * Units currently checked out via an ONGOING/OVERDUE booking are
+       * semantically held by that booking's custodian (even if no
+       * `Custody` row exists for them — qty-tracked bookings track the
+       * commitment on the `BookingAsset` pivot, not via `Custody`). They
+       * must be subtracted so we never double-allocate the same physical
+       * unit to a direct custody assignment AND an active booking.
+       *
+       * Reservations (RESERVED bookings) are NOT subtracted — those
+       * units are still physically present until their booking is
+       * checked out, so they're valid targets for custody assignment
+       * right now. The booking will re-validate availability at its own
+       * checkout time.
+       */
       const totalQuantity = asset.quantity ?? 0;
-      const custodySum = await tx.custody.aggregate({
-        where: { assetId },
-        _sum: { quantity: true },
-      });
+      const [custodySum, bookingCheckedOutSum] = await Promise.all([
+        tx.custody.aggregate({
+          where: { assetId },
+          _sum: { quantity: true },
+        }),
+        tx.bookingAsset.aggregate({
+          where: {
+            assetId,
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+            },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
       const inCustody = custodySum._sum.quantity ?? 0;
-      const available = totalQuantity - inCustody;
+      const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
+      const available = totalQuantity - inCustody - checkedOut;
 
       /** Step 5: Validate sufficient availability */
       if (quantity > available) {
         throw new ShelfError({
           cause: null,
-          message: `Cannot check out ${quantity} units. Only ${available} units are available.`,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${checkedOut} checked out on active bookings).`,
           label,
           status: 400,
-          additionalData: { assetId, quantity, available },
+          additionalData: {
+            assetId,
+            quantity,
+            available,
+            inCustody,
+            checkedOut,
+          },
         });
       }
 

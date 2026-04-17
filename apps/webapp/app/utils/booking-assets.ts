@@ -14,18 +14,41 @@ export type KitWithStatus = {
   [key: string]: any;
 };
 
-export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
+/**
+ * Booking-context status extensions beyond the raw Prisma `AssetStatus`:
+ *
+ * - `PARTIALLY_CHECKED_IN` — INDIVIDUAL-asset flow. The asset's entire
+ *   booking row has been checked in via a partial session (existed
+ *   pre-Phase 3c).
+ * - `PARTIALLY_CHECKED_IN_QTY` — Phase 3c. A QUANTITY_TRACKED asset has
+ *   had SOME units dispositioned on this booking (RETURN / CONSUME /
+ *   LOSS / DAMAGE) but `remaining > 0`, so it's not fully reconciled.
+ *   Label and color must be distinct from the individual-asset variant
+ *   because the semantics differ ("some units are in" vs. "this whole
+ *   thing is in").
+ */
+export type ExtendedAssetStatus =
+  | AssetStatus
+  | "PARTIALLY_CHECKED_IN"
+  | "PARTIALLY_CHECKED_IN_QTY";
 export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
 
 /**
- * Context-aware asset status resolver for booking operations
+ * Context-aware asset status resolver for booking operations.
  *
  * Determines the effective status of an asset within a booking context:
- * - If asset has partial check-in details AND booking is ONGOING/OVERDUE -> PARTIALLY_CHECKED_IN
- * - If asset has partial check-in details AND booking is COMPLETE -> AVAILABLE
- * - Otherwise -> original database status
+ * - INDIVIDUAL asset, partial check-in + booking ONGOING/OVERDUE → PARTIALLY_CHECKED_IN
+ * - INDIVIDUAL asset, otherwise → raw `Asset.status`
  *
- * This ensures consistent logic across validation, display, and business operations
+ * QUANTITY_TRACKED assets need a different treatment for DRAFT/RESERVED
+ * bookings. The global `Asset.status` (e.g. `CHECKED_OUT`) can reflect
+ * state from a *different* active booking or stale data from a prior
+ * cancellation — neither is relevant to a DRAFT/RESERVED row in the
+ * current booking, and surfacing "Checked out" there is misleading
+ * ("this booking hasn't checked anything out yet"). So for qty-tracked
+ * assets we hard-override to `AVAILABLE` when the booking is
+ * DRAFT/RESERVED, letting the row focus on this booking's own progress
+ * (reserved qty, disposition indicator) rather than global pool state.
  */
 export function getBookingContextAssetStatus(
   asset: AssetWithStatus,
@@ -43,6 +66,21 @@ export function getBookingContextAssetStatus(
     ["ONGOING", "OVERDUE"].includes(bookingStatus)
   ) {
     return "PARTIALLY_CHECKED_IN";
+  }
+
+  /**
+   * QUANTITY_TRACKED + DRAFT/RESERVED: the per-row badge should reflect
+   * *this* booking's state, not the shared pool's. "Checked out" leaking
+   * in from a prior booking (or from stale data) is noise at best and
+   * incorrect at worst. Force AVAILABLE; the qty progress indicator
+   * elsewhere in the row surfaces whatever real signal exists.
+   */
+  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
+  if (
+    isQtyTracked &&
+    (bookingStatus === "DRAFT" || bookingStatus === "RESERVED")
+  ) {
+    return AssetStatus.AVAILABLE;
   }
 
   return asset.status as AssetStatus;

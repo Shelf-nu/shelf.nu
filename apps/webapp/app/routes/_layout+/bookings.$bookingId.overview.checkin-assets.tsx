@@ -17,6 +17,7 @@ import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-check
 import { db } from "~/database/db.server";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   checkinAssets,
   getBooking,
@@ -111,6 +112,67 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking.status
     );
 
+    /**
+     * Phase 3c: compute per-asset "remaining" for QUANTITY_TRACKED assets
+     * in this booking. `remaining = BookingAsset.quantity − Σ(RETURN +
+     * CONSUME + LOSS + DAMAGE ConsumptionLog entries for this pair)`.
+     *
+     * Sent to the drawer so the UI can cap the per-row inputs, drive the
+     * auto-expand of the shortfall disclosure, and render a "fully
+     * reconciled → hidden" state. We compute with a single aggregate
+     * query + a lookup against the booking's already-loaded
+     * `bookingAssets` to avoid an N+1.
+     */
+    const qtyTrackedAssets = booking.bookingAssets.filter((ba) =>
+      isQuantityTracked(ba.asset)
+    );
+    const qtyAssetIds = qtyTrackedAssets.map((ba) => ba.assetId);
+
+    const loggedSums =
+      qtyAssetIds.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["assetId"],
+            where: {
+              bookingId: booking.id,
+              assetId: { in: qtyAssetIds },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+
+    const loggedSumById = new Map<string, number>(
+      loggedSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
+    );
+
+    /**
+     * Shape consumed by `partial-checkin-drawer.tsx`:
+     *   { [assetId]: { booked, logged, remaining, consumptionType } }
+     * `consumptionType` lets the drawer pick between "Returned" (TWO_WAY)
+     * and "Consumed" (ONE_WAY) as the primary input label.
+     */
+    const qtyRemainingByAssetId: Record<
+      string,
+      {
+        booked: number;
+        logged: number;
+        remaining: number;
+        consumptionType: "ONE_WAY" | "TWO_WAY" | null;
+      }
+    > = {};
+
+    for (const ba of qtyTrackedAssets) {
+      const booked = ba.quantity ?? 0;
+      const logged = loggedSumById.get(ba.assetId) ?? 0;
+      qtyRemainingByAssetId[ba.assetId] = {
+        booked,
+        logged,
+        remaining: Math.max(0, booked - logged),
+        consumptionType:
+          (ba.asset.consumptionType as "ONE_WAY" | "TWO_WAY" | null) ?? null,
+      };
+    }
+
     const title = `Scan assets to check in | ${booking.name}`;
     const header: HeaderData = {
       title,
@@ -122,6 +184,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       partialCheckinProgress,
       partialCheckinDetails,
+      qtyRemainingByAssetId,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

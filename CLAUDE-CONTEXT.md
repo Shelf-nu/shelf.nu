@@ -248,6 +248,29 @@ returnedQty)` matrix.
   partial return, over-return rejection, consume path).
 - Regression: INDIVIDUAL asset check-in path unchanged.
 
+**Follow-ups to land before Sub-phase 3d (Book-by-Model):**
+
+1. **Refactor partial check-in UX to match the audit UI pattern.** The
+   current scanner-drawer flow diverges from how audits present the same
+   "per-asset, per-session reconciliation" mental model. Unify the two so
+   users don't have to learn two paradigms for the same kind of work.
+   User to expand the spec before we start; design should follow the
+   audit UI as the baseline.
+2. **Implement consumption-log view on the asset page.** Phase 2 built
+   the `ConsumptionLog` model and Phase 3c populates it heavily on
+   check-in (RETURN / CONSUME / LOSS / DAMAGE), but there's no
+   user-facing surface for the resulting audit trail. Add a
+   consumption-log tab or section on the asset detail page showing the
+   chronological log with category, quantity, booking link, user, and
+   note. Reuse `getConsumptionLogs` from
+   `modules/consumption-log/service.server.ts`.
+3. **Unit tests for everything in Phase 3c.** The service-level
+   refactors (`partialCheckinBooking`, `checkinBooking`,
+   `computeBookingAssetRemaining`, `isBookingFullyCheckedIn`) and the
+   route-level action shipped without unit-test coverage; manual
+   verification via `TESTING-PHASE-3C.md` only. Land the test matrix
+   documented in that file before book-by-model touches the same code.
+
 ---
 
 ### Sub-phase 3d: Book-by-Model (NOT STARTED)

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { ReactNode } from "react";
-import type { Prisma } from "@prisma/client";
+import type { BookingStatus, Prisma } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import {
@@ -10,11 +10,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/shared/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
+import { ConsumptionTypeBadge } from "../assets/consumption-type-badge";
 import KitImage from "../kits/kit-image";
 
 type BookingWithAssets = Prisma.BookingGetPayload<{
@@ -28,6 +35,7 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             id: true;
             title: true;
             type: true;
+            consumptionType: true;
             availableToBook: true;
             custody: true;
             kitId: true;
@@ -67,6 +75,17 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 interface BookingAssetsSidebarProps {
   booking: BookingWithAssets;
   trigger?: ReactNode;
+  /**
+   * Optional map of `assetId → dispositionedQuantity` for this booking,
+   * i.e. sum of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows.
+   * When provided, the sidebar renders the qty column as `N / M`
+   * progress with an explanatory tooltip and swaps the status badge
+   * to "Partially checked in" for qty-tracked assets that have some
+   * units dispositioned but a non-zero remaining. When undefined, the
+   * sidebar falls back to the plain `× N` booked-quantity display —
+   * which keeps older call sites working without changes.
+   */
+  dispositionedByAsset?: Record<string, number>;
 }
 
 /** Asset enriched with the booked quantity from the BookingAsset pivot */
@@ -93,7 +112,6 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
   bookingAssets.forEach((ba) => {
     const asset: SidebarAsset = { ...ba.asset, bookedQuantity: ba.quantity };
     if (asset.kitId && asset.kit) {
-      // Asset belongs to a kit
       const kitId = asset.kitId;
       if (!itemsMap.has(kitId)) {
         itemsMap.set(kitId, {
@@ -105,12 +123,10 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
       }
       itemsMap.get(kitId)!.assets.push(asset);
     } else {
-      // Individual asset
       individualAssets.push(asset);
     }
   });
 
-  // Add individual assets as separate items
   individualAssets.forEach((asset) => {
     itemsMap.set(`asset-${asset.id}`, {
       id: `asset-${asset.id}`,
@@ -122,9 +138,132 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
   return Array.from(itemsMap.values());
 }
 
+/**
+ * Render the asset title + status stack used by both the standalone
+ * asset rows and the kit-expanded asset rows. Extracted because both
+ * paths share the exact same treatment and we want the qty-progress
+ * tooltip + partial-checkin badge in both places without duplication.
+ */
+function AssetTitleAndStatus({
+  asset,
+  bookingStatus,
+  dispositionedByAsset,
+}: {
+  asset: SidebarAsset;
+  bookingStatus: BookingStatus;
+  dispositionedByAsset?: Record<string, number>;
+}) {
+  const qtyBooked = asset.bookedQuantity ?? 0;
+  const qtyDispositioned = dispositionedByAsset?.[asset.id] ?? 0;
+  const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+
+  const isQtyPartial =
+    isQuantityTracked(asset) &&
+    qtyBooked > 0 &&
+    qtyDispositioned > 0 &&
+    qtyRemaining > 0 &&
+    (bookingStatus === "ONGOING" || bookingStatus === "OVERDUE");
+
+  /**
+   * The sidebar only knows the asset's raw DB status (no partial-checkin
+   * details are loaded here), so we start from that and only override to
+   * the qty-partial extended status when we have evidence from the
+   * `dispositionedByAsset` map.
+   */
+  const effectiveStatus = isQtyPartial
+    ? "PARTIALLY_CHECKED_IN_QTY"
+    : asset.status;
+
+  return (
+    <div className="min-w-[180px]">
+      <span className="word-break mb-1 block">
+        <Button
+          to={`/assets/${asset.id}`}
+          variant="link"
+          className="text-left font-medium text-gray-900 hover:text-gray-700"
+          target="_blank"
+          onlyNewTabIconOnHover={true}
+        >
+          {asset.title}
+        </Button>
+        {/* Quantity for qty-tracked assets:
+            - `N / M` with tooltip if there's been check-in activity
+            - plain `× N` otherwise */}
+        {isQuantityTracked(asset) && qtyBooked > 0 ? (
+          qtyDispositioned > 0 ? (
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={tw(
+                      "ml-1.5 inline-flex cursor-help items-center gap-1 text-xs tabular-nums",
+                      qtyRemaining === 0 ? "text-emerald-700" : "text-gray-700"
+                    )}
+                  >
+                    <span className="font-medium">{qtyDispositioned}</span>
+                    <span className="text-gray-400">/ {qtyBooked}</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center" className="max-w-xs">
+                  <div className="flex flex-col gap-1 text-xs">
+                    <div className="font-semibold text-gray-900">
+                      {qtyRemaining === 0
+                        ? "All units checked in"
+                        : "Partially checked in"}
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Booked</span>
+                      <span className="tabular-nums text-gray-900">
+                        {qtyBooked}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Checked in</span>
+                      <span className="tabular-nums text-gray-900">
+                        {qtyDispositioned}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Remaining</span>
+                      <span
+                        className={tw(
+                          "tabular-nums",
+                          qtyRemaining === 0
+                            ? "text-gray-400"
+                            : "font-medium text-amber-700"
+                        )}
+                      >
+                        {qtyRemaining}
+                      </span>
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <span className="ml-1.5 text-xs font-medium text-gray-500">
+              &times; {qtyBooked}
+            </span>
+          )
+        ) : null}
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
+        <AssetStatusBadge
+          id={asset.id}
+          status={effectiveStatus}
+          availableToBook={asset.availableToBook}
+          asset={asset}
+        />
+        <ConsumptionTypeBadge consumptionType={asset.consumptionType ?? null} />
+      </div>
+    </div>
+  );
+}
+
 export function BookingAssetsSidebar({
   booking,
   trigger,
+  dispositionedByAsset,
 }: BookingAssetsSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
@@ -168,7 +307,6 @@ export function BookingAssetsSidebar({
           </SheetHeader>
 
           <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Header matching BookingAssetsColumn */}
             <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
               <h5 className="text-left capitalize">Assets & kits</h5>
               <p>
@@ -176,7 +314,6 @@ export function BookingAssetsSidebar({
               </p>
             </div>
 
-            {/* Table structure matching BookingAssetsColumn */}
             <div className="flex-1 overflow-auto border border-b-0 border-gray-200 bg-white md:mx-0">
               <table className="w-full border-collapse">
                 <thead>
@@ -289,36 +426,13 @@ export function BookingAssetsSidebar({
                                           withPreview
                                         />
                                       </div>
-                                      <div className="min-w-[180px]">
-                                        <span className="word-break mb-1 block">
-                                          <Button
-                                            to={`/assets/${asset.id}`}
-                                            variant="link"
-                                            className="text-left font-medium text-gray-900 hover:text-gray-700"
-                                            target="_blank"
-                                            onlyNewTabIconOnHover={true}
-                                          >
-                                            {asset.title}
-                                          </Button>
-                                          {/* Show booked quantity for quantity-tracked kit assets */}
-                                          {isQuantityTracked(asset) &&
-                                            asset.bookedQuantity > 0 && (
-                                              <span className="ml-1.5 text-xs font-medium text-gray-500">
-                                                &times; {asset.bookedQuantity}
-                                              </span>
-                                            )}
-                                        </span>
-                                        <div>
-                                          <AssetStatusBadge
-                                            id={asset.id}
-                                            status={asset.status}
-                                            availableToBook={
-                                              asset.availableToBook
-                                            }
-                                            asset={asset}
-                                          />
-                                        </div>
-                                      </div>
+                                      <AssetTitleAndStatus
+                                        asset={asset}
+                                        bookingStatus={booking.status}
+                                        dispositionedByAsset={
+                                          dispositionedByAsset
+                                        }
+                                      />
                                     </div>
                                   </div>
                                 </td>
@@ -335,7 +449,6 @@ export function BookingAssetsSidebar({
                               </tr>
                             ))}
 
-                          {/* Separator row after kit assets */}
                           <tr className="kit-separator h-1 bg-gray-100">
                             <td colSpan={4} className="h-1 p-0"></td>
                           </tr>
@@ -367,34 +480,11 @@ export function BookingAssetsSidebar({
                                   withPreview
                                 />
                               </div>
-                              <div className="min-w-[180px]">
-                                <span className="word-break mb-1 block">
-                                  <Button
-                                    to={`/assets/${asset.id}`}
-                                    variant="link"
-                                    className="text-left font-medium text-gray-900 hover:text-gray-700"
-                                    target="_blank"
-                                    onlyNewTabIconOnHover={true}
-                                  >
-                                    {asset.title}
-                                  </Button>
-                                  {/* Show booked quantity for quantity-tracked assets */}
-                                  {isQuantityTracked(asset) &&
-                                    asset.bookedQuantity > 0 && (
-                                      <span className="ml-1.5 text-xs font-medium text-gray-500">
-                                        &times; {asset.bookedQuantity}
-                                      </span>
-                                    )}
-                                </span>
-                                <div>
-                                  <AssetStatusBadge
-                                    id={asset.id}
-                                    status={asset.status}
-                                    availableToBook={asset.availableToBook}
-                                    asset={asset}
-                                  />
-                                </div>
-                              </div>
+                              <AssetTitleAndStatus
+                                asset={asset}
+                                bookingStatus={booking.status}
+                                dispositionedByAsset={dispositionedByAsset}
+                              />
                             </div>
                           </div>
                         </td>

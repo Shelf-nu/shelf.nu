@@ -20,11 +20,18 @@ import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ListItemTagsColumn } from "../assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "../assets/category-badge";
+import { ConsumptionTypeBadge } from "../assets/consumption-type-badge";
 import BulkListItemCheckbox from "../list/bulk-actions/bulk-list-item-checkbox";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { EmptyTableValue } from "../shared/empty-table-value";
 import { ReturnedBadge } from "../shared/returned-badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 import { UserBadge } from "../shared/user-badge";
 import { Td } from "../table";
 import When from "../when/when";
@@ -106,16 +113,43 @@ export default function ListAssetContent({
   ]);
 
   // Use centralized status resolver for consistency
-  const contextStatus = getBookingContextAssetStatus(
+  const baseContextStatus = getBookingContextAssetStatus(
     item,
     partialCheckinDetails,
     booking.status
   );
-  const isPartiallyCheckedIn = isAssetPartiallyCheckedIn(
-    item,
-    partialCheckinDetails,
-    booking.status
-  );
+
+  /**
+   * Phase 3c: qty-tracked partial dispositioning.
+   *
+   * A qty-tracked asset doesn't get added to `PartialBookingCheckin.assetIds`
+   * until its `remaining` hits zero, so `partialCheckinDetails` is blind to
+   * "some units checked in, others outstanding". We detect that here from
+   * the `dispositionedQuantity` attached by the overview loader, and
+   * upgrade the row's visible status to `PARTIALLY_CHECKED_IN` so the
+   * badge and any consumers of this status reflect reality.
+   *
+   * Guarded on `ONGOING`/`OVERDUE` because a COMPLETE/ARCHIVED booking
+   * should show the original status (consistent with the existing
+   * individual-asset behavior).
+   */
+  const qtyBooked = item.bookedQuantity ?? 0;
+  const qtyDispositioned = item.dispositionedQuantity ?? 0;
+  const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+  const isQtyPartiallyCheckedIn =
+    isQuantityTracked(item) &&
+    qtyBooked > 0 &&
+    qtyDispositioned > 0 &&
+    qtyRemaining > 0 &&
+    (booking.status === "ONGOING" || booking.status === "OVERDUE");
+
+  const contextStatus = isQtyPartiallyCheckedIn
+    ? "PARTIALLY_CHECKED_IN_QTY"
+    : baseContextStatus;
+
+  const isPartiallyCheckedIn =
+    isQtyPartiallyCheckedIn ||
+    isAssetPartiallyCheckedIn(item, partialCheckinDetails, booking.status);
 
   return (
     <>
@@ -162,7 +196,7 @@ export default function ListAssetContent({
                   {item.title}
                 </Button>
               </span>
-              <div>
+              <div className="flex flex-wrap items-center gap-1">
                 {isFinished ? (
                   <ReturnedBadge />
                 ) : (
@@ -173,17 +207,78 @@ export default function ListAssetContent({
                     asset={item}
                   />
                 )}
+                {/* Minimal qty-tracked hint — renders nothing for
+                    INDIVIDUAL assets. */}
+                <ConsumptionTypeBadge
+                  consumptionType={item.consumptionType ?? null}
+                />
               </div>
             </div>
           </div>
         </div>
       </Td>
 
-      {/* Booked quantity — shows the number for qty-tracked assets, empty for individual */}
+      {/* Qty column — Empty for INDIVIDUAL assets. For qty-tracked:
+          shows just the booked total until there's check-in activity.
+          Once units have been dispositioned we show progress as
+          `checked-in / booked` (counts UP, like a progress indicator),
+          with an explanatory tooltip and a success check when full. */}
       <Td className={tw("text-center", isKitAsset ? "bg-gray-50/50" : "")}>
-        {isQuantityTracked(item) && item.bookedQuantity
-          ? item.bookedQuantity
-          : null}
+        {isQuantityTracked(item) && qtyBooked > 0 ? (
+          qtyDispositioned > 0 ? (
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={tw(
+                      "inline-flex cursor-help items-center gap-1 tabular-nums",
+                      qtyRemaining === 0 ? "text-emerald-700" : "text-gray-900"
+                    )}
+                  >
+                    <span className="font-medium">{qtyDispositioned}</span>
+                    <span className="text-gray-400">/ {qtyBooked}</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center" className="max-w-xs">
+                  <div className="flex flex-col gap-1 text-xs">
+                    <div className="font-semibold text-gray-900">
+                      {qtyRemaining === 0
+                        ? "All units checked in"
+                        : "Partially checked in"}
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Booked</span>
+                      <span className="tabular-nums text-gray-900">
+                        {qtyBooked}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Checked in</span>
+                      <span className="tabular-nums text-gray-900">
+                        {qtyDispositioned}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Remaining</span>
+                      <span
+                        className={tw(
+                          "tabular-nums",
+                          qtyRemaining === 0
+                            ? "text-gray-400"
+                            : "font-medium text-amber-700"
+                        )}
+                      >
+                        {qtyRemaining}
+                      </span>
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <span className="tabular-nums">{qtyBooked}</span>
+          )
+        ) : null}
       </Td>
 
       {/* If asset status is different than available, we need to show a label */}

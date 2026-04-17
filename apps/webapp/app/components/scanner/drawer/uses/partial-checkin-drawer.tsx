@@ -1,4 +1,11 @@
-import { useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { CSSProperties } from "react";
 import { AssetStatus } from "@prisma/client";
 import type { Booking } from "@prisma/client";
@@ -15,6 +22,7 @@ import {
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckinDialog from "~/components/booking/checkin-dialog";
 import { Form } from "~/components/custom-form";
+import { CheckIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
@@ -34,9 +42,146 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
+/**
+ * Shape of a single per-asset disposition submitted by the check-in drawer.
+ *
+ * - INDIVIDUAL assets: presence in the array means "checking this asset in".
+ *   The disposition numeric fields are ignored for individuals.
+ * - QUANTITY_TRACKED assets: at least one of returned/consumed/lost/damaged
+ *   must be > 0, otherwise the asset is treated as a blocker (see drawer).
+ *
+ * `pending` is implicit — it's `remaining − (returned|consumed) − lost − damaged`.
+ * Pending units write no log and keep the booking outstanding for another
+ * check-in session.
+ */
+export const checkinDispositionSchema = z.object({
+  assetId: z.string().min(1),
+  /** TWO_WAY return count — writes a RETURN log, no pool change. */
+  returned: z.number().int().nonnegative().optional(),
+  /** ONE_WAY consumption count — writes a CONSUME log, pool decrements. */
+  consumed: z.number().int().nonnegative().optional(),
+  /** Units permanently missing — writes a LOSS log, pool decrements. */
+  lost: z.number().int().nonnegative().optional(),
+  /** Units returned but unusable — writes a DAMAGE log, pool decrements. */
+  damaged: z.number().int().nonnegative().optional(),
+});
+
+export type CheckinDisposition = z.infer<typeof checkinDispositionSchema>;
+
+/**
+ * Internal drawer state for a qty-tracked asset's disposition inputs.
+ *
+ * All numeric inputs are tracked as strings so an empty field stays empty
+ * (controlled `value=""`) instead of coercing to 0 and looking confusing.
+ * We convert to numbers only at submit time.
+ */
+type QtyDispositionState = {
+  /**
+   * Primary input. Semantically either "Returned" (TWO_WAY) or
+   * "Consumed" (ONE_WAY) — the drawer picks the label based on the
+   * asset's consumptionType.
+   */
+  primary: string;
+  lost: string;
+  damaged: string;
+};
+
+type DispositionMap = Record<string, QtyDispositionState>;
+
+/**
+ * Context exposing per-asset disposition state down to the `AssetRow`
+ * render function. Using context (not prop drilling) because `AssetRow`
+ * is rendered via a callback passed to `ConfigurableDrawer`, making direct
+ * prop passing awkward.
+ */
+type DispositionContextValue = {
+  /** Map of assetId → per-asset disposition state. */
+  dispositions: DispositionMap;
+  /**
+   * Per-asset `remaining` + `consumptionType` coming from the loader.
+   * Empty when the booking has no qty-tracked assets.
+   */
+  qtyRemainingByAssetId: Record<
+    string,
+    {
+      booked: number;
+      logged: number;
+      remaining: number;
+      consumptionType: "ONE_WAY" | "TWO_WAY" | null;
+    }
+  >;
+  updateField: (
+    assetId: string,
+    field: keyof QtyDispositionState,
+    value: string
+  ) => void;
+};
+
+const DispositionContext = createContext<DispositionContextValue | null>(null);
+
+function useDispositionContext(): DispositionContextValue {
+  const ctx = useContext(DispositionContext);
+  if (!ctx) {
+    throw new Error(
+      "useDispositionContext called outside of PartialCheckinDrawer"
+    );
+  }
+  return ctx;
+}
+
+/**
+ * Parse a disposition state into numeric fields. Empty strings become 0.
+ * Used both for blocker detection (is-zero?) and for serializing the
+ * submit payload.
+ */
+function parseDispositionState(state: QtyDispositionState | undefined) {
+  const primary = Number(state?.primary ?? "");
+  const lost = Number(state?.lost ?? "");
+  const damaged = Number(state?.damaged ?? "");
+  return {
+    primary: Number.isFinite(primary) ? primary : 0,
+    lost: Number.isFinite(lost) ? lost : 0,
+    damaged: Number.isFinite(damaged) ? damaged : 0,
+  };
+}
+
 // Export the schema so it can be reused
 export const partialCheckinAssetsSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  /**
+   * Legacy asset-id array — kept for backward compatibility with existing
+   * scanner flows that don't carry per-asset quantities (e.g. individual
+   * assets only). Present when no `checkins` JSON payload is submitted.
+   */
+  assetIds: z.array(z.string()).min(1).optional(),
+  /**
+   * Modern per-asset disposition payload — JSON-encoded to sidestep the
+   * limits of form-encoded arrays-of-objects (same pattern the
+   * manage-assets drawer uses for its `quantities` map).
+   */
+  checkins: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value == null || value === "") return undefined;
+      try {
+        const parsed = JSON.parse(value);
+        const result = z.array(checkinDispositionSchema).safeParse(parsed);
+        if (!result.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Invalid checkin disposition payload",
+          });
+          return z.NEVER;
+        }
+        return result.data;
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "checkins is not valid JSON",
+        });
+        return z.NEVER;
+      }
+    }),
 });
 
 /**
@@ -53,8 +198,12 @@ export default function PartialCheckinDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking, partialCheckinProgress, partialCheckinDetails } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    partialCheckinProgress,
+    partialCheckinDetails,
+    qtyRemainingByAssetId,
+  } = useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
@@ -62,6 +211,29 @@ export default function PartialCheckinDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+
+  /**
+   * Per-qty-tracked-asset disposition state. Keyed by assetId. Populated
+   * on-demand when a qty-tracked asset is scanned (see effect below).
+   * Primary defaults to the remaining count so the happy-path is "scan
+   * and submit".
+   */
+  const [dispositions, setDispositions] = useState<DispositionMap>({});
+
+  const updateField = useCallback(
+    (assetId: string, field: keyof QtyDispositionState, value: string) => {
+      setDispositions((prev) => ({
+        ...prev,
+        [assetId]: {
+          primary: prev[assetId]?.primary ?? "",
+          lost: prev[assetId]?.lost ?? "",
+          damaged: prev[assetId]?.damaged ?? "",
+          [field]: value,
+        },
+      }));
+    },
+    []
+  );
 
   // Filter and prepare data for component rendering
   const assets = Object.values(items)
@@ -98,6 +270,74 @@ export default function PartialCheckinDrawer({
       ),
     ])
   );
+
+  /**
+   * Asset IDs in `assetIdsForCheckin` that are qty-tracked AND still have
+   * units to reconcile on this booking. The drawer surfaces a per-row
+   * quantity input for these and serializes them into the `checkins`
+   * JSON payload on submit.
+   */
+  const qtyTrackedIdsForCheckin = useMemo(
+    () =>
+      assetIdsForCheckin.filter((id) => {
+        const info = qtyRemainingByAssetId?.[id];
+        return !!info && info.remaining > 0;
+      }),
+    [assetIdsForCheckin, qtyRemainingByAssetId]
+  );
+
+  /**
+   * Keep the disposition map in sync with the current scan set:
+   *
+   * 1. Drop entries for assets no longer in `qtyTrackedIdsForCheckin`
+   *    (the user removed the scan via the trash icon). Without this,
+   *    re-scanning the same asset would restore its previous edited
+   *    values — confusing because the trash action is meant to "clear"
+   *    that row.
+   *
+   * 2. Seed entries for assets that are newly in the queue. Primary
+   *    input defaults to the full remaining quantity so the happy-path
+   *    is "scan and submit". Existing entries (for assets still in the
+   *    queue) are preserved so typing isn't lost as other scans arrive.
+   *
+   * We return the previous reference when nothing changed, to avoid
+   * pointless re-renders.
+   */
+  useEffect(() => {
+    if (!qtyRemainingByAssetId) return;
+    setDispositions((prev) => {
+      const inPlay = new Set(qtyTrackedIdsForCheckin);
+      let changed = false;
+      let next: DispositionMap = {};
+
+      // Keep only entries whose asset is still scanned.
+      for (const [id, state] of Object.entries(prev)) {
+        if (inPlay.has(id)) {
+          next[id] = state;
+        } else {
+          changed = true;
+        }
+      }
+
+      // Seed newly-scanned assets with their remaining quantity.
+      for (const id of qtyTrackedIdsForCheckin) {
+        if (next[id]) continue;
+        const info = qtyRemainingByAssetId[id];
+        if (!info) continue;
+        next = {
+          ...next,
+          [id]: {
+            primary: String(info.remaining),
+            lost: "",
+            damaged: "",
+          },
+        };
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [qtyTrackedIdsForCheckin, qtyRemainingByAssetId]);
 
   // Check if this would be a final check-in (all remaining assets are being checked in)
   const remainingAssetCount =
@@ -207,6 +447,42 @@ export default function PartialCheckinDrawer({
     }
   });
 
+  /**
+   * Phase 3c: qty-tracked assets that were scanned but have zero
+   * disposition entered across all inputs (primary + lost + damaged).
+   * Blocks submission — matches the existing "you must do something with
+   * this" pattern of other blockers. Resolvable either by entering a
+   * value or removing the scan.
+   */
+  const zeroDispositionQtyIds = qtyTrackedIdsForCheckin.filter((id) => {
+    const parsed = parseDispositionState(dispositions[id]);
+    return parsed.primary + parsed.lost + parsed.damaged === 0;
+  });
+  const qrIdsOfZeroDispositionQty = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item || item.type !== "asset") return false;
+      return zeroDispositionQtyIds.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+
+  /**
+   * Also flag over-return: if (primary + lost + damaged) exceeds the
+   * remaining count, the server will reject the submission. Surface it
+   * client-side so the user can fix before hitting submit.
+   */
+  const overReturnQtyIds = qtyTrackedIdsForCheckin.filter((id) => {
+    const info = qtyRemainingByAssetId?.[id];
+    if (!info) return false;
+    const parsed = parseDispositionState(dispositions[id]);
+    return parsed.primary + parsed.lost + parsed.damaged > info.remaining;
+  });
+  const qrIdsOfOverReturnQty = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item || item.type !== "asset") return false;
+      return overReturnQtyIds.includes((item?.data as any)?.id);
+    })
+    .map(([qrId]) => qrId);
+
   // Create blockers configuration
   const blockerConfigs = [
     {
@@ -277,6 +553,36 @@ export default function PartialCheckinDrawer({
       ),
       onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
     },
+    {
+      condition: zeroDispositionQtyIds.length > 0,
+      count: zeroDispositionQtyIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} quantity-tracked asset${
+            count > 1 ? "s have" : " has"
+          }`}</strong>{" "}
+          no quantity entered.
+        </>
+      ),
+      description:
+        "Enter a returned / consumed / lost / damaged quantity — or remove the scan.",
+      onResolve: () => removeItemsFromList(qrIdsOfZeroDispositionQty),
+    },
+    {
+      condition: overReturnQtyIds.length > 0,
+      count: overReturnQtyIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} quantity-tracked asset${
+            count > 1 ? "s exceed" : " exceeds"
+          }`}</strong>{" "}
+          the remaining quantity on this booking.
+        </>
+      ),
+      description:
+        "Reduce the entered values to match what's remaining — or remove the scan.",
+      onResolve: () => removeItemsFromList(qrIdsOfOverReturnQty),
+    },
   ];
 
   // Create blockers component
@@ -290,9 +596,44 @@ export default function PartialCheckinDrawer({
         ...qrIdsOfRedundantAssets,
         ...qrIdsOfAlreadyCheckedInAssets,
         ...qrIdsOfAlreadyCheckedInKits,
+        ...qrIdsOfZeroDispositionQty,
+        ...qrIdsOfOverReturnQty,
       ]);
     },
   });
+
+  /**
+   * Serialize the per-asset dispositions into the `checkins` JSON
+   * payload. Only included when at least one qty-tracked asset is in
+   * play; otherwise the form submits the legacy `assetIds` array.
+   */
+  const checkinsJson = useMemo(() => {
+    if (qtyTrackedIdsForCheckin.length === 0) return "";
+    const payload: CheckinDisposition[] = qtyTrackedIdsForCheckin.map((id) => {
+      const state = dispositions[id];
+      const parsed = parseDispositionState(state);
+      const info = qtyRemainingByAssetId?.[id];
+      const isOneWay = info?.consumptionType === "ONE_WAY";
+      return {
+        assetId: id,
+        ...(isOneWay
+          ? { consumed: parsed.primary }
+          : { returned: parsed.primary }),
+        lost: parsed.lost,
+        damaged: parsed.damaged,
+      };
+    });
+    return JSON.stringify(payload);
+  }, [qtyTrackedIdsForCheckin, dispositions, qtyRemainingByAssetId]);
+
+  const dispositionCtxValue = useMemo<DispositionContextValue>(
+    () => ({
+      dispositions,
+      qtyRemainingByAssetId: qtyRemainingByAssetId ?? {},
+      updateField,
+    }),
+    [dispositions, qtyRemainingByAssetId, updateField]
+  );
 
   // Create booking header component
   const BookingHeader = () => (
@@ -363,50 +704,53 @@ export default function PartialCheckinDrawer({
   );
 
   return (
-    <ConfigurableDrawer
-      schema={partialCheckinAssetsSchema}
-      items={items}
-      onClearItems={clearList}
-      form={
-        <CustomForm
-          assetIdsForCheckin={assetIdsForCheckin}
-          isEarlyCheckin={isEarlyCheckin}
-          booking={booking}
-          isLoading={isLoading}
-          hasBlockers={hasBlockers}
-        />
-      }
-      title={
-        <div className="text-right">
-          <span className="block text-gray-600">
-            {assetIdsForCheckin.length}/
-            {partialCheckinProgress?.uncheckedCount ||
-              booking.bookingAssets.length}{" "}
-            Assets scanned
-          </span>
-          <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
-            <Progress
-              value={
-                (assetIdsForCheckin.length /
-                  (partialCheckinProgress?.uncheckedCount ||
-                    booking.bookingAssets.length)) *
-                100
-              }
-            />
-          </span>
-        </div>
-      }
-      isLoading={isLoading}
-      renderItem={renderItemRow}
-      Blockers={Blockers}
-      defaultExpanded={defaultExpanded}
-      className={tw(
-        "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
-        className
-      )}
-      style={style}
-      headerContent={<BookingHeader />}
-    />
+    <DispositionContext.Provider value={dispositionCtxValue}>
+      <ConfigurableDrawer
+        schema={partialCheckinAssetsSchema}
+        items={items}
+        onClearItems={clearList}
+        form={
+          <CustomForm
+            assetIdsForCheckin={assetIdsForCheckin}
+            isEarlyCheckin={isEarlyCheckin}
+            booking={booking}
+            isLoading={isLoading}
+            hasBlockers={hasBlockers}
+            checkinsJson={checkinsJson}
+          />
+        }
+        title={
+          <div className="text-right">
+            <span className="block text-gray-600">
+              {assetIdsForCheckin.length}/
+              {partialCheckinProgress?.uncheckedCount ||
+                booking.bookingAssets.length}{" "}
+              Assets scanned
+            </span>
+            <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+              <Progress
+                value={
+                  (assetIdsForCheckin.length /
+                    (partialCheckinProgress?.uncheckedCount ||
+                      booking.bookingAssets.length)) *
+                  100
+                }
+              />
+            </span>
+          </div>
+        }
+        isLoading={isLoading}
+        renderItem={renderItemRow}
+        Blockers={Blockers}
+        defaultExpanded={defaultExpanded}
+        className={tw(
+          "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
+          className
+        )}
+        style={style}
+        headerContent={<BookingHeader />}
+      />
+    </DispositionContext.Provider>
   );
 }
 
@@ -497,24 +841,166 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const [, AssetAvailabilityLabels] =
     createAvailabilityLabels(availabilityConfigs);
 
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
+  const { qtyRemainingByAssetId } = useDispositionContext();
+  const qtyInfo = qtyRemainingByAssetId[asset.id] ?? null;
+  const showQtyControls =
+    !!qtyInfo && isInBooking && !isAlreadyCheckedIn && qtyInfo.remaining > 0;
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+  return (
+    <div className="flex items-start justify-between gap-3">
+      {/* Left column: asset title + badges. `min-w-0` so long titles can
+          truncate/wrap instead of pushing the disposition block off-screen. */}
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+        </p>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
+
+      {/* Right column: quantity disposition block (qty-tracked only). */}
+      {showQtyControls ? (
+        <QuantityDispositionBlock assetId={asset.id} info={qtyInfo!} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Quantity disposition block shown BELOW the asset title + badge for a
+ * QUANTITY_TRACKED asset that still has units to reconcile on the
+ * booking. Kept as its own row rather than inline next to the title —
+ * users found the inline forms confusing to read.
+ *
+ * Structure:
+ *   line 1: `Returned [input] of N` (or Consumed for ONE_WAY), ✓ when complete
+ *   line 2 (only when shortfall): Lost [input] · Damaged [input] · N pending
+ *
+ * Renders nothing for INDIVIDUAL assets, assets not in the booking, and
+ * assets already fully reconciled — the caller guards on `showQtyControls`.
+ */
+function QuantityDispositionBlock({
+  assetId,
+  info,
+}: {
+  assetId: string;
+  info: NonNullable<DispositionContextValue["qtyRemainingByAssetId"][string]>;
+}) {
+  const { dispositions, updateField } = useDispositionContext();
+  const state = dispositions[assetId] ?? { primary: "", lost: "", damaged: "" };
+  const parsed = parseDispositionState(state);
+  const total = parsed.primary + parsed.lost + parsed.damaged;
+  const pending = Math.max(0, info.remaining - total);
+  const isOverLimit = total > info.remaining;
+  const isFullyReturned = !isOverLimit && parsed.primary === info.remaining;
+  const shortfallVisible =
+    parsed.primary < info.remaining || parsed.lost > 0 || parsed.damaged > 0;
+
+  const primaryLabel =
+    info.consumptionType === "ONE_WAY" ? "Consumed" : "Returned";
+
+  const numInput = tw(
+    "w-14 rounded-md border px-2 py-1 text-right text-sm tabular-nums",
+    "focus:outline-none focus:ring-1 focus:ring-primary-500",
+    "[appearance:textfield]",
+    "[&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none",
+    "[&::-webkit-outer-spin-button]:appearance-none",
+    isOverLimit
+      ? "border-error-400 text-error-600"
+      : "border-gray-200 text-gray-900"
+  );
+
+  return (
+    <div
+      className={tw(
+        // Fixed-ish width so the left column (title + badges) gets the flex
+        // remainder; shrink-0 prevents the inputs from squishing when the
+        // title wraps.
+        "w-64 shrink-0 rounded-md border bg-white px-3 py-2",
+        isOverLimit ? "border-error-200 bg-error-50/40" : "border-gray-200"
+      )}
+    >
+      {/* Primary row: Returned/Consumed [input] of N  [✓ on happy path] */}
+      <label className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-gray-700">
+          {primaryLabel}
+        </span>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={info.remaining}
+            step={1}
+            value={state.primary}
+            onChange={(e) => updateField(assetId, "primary", e.target.value)}
+            inputMode="numeric"
+            aria-label={`${primaryLabel} quantity`}
+            className={numInput}
+          />
+          <span className="text-xs tabular-nums text-gray-500">
+            of {info.remaining}
+          </span>
+          {isFullyReturned ? (
+            <CheckIcon className="size-3.5 text-emerald-500" />
+          ) : null}
+        </div>
+      </label>
+
+      {/* Shortfall row — appears when primary < remaining OR user has
+          typed in lost/damaged. Compact horizontal layout, inputs aligned
+          on the right to match the primary. */}
+      {shortfallVisible ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-gray-100 pt-2 text-xs">
+          <label className="flex items-center gap-2">
+            <span className="text-gray-600">Lost</span>
+            <input
+              type="number"
+              min={0}
+              max={info.remaining}
+              step={1}
+              value={state.lost}
+              onChange={(e) => updateField(assetId, "lost", e.target.value)}
+              inputMode="numeric"
+              aria-label="Lost quantity"
+              className={tw(numInput, "w-12")}
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="text-gray-600">Damaged</span>
+            <input
+              type="number"
+              min={0}
+              max={info.remaining}
+              step={1}
+              value={state.damaged}
+              onChange={(e) => updateField(assetId, "damaged", e.target.value)}
+              inputMode="numeric"
+              aria-label="Damaged quantity"
+              className={tw(numInput, "w-12")}
+            />
+          </label>
+          <span
+            className="ml-auto italic text-gray-500"
+            title="Units left for a future check-in session"
+          >
+            <span className="font-medium not-italic tabular-nums text-gray-700">
+              {pending}
+            </span>{" "}
+            pending
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -645,6 +1131,13 @@ type CustomFormProps = {
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   isLoading?: boolean;
   hasBlockers: boolean;
+  /**
+   * JSON-encoded per-asset disposition payload for QUANTITY_TRACKED
+   * assets. Empty string when the booking has no qty-tracked assets in
+   * play, in which case the form submits only the legacy `assetIds`
+   * array.
+   */
+  checkinsJson: string;
 };
 
 const CustomForm = ({
@@ -653,6 +1146,7 @@ const CustomForm = ({
   booking,
   isLoading,
   hasBlockers,
+  checkinsJson,
 }: CustomFormProps) => {
   /** Use state instead of ref so the component re-renders once the form
    * mounts — this guarantees portalContainer is always the real DOM node
@@ -676,6 +1170,10 @@ const CustomForm = ({
             value={assetId}
           />
         ))}
+
+        {checkinsJson ? (
+          <input type="hidden" name="checkins" value={checkinsJson} />
+        ) : null}
 
         {/* Cancel button */}
         <Button type="button" variant="secondary" to=".." className="ml-auto">

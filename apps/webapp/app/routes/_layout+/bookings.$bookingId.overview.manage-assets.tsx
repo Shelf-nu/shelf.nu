@@ -35,6 +35,7 @@ import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
+import { ConsumptionTypeBadge } from "~/components/assets/consumption-type-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -112,6 +113,15 @@ export type AssetWithBooking = Asset & {
   qrScanned: string;
   /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
   bookedQuantity?: number | null;
+  /**
+   * Units already dispositioned on this booking via check-in activity —
+   * sum of `RETURN + CONSUME + LOSS + DAMAGE` ConsumptionLog rows for
+   * this (booking, asset) pair. Used by the booking overview to render
+   * the "Partially checked in" status and the `remaining / booked` qty
+   * progress indicator. 0 when no check-in activity has happened yet.
+   * Only meaningful for QUANTITY_TRACKED assets.
+   */
+  dispositionedQuantity?: number | null;
 };
 
 export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
@@ -632,6 +642,47 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (submitted != null && submitted !== current) {
         changedQuantities[assetId] = submitted;
         changedAssetIds.push(assetId);
+      }
+    }
+
+    /**
+     * Phase 3c guardrail: for any qty-tracked asset whose quantity is
+     * being reduced, make sure the new value isn't lower than the sum of
+     * what's already been dispositioned via ConsumptionLog (RETURN /
+     * CONSUME / LOSS / DAMAGE) for this booking.
+     *
+     * Without this check, remaining = BookingAsset.quantity − Σ(logs)
+     * could go negative and the check-in math would break.
+     */
+    if (changedAssetIds.length > 0) {
+      const loggedSums = await db.consumptionLog.groupBy({
+        by: ["assetId"],
+        where: {
+          bookingId,
+          assetId: { in: changedAssetIds },
+          category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+        },
+        _sum: { quantity: true },
+      });
+      const loggedByAsset = new Map<string, number>(
+        loggedSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
+      );
+      for (const assetId of changedAssetIds) {
+        const logged = loggedByAsset.get(assetId) ?? 0;
+        const newQty = changedQuantities[assetId];
+        if (logged > 0 && newQty < logged) {
+          const ba = existingBookingAssetMap.get(assetId);
+          const title = ba?.asset?.title ?? "asset";
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Booking",
+            message: `Cannot reduce booked quantity for "${title}" below ${logged} — ${logged} unit${
+              logged === 1 ? " has" : "s have"
+            } already been dispositioned on this booking.`,
+            shouldBeCaptured: false,
+          });
+        }
       }
     }
 
@@ -1200,16 +1251,21 @@ const RowComponent = ({
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}{" "}
               </p>
-              <div className="flex flex-row gap-x-2">
+              <div className="flex flex-row flex-wrap items-center gap-x-2 gap-y-1">
                 {isQuantityTracked(item) ? (
-                  <Badge
-                    color={BADGE_COLORS.blue.bg}
-                    textColor={BADGE_COLORS.blue.text}
-                    withDot={false}
-                  >
-                    Qty tracked · {item.availableQuantity ?? item.quantity}{" "}
-                    available
-                  </Badge>
+                  <>
+                    <Badge
+                      color={BADGE_COLORS.blue.bg}
+                      textColor={BADGE_COLORS.blue.text}
+                      withDot={false}
+                    >
+                      Qty tracked · {item.availableQuantity ?? item.quantity}{" "}
+                      available
+                    </Badge>
+                    <ConsumptionTypeBadge
+                      consumptionType={item.consumptionType ?? null}
+                    />
+                  </>
                 ) : (
                   <>
                     <AssetStatusBadge

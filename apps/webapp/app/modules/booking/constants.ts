@@ -91,6 +91,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           id: true,
           title: true,
           type: true,
+          consumptionType: true,
+          unitOfMeasure: true,
           availableToBook: true,
           status: true,
           kitId: true,
