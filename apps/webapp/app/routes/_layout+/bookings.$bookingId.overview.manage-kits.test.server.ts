@@ -92,10 +92,15 @@ describe("manage-kits route validation", () => {
     updatedAt: new Date(),
   } as any;
 
+  // Phase 3a renamed the implicit M2M to the explicit BookingAsset pivot;
+  // the action reads `booking.bookingAssets` now, so the mock shape follows.
   const mockBooking = {
     id: "booking123",
     status: BookingStatus.ONGOING,
-    assets: [{ id: "asset1" }, { id: "asset2" }],
+    bookingAssets: [
+      { asset: { id: "asset1" }, assetId: "asset1", quantity: 1, id: "ba1" },
+      { asset: { id: "asset2" }, assetId: "asset2", quantity: 1, id: "ba2" },
+    ],
     from: new Date(),
     to: new Date(),
     name: "Test Booking",
@@ -188,7 +193,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         {},
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
@@ -294,7 +300,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
@@ -473,7 +480,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"]) // existing booking asset IDs
+        new Set(["asset1", "asset2"]), // existing booking asset IDs
+        BookingStatus.ONGOING
       );
     });
   });

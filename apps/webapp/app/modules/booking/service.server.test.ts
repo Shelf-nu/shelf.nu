@@ -4,9 +4,12 @@ import {
   AssetType,
   KitStatus,
   OrganizationRoles,
+  ConsumptionType,
 } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
+import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -34,6 +37,9 @@ import {
   extendBooking,
   removeAssets,
   getOngoingBookingForAsset,
+  // Phase 3c helpers
+  computeBookingAssetRemaining,
+  isBookingFullyCheckedIn,
   // Test helper functions
   getActionTextFromTransition,
   getSystemActionText,
@@ -120,6 +126,26 @@ vitest.mock("~/database/db.server", () => ({
     },
     bookingAsset: {
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
+      update: vitest.fn().mockResolvedValue({}),
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      groupBy: vitest.fn().mockResolvedValue([]),
+      // why: Phase 3c qty-tracked flows call tx.bookingAsset.count when
+      // deciding whether a shared pool can flip back to AVAILABLE.
+      count: vitest.fn().mockResolvedValue(0),
+    },
+    consumptionLog: {
+      create: vitest.fn().mockResolvedValue({}),
+      findMany: vitest.fn().mockResolvedValue([]),
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
+    // why: Phase 3c pool-drain guard aggregates and counts custody rows
+    // to refuse decrements that would leave team members uncovered.
+    custody: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      count: vitest.fn().mockResolvedValue(0),
     },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -156,6 +182,31 @@ vitest.mock("~/modules/user/service.server", () => ({
     lastName: "User",
   }),
 }));
+
+// why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
+// can't express cleanly — stub the helper to return a minimal asset
+// stub. Tests override the return per-asset as needed.
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vitest.fn().mockResolvedValue({
+    id: "asset-qty-default",
+    title: "Default Asset",
+    quantity: 0,
+  }),
+}));
+
+// why: partial-mock so real helpers (computeBookingAvailableQuantity and
+// friends) keep their behavior, but ConsumptionLog writes are stubbed so
+// we can assert on calls without running real Prisma writes.
+vitest.mock(
+  "~/modules/consumption-log/service.server",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof consumptionLogService>();
+    return {
+      ...actual,
+      createConsumptionLog: vitest.fn().mockResolvedValue({}),
+    };
+  }
+);
 
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
@@ -390,19 +441,19 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: null },
+          asset: { id: "asset-1", kitId: null, type: AssetType.INDIVIDUAL },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
         },
         {
-          asset: { id: "asset-2", kitId: null },
+          asset: { id: "asset-2", kitId: null, type: AssetType.INDIVIDUAL },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-2",
         },
         {
-          asset: { id: "asset-3", kitId: null },
+          asset: { id: "asset-3", kitId: null, type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-3",
@@ -423,11 +474,33 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
 
+    // why: isBookingFullyCheckedIn reads tx.bookingAsset.findMany to decide
+    // the ONGOING→COMPLETE transition. Returning the 3 booking assets keeps
+    // the booking in the partial (non-complete) branch so txResult.booking
+    // resolves to bookingWithAssets (with name set) and the note block
+    // succeeds. Also feeds the post-tx "outstanding" count.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      { assetId: "asset-1", asset: { type: AssetType.INDIVIDUAL } },
+      { assetId: "asset-2", asset: { type: AssetType.INDIVIDUAL } },
+      { assetId: "asset-3", asset: { type: AssetType.INDIVIDUAL } },
+    ]);
+
+    // why: so isBookingFullyCheckedIn sees asset-1 and asset-2 as reconciled
+    // (and asset-3 as still outstanding) — keeps the booking at "partial"
+    // and makes remainingAssetCount resolve to 1.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1", "asset-2"] },
+    ]);
+
     const result = await partialCheckinBooking(mockPartialCheckinParams);
 
-    // Verify assets status updated (only INDIVIDUAL assets get status reset)
+    // Verify assets status updated (only INDIVIDUAL assets get status reset).
+    // The service filters by type in JS now (Phase 3c), so the where clause
+    // just has the individual asset IDs.
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] }, type: AssetType.INDIVIDUAL },
+      where: { id: { in: ["asset-1", "asset-2"] } },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -441,10 +514,11 @@ describe("partialCheckinBooking", () => {
       },
     });
 
-    // Verify notes created
+    // Verify notes created — individual-asset note includes a markdoc
+    // link back to the booking (post-Phase 3c wording).
     expect(noteService.createNotes).toHaveBeenCalledWith({
       content:
-        '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
+        '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in on {% link to="/bookings/booking-1" text="Test Booking" /%}.',
       type: "UPDATE",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
@@ -543,19 +617,19 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: "kit-1" },
+          asset: { id: "asset-1", kitId: "kit-1", type: AssetType.INDIVIDUAL },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t2",
         },
         {
-          asset: { id: "asset-2", kitId: "kit-1" },
+          asset: { id: "asset-2", kitId: "kit-1", type: AssetType.INDIVIDUAL },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t3",
         },
         {
-          asset: { id: "asset-3", kitId: null },
+          asset: { id: "asset-3", kitId: null, type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t4",
@@ -3513,5 +3587,689 @@ describe("getOngoingBookingForAsset", () => {
       },
     });
     expect(result).toEqual(checkedOutBooking);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                  Phase 3c — Quantity-aware check-in tests                  */
+/* -------------------------------------------------------------------------- */
+
+describe("computeBookingAssetRemaining", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("returns booked minus logged sum across disposition categories", async () => {
+    expect.assertions(1);
+
+    // why: pivot row exists for this (booking, asset) pair with 10 booked.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    // why: aggregate of RETURN+CONSUME+LOSS+DAMAGE logs totals 3 units.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+
+    const remaining = await computeBookingAssetRemaining(
+      db,
+      "booking-1",
+      "asset-1"
+    );
+
+    expect(remaining).toBe(7);
+  });
+
+  it("clamps to zero when logs exceed booked quantity", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 5 });
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 8 } });
+
+    const remaining = await computeBookingAssetRemaining(
+      db,
+      "booking-1",
+      "asset-1"
+    );
+
+    expect(remaining).toBe(0);
+  });
+
+  it("returns booked quantity when no disposition logs exist", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    // why: Prisma _sum returns null when the aggregated set is empty.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: null } });
+
+    const remaining = await computeBookingAssetRemaining(
+      db,
+      "booking-1",
+      "asset-1"
+    );
+
+    expect(remaining).toBe(10);
+  });
+
+  it("returns zero when the bookingAsset pivot row is missing", async () => {
+    expect.assertions(1);
+
+    // why: defends against asset removed from booking between read+write.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    const remaining = await computeBookingAssetRemaining(
+      db,
+      "booking-1",
+      "asset-1"
+    );
+
+    expect(remaining).toBe(0);
+  });
+});
+
+describe("isBookingFullyCheckedIn", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("returns true when individuals are reconciled and qty-tracked remaining is zero", async () => {
+    expect.assertions(1);
+
+    // why: mixed booking with one INDIVIDUAL (asset-1) and one
+    // QUANTITY_TRACKED (asset-2) asset.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        assetId: "asset-1",
+        quantity: 1,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        assetId: "asset-2",
+        quantity: 10,
+        asset: { id: "asset-2", type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    // why: asset-1 is in a session → individual-side reconciled.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
+    // why: computeBookingAssetRemaining reads findUnique + aggregate.
+    // Booked 10 − logged 10 → remaining 0 for asset-2.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 10 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("returns false when an individual asset is missing from every session", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        assetId: "asset-1",
+        quantity: 1,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        assetId: "asset-2",
+        quantity: 1,
+        asset: { id: "asset-2", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: only asset-1 is reconciled; asset-2 is still pending.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("returns false when a qty-tracked asset still has remaining units", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        quantity: 10,
+        asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    // why: booked 10 − logged 3 → 7 still outstanding.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("returns true when the booking has no assets at all (short-circuit)", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+});
+
+describe("partialCheckinBooking — qty-tracked dispositions", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: clearAllMocks clears call history but not `mockResolvedValue`
+    // implementations. Tests in this block mutate several shared mocks
+    // (bookingAsset.findMany, consumptionLog.aggregate, etc.) — reset
+    // them to their original "empty" defaults so ordering doesn't leak.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue(null);
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.booking.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
+    (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+  });
+
+  /** Booking id + common params reused across scenarios in this block. */
+  const mockQtyBookingId = "booking-q1";
+  const mockQtyAssetId = "asset-pens";
+
+  /**
+   * Minimal booking skeleton for qty-tracked flows. One QUANTITY_TRACKED
+   * asset (Pens) with a booked quantity of 10 on a pool of 100.
+   */
+  const makeQtyBooking = () => ({
+    id: mockQtyBookingId,
+    name: "Qty Booking",
+    status: BookingStatus.ONGOING,
+    organizationId: "org-1",
+    creatorId: "user-1",
+    custodianUserId: "user-1",
+    custodianTeamMemberId: null,
+    bookingAssets: [
+      {
+        assetId: mockQtyAssetId,
+        quantity: 10,
+        asset: {
+          id: mockQtyAssetId,
+          type: AssetType.QUANTITY_TRACKED,
+          kitId: null,
+        },
+      },
+    ],
+  });
+
+  /** Shared base params; individual tests override `checkins`. */
+  const baseParams = {
+    id: mockQtyBookingId,
+    organizationId: "org-1",
+    userId: "user-1",
+    hints: mockClientHints,
+  };
+
+  /**
+   * Sets up the common mocks for qty-tracked partial-checkin flows.
+   * - lockAssetForQuantityUpdate returns a Pens asset with pool=100
+   * - booking.findUniqueOrThrow returns the qty booking shell
+   * - bookingAsset.findUnique returns `quantity: 10` (booked on booking)
+   * - consumptionLog.aggregate returns `{_sum: {quantity: 0}}` (no logs yet)
+   *
+   * @param overrides - optional per-test overrides
+   */
+  function setupQtyMocks(
+    overrides: {
+      pool?: number;
+      logged?: number;
+      custodySum?: number;
+    } = {}
+  ) {
+    const pool = overrides.pool ?? 100;
+    const logged = overrides.logged ?? 0;
+    const custodySum = overrides.custodySum ?? 0;
+
+    // why: returns the stable "Pens" stub used by every qty-tracked test.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: mockQtyAssetId,
+      title: "Pens",
+      quantity: pool,
+    });
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(makeQtyBooking());
+
+    // why: booked 10 units on this booking.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+
+    // why: logged-so-far aggregate controls `remaining = 10 − logged`.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({
+      _sum: { quantity: logged },
+    });
+
+    // why: pool-drain guard reads custody aggregate sum.
+    //@ts-expect-error missing vitest type
+    db.custody.aggregate.mockResolvedValue({
+      _sum: { quantity: custodySum },
+    });
+  }
+
+  it("writes a single RETURN log for TWO_WAY when returned equals remaining", async () => {
+    expect.assertions(3);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    // One RETURN log for the full remaining quantity.
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 10,
+        bookingId: mockQtyBookingId,
+      })
+    );
+    // RETURN never touches Asset.quantity (pool stays put).
+    expect(db.asset.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+    // Booking flipped to COMPLETE because remaining hit zero.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+      })
+    );
+  });
+
+  it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
+    expect.assertions(5);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 3, damaged: 2 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 5 })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "LOSS", quantity: 3 })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "DAMAGE", quantity: 2 })
+    );
+    // Pool decrement = lost (3) + damaged (2) = 5. RETURN is excluded.
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 5 } },
+    });
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+      })
+    );
+  });
+
+  it("keeps booking ONGOING when the payload leaves units pending", async () => {
+    expect.assertions(3);
+
+    setupQtyMocks();
+
+    // why: isBookingFullyCheckedIn reads tx.bookingAsset.findMany to decide
+    // the COMPLETE transition. Return our qty-tracked asset so the helper
+    // actually evaluates remaining instead of short-circuiting on empty.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        assetId: mockQtyAssetId,
+        quantity: 10,
+        asset: { id: mockQtyAssetId, type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+
+    // why: sequence consumptionLog.aggregate across the three calls in
+    // the service so remaining progresses as:
+    //   1. pre-lock check   → logged 0 → remaining 10
+    //   2. post-lock re-query → logged 0 → remaining 10, claimed 8 OK
+    //   3. isBookingFullyCheckedIn → logged 8 → remaining 2 → NOT complete
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce({ _sum: { quantity: 0 } })
+      .mockResolvedValueOnce({ _sum: { quantity: 0 } })
+      .mockResolvedValueOnce({ _sum: { quantity: 8 } });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      // 5 + 2 + 1 = 8 of 10 remaining → 2 still pending.
+      checkins: [{ assetId: mockQtyAssetId, returned: 5, lost: 2, damaged: 1 }],
+    });
+
+    // Pool decrement = lost (2) + damaged (1) = 3.
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 3 } },
+    });
+
+    // Booking must NOT flip to COMPLETE while units remain pending.
+    const bookingUpdateCalls = (
+      db.booking.update as ReturnType<typeof vitest.fn>
+    ).mock.calls;
+    const flippedToComplete = bookingUpdateCalls.some(
+      (callArgs) => callArgs[0]?.data?.status === BookingStatus.COMPLETE
+    );
+    expect(flippedToComplete).toBe(false);
+
+    // PartialBookingCheckin session row is still created (session log).
+    expect(db.partialBookingCheckin.create).toHaveBeenCalled();
+  });
+
+  it("writes a CONSUME log and decrements pool for ONE_WAY consumed", async () => {
+    expect.assertions(3);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 10 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", quantity: 10 })
+    );
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 10 } },
+    });
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+      })
+    );
+  });
+
+  it("rejects over-return when claimed exceeds remaining", async () => {
+    expect.assertions(3);
+
+    // why: booked 10, logged 0 → remaining 10. Claimed 12 should fail.
+    setupQtyMocks();
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 12 }],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // No log writes and no pool decrement on rejection.
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the pool-drain guard trips (projected < custody sum)", async () => {
+    expect.assertions(3);
+
+    // why: pool=10, custody holds 8, user tries to remove 5 →
+    // projected (5) < inCustody (8). Must reject.
+    setupQtyMocks({ pool: 10, custodySum: 8 });
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, lost: 5 }],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty payload (no checkins and no assetIds)", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [],
+        assetIds: [],
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("checkinBooking — qty-tracked auto-default", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: reset mocks mutated by earlier describe blocks so test order
+    // doesn't leak return values between qty-tracked scenarios.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue(null);
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.booking.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
+    (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({});
+  });
+
+  const mockBookingId = "booking-c1";
+  const mockQtyAssetId = "asset-pens";
+
+  /**
+   * Build a booking shell with one QUANTITY_TRACKED asset. `consumptionType`
+   * drives whether the auto-default is RETURN (TWO_WAY) or CONSUME (ONE_WAY).
+   */
+  function makeBooking(consumptionType: ConsumptionType) {
+    return {
+      id: mockBookingId,
+      name: "Auto Checkin",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFromDate,
+      to: futureToDate,
+      bookingAssets: [
+        {
+          assetId: mockQtyAssetId,
+          quantity: 10,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            consumptionType,
+            title: "Pens",
+            kitId: null,
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              {
+                booking: {
+                  id: mockBookingId,
+                  status: BookingStatus.ONGOING,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      partialCheckins: [],
+    };
+  }
+
+  const baseParams = {
+    id: mockBookingId,
+    organizationId: "org-1",
+    userId: "user-1",
+    hints: mockClientHints,
+  };
+
+  /**
+   * Wire up the common mocks for checkinBooking qty-tracked paths.
+   *
+   * @param consumptionType - drives the auto-default branch
+   * @param pool - starting `Asset.quantity` (defaults to 100)
+   */
+  function setupCheckinMocks(consumptionType: ConsumptionType, pool = 100) {
+    const booking = makeBooking(consumptionType);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    // why: booked 10 units, zero logged so remaining = 10.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: mockQtyAssetId,
+      title: "Pens",
+      quantity: pool,
+    });
+  }
+
+  it("auto-defaults to CONSUME for ONE_WAY assets and decrements the pool", async () => {
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+
+    await checkinBooking(baseParams);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "CONSUME",
+        quantity: 10,
+        bookingId: mockBookingId,
+      })
+    );
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 10 } },
+    });
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+      })
+    );
+  });
+
+  it("auto-defaults to RETURN for TWO_WAY assets and leaves the pool untouched", async () => {
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+
+    await checkinBooking(baseParams);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 10,
+      })
+    );
+    // RETURN must NOT decrement Asset.quantity.
+    expect(db.asset.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: expect.anything() }),
+      })
+    );
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+      })
+    );
+  });
+
+  it("uses an explicit disposition when provided, overriding the auto-default", async () => {
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+
+    await checkinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, lost: 10 }],
+    });
+
+    // Only a LOSS log — no RETURN or CONSUME auto-fill.
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "LOSS", quantity: 10 })
+    );
+    const calls = (
+      consumptionLogService.createConsumptionLog as ReturnType<typeof vitest.fn>
+    ).mock.calls;
+    const categoriesLogged = calls.map(
+      (callArgs) => callArgs[0]?.category as string | undefined
+    );
+    expect(categoriesLogged).not.toContain("RETURN");
+    // Pool decrement = lost (10).
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 10 } },
+    });
   });
 });
