@@ -14,6 +14,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -107,35 +108,57 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /**
-     * Validate the requested quantity doesn't exceed availability.
-     * Exclude the current booking so its existing reservation isn't
-     * double-counted.
-     */
-    const availability = await computeBookingAvailableQuantity(
-      assetId,
-      bookingId
-    );
-
-    if (quantity > availability.available) {
-      throw new ShelfError({
-        cause: null,
-        message: `Cannot reserve ${quantity} units of "${bookingAsset.asset.title}". Only ${availability.available} available.`,
-        label: "Booking",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-
-    /**
      * Capture the previous quantity before updating so the activity note
      * can show the "from X → to Y" delta. If the quantity didn't actually
      * change we skip the note write below.
+     *
+     * Declared outside the transaction so the activity-notes block (which
+     * intentionally lives outside the tx) can reference it.
      */
-    const previousQuantity = bookingAsset.quantity;
+    let previousQuantity = bookingAsset.quantity;
 
-    await db.bookingAsset.update({
-      where: { id: bookingAsset.id },
-      data: { quantity },
+    /**
+     * Validate availability and persist the new quantity atomically.
+     *
+     * We lock the asset row with `SELECT ... FOR UPDATE` before reading
+     * availability so two concurrent adjust requests against the same
+     * qty-tracked asset (even from different bookings) are serialized.
+     * Without the lock, both callers can read the same stale availability
+     * snapshot, each pass their own guard, and both commit — oversubscribing
+     * the pool.
+     *
+     * `computeBookingAvailableQuantity` intentionally keeps its original
+     * signature and uses the default `db` client. The row lock held by
+     * this transaction blocks concurrent writers; read-committed isolation
+     * then returns correct values for the availability computation.
+     *
+     * Exclude the current booking so its existing reservation isn't
+     * double-counted.
+     */
+    await db.$transaction(async (tx) => {
+      await lockAssetForQuantityUpdate(tx, assetId);
+
+      const availability = await computeBookingAvailableQuantity(
+        assetId,
+        bookingId
+      );
+
+      if (quantity > availability.available) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot reserve ${quantity} units of "${bookingAsset.asset.title}". Only ${availability.available} available.`,
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
+      previousQuantity = bookingAsset.quantity;
+
+      await tx.bookingAsset.update({
+        where: { id: bookingAsset.id },
+        data: { quantity },
+      });
     });
 
     /**

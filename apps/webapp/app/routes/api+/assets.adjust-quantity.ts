@@ -33,17 +33,36 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-/** Zod schema for the adjust-quantity request body. */
-export const AdjustQuantitySchema = z.object({
-  assetId: z.string(),
-  quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
-  category: z.enum(["RESTOCK", "ADJUSTMENT", "LOSS"]),
-  direction: z.enum(["add", "subtract"]),
-  note: z
-    .string()
-    .optional()
-    .transform((val) => (val === "" ? undefined : val)),
-});
+/**
+ * Zod schema for the adjust-quantity request body.
+ *
+ * The `.refine` enforces the documented category/direction pairing so that the
+ * `ConsumptionLog` row category can never contradict the sign of the quantity
+ * change. RESTOCK must always add, LOSS must always subtract, ADJUSTMENT can
+ * go either way.
+ */
+export const AdjustQuantitySchema = z
+  .object({
+    assetId: z.string(),
+    quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
+    category: z.enum(["RESTOCK", "ADJUSTMENT", "LOSS"]),
+    direction: z.enum(["add", "subtract"]),
+    note: z
+      .string()
+      .optional()
+      .transform((val) => (val === "" ? undefined : val)),
+  })
+  .refine(
+    ({ category, direction }) =>
+      category === "ADJUSTMENT" ||
+      (category === "RESTOCK" && direction === "add") ||
+      (category === "LOSS" && direction === "subtract"),
+    {
+      message:
+        "Invalid category/direction combination — RESTOCK must add, LOSS must subtract.",
+      path: ["direction"],
+    }
+  );
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

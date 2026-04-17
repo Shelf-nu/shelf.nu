@@ -327,6 +327,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Runtime validation schema for the decoded `quantities` payload.
+ *
+ * The form submits quantities as a JSON-encoded string (see the hidden
+ * input in the footer form), so after `JSON.parse` we still need to
+ * validate the shape to reject negative, zero, non-integer, Infinity,
+ * or absurdly large values — any of which would otherwise flow into
+ * `BookingAsset.quantity` via the raw SQL upsert in `updateBookingAssets`
+ * and break availability math and check-in accounting.
+ *
+ * Upper bound of 1,000,000 is a sanity cap; real bookings never come
+ * close to this.
+ */
+const quantitiesSchema = z.record(
+  z.string(),
+  z.number().int().positive().max(1_000_000)
+);
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -362,12 +380,52 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
 
     /**
-     * Parse the quantities JSON string into a Record<string, number>.
-     * Falls back to an empty object if not provided or malformed.
+     * Parse and validate the quantities JSON string into a
+     * Record<string, number>. A blind cast here is unsafe because any
+     * authenticated user with `booking.update` could submit negative,
+     * zero, non-integer, Infinity, or absurdly large values that would
+     * then persist to `BookingAsset.quantity` and break availability
+     * math + check-in accounting.
+     *
+     * We:
+     *   1. `JSON.parse` inside a try/catch so malformed JSON becomes a
+     *      clean 400 instead of a 500 from an uncaught SyntaxError.
+     *   2. Run the parsed value through `quantitiesSchema` so each
+     *      entry is guaranteed to be a positive integer within a sane
+     *      upper bound (see schema above).
+     *
+     * Both failure branches throw a ShelfError, which the outer
+     * try/catch converts into the action's standard 400 JSON response
+     * via `makeShelfError` + `data(error(reason), { status })`.
      */
-    const quantities: Record<string, number> = rawQuantities
-      ? (JSON.parse(rawQuantities) as Record<string, number>)
-      : {};
+    let quantities: Record<string, number> = {};
+    if (rawQuantities) {
+      try {
+        const parsed = JSON.parse(rawQuantities);
+        const result = quantitiesSchema.safeParse(parsed);
+        if (!result.success) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Booking",
+            message:
+              "Invalid quantities payload — each quantity must be a positive integer.",
+            additionalData: { issues: result.error.issues },
+            shouldBeCaptured: false,
+          });
+        }
+        quantities = result.data;
+      } catch (cause) {
+        if (cause instanceof ShelfError) throw cause;
+        throw new ShelfError({
+          cause,
+          status: 400,
+          label: "Booking",
+          message: "Invalid quantities JSON — could not parse.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
 
     /**
      * If user has selected all assets, then we have to get ids of all those assets

@@ -17,7 +17,10 @@
  */
 
 import type { ConsumptionCategory, Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import {
+  BookingStatus,
+  ConsumptionCategory as ConsumptionCategoryEnum,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -254,8 +257,14 @@ export async function computeAvailableQuantity(
  *
  * Available = Total - InCustody - Reserved
  *
- * Where Reserved = sum of BookingAsset.quantity for bookings
- * with status RESERVED, ONGOING, or OVERDUE.
+ * Where Reserved = sum, across bookings with status RESERVED, ONGOING, or
+ * OVERDUE, of each booking's *remaining* reserved quantity for this asset.
+ * Remaining is computed as `BookingAsset.quantity` minus any already-logged
+ * disposition quantities (RETURN, CONSUME, LOSS, DAMAGE) from partial
+ * check-ins — since Phase 3c partial check-in writes ConsumptionLog rows
+ * without decrementing `BookingAsset.quantity`, the pivot stays at the
+ * booked qty by design and we must subtract logged dispositions here.
+ * Per-booking remaining is clamped at 0 as defence-in-depth.
  *
  * This is the booking-aware counterpart of {@link computeAvailableQuantity},
  * which only considers custody. Use this function when you need to know how
@@ -276,7 +285,7 @@ export async function computeBookingAvailableQuantity(
     /** Reuse existing custody-based availability calculation */
     const { total, inCustody } = await computeAvailableQuantity(assetId);
 
-    /** Build the where clause for summing reserved booking quantities */
+    /** Build the where clause for selecting active reservations */
     const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
       assetId,
       booking: {
@@ -295,12 +304,68 @@ export async function computeBookingAvailableQuantity(
       bookingAssetWhere.bookingId = { not: excludeBookingId };
     }
 
-    const reservedSum = await db.bookingAsset.aggregate({
+    /**
+     * Fetch the reserved pivot rows for this asset across active bookings.
+     * We need individual rows (not an aggregate) so we can subtract the
+     * per-booking logged disposition quantities before summing.
+     */
+    const reservedRows = await db.bookingAsset.findMany({
       where: bookingAssetWhere,
-      _sum: { quantity: true },
+      select: { bookingId: true, assetId: true, quantity: true },
     });
 
-    const reserved = reservedSum._sum?.quantity ?? 0;
+    let reserved = 0;
+
+    if (reservedRows.length > 0) {
+      const bookingIds = reservedRows.map((r) => r.bookingId);
+
+      /**
+       * Sum already-logged disposition quantities per booking for this
+       * asset. Dispositions are terminal for reserved units:
+       *   - RETURN   — unit came back to stock
+       *   - CONSUME  — unit consumed (permanently out)
+       *   - LOSS     — unit reported lost
+       *   - DAMAGE   — unit reported damaged
+       * CHECKOUT is intentionally excluded: it represents a handoff into
+       * custody, not a reduction of the booking's reservation footprint.
+       */
+      const loggedGroups = await db.consumptionLog.groupBy({
+        by: ["bookingId"],
+        where: {
+          assetId,
+          bookingId: { in: bookingIds },
+          category: {
+            in: [
+              ConsumptionCategoryEnum.RETURN,
+              ConsumptionCategoryEnum.CONSUME,
+              ConsumptionCategoryEnum.LOSS,
+              ConsumptionCategoryEnum.DAMAGE,
+            ],
+          },
+        },
+        _sum: { quantity: true },
+      });
+
+      /** bookingId → total logged disposition quantity for this asset */
+      const loggedByBookingId = new Map<string, number>();
+      for (const group of loggedGroups) {
+        if (group.bookingId) {
+          loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
+        }
+      }
+
+      /**
+       * For each active reservation, subtract the logged dispositions from
+       * the booked quantity. Clamp at 0 per row so an over-logged booking
+       * (should not happen, but defence-in-depth) can't push `reserved`
+       * negative and silently inflate availability elsewhere.
+       */
+      for (const row of reservedRows) {
+        const logged = loggedByBookingId.get(row.bookingId) ?? 0;
+        const remaining = Math.max(0, row.quantity - logged);
+        reserved += remaining;
+      }
+    }
 
     return {
       total,
@@ -384,7 +449,24 @@ export async function adjustQuantity({
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
       const asset = await lockAssetForQuantityUpdate(tx, assetId);
 
-      /** Step 2: Validate the asset is quantity-tracked */
+      /**
+       * Step 2: Validate asset belongs to the caller's organization.
+       * Prevents cross-tenant IDOR: without this guard, any authenticated
+       * user with `asset:update` in any org could mutate another org's
+       * qty-tracked asset by passing its id. Mirrors the pattern used in
+       * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+       */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /** Step 3: Validate the asset is quantity-tracked */
       if (asset.type !== "QUANTITY_TRACKED") {
         throw new ShelfError({
           cause: null,
@@ -397,7 +479,7 @@ export async function adjustQuantity({
 
       const currentQuantity = asset.quantity ?? 0;
 
-      /** Step 3: For subtraction, ensure the new total doesn't drop below in-custody */
+      /** Step 4: For subtraction, ensure the new total doesn't drop below in-custody */
       if (direction === "subtract") {
         const custodySum = await tx.custody.aggregate({
           where: { assetId },
@@ -420,19 +502,19 @@ export async function adjustQuantity({
         }
       }
 
-      /** Step 4: Compute the new total quantity */
+      /** Step 5: Compute the new total quantity */
       const newQuantity =
         direction === "add"
           ? currentQuantity + quantity
           : currentQuantity - quantity;
 
-      /** Step 5: Update the asset's quantity */
+      /** Step 6: Update the asset's quantity */
       const updatedAsset = await tx.asset.update({
         where: { id: assetId },
         data: { quantity: newQuantity },
       });
 
-      /** Step 6: Create an immutable audit log entry */
+      /** Step 7: Create an immutable audit log entry */
       await createConsumptionLog({
         assetId,
         category,

@@ -1244,44 +1244,15 @@ export async function checkoutBooking({
     }
 
     /**
-     * Validate quantity availability for QUANTITY_TRACKED assets.
-     * Between when a booking was created and checkout, other operations
-     * (custody assignments, other booking checkouts) may have consumed
-     * some units. We check here so the user gets a clear error listing
-     * which assets need their quantities adjusted before proceeding.
+     * Identify QUANTITY_TRACKED bookingAssets upfront. Availability
+     * validation happens INSIDE the transaction below, guarded by a
+     * per-asset row lock, to avoid TOCTOU races with sibling writers
+     * (other booking checkouts, direct custody assignments, quantity
+     * adjustments) that could oversubscribe the same physical pool.
      */
     const qtyTrackedBookingAssets = bookingFound.bookingAssets.filter((ba) =>
       isQuantityTracked(ba.asset)
     );
-
-    if (qtyTrackedBookingAssets.length > 0) {
-      const insufficientQtyWarnings: string[] = [];
-
-      for (const ba of qtyTrackedBookingAssets) {
-        const { available } = await computeBookingAvailableQuantity(
-          ba.asset.id,
-          id
-        );
-
-        if (ba.quantity > available) {
-          insufficientQtyWarnings.push(
-            `"${ba.asset.title}": requested ${ba.quantity}, only ${available} available`
-          );
-        }
-      }
-
-      if (insufficientQtyWarnings.length > 0) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
-            "\n"
-          )}\nPlease adjust quantities in the booking before checkout.`,
-          shouldBeCaptured: false,
-          status: 400,
-        });
-      }
-    }
 
     /**
      * This checks if the booking end date is in the past
@@ -1325,37 +1296,104 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    /** Keep the transaction lean (writes only) to stay within the 5s
-     * timeout. The heavy read for the return payload is done after commit.
-     * This prevents P2028 timeouts on bookings with many assets.
+    /** Keep the transaction lean (writes only + per-asset row locks for
+     * qty-tracked availability guard) to stay within the timeout. The
+     * heavy read for the return payload is done after commit. This
+     * prevents P2028 timeouts on bookings with many assets.
      *
-     * Prisma's array-form $transaction executes queries sequentially
-     * within a single DB transaction — it doesn't parallelize, but keeps
-     * the transaction fast by avoiding heavy includes/reads. */
-    const txOps = [
-      db.asset.updateMany({
-        where: {
-          id: { in: bookingFound.bookingAssets.map((ba) => ba.asset.id) },
-        },
-        data: { status: AssetStatus.CHECKED_OUT },
-      }),
-      db.booking.update({
-        where: { id: bookingFound.id },
-        data: dataToUpdate,
-        select: { id: true },
-      }),
-    ];
+     * We use the interactive (callback) form of `$transaction` so we can
+     * acquire `SELECT … FOR UPDATE` row locks via
+     * `lockAssetForQuantityUpdate` on each unique qty-tracked asset
+     * BEFORE validating availability. This serializes concurrent writers
+     * (other booking checkouts, direct custody assignments, quantity
+     * adjustments) on the same asset, closing a TOCTOU window where two
+     * checkouts could otherwise pass the guard against the same stale
+     * snapshot and both commit. */
+    const uniqueQtyTrackedAssetIds = Array.from(
+      new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
+    );
 
-    if (hasKits) {
-      txOps.push(
-        db.kit.updateMany({
-          where: { id: { in: kitIds } },
-          data: { status: KitStatus.CHECKED_OUT },
-        })
-      );
-    }
+    await db.$transaction(
+      async (tx) => {
+        /**
+         * Validate quantity availability for QUANTITY_TRACKED assets.
+         * Between when a booking was created and checkout, other
+         * operations (custody assignments, other booking checkouts) may
+         * have consumed some units. We check here — under the row lock —
+         * so the user gets a clear error listing which assets need
+         * their quantities adjusted before proceeding, and no two
+         * concurrent writers can both pass this guard against the same
+         * snapshot.
+         *
+         * `computeBookingAvailableQuantity` doesn't take a `tx`, but
+         * read-committed isolation combined with the row lock acquired
+         * above guarantees that once any competing writer has committed
+         * its change it is visible here; any still-open writer is
+         * blocked on the same row lock until we commit or roll back.
+         */
+        if (uniqueQtyTrackedAssetIds.length > 0) {
+          const insufficientQtyWarnings: string[] = [];
 
-    await db.$transaction(txOps);
+          for (const assetId of uniqueQtyTrackedAssetIds) {
+            await lockAssetForQuantityUpdate(tx, assetId);
+
+            const { available } = await computeBookingAvailableQuantity(
+              assetId,
+              id
+            );
+
+            // Sum the requested units for this asset on this booking.
+            // (Typically there's one BookingAsset per asset, but we sum
+            // defensively in case the invariant ever changes.)
+            const requested = qtyTrackedBookingAssets
+              .filter((ba) => ba.asset.id === assetId)
+              .reduce((sum, ba) => sum + ba.quantity, 0);
+
+            if (requested > available) {
+              const title =
+                qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)
+                  ?.asset.title ?? "";
+              insufficientQtyWarnings.push(
+                `"${title}": requested ${requested}, only ${available} available`
+              );
+            }
+          }
+
+          if (insufficientQtyWarnings.length > 0) {
+            throw new ShelfError({
+              cause: null,
+              label,
+              message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
+                "\n"
+              )}\nPlease adjust quantities in the booking before checkout.`,
+              shouldBeCaptured: false,
+              status: 400,
+            });
+          }
+        }
+
+        await tx.asset.updateMany({
+          where: {
+            id: { in: bookingFound.bookingAssets.map((ba) => ba.asset.id) },
+          },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+
+        await tx.booking.update({
+          where: { id: bookingFound.id },
+          data: dataToUpdate,
+          select: { id: true },
+        });
+
+        if (hasKits) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds } },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
+      },
+      { timeout: 15000 }
+    );
 
     /** Build an effective snapshot by merging bookingFound with any fields
      * modified by dataToUpdate (adjusted dates, status). This avoids
