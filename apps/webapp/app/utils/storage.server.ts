@@ -68,7 +68,7 @@ export async function createSignedUrl({
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { data, error } = await getSupabaseAdmin()
         .storage.from(bucketName)
-        .createSignedUrl(normalizedFilename, 24 * 60 * 60); //24h
+        .createSignedUrl(normalizedFilename, 3 * 24 * 60 * 60); // 72h — must match threeDaysFromNow() in refreshExpiredAssetImages
 
       if (!error) {
         const signedUrl = data?.signedUrl;

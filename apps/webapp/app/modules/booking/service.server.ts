@@ -198,6 +198,7 @@ async function cancelScheduler(
  * Creates a consistent status transition note for booking activity logs
  *
  * @param bookingId - The booking ID to add the note to
+ * @param organizationId - Organization the booking belongs to (enforced at note-service layer)
  * @param fromStatus - The previous booking status
  * @param toStatus - The new booking status
  * @param userId - ID of the user who performed the action (if manual)
@@ -206,6 +207,7 @@ async function cancelScheduler(
  */
 export async function createStatusTransitionNote({
   bookingId,
+  organizationId,
   fromStatus,
   toStatus,
   userId,
@@ -213,6 +215,7 @@ export async function createStatusTransitionNote({
   custodianUserId,
 }: {
   bookingId: string;
+  organizationId: string;
   fromStatus: BookingStatus;
   toStatus: BookingStatus;
   userId?: string;
@@ -251,6 +254,7 @@ export async function createStatusTransitionNote({
 
   await createSystemBookingNote({
     bookingId,
+    organizationId,
     content,
   });
 }
@@ -682,6 +686,7 @@ export async function updateBasicBooking({
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
       });
       changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
@@ -696,6 +701,7 @@ export async function updateBasicBooking({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
       changes.push("Booking description was updated");
@@ -705,6 +711,7 @@ export async function updateBasicBooking({
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking start date from ${wrapDateForNote(
           booking.from
         )} to ${wrapDateForNote(from)}.`,
@@ -720,6 +727,7 @@ export async function updateBasicBooking({
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking end date from ${wrapDateForNote(
           booking.to
         )} to ${wrapDateForNote(to)}.`,
@@ -778,6 +786,7 @@ export async function updateBasicBooking({
 
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: custodianChangeMessage,
           });
 
@@ -792,6 +801,7 @@ export async function updateBasicBooking({
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
         await createSystemBookingNote({
           bookingId: booking.id,
+          organizationId,
           content: `${userLink} changed booking custodian assignment.`,
         });
         changes.push("Custodian assignment was changed");
@@ -816,6 +826,7 @@ export async function updateBasicBooking({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
       });
       changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
@@ -1096,6 +1107,7 @@ export async function reserveBooking({
     // Add activity log for status change to RESERVED
     await createStatusTransitionNote({
       bookingId: updatedBooking.id,
+      organizationId,
       fromStatus: bookingFound.status,
       toStatus: updatedBooking.status,
       userId,
@@ -1294,6 +1306,7 @@ export async function checkoutBooking({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: bookingFound.id,
+        organizationId,
         fromStatus: bookingFound.status,
         toStatus: effectiveStatus,
         userId,
@@ -1673,6 +1686,7 @@ export async function checkinBooking({
 
         await createSystemBookingNote({
           bookingId: updatedBooking.id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
@@ -1681,6 +1695,7 @@ export async function checkinBooking({
         // Standard status transition note
         await createStatusTransitionNote({
           bookingId: updatedBooking.id,
+          organizationId,
           fromStatus: bookingFound.status,
           toStatus: BookingStatus.COMPLETE,
           userId,
@@ -2031,6 +2046,7 @@ export async function partialCheckinBooking({
 
         await createSystemBookingNote({
           bookingId: id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
@@ -2048,6 +2064,7 @@ export async function partialCheckinBooking({
 
         await createSystemBookingNote({
           bookingId: id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
@@ -2199,6 +2216,7 @@ export async function updateBookingAssets({
           });
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: `${wrapUserLinkForNote(
               user
             )} added ${assetContent} to the booking.`,
@@ -2206,6 +2224,7 @@ export async function updateBookingAssets({
         } else {
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: `${assetContent} added to the booking.`,
           });
         }
@@ -2235,12 +2254,14 @@ export async function updateBookingAssets({
 
 export async function createKitBookingNote({
   bookingId,
+  organizationId,
   kitIds,
   kits = [],
   userId,
   action = "added",
 }: {
   bookingId: string;
+  organizationId: string;
   kitIds: string[];
   kits?: Array<{ id: string; name: string }>;
   userId?: string;
@@ -2262,6 +2283,7 @@ export async function createKitBookingNote({
     });
     await createSystemBookingNote({
       bookingId,
+      organizationId,
       content: `${wrapUserLinkForNote(
         user
       )} ${action} ${kitContent} to the booking.`,
@@ -2269,6 +2291,7 @@ export async function createKitBookingNote({
   } else {
     await createSystemBookingNote({
       bookingId,
+      organizationId,
       content: `${kitContent} ${action} to the booking.`,
     });
   }
@@ -2317,6 +2340,7 @@ export async function archiveBooking({
     // Add activity log for booking archival
     await createStatusTransitionNote({
       bookingId: updatedBooking.id,
+      organizationId,
       fromStatus: booking.status,
       toStatus: BookingStatus.ARCHIVED,
       userId,
@@ -2453,6 +2477,7 @@ export async function cancelBooking({
     // Add activity log for booking cancellation
     await createStatusTransitionNote({
       bookingId: booking.id,
+      organizationId,
       fromStatus: bookingFound.status,
       toStatus: BookingStatus.CANCELLED,
       userId,
@@ -2511,6 +2536,7 @@ export async function revertBookingToDraft({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
+        organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         userId,
@@ -2520,6 +2546,7 @@ export async function revertBookingToDraft({
       // System-initiated revert (fallback)
       await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
+        organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         custodianUserId: cancelledBooking.custodianUserId || undefined,
@@ -2685,6 +2712,7 @@ export async function extendBooking({
     });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         user
       )} extended the booking from **${wrapDateForNote(
@@ -3126,11 +3154,6 @@ export async function getBookings(params: {
                   color: true,
                 },
               },
-              bookings: {
-                select: {
-                  id: true,
-                },
-              },
               kit: {
                 select: {
                   id: true,
@@ -3272,6 +3295,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${kitContent} and ${assetContent} from booking.`,
@@ -3285,6 +3309,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${kitContent} from booking.`,
@@ -3295,6 +3320,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${assetContent} from booking.`,
@@ -4022,6 +4048,7 @@ export async function bulkArchiveBookings({
       for (const booking of bookings) {
         await createStatusTransitionNote({
           bookingId: booking.id,
+          organizationId,
           fromStatus: booking.status,
           toStatus: BookingStatus.ARCHIVED,
           custodianUserId: booking.custodianUserId || undefined,
@@ -4177,6 +4204,7 @@ export async function bulkCancelBookings({
       for (const booking of bookings) {
         await createStatusTransitionNote({
           bookingId: booking.id,
+          organizationId,
           fromStatus: booking.status,
           toStatus: BookingStatus.CANCELLED,
           userId,
@@ -4315,6 +4343,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${kitContent} and ${assetContent} to booking.`,
@@ -4328,6 +4357,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${kitContent} to booking.`,
@@ -4338,6 +4368,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${assetContent} to booking.`,
