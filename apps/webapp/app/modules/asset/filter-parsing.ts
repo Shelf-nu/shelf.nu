@@ -15,6 +15,15 @@ const API_TO_DB_FIELD_MAP: Record<string, string> = {
 };
 
 /**
+ * Validates that a filter name is safe for use in raw SQL identifiers.
+ * Custom field names (cf_*) are excluded because they're used as
+ * parameterized values, not raw SQL identifiers.
+ * Non-custom-field names get injected via Prisma.raw() as column names,
+ * so they must only contain safe identifier characters.
+ */
+const SAFE_SQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
  * Parses a filter query string into an array of Filter objects.
  * This function is shared between client and server code.
  *
@@ -37,6 +46,12 @@ export function parseFilters(
     if (column) {
       const [operator, filterValue] = value.split(":");
       const dbKey = API_TO_DB_FIELD_MAP[key] || key;
+
+      // Non-custom-field names are used in Prisma.raw() as SQL identifiers,
+      // so reject names with unsafe characters to prevent SQL syntax errors
+      if (!key.startsWith("cf_") && !SAFE_SQL_IDENTIFIER.test(dbKey)) {
+        return;
+      }
 
       const filter: Filter = {
         name: dbKey,

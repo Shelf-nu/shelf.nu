@@ -189,6 +189,30 @@ export const assetIndexFields = ({
       select: { id: true },
       take: 1,
     },
+    /**
+     * Include booking custodian data for CHECKED_OUT assets inline,
+     * eliminating the N+1 re-query in updateAssetsWithBookingCustodians().
+     * Only ONGOING/OVERDUE bookings have custodian info relevant to display.
+     */
+    bookings: {
+      where: {
+        status: { in: ["ONGOING", "OVERDUE"] },
+      },
+      take: 1,
+      select: {
+        id: true,
+        status: true,
+        custodianTeamMember: true,
+        custodianUser: {
+          select: {
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
+      },
+    },
   } satisfies Prisma.AssetInclude;
 
   // Conditionally add bookings if date range is provided
@@ -215,6 +239,16 @@ export const assetIndexFields = ({
           status: true,
           id: true,
           name: true,
+          // Custodian fields needed by updateAssetsWithBookingCustodians()
+          custodianTeamMember: true,
+          custodianUser: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
         },
       },
     } satisfies Prisma.AssetInclude;

@@ -20,6 +20,7 @@ import {
 import { runWithRequestCache } from "./request-cache.server";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
+import { serverTiming } from "./timing.server";
 
 type ServerEnv = {
   Variables: Record<symbol, unknown>;
@@ -72,9 +73,13 @@ export default createHonoServer<ServerEnv>({
   defaultLogger: false,
   getLoadContext,
   configure: (server) => {
+    // Measure total request duration (dev/staging only, skipped in production).
+    // Registered first so it captures time spent in all downstream middleware.
+    server.use("*", serverTiming());
+
     /**
      * Ensure host headers are present for React Router CSRF protection
-     * Must be first to ensure headers are available for all downstream middleware
+     * Must be early to ensure headers are available for all downstream middleware
      */
     server.use("*", ensureHostHeaders());
 
@@ -145,7 +150,7 @@ export default createHonoServer<ServerEnv>({
         publicPaths: [
           "/",
           "/_root", // Root layout loader - needed for all pages including public routes
-          "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite
+          "/accept-invite/*path", // *path is a named wildcard matching any path after /accept-invite
           "/forgot-password",
           "/join",
           "/login",

@@ -28,6 +28,7 @@ import {
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { parseFiltersWithHierarchy } from "./query.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
   getEntitiesWithSelectedValues,
@@ -127,7 +128,7 @@ export async function simpleModeLoader({
   const hasActiveFilters = computeHasActiveFilters(searchParams);
   const view = searchParams.get("view") ?? "table";
 
-  /** Query tierLimit, assets & Asset index settings */
+  /** Query tierLimit, assets, presets, permissions & more — all in parallel */
   let [
     tierLimit,
     {
@@ -150,6 +151,8 @@ export async function simpleModeLoader({
     tagsData,
     teamMembersForFormData,
     notifyData,
+    savedFilterPresets,
+    canImport,
   ] = await Promise.all([
     getOrganizationTierLimit({
       organizationId,
@@ -207,15 +210,33 @@ export async function simpleModeLoader({
         })
       : Promise.resolve(null),
     getTeamMembersForNotify({ organizationId }),
+    // Saved filter presets — only depends on organizationId + userId
+    listPresetsForUser({
+      organizationId,
+      ownerId: userId,
+    }),
+    // Import permission — only depends on organizationId, userId, role
+    hasPermission({
+      organizationId,
+      userId,
+      roles: role ? [role] : [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    }),
   ]);
 
   const currentUserTeamMember = isSelfService
     ? teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
-  assets = await updateAssetsWithBookingCustodians(assets);
+  // Synchronous — no DB call. Booking custodian data is already included
+  // in the initial asset query (via assetIndexFields), so this just reshapes
+  // it into the `custody.custodian` structure the UI expects.
+  assets = updateAssetsWithBookingCustodians(assets);
 
-  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  // Refresh expired signed URLs before returning so users never see broken images.
+  // Runs after the main query completes but is awaited to ensure fresh URLs.
+  // With 72h expiration, this path is hit infrequently.
   try {
     assets = await refreshExpiredAssetImages(assets);
   } catch (cause) {
@@ -252,12 +273,6 @@ export async function simpleModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  // Load saved filter presets
-  const savedFilterPresets = await listPresetsForUser({
-    organizationId,
-    ownerId: userId,
-  });
-
   return data(
     payload({
       header,
@@ -271,15 +286,7 @@ export async function simpleModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets:
-        canImportAssets(tierLimit) &&
-        (await hasPermission({
-          organizationId,
-          userId,
-          roles: role ? [role] : [],
-          entity: PermissionEntity.asset,
-          action: PermissionAction.import,
-        })),
+      canImportAssets: canImportAssets(tierLimit) && canImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -362,30 +369,30 @@ export async function advancedModeLoader({
     });
   }
 
+  // Parse and expand location hierarchy filters ONCE — this avoids redundant
+  // DB calls that were previously happening in both getAllSelectedValuesFromFilters
+  // and getAdvancedPaginatedAndFilterableAssets independently.
+  const parsedFilters = await parseFiltersWithHierarchy(
+    filters ?? "",
+    settings.columns as Column[],
+    organizationId
+  );
+
   const { selectedTags, selectedCategory, selectedLocation } =
     await getAllSelectedValuesFromFilters(
       filters,
       settings.columns as Column[],
-      organizationId
+      organizationId,
+      parsedFilters
     );
 
-  const {
-    tags,
-    totalTags,
-    categories,
-    totalCategories,
-    locations,
-    totalLocations,
-  } = await getEntitiesWithSelectedValues({
-    organizationId,
-    allSelectedEntries,
-    selectedTagIds: selectedTags,
-    selectedCategoryIds: selectedCategory,
-    selectedLocationIds: selectedLocation,
-  });
-
-  /** Query tierLimit, assets & Asset index settings */
+  // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
+  // categories, locations). Its output is only used in the final response
+  // payload — no other query depends on it. Running it inside Promise.all
+  // lets it overlap with the asset query instead of blocking it.
+  /** Query entities, tierLimit, assets & more — all in parallel */
   const [
+    { tags, totalTags, categories, totalCategories, locations, totalLocations },
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
@@ -397,7 +404,16 @@ export async function advancedModeLoader({
     bookings,
     totalBookings,
     advNotifyData,
+    advSavedFilterPresets,
+    advCanImport,
   ] = await Promise.all([
+    getEntitiesWithSelectedValues({
+      organizationId,
+      allSelectedEntries,
+      selectedTagIds: selectedTags,
+      selectedCategoryIds: selectedCategory,
+      selectedLocationIds: selectedLocation,
+    }),
     getOrganizationTierLimit({
       organizationId,
       organizations,
@@ -410,6 +426,7 @@ export async function advancedModeLoader({
       getBookings: view === "availability",
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
       availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+      preParsedFilters: parsedFilters,
     }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
@@ -472,13 +489,27 @@ export async function advancedModeLoader({
       },
     }),
     getTeamMembersForNotify({ organizationId }),
+    // Saved filter presets — only depends on organizationId + userId
+    listPresetsForUser({
+      organizationId,
+      ownerId: userId,
+    }),
+    // Import permission — only depends on organizationId, userId, role
+    hasPermission({
+      organizationId,
+      userId,
+      roles: role ? [role] : [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    }),
   ]);
 
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
-  // Refresh expired image signed URLs server-side to prevent N+1 client calls
+  // Refresh expired signed URLs before returning so users never see broken images.
+  // With 72h expiration, this path is hit infrequently.
   let refreshedAssets = assets;
   try {
     refreshedAssets = await refreshExpiredAssetImages(assets);
@@ -488,7 +519,7 @@ export async function advancedModeLoader({
         cause,
         message: "Failed to batch refresh expired asset images",
         label: "Assets",
-        additionalData: { assetCount: assets.length },
+        additionalData: { assetCount: refreshedAssets.length },
         shouldBeCaptured: true,
       })
     );
@@ -516,12 +547,6 @@ export async function advancedModeLoader({
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
 
-  // Load saved filter presets
-  const savedFilterPresets = await listPresetsForUser({
-    organizationId,
-    ownerId: userId,
-  });
-
   return data(
     payload({
       header,
@@ -533,15 +558,7 @@ export async function advancedModeLoader({
       totalPages,
       modelName,
       hasActiveFilters,
-      canImportAssets:
-        canImportAssets(tierLimit) &&
-        (await hasPermission({
-          organizationId,
-          userId,
-          roles: role ? [role] : [],
-          entity: PermissionEntity.asset,
-          action: PermissionAction.import,
-        })),
+      canImportAssets: canImportAssets(tierLimit) && advCanImport,
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
@@ -572,7 +589,7 @@ export async function advancedModeLoader({
       bookings,
       totalBookings,
       // Saved filter presets
-      savedFilterPresets,
+      savedFilterPresets: advSavedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,
     }),
     {

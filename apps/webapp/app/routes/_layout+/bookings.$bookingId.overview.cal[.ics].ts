@@ -91,7 +91,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       "BEGIN:VEVENT",
       `SUMMARY:${summary}`,
       `UID:${booking.id}`,
-      `SEQUENCE:${Date.now()}`,
+      `SEQUENCE:0`,
       "STATUS:CONFIRMED",
       "TRANSP:TRANSPARENT",
       `DTSTART:${formattedFromDate}`,

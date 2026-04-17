@@ -9,14 +9,16 @@ export enum QueueNames {
   addonTrialQueue = "addon-trial-queue",
 }
 
-let scheduler!: PgBoss;
+let pgBossInstance!: PgBoss;
 
 declare global {
-  var scheduler: PgBoss;
+  // Renamed from `scheduler` to avoid conflict with the built-in
+  // Web Scheduling API type added in TypeScript 6 / ES2025.
+  var pgBossScheduler: PgBoss;
 }
 
 export const init = async () => {
-  if (!scheduler) {
+  if (!pgBossInstance) {
     const url = DATABASE_URL.split("?")[0];
     const commonAttributes = {
       connectionString: url,
@@ -25,22 +27,22 @@ export const init = async () => {
     };
 
     if (NODE_ENV === "production") {
-      scheduler = new PgBoss({
+      pgBossInstance = new PgBoss({
         max: 4,
         ...commonAttributes,
       });
     } else {
-      if (!global.scheduler) {
-        global.scheduler = new PgBoss({
+      if (!global.pgBossScheduler) {
+        global.pgBossScheduler = new PgBoss({
           max: 1,
           ...commonAttributes,
         });
       }
-      scheduler = global.scheduler;
+      pgBossInstance = global.pgBossScheduler;
     }
-    await scheduler.start();
+    await pgBossInstance.start();
   }
   return;
 };
 
-export { scheduler };
+export { pgBossInstance as scheduler };

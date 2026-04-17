@@ -32,11 +32,11 @@
     "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.4.3",
-    "@commitlint/config-conventional": "^20.4.3",
-    "@evilmartians/lefthook": "^1.13.6",
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@evilmartians/lefthook": "^2.1.5",
     "prettier": "3.0.3",
-    "turbo": "^2.8.13"
+    "turbo": "^2.9.5"
   },
   "pnpm": {
     "overrides": {
