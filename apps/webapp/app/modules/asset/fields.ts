@@ -47,6 +47,7 @@ export const getAssetOverviewFields = (
     custody: {
       select: {
         createdAt: true,
+        quantity: true,
         custodian: {
           include: {
             user: true,
@@ -79,25 +80,32 @@ export const getAssetOverviewFields = (
         },
       },
     },
+    assetModel: { select: { id: true, name: true } },
     kit: { select: { id: true, name: true, status: true } },
-    bookings: {
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
-        // Exclude bookings where this asset has been partially checked in
-        NOT: {
-          partialCheckins: {
-            some: {
-              assetIds: { has: assetId },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+          // Exclude bookings where this asset has been partially checked in
+          NOT: {
+            partialCheckins: {
+              some: {
+                assetIds: { has: assetId },
+              },
             },
           },
         },
       },
-      select: {
-        id: true,
-        name: true,
-        from: true,
-        custodianTeamMember: true,
-        custodianUser: true,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            name: true,
+            from: true,
+            custodianTeamMember: true,
+            custodianUser: true,
+          },
+        },
       },
     },
   } satisfies Prisma.AssetInclude;
@@ -147,6 +155,7 @@ export const assetIndexFields = ({
     location: LOCATION_WITH_HIERARCHY,
     custody: {
       select: {
+        quantity: true,
         custodian: {
           select: {
             name: true,
@@ -194,21 +203,27 @@ export const assetIndexFields = ({
      * eliminating the N+1 re-query in updateAssetsWithBookingCustodians().
      * Only ONGOING/OVERDUE bookings have custodian info relevant to display.
      */
-    bookings: {
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+        },
       },
       take: 1,
-      select: {
-        id: true,
-        status: true,
-        custodianTeamMember: true,
-        custodianUser: {
+      include: {
+        booking: {
           select: {
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
+            id: true,
+            status: true,
+            custodianTeamMember: true,
+            custodianUser: {
+              select: {
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                profilePicture: true,
+              },
+            },
           },
         },
       },
@@ -219,34 +234,40 @@ export const assetIndexFields = ({
   if (bookingTo && bookingFrom && unavailableBookingStatuses) {
     return {
       ...fields,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: { in: unavailableBookingStatuses },
-          OR: [
-            {
-              from: { lte: bookingTo },
-              to: { gte: bookingFrom },
-            },
-            {
-              from: { gte: bookingFrom },
-              to: { lte: bookingTo },
-            },
-          ],
+          booking: {
+            status: { in: unavailableBookingStatuses },
+            OR: [
+              {
+                from: { lte: bookingTo },
+                to: { gte: bookingFrom },
+              },
+              {
+                from: { gte: bookingFrom },
+                to: { lte: bookingTo },
+              },
+            ],
+          },
         },
-        select: {
-          from: true,
-          to: true,
-          status: true,
-          id: true,
-          name: true,
-          // Custodian fields needed by updateAssetsWithBookingCustodians()
-          custodianTeamMember: true,
-          custodianUser: {
+        include: {
+          booking: {
             select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              profilePicture: true,
+              from: true,
+              to: true,
+              status: true,
+              id: true,
+              name: true,
+              // Custodian fields needed by updateAssetsWithBookingCustodians()
+              custodianTeamMember: true,
+              custodianUser: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  profilePicture: true,
+                },
+              },
             },
           },
         },

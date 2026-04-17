@@ -1,4 +1,9 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  type Prisma,
+} from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
@@ -223,21 +228,41 @@ export function formatBookingDuration(from: Date, to: Date): string {
 }
 
 /**
- * Core logic for determining if an asset has booking conflicts
- * Used by both isAssetAlreadyBooked and kit-related functions
+ * Core logic for determining if an asset has booking conflicts.
+ * Assets now reference bookings through the BookingAsset pivot table,
+ * so we traverse `asset.bookingAssets[].booking` instead of the
+ * old implicit `asset.bookings[]`.
+ *
+ * For INDIVIDUAL assets, any overlapping booking is a conflict.
+ * For QUANTITY_TRACKED assets, this function always returns false because
+ * multiple bookings can reserve from the same asset as long as the total
+ * reserved quantity does not exceed the available quantity. The actual
+ * quantity availability check is performed at the service layer via
+ * `computeBookingAvailableQuantity()`.
+ *
+ * Used by both isAssetAlreadyBooked and kit-related functions.
  */
 export function hasAssetBookingConflicts(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {
-  if (!asset.bookings?.length) return false;
+  /**
+   * QUANTITY_TRACKED assets can appear in multiple concurrent bookings,
+   * each reserving a portion of the total quantity. Conflict detection
+   * for these assets is handled at the service layer where we have access
+   * to the full quantity context (total, in-custody, reserved amounts).
+   */
+  if (asset.type === AssetType.QUANTITY_TRACKED) return false;
 
-  const conflictingBookings = asset.bookings.filter(
-    (b) => b.id !== currentBookingId
-  );
+  if (!asset.bookingAssets?.length) return false;
+
+  const conflictingBookings = asset.bookingAssets
+    .map((ba) => ba.booking)
+    .filter((b) => b.id !== currentBookingId);
 
   if (conflictingBookings.length === 0) return false;
 
@@ -260,13 +285,20 @@ export function hasAssetBookingConflicts(
 }
 
 /**
- * Determines if an asset is already booked and unavailable for the current booking context
- * Handles partial check-in logic properly
+ * Determines if an asset is already booked and unavailable for the current booking context.
+ * Handles partial check-in logic properly.
+ *
+ * For QUANTITY_TRACKED assets, this always returns false because they support
+ * concurrent bookings — quantity availability is validated at the service layer.
+ *
+ * Uses the BookingAsset pivot relation (`asset.bookingAssets[].booking`)
+ * instead of the removed implicit `asset.bookings[]`.
  */
 export function isAssetAlreadyBooked(
   asset: {
     status: string;
-    bookings?: { id: string; status: string }[];
+    type?: string;
+    bookingAssets?: { booking: { id: string; status: string } }[];
   },
   currentBookingId: string
 ): boolean {

@@ -42,10 +42,12 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   ColumnLabelKey,
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
@@ -172,13 +174,20 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div className="min-w-0 flex-1 truncate">
-                <Link
-                  to={item.id}
-                  className="truncate font-medium underline hover:text-gray-600"
-                  title={item.title}
-                >
-                  {item.title}
-                </Link>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    to={item.id}
+                    className="truncate font-medium underline hover:text-gray-600"
+                    title={item.title}
+                  >
+                    {item.title}
+                  </Link>
+                  {isQuantityTracked(item) ? (
+                    <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                      QTY
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
           }
@@ -212,7 +221,14 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn id={item.id} status={item.status} />;
+      return (
+        <StatusColumn
+          id={item.id}
+          status={item.status}
+          availableToBook={item.availableToBook}
+          asset={item}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -316,6 +332,39 @@ export function AdvancedIndexColumn({
     case "barcode_EAN13":
       return <BarcodeColumn column={column} item={item} />;
 
+    case "type":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) ? (
+            <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+              QTY
+            </span>
+          ) : (
+            "Individual"
+          )}
+        </Td>
+      );
+
+    case "assetModel":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.assetModelName ? item.assetModelName : <EmptyTableValue />}
+        </Td>
+      );
+
+    case "quantity":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.quantity != null ? (
+            `${item.quantity}${
+              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
+            }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
@@ -364,10 +413,25 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
+function StatusColumn({
+  id,
+  status,
+  availableToBook,
+  asset,
+}: {
+  id: string;
+  status: AssetStatus;
+  availableToBook?: boolean;
+  asset?: AdvancedIndexAsset;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge id={id} status={status} availableToBook={true} />
+      <AssetStatusBadge
+        id={id}
+        status={status}
+        availableToBook={availableToBook ?? true}
+        asset={asset}
+      />
     </Td>
   );
 }
@@ -449,6 +513,7 @@ function CustodyColumn({
   custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
+  const primaryCustody = getPrimaryCustody(custody);
 
   return (
     <When
@@ -459,8 +524,8 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {custody?.custodian ? (
-          <TeamMemberBadge teamMember={custody?.custodian} />
+        {primaryCustody?.custodian ? (
+          <TeamMemberBadge teamMember={primaryCustody.custodian} />
         ) : (
           <EmptyTableValue />
         )}

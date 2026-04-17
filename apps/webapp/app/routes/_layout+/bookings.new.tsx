@@ -12,8 +12,10 @@ import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { NewBookingForm } from "~/components/booking/forms/new-booking-form";
 import { newBookingHeader } from "~/components/booking/new-booking-header";
 import Header from "~/components/layout/header";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   createBooking,
   updateBookingNotificationRecipients,
@@ -268,7 +270,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     if (hasAssetIds) {
-      return redirect(`/bookings/${booking.id}/overview`);
+      /**
+       * If the booking was created from a single QUANTITY_TRACKED asset
+       * (e.g. via the asset page's "Create new booking" dropdown), append
+       * an ?adjustQty=<assetId> search param so the overview route can
+       * auto-open the quantity adjust dialog. This avoids the user being
+       * silently stuck with quantity=1 when they meant to book more.
+       */
+      let redirectUrl = `/bookings/${booking.id}/overview`;
+      if (assetIds && assetIds.length === 1) {
+        const [singleAssetId] = assetIds;
+        const addedAsset = await db.asset.findFirst({
+          where: { id: singleAssetId, organizationId },
+          select: { id: true, type: true },
+        });
+        if (addedAsset && isQuantityTracked(addedAsset)) {
+          redirectUrl += `?adjustQty=${singleAssetId}`;
+        }
+      }
+      return redirect(redirectUrl);
     } else {
       const manageAssetsUrl = `/bookings/${
         booking.id

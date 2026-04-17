@@ -34,6 +34,7 @@ import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
+import { hasCustody } from "~/modules/custody/utils";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -374,28 +375,44 @@ const ListBookingsContent = ({
 }: {
   item: Prisma.BookingGetPayload<{
     include: {
-      assets: {
+      bookingAssets: {
         select: {
           id: true;
-          title: true;
-          availableToBook: true;
-          custody: true;
-          kitId: true;
-          status: true;
-          mainImage: true;
-          thumbnailImage: true;
-          mainImageExpiration: true;
-          category: {
+          quantity: true;
+          asset: {
             select: {
               id: true;
-              name: true;
-              color: true;
-            };
-          };
-          kit: {
-            select: {
-              id: true;
-              name: true;
+              title: true;
+              type: true;
+              availableToBook: true;
+              custody: true;
+              kitId: true;
+              status: true;
+              mainImage: true;
+              thumbnailImage: true;
+              mainImageExpiration: true;
+              category: {
+                select: {
+                  id: true;
+                  name: true;
+                  color: true;
+                };
+              };
+              kit: {
+                select: {
+                  id: true;
+                  name: true;
+                  image: true;
+                  imageExpiration: true;
+                  category: {
+                    select: {
+                      id: true;
+                      name: true;
+                      color: true;
+                    };
+                  };
+                };
+              };
             };
           };
         };
@@ -418,8 +435,8 @@ const ListBookingsContent = ({
   }>;
 }) => {
   const hasUnavaiableAssets =
-    item.assets.some(
-      (asset) => !asset.availableToBook || asset.custody !== null
+    item.bookingAssets.some(
+      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
   return (

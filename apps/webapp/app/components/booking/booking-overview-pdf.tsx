@@ -168,8 +168,14 @@ const BookingPDFPreview = ({
 }) => {
   if (!pdfMeta) return null;
 
-  const { booking, organization, assets, assetIdToQrCodeMap, totalValue } =
-    pdfMeta;
+  const {
+    booking,
+    organization,
+    assets,
+    assetIdToQrCodeMap,
+    assetIdToQuantityMap,
+    totalValue,
+  } = pdfMeta;
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
         booking.custodianUser.email
@@ -320,6 +326,9 @@ const BookingPDFPreview = ({
               <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Name
               </th>
+              <th className="w-12 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+                Qty
+              </th>
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Kit
               </th>
@@ -362,6 +371,9 @@ const BookingPDFPreview = ({
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.title}
                   </td>
+                  <td className="border-r border-gray-300 p-2.5 text-center text-sm text-gray-600">
+                    {assetIdToQuantityMap[asset.id] ?? 1}
+                  </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.kit?.name}
                   </td>
@@ -385,7 +397,7 @@ const BookingPDFPreview = ({
 
                 <When truthy={!!asset.description}>
                   <tr className="border-b border-gray-300 align-top">
-                    <td colSpan={7} className="m-2 p-2">
+                    <td colSpan={8} className="m-2 p-2">
                       <div className="flex items-start gap-4 bg-gray-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">

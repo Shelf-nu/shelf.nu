@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Asset,
   Booking,
@@ -47,6 +47,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 
@@ -59,11 +60,11 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
-import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
@@ -73,9 +74,11 @@ import {
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
+import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -88,7 +91,12 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
-import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { Logger } from "~/utils/logger";
+import {
+  wrapAssetsWithDataForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -96,12 +104,14 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type AssetWithBooking = Asset & {
-  bookings: Booking[];
+  bookingAssets: { booking: Booking }[];
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
   kitId?: string | null;
   qrScanned: string;
+  /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
+  bookedQuantity?: number | null;
 };
 
 export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
@@ -149,17 +159,93 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    const modelName = {
-      singular: "asset",
-      plural: "assets",
-    };
-
     const booking = await getBooking({
       id,
       organizationId,
       userOrganizations,
       request,
     });
+
+    /**
+     * For QUANTITY_TRACKED assets, compute available quantity factoring in
+     * both custody AND booking reservations. Exclude the current booking
+     * so its own reservation doesn't reduce the displayed availability.
+     */
+    const qtyAssetIds = assets
+      .filter((a) => a.type === "QUANTITY_TRACKED")
+      .map((a) => a.id);
+
+    const [custodySums, bookingSums] =
+      qtyAssetIds.length > 0
+        ? await Promise.all([
+            db.custody.groupBy({
+              by: ["assetId"],
+              where: { assetId: { in: qtyAssetIds } },
+              _sum: { quantity: true },
+            }),
+            db.bookingAsset.groupBy({
+              by: ["assetId"],
+              where: {
+                assetId: { in: qtyAssetIds },
+                bookingId: { not: id },
+                booking: {
+                  status: {
+                    in: [
+                      BookingStatus.RESERVED,
+                      BookingStatus.ONGOING,
+                      BookingStatus.OVERDUE,
+                    ],
+                  },
+                  /**
+                   * Only count reservations from bookings whose dates
+                   * overlap with the current booking. Non-overlapping
+                   * bookings don't compete for the same quantity window.
+                   */
+                  ...(booking.from &&
+                    booking.to && {
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    }),
+                },
+              },
+              _sum: { quantity: true },
+            }),
+          ])
+        : [[], []];
+
+    const custodyByAsset = new Map(
+      custodySums.map((c) => [c.assetId, c._sum.quantity ?? 0])
+    );
+    const reservedByAsset = new Map(
+      bookingSums.map((b) => [b.assetId, b._sum.quantity ?? 0])
+    );
+
+    /** Attach availableQuantity and filter out fully-allocated qty assets */
+    const assetsWithAvailability = assets
+      .map((a) => {
+        if (a.type !== "QUANTITY_TRACKED") return a;
+        const inCustody = custodyByAsset.get(a.id) ?? 0;
+        const reserved = reservedByAsset.get(a.id) ?? 0;
+        const availableQuantity = (a.quantity ?? 0) - inCustody - reserved;
+        return { ...a, availableQuantity };
+      })
+      .filter((a) => {
+        if (a.type !== "QUANTITY_TRACKED") return true;
+        return (a as { availableQuantity: number }).availableQuantity > 0;
+      });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
 
     /** Self service can only manage assets for bookings that are DRAFT */
     const cantManageAssetsAsBaseOrSelfService =
@@ -193,7 +279,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
+    const bookingKitIds = getKitIdsByAssets(
+      booking.bookingAssets.map((ba) => ba.asset)
+    );
 
     return payload({
       header: {
@@ -208,7 +296,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       booking,
-      items: assets,
+      items: assetsWithAvailability,
       categories,
       tags,
       search,
@@ -244,17 +332,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    let { assetIds, removedAssetIds, redirectTo } = parseData(
+    let {
+      assetIds,
+      removedAssetIds,
+      redirectTo,
+      quantities: rawQuantities,
+    } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
         removedAssetIds: z.array(z.string()).optional().default([]),
         redirectTo: z.string().optional().nullable(),
+        /** JSON-encoded map of assetId → quantity for QUANTITY_TRACKED assets */
+        quantities: z.string().optional().nullable(),
       }),
       {
         additionalData: { userId, bookingId },
       }
     );
+
+    /**
+     * Parse the quantities JSON string into a Record<string, number>.
+     * Falls back to an empty object if not provided or malformed.
+     */
+    const quantities: Record<string, number> = rawQuantities
+      ? (JSON.parse(rawQuantities) as Record<string, number>)
+      : {};
 
     /**
      * If user has selected all assets, then we have to get ids of all those assets
@@ -272,12 +375,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: assetsWhere,
         select: { id: true },
       });
-      const bookingAssets = await db.asset.findMany({
+      const bookingAssetRows = await db.bookingAsset.findMany({
         where: {
-          id: { notIn: removedAssetIds },
-          bookings: { some: { id: bookingId } },
+          bookingId,
+          assetId: { notIn: removedAssetIds },
         },
-        select: { id: true },
+        select: { assetId: true },
       });
 
       /**
@@ -288,7 +391,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds = [
         ...new Set([
           ...allAssets.map((asset) => asset.id),
-          ...bookingAssets.map((asset) => asset.id),
+          ...bookingAssetRows.map((ba) => ba.assetId),
         ]),
       ];
     }
@@ -307,10 +410,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: { id: bookingId, organizationId },
         select: {
           id: true,
+          name: true,
           status: true,
-          /** We need to get the original assets that were part of the booking before the update so we can compare */
-          assets: {
-            select: { id: true },
+          /**
+           * We need the original assets and their quantities so we can
+           * compare and detect changes. Asset `title` and `type` are
+           * needed to generate qty-aware activity notes (e.g. "set
+           * quantity for \"Screwdriver\" to 5").
+           */
+          bookingAssets: {
+            select: {
+              assetId: true,
+              quantity: true,
+              asset: { select: { id: true, title: true, type: true } },
+            },
           },
         },
       })
@@ -345,7 +458,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
     // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
+    const existingAssetIds = booking.bookingAssets.map((ba) => ba.assetId);
 
     // Filter out existing assets to get only newly added ones
     const newAssetIds = assetIds.filter(
@@ -392,24 +505,209 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * Build a lookup of existing bookingAsset rows (assetId → {quantity, asset})
+     * so the add- and adjust-quantity flows below can generate qty-aware
+     * activity notes without re-querying the asset table.
+     */
+    const existingBookingAssetMap = new Map(
+      booking.bookingAssets.map((ba) => [ba.assetId, ba])
+    );
+
+    const actor = wrapUserLinkForNote(user!);
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name
+    );
+
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
+      /**
+       * Filter the quantities map to only include entries for newly added assets.
+       * This avoids attempting to update quantities for assets already in the booking.
+       */
+      const newQuantities: Record<string, number> = {};
+      for (const assetId of newAssetIds) {
+        if (quantities[assetId] != null) {
+          newQuantities[assetId] = quantities[assetId];
+        }
+      }
+
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
-      const b = await updateBookingAssets({
+      await updateBookingAssets({
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets
         userId,
+        quantities: newQuantities,
       });
 
-      /** We create notes for the newly added assets */
-      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
-      await createNotes({
-        content: `${wrapUserLinkForNote(user!)} added asset to ${bookingLink}.`,
-        type: "UPDATE",
-        userId: authSession.userId,
-        assetIds: newAssetIds,
+      /**
+       * Fetch the newly added assets so we can generate notes that reference
+       * each asset by title and that include the chosen quantity for
+       * QUANTITY_TRACKED assets. We fetch here rather than letting
+       * `updateBookingAssets` return them, because the service doesn't
+       * include asset detail.
+       */
+      const newAssets = await db.asset.findMany({
+        where: { id: { in: newAssetIds }, organizationId },
+        select: { id: true, title: true, type: true },
       });
+      const newAssetById = new Map(newAssets.map((a) => [a.id, a]));
+
+      /**
+       * Activity logging for the add flow.
+       *
+       * Wrapped in a best-effort try/catch: the assets have already been
+       * written to the booking at this point, so a failure to log activity
+       * must NOT bubble up and roll back the user's change. Errors are
+       * logged server-side for investigation.
+       *
+       * We write:
+       *   1. One asset-side note per added asset (shows "added to <booking>"
+       *      plus the reserved quantity for qty-tracked assets).
+       *   2. One booking-side system note summarizing everything that was
+       *      added, using `wrapAssetsWithDataForNote` (same helper
+       *      `removeAssets` uses — handles single and multi-asset cases
+       *      consistently with the rest of the activity feed). Quantity
+       *      info is appended as a readable suffix rather than stuffed
+       *      into markdoc tags.
+       */
+      try {
+        await Promise.all(
+          newAssetIds.map(async (assetId) => {
+            const assetInfo = newAssetById.get(assetId);
+            if (!assetInfo) return;
+            const reservedQty = newQuantities[assetId];
+            const qtySuffix =
+              isQuantityTracked(assetInfo) && reservedQty != null
+                ? ` with quantity **${reservedQty}**`
+                : "";
+            await createNotes({
+              content: `${actor} added asset to ${bookingLink}${qtySuffix}.`,
+              type: "UPDATE",
+              userId: authSession.userId,
+              assetIds: [assetId],
+            });
+          })
+        );
+
+        const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
+        const qtyAnnotations = newAssets
+          .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
+          .map((a) => `**${a.title}** (x${newQuantities[a.id]})`)
+          .join(", ");
+        const qtySuffix = qtyAnnotations
+          ? ` with quantities: ${qtyAnnotations}`
+          : "";
+
+        await createSystemBookingNote({
+          bookingId,
+          content: `${actor} added ${assetListContent} to the booking${qtySuffix}.`,
+        });
+      } catch (noteError) {
+        Logger.error(
+          makeShelfError(noteError, {
+            userId,
+            bookingId,
+            newAssetIds,
+            newQuantities,
+            context: "manage-assets add-note creation",
+          })
+        );
+      }
+    }
+
+    /**
+     * Update quantities for existing QUANTITY_TRACKED assets whose quantity changed.
+     * We build a map of the old quantities and compare against the submitted values.
+     * updateBookingAssets uses ON CONFLICT … DO UPDATE, so passing existing asset IDs
+     * with new quantities will upsert the quantity on the pivot row.
+     */
+    const changedQuantities: Record<string, number> = {};
+    const changedAssetIds: string[] = [];
+    for (const assetId of existingAssetIds) {
+      const submitted = quantities[assetId];
+      const current = existingBookingAssetMap.get(assetId)?.quantity ?? 1;
+      if (submitted != null && submitted !== current) {
+        changedQuantities[assetId] = submitted;
+        changedAssetIds.push(assetId);
+      }
+    }
+
+    if (changedAssetIds.length > 0) {
+      await updateBookingAssets({
+        id: bookingId,
+        organizationId,
+        assetIds: changedAssetIds,
+        userId,
+        quantities: changedQuantities,
+      });
+
+      /**
+       * Activity notes for quantity adjustments on existing assets.
+       * One per-asset note and one booking-side summary note so the
+       * change is visible from both activity feeds — matches the behavior
+       * of the single-asset adjust dialog
+       * (`routes/api+/bookings.$bookingId.adjust-asset-quantity.ts`).
+       *
+       * Wrapped in a best-effort try/catch for the same reason as the add
+       * flow above: the quantity update is already persisted and the user
+       * shouldn't see the save fail because an activity log couldn't be
+       * written.
+       */
+      try {
+        const adjustments = changedAssetIds
+          .map((assetId) => {
+            const ba = existingBookingAssetMap.get(assetId);
+            if (!ba) return null;
+            return {
+              assetId,
+              asset: ba.asset,
+              from: ba.quantity,
+              to: changedQuantities[assetId],
+            };
+          })
+          .filter(
+            (a): a is NonNullable<typeof a> => a !== null && a.asset !== null
+          );
+
+        await Promise.all(
+          adjustments.map((adj) =>
+            createNotes({
+              content: `${actor} adjusted booked quantity for ${bookingLink} from **${adj.from}** to **${adj.to}**.`,
+              type: "UPDATE",
+              userId: authSession.userId,
+              assetIds: [adj.assetId],
+            })
+          )
+        );
+
+        const bookingAdjustSummary = adjustments
+          .map(
+            (adj) =>
+              `{% link to="/assets/${
+                adj.asset!.id
+              }" text="${adj.asset!.title.replace(/"/g, "&quot;")}" /%} (**${
+                adj.from
+              }** → **${adj.to}**)`
+          )
+          .join(", ");
+        await createSystemBookingNote({
+          bookingId,
+          content: `${actor} adjusted booked quantity for ${bookingAdjustSummary}.`,
+        });
+      } catch (noteError) {
+        Logger.error(
+          makeShelfError(noteError, {
+            userId,
+            bookingId,
+            changedAssetIds,
+            changedQuantities,
+            context: "manage-assets adjust-note creation",
+          })
+        );
+      }
     }
 
     /** If some assets were removed, we also need to handle those */
@@ -467,12 +765,54 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Manages the asset selection flow for a booking.
+ * Users can select individual and quantity-tracked assets,
+ * specifying how many units to reserve for QUANTITY_TRACKED assets.
+ */
 export default function AddAssetsToNewBooking() {
+  const { booking, bookingKitIds, items, totalItems } =
+    useLoaderData<typeof loader>();
+
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, bookingKitIds, items, totalItems } =
-    useLoaderData<typeof loader>();
+  /**
+   * Stores the selected quantity for each QUANTITY_TRACKED asset.
+   * Keys are asset IDs, values are the number of units to reserve.
+   * Only populated for QUANTITY_TRACKED assets; INDIVIDUAL assets are excluded.
+   *
+   * Initialized from existing booking data so that qty-tracked assets
+   * already in the booking show their current booked quantity rather
+   * than defaulting to 1.
+   */
+  const [quantities, setQuantities] = useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    for (const ba of booking.bookingAssets) {
+      if (isQuantityTracked(ba.asset) && !ba.asset.kitId) {
+        initial[ba.asset.id] = ba.quantity;
+      }
+    }
+    return initial;
+  });
+
+  /** Updates the quantity for a specific QUANTITY_TRACKED asset */
+  const handleQuantityChange = useCallback(
+    (assetId: string, quantity: number) => {
+      setQuantities((prev) => ({ ...prev, [assetId]: quantity }));
+    },
+    []
+  );
+
+  /** Removes a quantity entry when an asset is deselected */
+  const removeQuantity = useCallback((assetId: string) => {
+    setQuantities((prev) => {
+      const next = { ...prev };
+      delete next[assetId];
+      return next;
+    });
+  }, []);
+
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -488,8 +828,11 @@ export default function AddAssetsToNewBooking() {
 
   /** Assets with kits has to be handled from manage-kits */
   const bookingAssets = useMemo(
-    () => booking.assets.filter((asset) => !asset.kitId),
-    [booking.assets]
+    () =>
+      booking.bookingAssets
+        .filter((ba) => !ba.asset.kitId)
+        .map((ba) => ba.asset),
+    [booking.bookingAssets]
   );
 
   const removedAssets = useMemo(
@@ -503,7 +846,34 @@ export default function AddAssetsToNewBooking() {
     [bookingAssets, selectedBulkItems]
   );
 
-  const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
+  /**
+   * Build a stable map of the initial booked quantities so we can
+   * detect whether the user changed any quantity values.
+   */
+  const initialQuantities = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const ba of booking.bookingAssets) {
+      if (isQuantityTracked(ba.asset) && !ba.asset.kitId) {
+        m[ba.asset.id] = ba.quantity;
+      }
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const hasQuantityChanges = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(initialQuantities),
+      ...Object.keys(quantities),
+    ]);
+    for (const k of keys) {
+      if ((initialQuantities[k] ?? 1) !== (quantities[k] ?? 1)) return true;
+    }
+    return false;
+  }, [initialQuantities, quantities]);
+
+  const hasUnsavedChanges =
+    selectedBulkItemsCount !== bookingAssets.length || hasQuantityChanges;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -533,10 +903,16 @@ export default function AddAssetsToNewBooking() {
   );
 
   /**
-   * Set disabled items for assets
+   * Set disabled items for assets.
+   * QUANTITY_TRACKED assets are never disabled — they support partial
+   * reservations, so the user must always be able to select/deselect
+   * them and adjust the quantity picker.
    */
   useEffect(() => {
     const _disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
+      /** Qty-tracked assets can always be selected to adjust quantity */
+      if (isQuantityTracked(asset)) return acc;
+
       if (!asset.availableToBook || !!asset.kitId) {
         acc.push(asset);
       }
@@ -666,6 +1042,22 @@ export default function AddAssetsToNewBooking() {
               return;
             }
 
+            /**
+             * Check if the asset is currently selected so we know
+             * whether we are adding or removing it.
+             */
+            const isCurrentlySelected = selectedBulkItems.some(
+              (item) => item.id === asset.id
+            );
+
+            if (isCurrentlySelected) {
+              /** Clean up quantity state when a QUANTITY_TRACKED asset is deselected */
+              removeQuantity(asset.id);
+            } else if (isQuantityTracked(asset)) {
+              /** Initialize quantity to 1 when a QUANTITY_TRACKED asset is first selected */
+              handleQuantityChange(asset.id, 1);
+            }
+
             updateItem(asset);
           }}
           emptyStateClassName="py-10"
@@ -674,6 +1066,10 @@ export default function AddAssetsToNewBooking() {
             text: "What are you waiting for? Create your first asset now!",
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
+          }}
+          extraItemComponentProps={{
+            quantities,
+            onQuantityChange: handleQuantityChange,
           }}
           bulkActions={<> </>}
           disableSelectAllItems
@@ -718,6 +1114,12 @@ export default function AddAssetsToNewBooking() {
                 value={asset.id}
               />
             ))}
+            {/* JSON-encoded quantities for QUANTITY_TRACKED assets */}
+            <input
+              type="hidden"
+              name="quantities"
+              value={JSON.stringify(quantities)}
+            />
             {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageKitsUrl} type="hidden" />
             ) : null}
@@ -750,11 +1152,21 @@ export default function AddAssetsToNewBooking() {
   );
 }
 
+/**
+ * Row component for each asset in the manage-assets list.
+ * Shows a quantity input inline for QUANTITY_TRACKED assets when selected.
+ */
 const RowComponent = ({
   item,
+  extraProps,
 }: {
   item: AssetsFromViewItem & {
     location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
+    availableQuantity?: number;
+  };
+  extraProps?: {
+    quantities?: Record<string, number>;
+    onQuantityChange?: (assetId: string, quantity: number) => void;
   };
 }) => {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
@@ -762,6 +1174,9 @@ const RowComponent = ({
   const { category, tags, location } = item;
   const isPartOfKit = !!item.kitId;
   const isAddedThroughKit = isPartOfKit && checked;
+  const isQtyTracked = isQuantityTracked(item);
+  /** Show the quantity picker only when the asset is selected and is QUANTITY_TRACKED */
+  const showQuantityPicker = checked && isQtyTracked;
 
   return (
     <>
@@ -786,23 +1201,72 @@ const RowComponent = ({
                 {item.title}{" "}
               </p>
               <div className="flex flex-row gap-x-2">
-                <When truthy={item.status === AssetStatus.AVAILABLE}>
-                  <AssetStatusBadge
-                    id={item.id}
-                    status={item.status}
-                    availableToBook={item.availableToBook}
-                  />
-                </When>
-
-                <AvailabilityLabel
-                  isAddedThroughKit={isAddedThroughKit}
-                  showKitStatus
-                  asset={item as unknown as AssetWithBooking}
-                  isCheckedOut={item.status === "CHECKED_OUT"}
-                />
+                {isQuantityTracked(item) ? (
+                  <Badge
+                    color={BADGE_COLORS.blue.bg}
+                    textColor={BADGE_COLORS.blue.text}
+                    withDot={false}
+                  >
+                    Qty tracked · {item.availableQuantity ?? item.quantity}{" "}
+                    available
+                  </Badge>
+                ) : (
+                  <>
+                    <AssetStatusBadge
+                      id={item.id}
+                      status={item.status}
+                      availableToBook={item.availableToBook}
+                      asset={item}
+                    />
+                    <AvailabilityLabel
+                      isAddedThroughKit={isAddedThroughKit}
+                      showKitStatus
+                      asset={item as unknown as AssetWithBooking}
+                      isCheckedOut={item.status === "CHECKED_OUT"}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
+          {/* Quantity picker for QUANTITY_TRACKED assets */}
+          {showQuantityPicker ? (
+            <div
+              className="ml-auto flex shrink-0 items-center gap-2 pr-2"
+              role="presentation"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <label
+                htmlFor={`qty-${item.id}`}
+                className="text-xs text-gray-500"
+              >
+                Qty:
+              </label>
+              <input
+                id={`qty-${item.id}`}
+                type="number"
+                min={1}
+                max={item.availableQuantity ?? item.quantity ?? undefined}
+                value={extraProps?.quantities?.[item.id] ?? 1}
+                onChange={(e) => {
+                  const maxQty =
+                    item.availableQuantity ?? item.quantity ?? Infinity;
+                  const val = Math.max(
+                    1,
+                    Math.min(Number(e.target.value) || 1, maxQty)
+                  );
+                  extraProps?.onQuantityChange?.(item.id, val);
+                }}
+                className="h-8 w-16 rounded-md border border-gray-300 px-2 text-center text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                aria-label={`Quantity for ${item.title}`}
+              />
+              {(item.availableQuantity ?? item.quantity) != null ? (
+                <span className="text-xs text-gray-400">
+                  / {item.availableQuantity ?? item.quantity}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </Td>
 

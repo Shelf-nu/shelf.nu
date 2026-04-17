@@ -12,6 +12,7 @@ import {
   getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
+import { getAssetModels } from "~/modules/asset-model/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr/service.server";
@@ -70,6 +71,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       { categories, totalCategories, tags, locations, totalLocations },
       customFields,
       nextSequentialId,
+      { assetModels, totalAssetModels },
     ] = await Promise.all([
       getAllEntriesForCreateAndEdit({
         organizationId,
@@ -81,6 +83,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         category: searchParams.get("category"),
       }),
       estimateNextSequentialId(organizationId),
+      getAssetModels({ organizationId, page: 1, perPage: 100 }),
     ]);
 
     return payload({
@@ -91,6 +94,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalTags: tags.length,
       locations,
       totalLocations,
+      assetModels,
+      totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
       nextSequentialId,
@@ -161,10 +166,16 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       title,
       description,
       category,
+      assetModelId,
       qrId,
       newLocationId,
       valuation,
       addAnother,
+      type,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     } = payload;
 
     /** This checks if tags are passed and build the  */
@@ -181,12 +192,18 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       description,
       userId: authSession.userId,
       categoryId: category,
+      assetModelId: assetModelId || undefined,
       locationId: newLocationId,
       qrId,
       tags,
       valuation,
       customFieldsValues,
       barcodes,
+      type,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     });
 
     const actor = wrapUserLinkForNote({

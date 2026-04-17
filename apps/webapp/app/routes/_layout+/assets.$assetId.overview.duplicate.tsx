@@ -53,6 +53,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+      include: {
+        custody: { select: { quantity: true } },
+      },
     });
 
     return payload({
@@ -174,6 +177,7 @@ export default function DuplicateAsset() {
                   id={asset.id}
                   status={asset.status}
                   availableToBook={asset.availableToBook}
+                  asset={asset}
                 />
               </div>
             </div>

@@ -12,6 +12,7 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
+import { hasCustody } from "~/modules/custody/utils";
 import type { LoaderData } from "~/routes/_layout+/kits.$kitId.scan-assets";
 import type {
   AssetFromQr,
@@ -85,7 +86,9 @@ export default function AddAssetsToKitDrawer({
 
   // Asset has custody (unavailable for kit assignment) - matches server logic
   const assetsWithCustodyIds = assets
-    .filter((asset) => !!asset && asset.custody && asset.kitId !== kit.id)
+    .filter(
+      (asset) => !!asset && hasCustody(asset.custody) && asset.kitId !== kit.id
+    )
     .map((asset) => asset.id);
 
   // Asset is checked out
@@ -240,7 +243,7 @@ export function AssetRow({
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
     // Custom preset for assets with custody (unavailable for kits)
     {
-      condition: !!asset.custody && asset.kitId !== kit.id,
+      condition: hasCustody(asset.custody) && asset.kitId !== kit.id,
       badgeText: "Has custody",
       tooltipTitle: "Asset has custody",
       tooltipContent:

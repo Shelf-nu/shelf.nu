@@ -311,7 +311,7 @@ export async function sendBookingUpdatedEmail({
 
     const emailArgs: BasicEmailContentArgs = {
       bookingName: booking.name,
-      assetsCount: booking._count.assets,
+      assetsCount: booking._count.bookingAssets,
       custodian,
       from: booking.from!,
       to: booking.to!,
@@ -336,7 +336,7 @@ export async function sendBookingUpdatedEmail({
       const html = await bookingUpdatesTemplateString({
         booking,
         heading: `Your booking "${booking.name}" has been updated`,
-        assetCount: booking._count.assets,
+        assetCount: booking._count.bookingAssets,
         hints,
         changes,
         recipientReason: recipient.reason,
@@ -366,7 +366,7 @@ export async function sendBookingUpdatedEmail({
           const html = await bookingUpdatesTemplateString({
             booking,
             heading: `Your booking "${booking.name}" has been updated`,
-            assetCount: booking._count.assets,
+            assetCount: booking._count.bookingAssets,
             hints,
             changes,
             recipientReason: "custodian",

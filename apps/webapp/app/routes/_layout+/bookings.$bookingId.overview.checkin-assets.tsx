@@ -99,11 +99,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
     // not the filtered count from booking.assets (which may be filtered by status)
-    const totalBookingAssets = await db.asset.count({
+    const totalBookingAssets = await db.bookingAsset.count({
       where: {
-        bookings: {
-          some: { id: booking.id },
-        },
+        bookingId: booking.id,
       },
     });
 

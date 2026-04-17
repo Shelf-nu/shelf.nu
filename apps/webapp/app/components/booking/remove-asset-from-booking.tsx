@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Asset } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
@@ -18,7 +19,21 @@ import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
-export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
+/**
+ * Remove-from-booking confirmation dialog.
+ *
+ * Accepts an optional `trigger` so callers inside a Popover/menu can render
+ * a trigger element styled to match surrounding menu items. When omitted,
+ * falls back to the component's built-in trash button for backwards
+ * compatibility with existing call sites.
+ */
+export const RemoveAssetFromBooking = ({
+  asset,
+  trigger,
+}: {
+  asset: Asset;
+  trigger?: ReactNode;
+}) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isArchived, isCompleted } = useBookingStatusHelpers(booking.status);
   const disabled = useDisabled();
@@ -26,24 +41,26 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="link"
-          data-test-id="deleteBookingButton"
-          icon="trash"
-          className={tw(
-            "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none   hover:bg-slate-100 hover:text-gray-700"
-          )}
-          title={
-            isArchived || isCompleted
-              ? "Cannot remove assets from completed bookings"
-              : undefined
-          }
-          width="full"
-          disabled={disabled || isArchived || isCompleted}
-        >
-          Remove
-        </Button>
+        {trigger ?? (
+          <Button
+            type="button"
+            variant="link"
+            data-test-id="deleteBookingButton"
+            icon="trash"
+            className={tw(
+              "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none   hover:bg-slate-100 hover:text-gray-700"
+            )}
+            title={
+              isArchived || isCompleted
+                ? "Cannot remove assets from completed bookings"
+                : undefined
+            }
+            width="full"
+            disabled={disabled || isArchived || isCompleted}
+          >
+            Remove
+          </Button>
+        )}
       </AlertDialogTrigger>
 
       <AlertDialogContent>

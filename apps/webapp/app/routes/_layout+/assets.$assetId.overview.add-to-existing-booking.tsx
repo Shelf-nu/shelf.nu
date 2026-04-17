@@ -11,14 +11,18 @@ import {
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
+import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { db } from "~/database/db.server";
 
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   loadBookingsData,
   processBooking,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
+import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -41,6 +45,7 @@ import { intersected } from "~/utils/utils";
 const updateBookingSchema = z.object({
   assetIds: z.string().array().min(1, "At least one asset is required."),
   bookingId: z.string().min(1, "Please select a booking."),
+  quantity: z.coerce.number().int().positive().optional(),
 });
 
 export const meta = () => [{ title: appendToMetaTitle("Add to booking") }];
@@ -68,7 +73,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ids: assetId ? [assetId] : undefined,
     });
 
-    return data(payload(loaderData), {
+    /** Fetch the asset so we can show a quantity picker for qty-tracked assets */
+    const asset = await db.asset.findFirst({
+      where: { id: assetId, organizationId },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        quantity: true,
+        unitOfMeasure: true,
+      },
+    });
+
+    /**
+     * For qty-tracked assets, compute current booking-aware availability so
+     * the modal can cap the quantity input. The selected booking isn't known
+     * yet at load time, so we don't exclude any booking here — this is the
+     * conservative max the user can request. The action re-validates using
+     * excludeBookingId once the target booking is known.
+     */
+    const assetAvailability =
+      asset && isQuantityTracked(asset)
+        ? await computeBookingAvailableQuantity(asset.id)
+        : null;
+
+    return data(payload({ ...loaderData, asset, assetAvailability }), {
       headers: [
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
@@ -91,22 +120,60 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
     const formData = await request.formData();
-    const { assetIds, bookingId } = parseData(formData, updateBookingSchema, {
-      additionalData: { userId },
-      message: "Please select a Booking",
-      shouldBeCaptured: false,
-    });
+    const { assetIds, bookingId, quantity } = parseData(
+      formData,
+      updateBookingSchema,
+      {
+        additionalData: { userId },
+        message: "Please select a Booking",
+        shouldBeCaptured: false,
+      }
+    );
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
       assetIds
     );
 
-    const bookingAssets = (
-      "assets" in bookingInfo ? bookingInfo.assets : []
-    ).map((asset) => asset.id);
+    /**
+     * If a quantity was submitted (qty-tracked asset), validate it doesn't
+     * exceed availability before writing to the booking. excludeBookingId
+     * is the target booking so we don't double-count its own reservations.
+     */
+    let quantities: Record<string, number> | undefined;
+    if (quantity != null && finalAssetIds.length === 1) {
+      const assetId = finalAssetIds[0];
+      const asset = await db.asset.findFirst({
+        where: { id: assetId, organizationId },
+        select: { id: true, title: true, type: true },
+      });
 
-    if (bookingAssets.length > 0 && intersected(bookingAssets, finalAssetIds)) {
+      if (asset && isQuantityTracked(asset)) {
+        const availability = await computeBookingAvailableQuantity(
+          assetId,
+          bookingId
+        );
+        if (quantity > availability.available) {
+          throw new ShelfError({
+            cause: null,
+            message: `Cannot reserve ${quantity} units of "${asset.title}". Only ${availability.available} available.`,
+            label: "Booking",
+            shouldBeCaptured: false,
+            status: 400,
+          });
+        }
+        quantities = { [assetId]: quantity };
+      }
+    }
+
+    const bookingAssetIds = (
+      "bookingAssets" in bookingInfo ? bookingInfo.bookingAssets : []
+    ).map((ba) => ba.asset.id);
+
+    if (
+      bookingAssetIds.length > 0 &&
+      intersected(bookingAssetIds, finalAssetIds)
+    ) {
       throw new ShelfError({
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
@@ -128,6 +195,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       assetIds: finalAssetIds,
       userId,
+      quantities,
     });
 
     const actor = wrapUserLinkForNote({
@@ -165,10 +233,14 @@ export function links() {
 }
 
 export default function ExistingBooking() {
-  const { ids } = useLoaderData<typeof loader>();
+  const { ids, asset, assetAvailability } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+
+  const isQtyTracked = asset ? isQuantityTracked(asset) : false;
+  const unitLabel = asset?.unitOfMeasure || "units";
+  const maxQuantity = assetAvailability?.available ?? undefined;
 
   function isValidBooking(booking: any) {
     return booking && ["RESERVED", "DRAFT"].includes(booking.status);
@@ -235,6 +307,27 @@ export default function ExistingBooking() {
             are visible
           </div>
         </div>
+
+        {isQtyTracked ? (
+          <div className="mb-2">
+            <Input
+              name="quantity"
+              type="number"
+              label={`Quantity (${unitLabel})`}
+              min={1}
+              max={maxQuantity}
+              step={1}
+              defaultValue={1}
+              required
+            />
+            {maxQuantity != null ? (
+              <p className="mt-1 text-xs text-gray-500">
+                Max available: {maxQuantity} {unitLabel}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {actionData?.error && (
           <div>
             <div className="text-red-500">

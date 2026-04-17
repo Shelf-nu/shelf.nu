@@ -91,13 +91,17 @@ export type KitForBooking = Prisma.KitGetPayload<{
         status: true;
         availableToBook: true;
         custody: true;
-        bookings: {
-          select: {
-            id: true;
-            status: true;
-            name: true;
-            from: true;
-            to: true;
+        bookingAssets: {
+          include: {
+            booking: {
+              select: {
+                id: true;
+                status: true;
+                name: true;
+                from: true;
+                to: true;
+              };
+            };
           };
         };
       };
@@ -155,7 +159,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
+    const bookingKitIds = getKitIdsByAssets(
+      booking.bookingAssets.map((ba) => ba.asset)
+    );
 
     const { page, perPage, kits, search, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
@@ -170,38 +176,44 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               status: true,
               availableToBook: true,
               custody: true,
-              bookings: {
+              bookingAssets: {
                 /**
                  * Important to make sure the bookings are overlapping the period of the current booking
                  */
                 where: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.from },
-                          to: { gte: booking.to },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.from },
-                        },
+                  booking: {
+                    status: {
+                      in: [
+                        BookingStatus.RESERVED,
+                        BookingStatus.ONGOING,
+                        BookingStatus.OVERDUE,
                       ],
-                    }),
+                    },
+                    ...(booking.from &&
+                      booking.to && {
+                        OR: [
+                          {
+                            from: { lte: booking.from },
+                            to: { gte: booking.to },
+                          },
+                          {
+                            from: { gte: booking.from },
+                            to: { lte: booking.from },
+                          },
+                        ],
+                      }),
+                  },
                 },
-                select: {
-                  id: true,
-                  status: true,
-                  name: true,
-                  from: true,
-                  to: true,
+                include: {
+                  booking: {
+                    select: {
+                      id: true,
+                      status: true,
+                      name: true,
+                      from: true,
+                      to: true,
+                    },
+                  },
                 },
               },
             },
@@ -268,8 +280,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         select: {
           id: true,
           status: true,
-          assets: {
-            select: { id: true },
+          bookingAssets: {
+            select: { asset: { select: { id: true } } },
           },
         },
       })
@@ -328,7 +340,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
 
     // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
+    const existingAssetIds = booking.bookingAssets.map((ba) => ba.asset.id);
 
     // Filter out existing assets to get only newly added ones
     const newAssetIds = allSelectedAssetIds.filter(
@@ -503,7 +515,9 @@ export default function AddKitsToBooking() {
     [booking]
   );
 
-  const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
+  const totalAssetsSelected = booking.bookingAssets.filter(
+    (ba) => !ba.asset.kitId
+  ).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
 
   /**
@@ -682,8 +696,10 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
     kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 

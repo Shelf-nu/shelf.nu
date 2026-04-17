@@ -4,6 +4,7 @@ import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -53,18 +54,20 @@ export default function ListAssetContent({
   const isCheckedOut = useMemo(
     () =>
       (item.status === AssetStatus.CHECKED_OUT &&
-        !item.bookings.some((b) => b.id === booking.id) &&
+        !item.bookingAssets.some((ba) => ba.booking.id === booking.id) &&
         // Only exclude assets from current booking if current booking is ONGOING/OVERDUE
         !(
-          booking.assets.some((asset) => asset.id === item.id) &&
+          booking.bookingAssets.some(
+            (ba: { assetId: string }) => ba.assetId === item.id
+          ) &&
           (booking.status === "ONGOING" || booking.status === "OVERDUE")
         )) ??
       false,
     [
       item.status,
-      item.bookings,
+      item.bookingAssets,
       booking.id,
-      booking.assets,
+      booking.bookingAssets,
       item.id,
       booking.status,
     ]
@@ -167,12 +170,20 @@ export default function ListAssetContent({
                     id={item.id}
                     status={contextStatus}
                     availableToBook={item.availableToBook}
+                    asset={item}
                   />
                 )}
               </div>
             </div>
           </div>
         </div>
+      </Td>
+
+      {/* Booked quantity — shows the number for qty-tracked assets, empty for individual */}
+      <Td className={tw("text-center", isKitAsset ? "bg-gray-50/50" : "")}>
+        {isQuantityTracked(item) && item.bookedQuantity
+          ? item.bookedQuantity
+          : null}
       </Td>
 
       {/* If asset status is different than available, we need to show a label */}

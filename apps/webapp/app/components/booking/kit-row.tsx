@@ -112,6 +112,9 @@ export default function KitRow({
           </div>
         </Td>
 
+        {/* Qty — empty for kit header rows */}
+        <Td> </Td>
+
         <Td>
           <When truthy={isOverlapping && !isInProgress}>
             <AvailabilityBadge

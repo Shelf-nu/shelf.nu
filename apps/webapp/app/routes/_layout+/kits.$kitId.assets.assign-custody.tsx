@@ -83,14 +83,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assets: {
           select: {
             status: true,
-            bookings: {
+            bookingAssets: {
               where: {
-                status: {
-                  in: [BookingStatus.RESERVED],
+                booking: {
+                  status: {
+                    in: [BookingStatus.RESERVED],
+                  },
+                  from: { gt: new Date() },
                 },
-                from: { gt: new Date() },
               },
-              select: { id: true },
+              include: {
+                booking: {
+                  select: { id: true },
+                },
+              },
             },
           },
         },
@@ -309,7 +315,9 @@ export default function GiveKitCustody() {
 
   const { isSelfService } = useUserRoleHelper();
 
-  const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
+  const hasBookings = kit.assets.some(
+    (asset) => asset.bookingAssets.length > 0
+  );
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
@@ -372,7 +380,7 @@ export default function GiveKitCustody() {
             <>
               Kit is part of an{" "}
               <Link
-                to={`/bookings/${kit.assets[0].bookings[0].id}`}
+                to={`/bookings/${kit.assets[0].bookingAssets[0].booking.id}`}
                 className="underline"
                 target="_blank"
               >

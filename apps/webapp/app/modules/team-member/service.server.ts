@@ -833,3 +833,53 @@ export async function getTeamMembersForNotify({
     });
   }
 }
+
+/**
+ * Fetches team members for the quantity custody dialog's DynamicSelect.
+ *
+ * Returns the first page (12 items) by default, or all items when
+ * `getAll=teamMember` is present in the search params. Self-service
+ * users are scoped to only their own team member record.
+ *
+ * @param args - Organization, request, user ID, and role
+ * @returns Object with `teamMembers` array and `totalTeamMembers` count
+ */
+export async function getTeamMembersForQuantityCustody({
+  organizationId,
+  request,
+  userId,
+  isSelfService,
+}: {
+  organizationId: string;
+  request: Request;
+  userId: string;
+  isSelfService: boolean;
+}) {
+  try {
+    const searchParams = getCurrentSearchParams(request);
+    const where = {
+      deletedAt: null,
+      organizationId,
+      userId: isSelfService ? userId : undefined,
+    };
+
+    const [teamMembers, totalTeamMembers] = await Promise.all([
+      db.teamMember.findMany({
+        where,
+        include: { user: true },
+        orderBy: { userId: "asc" },
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
+      }),
+      db.teamMember.count({ where }),
+    ]);
+
+    return { teamMembers, totalTeamMembers };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team members for quantity custody",
+      additionalData: { organizationId, userId },
+      label,
+    });
+  }
+}

@@ -47,6 +47,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -611,7 +612,9 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
 
 function AssetListItem({ item }: { item: AuditAssetItem }) {
   const { session, canRemoveAssets } = useLoaderData<typeof loader>();
-  const { category, location, custody } = item;
+  const { category, location, custody: custodyArray } = item;
+  /** Get the primary custody record from the array */
+  const custody = getPrimaryCustody(custodyArray);
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
   const { roles } = useUserRoleHelper();

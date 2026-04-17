@@ -45,6 +45,7 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
     case "description":
       return "text";
     case "valuation":
+    case "quantity":
       return "number";
     case "availableToBook":
       return "boolean";
@@ -53,6 +54,9 @@ export function getQueryFieldType(fieldName: string): QueryFieldType {
       return "date";
     case "tags":
       return "array";
+    case "type":
+    case "assetModel":
+      return "enum";
     default:
       return "string";
   }

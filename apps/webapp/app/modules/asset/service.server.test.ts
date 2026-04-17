@@ -6,6 +6,7 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  createAsset,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
   uploadDuplicateAssetMainImage,
@@ -373,5 +374,68 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (refresh failed gracefully)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
+  });
+});
+
+describe("createAsset quantity validation", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no quantity", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        consumptionType: "ONE_WAY",
+        // quantity intentionally omitted
+      })
+    ).rejects.toThrow("Quantity is required for quantity-tracked assets");
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no consumptionType", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        quantity: 100,
+        // consumptionType intentionally omitted
+      })
+    ).rejects.toThrow(
+      "Consumption type is required for quantity-tracked assets"
+    );
+  });
+
+  it("does not throw quantity validation for INDIVIDUAL assets", async () => {
+    // This test verifies that INDIVIDUAL assets skip quantity validation.
+    // The function will proceed past validation but will fail on
+    // other operations (e.g., sequential ID generation) which is expected.
+    // We assert the thrown error is NOT a quantity validation error.
+    await expect(
+      createAsset({
+        title: "Test Laptop",
+        description: "A laptop",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "INDIVIDUAL",
+        // No quantity or consumptionType — should not throw validation error
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining("Quantity is required"),
+      })
+    );
   });
 });

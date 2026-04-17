@@ -507,6 +507,7 @@ const RowComponent = ({
                     id={item.id}
                     status={item.status}
                     availableToBook={item.availableToBook}
+                    asset={item}
                   />
                 </When>
 

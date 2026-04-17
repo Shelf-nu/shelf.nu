@@ -166,7 +166,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -183,7 +183,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -197,7 +197,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -211,7 +211,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -221,7 +221,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           where: { organizationId },
           orderBy: { createdAt: "desc" },
           take: 5,
-          include: { category: true },
+          include: {
+            category: true,
+            custody: { select: { quantity: true } },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({

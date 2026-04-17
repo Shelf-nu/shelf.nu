@@ -83,6 +83,13 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImageExpiration: true,
   status: true,
   availableToBook: true,
+  type: true,
+  quantity: true,
+  custody: {
+    select: {
+      quantity: true,
+    },
+  },
   category: {
     select: {
       id: true,

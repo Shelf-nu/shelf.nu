@@ -65,6 +65,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
@@ -400,7 +401,7 @@ export async function getPaginatedAndFilterableKits<
       where.assets = {
         every: {
           organizationId,
-          custody: null,
+          custody: { none: {} },
         },
       };
 
@@ -411,14 +412,16 @@ export async function getPaginatedAndFilterableKits<
           {
             assets: {
               none: {
-                bookings: {
+                bookingAssets: {
                   some: {
-                    id: { not: currentBookingId },
-                    status: BookingStatus.RESERVED,
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
+                    booking: {
+                      id: { not: currentBookingId },
+                      status: BookingStatus.RESERVED,
+                      OR: [
+                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                      ],
+                    },
                   },
                 },
               },
@@ -433,22 +436,24 @@ export async function getPaginatedAndFilterableKits<
               {
                 assets: {
                   none: {
-                    bookings: {
+                    bookingAssets: {
                       some: {
-                        id: { not: currentBookingId },
-                        status: {
-                          in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                        booking: {
+                          id: { not: currentBookingId },
+                          status: {
+                            in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                          },
+                          OR: [
+                            {
+                              from: { lte: bookingTo },
+                              to: { gte: bookingFrom },
+                            },
+                            {
+                              from: { gte: bookingFrom },
+                              to: { lte: bookingTo },
+                            },
+                          ],
                         },
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
                       },
                     },
                   },
@@ -861,23 +866,27 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
       const kitAsset = await db.asset.findFirst({
         where: {
           kitId: kit.id,
-          bookings: {
-            some: { status: { in: ["ONGOING", "OVERDUE"] } },
+          bookingAssets: {
+            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
           },
         },
         select: {
           id: true,
-          bookings: {
-            where: { status: { in: ["ONGOING", "OVERDUE"] } },
-            select: {
-              id: true,
-              custodianTeamMember: true,
-              custodianUser: {
+          bookingAssets: {
+            where: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+            include: {
+              booking: {
                 select: {
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  profilePicture: true,
+                  id: true,
+                  custodianTeamMember: true,
+                  custodianUser: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      displayName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             },
@@ -885,7 +894,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
         },
       });
 
-      const booking = kitAsset?.bookings[0];
+      const booking = kitAsset?.bookingAssets[0]?.booking;
       const custodianUser = booking?.custodianUser;
       const custodianTeamMember = booking?.custodianTeamMember;
 
@@ -964,26 +973,26 @@ export function getKitCurrentBooking(kit: {
   id: string;
   assets: {
     status: AssetStatus;
-    bookings: CurrentBookingType[];
+    bookingAssets: { booking: CurrentBookingType }[];
   }[];
 }) {
   const ongoingBookingAsset = kit.assets
-    // Filter each asset's bookings to only ongoing or overdue ones
+    // Filter each asset's bookingAssets to only ongoing or overdue ones
     .map((a) => ({
       ...a,
-      bookings: a.bookings.filter(
-        (b) =>
-          b.status === BookingStatus.ONGOING ||
-          b.status === BookingStatus.OVERDUE
+      bookingAssets: a.bookingAssets.filter(
+        (ba) =>
+          ba.booking.status === BookingStatus.ONGOING ||
+          ba.booking.status === BookingStatus.OVERDUE
       ),
     }))
     // Only consider assets that are actually checked out
     .filter((a) => a.status === AssetStatus.CHECKED_OUT)
     // Find the first asset that has any ongoing/overdue bookings
-    .find((a) => a.bookings.length > 0);
+    .find((a) => a.bookingAssets.length > 0);
 
   const ongoingBooking = ongoingBookingAsset
-    ? ongoingBookingAsset.bookings[0]
+    ? ongoingBookingAsset.bookingAssets[0].booking
     : undefined;
 
   return ongoingBooking;
@@ -2025,7 +2034,11 @@ export async function updateKitAssets({
               id: true,
               title: true,
               kit: true,
-              bookings: { select: { id: true, status: true } },
+              bookingAssets: {
+                include: {
+                  booking: { select: { id: true, status: true } },
+                },
+              },
             },
           },
           custody: {
@@ -2130,7 +2143,7 @@ export async function updateKitAssets({
 
     /** An asset already in custody cannot be added to a kit */
     const isSomeAssetInCustody = newlyAddedAssets.some(
-      (asset) => asset.custody && asset.kit?.id !== kit.id
+      (asset) => hasCustody(asset.custody) && asset.kit?.id !== kit.id
     );
     if (isSomeAssetInCustody) {
       throw new ShelfError({
@@ -2144,7 +2157,9 @@ export async function updateKitAssets({
     }
 
     const kitBookings =
-      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+      kit.assets
+        .find((a) => a.bookingAssets.length > 0)
+        ?.bookingAssets.map((ba) => ba.booking) ?? [];
 
     await db.kit.update({
       where: { id: kit.id, organizationId },
@@ -2253,7 +2268,7 @@ export async function updateKitAssets({
      * If a kit is in custody then the assets added to kit will also inherit the status
      */
     const assetsToInheritStatus = newlyAddedAssets.filter(
-      (asset) => !asset.custody
+      (asset) => !hasCustody(asset.custody)
     );
 
     if (
@@ -2269,9 +2284,11 @@ export async function updateKitAssets({
             data: {
               status: AssetStatus.IN_CUSTODY,
               custody: {
-                create: {
-                  custodian: { connect: { id: kit.custody?.custodian.id } },
-                },
+                create: [
+                  {
+                    custodian: { connect: { id: kit.custody?.custodian.id } },
+                  },
+                ],
               },
             },
           })
@@ -2332,17 +2349,31 @@ export async function updateKitAssets({
 
     if (bookingsToUpdate?.length) {
       await Promise.all(
-        bookingsToUpdate.map((booking) =>
-          db.booking.update({
-            where: { id: booking.id },
-            data: {
-              assets: {
-                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
-                disconnect: removedAssets.map((a) => ({ id: a.id })),
-              },
-            },
-          })
-        )
+        bookingsToUpdate.flatMap((booking) => {
+          const ops = [];
+          if (newlyAddedAssets.length > 0) {
+            ops.push(
+              db.bookingAsset.createMany({
+                data: newlyAddedAssets.map((a) => ({
+                  bookingId: booking.id,
+                  assetId: a.id,
+                })),
+                skipDuplicates: true,
+              })
+            );
+          }
+          if (removedAssets.length > 0) {
+            ops.push(
+              db.bookingAsset.deleteMany({
+                where: {
+                  bookingId: booking.id,
+                  assetId: { in: removedAssets.map((a) => a.id) },
+                },
+              })
+            );
+          }
+          return ops;
+        })
       );
     }
 
@@ -2444,13 +2475,13 @@ export async function bulkRemoveAssetsFromKits({
        * to avoid orphaned custody records when status is set to AVAILABLE
        */
       const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && asset.custody
+        (asset) => !!asset.kit?.custody && hasCustody(asset.custody)
       );
 
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a) => {
-        invariant(a.custody, "Custody not found over asset");
-        return a.custody.id;
-      });
+      /** Collect all custody record IDs from assets whose kits are in custody */
+      const custodyIdsToDelete = assetsWhoseKitsInCustody.flatMap((a) =>
+        (a.custody ?? []).map((c) => c.id)
+      );
 
       if (custodyIdsToDelete.length > 0) {
         await tx.custody.deleteMany({
@@ -2468,9 +2499,10 @@ export async function bulkRemoveAssetsFromKits({
       if (assetsWhoseKitsInCustody.length > 0) {
         await tx.note.createMany({
           data: assetsWhoseKitsInCustody.map((asset) => {
-            const custodianDisplay = asset.custody?.custodian
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            const custodianDisplay = primaryCustody?.custodian
               ? wrapCustodianForNote({
-                  teamMember: asset.custody.custodian,
+                  teamMember: primaryCustody.custodian,
                 })
               : "**Unknown Custodian**";
             return {

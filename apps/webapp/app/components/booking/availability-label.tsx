@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import { hasCustody } from "~/modules/custody/utils";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
 import { SERVER_URL } from "~/utils/env";
@@ -80,9 +82,14 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Has custody
+   * Has custody — skip for QUANTITY_TRACKED assets since they can have
+   * partial custody while still having available units for booking.
+   * The status badge and quantity picker already communicate availability.
    */
-  if (asset.custody) {
+  if (
+    hasCustody(asset.custody as Record<string, unknown>[] | null | undefined) &&
+    !isQuantityTracked(asset)
+  ) {
     return (
       <AvailabilityBadge
         badgeText={"In custody"}
@@ -101,8 +108,9 @@ export function AvailabilityLabel({
     hasAssetBookingConflicts(asset, booking.id) &&
     !["ONGOING", "OVERDUE"].includes(booking.status)
   ) {
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -149,8 +157,9 @@ export function AvailabilityLabel({
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
-    const conflictingBooking = asset?.bookings
-      ?.filter(
+    const conflictingBooking = asset?.bookingAssets
+      ?.map((ba) => ba.booking)
+      .filter(
         (b) =>
           b.id !== booking.id &&
           (b.status === BookingStatus.ONGOING ||
@@ -260,8 +269,8 @@ export function getKitAvailabilityStatus(
 ) {
   const bookings = kit.assets
     .map((asset) => {
-      if (asset?.bookings.length) {
-        return asset.bookings;
+      if (asset?.bookingAssets.length) {
+        return asset.bookingAssets.map((ba) => ba.booking);
       }
       return null;
     })
@@ -273,7 +282,8 @@ export function getKitAvailabilityStatus(
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
   const isInCustody =
-    kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
+    kit.status === "IN_CUSTODY" ||
+    kit.assets.some((a) => hasCustody(a.custody));
 
   const isKitWithoutAssets = kit.assets.length === 0;
 
@@ -311,8 +321,10 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
     kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+      asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 

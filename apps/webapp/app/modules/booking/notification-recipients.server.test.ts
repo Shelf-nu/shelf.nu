@@ -70,7 +70,7 @@ function buildMockBooking(
       selfServiceGroupId: null,
       owner: { email: "owner@example.com" },
     },
-    _count: { assets: 3 },
+    _count: { bookingAssets: 3 },
   } as unknown as BookingForEmail;
 }
 

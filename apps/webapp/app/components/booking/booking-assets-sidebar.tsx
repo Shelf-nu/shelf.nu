@@ -10,6 +10,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/shared/sheet";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -18,35 +19,42 @@ import KitImage from "../kits/kit-image";
 
 type BookingWithAssets = Prisma.BookingGetPayload<{
   include: {
-    assets: {
+    bookingAssets: {
       select: {
         id: true;
-        title: true;
-        availableToBook: true;
-        custody: true;
-        kitId: true;
-        status: true;
-        mainImage: true;
-        thumbnailImage: true;
-        mainImageExpiration: true;
-        category: {
+        quantity: true;
+        asset: {
           select: {
             id: true;
-            name: true;
-            color: true;
-          };
-        };
-        kit: {
-          select: {
-            id: true;
-            name: true;
-            image: true;
-            imageExpiration: true;
+            title: true;
+            type: true;
+            availableToBook: true;
+            custody: true;
+            kitId: true;
+            status: true;
+            mainImage: true;
+            thumbnailImage: true;
+            mainImageExpiration: true;
             category: {
               select: {
                 id: true;
                 name: true;
                 color: true;
+              };
+            };
+            kit: {
+              select: {
+                id: true;
+                name: true;
+                image: true;
+                imageExpiration: true;
+                category: {
+                  select: {
+                    id: true;
+                    name: true;
+                    color: true;
+                  };
+                };
               };
             };
           };
@@ -61,12 +69,29 @@ interface BookingAssetsSidebarProps {
   trigger?: ReactNode;
 }
 
-// Group assets by kits and individual assets - similar to the original pagination structure
-function groupAssets(assets: BookingWithAssets["assets"]) {
-  const itemsMap = new Map();
-  const individualAssets: any[] = [];
+/** Asset enriched with the booked quantity from the BookingAsset pivot */
+type SidebarAsset = BookingWithAssets["bookingAssets"][number]["asset"] & {
+  bookedQuantity: number;
+};
 
-  assets.forEach((asset) => {
+/**
+ * Groups assets by kits and individual assets, similar to the original
+ * pagination structure. Preserves booked quantity from the pivot row.
+ */
+function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
+  const itemsMap = new Map<
+    string,
+    {
+      id: string;
+      type: "kit" | "asset";
+      assets: SidebarAsset[];
+      kit?: SidebarAsset["kit"];
+    }
+  >();
+  const individualAssets: SidebarAsset[] = [];
+
+  bookingAssets.forEach((ba) => {
+    const asset: SidebarAsset = { ...ba.asset, bookedQuantity: ba.quantity };
     if (asset.kitId && asset.kit) {
       // Asset belongs to a kit
       const kitId = asset.kitId;
@@ -104,7 +129,7 @@ export function BookingAssetsSidebar({
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
 
-  const paginatedItems = groupAssets(booking.assets);
+  const paginatedItems = groupAssets(booking.bookingAssets);
 
   const toggleKitExpansion = (kitId: string) => {
     setExpandedKits((prev) => ({
@@ -113,7 +138,7 @@ export function BookingAssetsSidebar({
     }));
   };
 
-  const hasItems = booking.assets.length > 0;
+  const hasItems = booking.bookingAssets.length > 0;
   const defaultTrigger = (
     <Button
       type="button"
@@ -121,7 +146,7 @@ export function BookingAssetsSidebar({
       onClick={hasItems ? () => setIsOpen(true) : undefined}
       className={!hasItems ? "hover:text-gray cursor-default no-underline" : ""}
     >
-      {booking.assets.length} assets
+      {booking.bookingAssets.length} assets
     </Button>
   );
 
@@ -136,8 +161,9 @@ export function BookingAssetsSidebar({
               Assets in "{booking.name}"
             </SheetTitle>
             <SheetDescription className="text-left">
-              {booking.assets.length}{" "}
-              {booking.assets.length === 1 ? "asset" : "assets"} in this booking
+              {booking.bookingAssets.length}{" "}
+              {booking.bookingAssets.length === 1 ? "asset" : "assets"} in this
+              booking
             </SheetDescription>
           </SheetHeader>
 
@@ -239,7 +265,7 @@ export function BookingAssetsSidebar({
 
                           {/* Kit Assets (when expanded) */}
                           {isExpanded &&
-                            item.assets.map((asset: any) => (
+                            item.assets.map((asset) => (
                               <tr
                                 key={`kit-asset-${asset.id}`}
                                 className="relative border-b border-gray-200"
@@ -274,6 +300,13 @@ export function BookingAssetsSidebar({
                                           >
                                             {asset.title}
                                           </Button>
+                                          {/* Show booked quantity for quantity-tracked kit assets */}
+                                          {isQuantityTracked(asset) &&
+                                            asset.bookedQuantity > 0 && (
+                                              <span className="ml-1.5 text-xs font-medium text-gray-500">
+                                                &times; {asset.bookedQuantity}
+                                              </span>
+                                            )}
                                         </span>
                                         <div>
                                           <AssetStatusBadge
@@ -282,6 +315,7 @@ export function BookingAssetsSidebar({
                                             availableToBook={
                                               asset.availableToBook
                                             }
+                                            asset={asset}
                                           />
                                         </div>
                                       </div>
@@ -344,12 +378,20 @@ export function BookingAssetsSidebar({
                                   >
                                     {asset.title}
                                   </Button>
+                                  {/* Show booked quantity for quantity-tracked assets */}
+                                  {isQuantityTracked(asset) &&
+                                    asset.bookedQuantity > 0 && (
+                                      <span className="ml-1.5 text-xs font-medium text-gray-500">
+                                        &times; {asset.bookedQuantity}
+                                      </span>
+                                    )}
                                 </span>
                                 <div>
                                   <AssetStatusBadge
                                     id={asset.id}
                                     status={asset.status}
                                     availableToBook={asset.availableToBook}
+                                    asset={asset}
                                   />
                                 </div>
                               </div>
