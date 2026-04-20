@@ -1,5 +1,6 @@
 import type { Organization, SsoDetails } from "@prisma/client";
 import type { AuthSession } from "@server/session";
+import { isAuthApiError } from "@supabase/supabase-js";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
@@ -74,12 +75,19 @@ export async function resolveUserAndOrgForSsoCallback({
     // If user exists, check if they're trying to convert from email to SSO
     if (user) {
       // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
-      // Supabase auth account yet). Treat "not found" as null.
+      // Supabase auth account yet). Only swallow a genuine 404 — rethrow
+      // transient Supabase/admin errors so they aren't misread as a missing
+      // user and trigger the destructive ID rewrite below.
       let authUser;
       try {
         authUser = await getAuthUserById(user.id);
-      } catch {
-        authUser = null;
+      } catch (error) {
+        const innerCause = isLikeShelfError(error) ? error.cause : error;
+        if (isAuthApiError(innerCause) && innerCause.status === 404) {
+          authUser = null;
+        } else {
+          throw error;
+        }
       }
 
       if (authUser?.app_metadata?.provider === "email") {
