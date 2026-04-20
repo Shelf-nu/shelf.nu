@@ -499,7 +499,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         );
 
         await db.scimToken.delete({
-          where: { id: tokenId },
+          where: { 
+            id: tokenId,
+            organizationId, // Ensure token belongs to this organization
+          },
         });
 
         sendNotification({

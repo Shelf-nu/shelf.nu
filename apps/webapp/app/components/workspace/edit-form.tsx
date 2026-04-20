@@ -613,13 +613,16 @@ const WorkspaceScimTokensSection = ({
   const newToken = generateData?.rawToken;
 
   // Show dialog when a new token is generated (but not if already dismissed)
-  if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
-    setRevealedToken(newToken);
-    setCopied(false);
-    if (labelInputRef.current) {
-      labelInputRef.current.value = "";
+  // Show dialog when a new token is generated (but not if already dismissed)
+  React.useEffect(() => {
+    if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
+      setRevealedToken(newToken);
+      setCopied(false);
+      if (labelInputRef.current) {
+        labelInputRef.current.value = "";
+      }
     }
-  }
+  }, [newToken, revealedToken, dismissedToken]);
 
   const handleCopy = useCallback(() => {
     if (revealedToken) {
