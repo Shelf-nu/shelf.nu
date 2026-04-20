@@ -92,7 +92,9 @@ const SidebarProvider = forwardRef<
 
     // Debounce cookie persistence so rapid CMD+B toggling only fires
     // one request with the final state, instead of a POST per toggle.
-    const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const persistTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+      undefined
+    );
 
     // Clean up debounce timer on unmount to prevent stale submissions
     useEffect(
