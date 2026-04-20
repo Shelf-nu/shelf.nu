@@ -6,10 +6,17 @@
  * `fix-create-note-permissions` branch. An attacker with `bookingNote.create`
  * in Org A must NOT be able to create or delete notes on a booking belonging
  * to Org B simply by knowing the target bookingId.
+ *
+ * Lives under `test/routes-tests/` rather than next to the route itself
+ * because React Router's flat-routes scanner auto-registers any `*.ts` /
+ * `*.tsx` file inside `app/routes/` as a route module and would try to
+ * serve this test file to the client — crashing the dev server on its
+ * server-only imports.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
+import { action } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { db } from "~/database/db.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import type * as HttpServerModule from "~/utils/http.server";
@@ -19,8 +26,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import * as rolesServer from "~/utils/roles.server";
-
-import { action } from "./bookings.$bookingId.activity";
 
 // @vitest-environment node
 
