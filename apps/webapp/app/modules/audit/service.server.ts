@@ -1,7 +1,11 @@
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import type { AuditAssignment, AuditSession } from "@prisma/client";
+import type {
+  AuditAssignment,
+  AuditSession,
+  Organization,
+} from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
@@ -15,6 +19,7 @@ import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -2337,6 +2342,211 @@ export async function archiveAuditSession({
       cause,
       message: "Failed to archive audit session",
       additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Builds a Prisma WHERE clause for audits based on the current URL search
+ * params. Used by bulk operations when the user selects "all" items across
+ * pages so the operation respects any active filters.
+ *
+ * @param organizationId - The organization ID for scoping
+ * @param currentSearchParams - Serialized URL search params from the index page
+ * @param userId - The current user (used for assignment-scoped filters)
+ * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
+ *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
+ */
+export function getAuditWhereInput({
+  organizationId,
+  currentSearchParams,
+  userId,
+  isSelfServiceOrBase,
+}: {
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  userId?: string;
+  isSelfServiceOrBase?: boolean;
+}): Prisma.AuditSessionWhereInput {
+  const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+  // Filter by assignee for BASE/SELF_SERVICE users so select-all
+  // never pulls in audits outside the user's visible scope
+  if (isSelfServiceOrBase && userId) {
+    where.assignments = {
+      some: {
+        userId,
+      },
+    };
+  }
+
+  // Always parse params — even when empty/null, we need to apply
+  // default filters (e.g. exclude ARCHIVED) to mirror the index loader
+  const searchParams = new URLSearchParams(currentSearchParams ?? "");
+
+  // Normalize + validate the status param against the AuditStatus enum.
+  // "ALL" and any unknown value fall through to the default branch so we
+  // always exclude ARCHIVED unless a specific valid status is selected.
+  const rawStatus = searchParams.get("status");
+  const normalized = rawStatus ? rawStatus.toUpperCase() : null;
+  const status =
+    normalized &&
+    normalized !== "ALL" &&
+    (Object.values(AuditStatus) as string[]).includes(normalized)
+      ? (normalized as AuditStatus)
+      : null;
+
+  if (status) {
+    where.status = status;
+  } else {
+    // Mirror the index loader: exclude ARCHIVED by default when no
+    // explicit status filter is set, so select-all never pulls in
+    // audits the user didn't see in the list
+    where.status = { notIn: [AuditStatus.ARCHIVED] };
+  }
+
+  // Respect the active search term so select-all only targets the
+  // filtered subset the user sees, not every audit in the org
+  const search = searchParams.get("s");
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+/**
+ * Archives multiple audit sessions in a single transaction.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) will be archived.
+ * Creates an activity note on each archived audit.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ *
+ * @param params.auditIds - Array of audit IDs (or containing ALL_SELECTED_KEY)
+ * @param params.organizationId - Scoping organization
+ * @param params.userId - The user performing the archive (for activity notes)
+ * @param params.currentSearchParams - Serialized URL params for select-all filtering
+ * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
+ *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @throws {ShelfError} If the selection is empty or any selected audit is not
+ *   in a terminal state
+ */
+export async function bulkArchiveAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+  isSelfServiceOrBase,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+  isSelfServiceOrBase?: boolean;
+}) {
+  try {
+    /** When all items are selected, resolve from filters instead of IDs */
+    const where: Prisma.AuditSessionWhereInput = auditIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+        })
+      : { id: { in: auditIds }, organizationId };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No archivable audits were found for your selection.",
+        label,
+        additionalData: { auditIds, organizationId },
+        status: 400,
+      });
+    }
+
+    const someNotTerminal = audits.some(
+      (a) =>
+        a.status !== AuditStatus.COMPLETED && a.status !== AuditStatus.CANCELLED
+    );
+
+    if (someNotTerminal) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some audits are not in a completed or cancelled state. Only completed or cancelled audits can be archived.",
+        label,
+        additionalData: { auditIds, organizationId },
+      });
+    }
+
+    // Fetch user info once up-front for activity notes. Hoisted out of the
+    // transaction to keep the write-only work inside $transaction small and
+    // avoid holding a DB connection while reading unrelated data.
+    const user = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
+    await db.$transaction(async (tx) => {
+      // Keep terminal-state predicate on the write to guard against
+      // concurrent status changes between the read and this update,
+      // mirroring the single-item archiveAuditSession() pattern
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: { in: audits.map((a) => a.id) },
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      if (result.count !== audits.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some audits could not be archived because their status changed. Please refresh and try again.",
+          label,
+          additionalData: {
+            expected: audits.length,
+            actual: result.count,
+            organizationId,
+          },
+          status: 409,
+        });
+      }
+
+      // Create an activity note on each archived audit
+      await tx.auditNote.createMany({
+        data: audits.map((a) => ({
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE" as const,
+          userId,
+          auditSessionId: a.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk archive audits",
+      additionalData: { auditIds, organizationId, userId },
       label,
       status: 500,
     });

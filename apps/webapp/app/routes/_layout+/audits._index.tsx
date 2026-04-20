@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
+import AuditIndexBulkActionsDropdown from "~/components/audit/audit-index-bulk-actions-dropdown";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { NewAuditInfoDialog } from "~/components/audit/new-audit-info-dialog";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -124,6 +125,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
+/** Loader data type re-exported for child components (e.g. bulk archive dialog). */
+export type AuditsIndexLoaderData = typeof loader;
+
 export default function AuditsIndexPage() {
   const { isSelfServiceOrBase } = useLoaderData<typeof loader>();
   return (
@@ -153,6 +157,9 @@ export default function AuditsIndexPage() {
           }}
         />
         <List
+          bulkActions={
+            isSelfServiceOrBase ? undefined : <AuditIndexBulkActionsDropdown />
+          }
           ItemComponent={ListItemContent}
           headerChildren={
             <>
@@ -176,7 +183,8 @@ export default function AuditsIndexPage() {
   );
 }
 
-type AuditListItem = Prisma.AuditSessionGetPayload<{
+/** Shape of a row in the audits index list (includes relations from AUDIT_LIST_INCLUDE). */
+export type AuditListItem = Prisma.AuditSessionGetPayload<{
   include: typeof AUDIT_LIST_INCLUDE;
 }>;
 
