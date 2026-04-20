@@ -15,6 +15,7 @@ import { tw } from "~/utils/tw";
 import { waitForImagesToLoad } from "~/utils/wait-for-images";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
 import { Ean13LookupLink } from "../barcode/barcode-card";
+import { UnlockBarcodesModal } from "../barcode/unlock-barcodes-banner";
 import { CrispButton } from "../marketing/crisp";
 import When from "../when/when";
 
@@ -80,7 +81,7 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
   const organization = useCurrentOrganization();
   const resolvedShowShelfBranding = resolveShowShelfBranding(
     showShelfBranding,
@@ -277,6 +278,7 @@ export const CodePreview = ({
           </select>
           <When truthy={!isBaseOrSelfService}>
             <Button
+              type="button"
               icon="plus"
               variant="secondary"
               size="sm"
@@ -285,11 +287,20 @@ export const CodePreview = ({
               disabled={
                 !canUseBarcodes
                   ? {
-                      reason: (
+                      reason: isOwner ? (
                         <>
-                          Your workspace doesn't currently support barcodes. If
-                          you want to enable barcodes for your workspace, please
-                          get in touch with{" "}
+                          Your workspace doesn't have the barcodes addon
+                          enabled.{" "}
+                          <UnlockBarcodesModal
+                            triggerVariant="link"
+                            triggerLabel="Learn more"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          Your workspace doesn't currently support barcodes.
+                          Contact your workspace owner to enable this feature,
+                          or get in touch with{" "}
                           <CrispButton variant="link">sales</CrispButton>.
                         </>
                       ),
@@ -328,6 +339,7 @@ export const CodePreview = ({
       <When truthy={!hideButton && !!selectedCode}>
         <div className="mt-8 flex w-full items-center gap-3 border-t-[1.1px] border-[#E3E4E8] px-4 py-3">
           <Button
+            type="button"
             icon="download"
             onClick={downloadCode}
             download={fileName}
@@ -338,6 +350,7 @@ export const CodePreview = ({
             Download
           </Button>
           <Button
+            type="button"
             icon="print"
             variant="secondary"
             className="w-full"

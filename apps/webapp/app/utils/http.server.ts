@@ -95,7 +95,17 @@ export function parseData<Schema extends ZodType<any, any, any>>(
   options?: Options
 ) {
   if (data instanceof FormData) {
-    data = parseFormAny(data);
+    try {
+      data = parseFormAny(data);
+    } catch (cause) {
+      throw new ShelfError({
+        cause,
+        message: "Invalid form data",
+        label: "Request validation",
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
   }
 
   if (data instanceof URLSearchParams) {

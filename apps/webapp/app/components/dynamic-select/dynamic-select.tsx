@@ -314,6 +314,7 @@ export default function DynamicSelect({
                 </div>
                 <When truthy={selectedItems?.length > 0 && showSearch}>
                   <Button
+                    type="button"
                     as="button"
                     variant="link"
                     className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
@@ -342,6 +343,7 @@ export default function DynamicSelect({
                   />
                   <When truthy={Boolean(searchQuery)}>
                     <Button
+                      type="button"
                       icon="x"
                       variant="tertiary"
                       disabled={Boolean(searchQuery)}

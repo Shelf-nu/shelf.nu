@@ -6,6 +6,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import type { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import { UserBadge } from "../shared/user-badge";
 
 export type NoteData = {
@@ -110,7 +111,7 @@ export function AuditAssetNoteItem({
         type: fetcher.data.note.type,
         user: {
           id: fetcher.data.note.user.id,
-          name: `${fetcher.data.note.user.firstName} ${fetcher.data.note.user.lastName}`,
+          name: resolveUserDisplayName(fetcher.data.note.user),
           img: fetcher.data.note.user.profilePicture ?? null,
         },
         needsServerSync: false,
@@ -155,6 +156,7 @@ export function AuditAssetNoteItem({
           {/* Show attach images button only for COMMENT notes that are saved (not temp) */}
           {onAttachImages && canDelete && !note.id.startsWith("temp-") && (
             <Button
+              type="button"
               variant="secondary"
               onClick={() => onAttachImages(note.id)}
               disabled={!canAttachImages}
@@ -190,7 +192,7 @@ export function AuditAssetNoteItem({
               </fetcher.Form>
             ) : (
               // Temp notes just remove from state, no server call
-              <Button variant="secondary" onClick={handleDelete}>
+              <Button type="button" variant="secondary" onClick={handleDelete}>
                 <Trash className="size-4" />
               </Button>
             ))}

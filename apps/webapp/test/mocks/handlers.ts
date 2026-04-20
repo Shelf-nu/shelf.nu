@@ -1,4 +1,4 @@
-import { rest } from "msw";
+import { http, HttpResponse } from "msw";
 
 import { USER_EMAIL, USER_ID, USER_PASSWORD } from "./user";
 
@@ -29,41 +29,38 @@ export const SUPABASE_AUTH_USER_API = "/auth/v1/user";
 export const SUPABASE_AUTH_ADMIN_USER_API = "/auth/v1/admin/users";
 
 export const handlers = [
-  rest.post(
+  http.post(
     `${SUPABASE_URL}${SUPABASE_AUTH_TOKEN_API}`,
-    async (req, res, ctx) => {
-      const { email, password, refresh_token } = await req.json();
+    async ({ request }) => {
+      const { email, password, refresh_token } =
+        (await request.json()) as Record<string, string>;
 
       if (refresh_token) {
         if (refresh_token !== "valid")
-          return res(ctx.status(401), ctx.json({ error: "Token expired" }));
-        return res(ctx.status(200), ctx.json(supabaseAuthSession));
+          return HttpResponse.json({ error: "Token expired" }, { status: 401 });
+        return HttpResponse.json(supabaseAuthSession, { status: 200 });
       }
 
       if (!email || !password || password !== USER_PASSWORD)
-        return res(
-          ctx.status(401),
-          ctx.json({ message: "Wrong email or password" })
+        return HttpResponse.json(
+          { message: "Wrong email or password" },
+          { status: 401 }
         );
-      return res(ctx.status(200), ctx.json(supabaseAuthSession));
+      return HttpResponse.json(supabaseAuthSession, { status: 200 });
     }
   ),
-  rest.get(
-    `${SUPABASE_URL}${SUPABASE_AUTH_USER_API}`,
-    async (req, res, ctx) => {
-      const token = req.headers.get("authorization")?.split("Bearer ")?.[1];
+  http.get(`${SUPABASE_URL}${SUPABASE_AUTH_USER_API}`, async ({ request }) => {
+    const token = request.headers.get("authorization")?.split("Bearer ")?.[1];
 
-      if (token !== "valid")
-        return res(ctx.status(401), ctx.json({ error: "Token expired" }));
-      return res(ctx.status(200), ctx.json({ id: USER_ID }));
-    }
+    if (token !== "valid")
+      return HttpResponse.json({ error: "Token expired" }, { status: 401 });
+    return HttpResponse.json({ id: USER_ID }, { status: 200 });
+  }),
+  http.post(`${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`, async () =>
+    HttpResponse.json(authAccount, { status: 200 })
   ),
-  rest.post(
-    `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
-    async (_req, res, ctx) => res(ctx.status(200), ctx.json(authAccount))
-  ),
-  rest.delete(
-    `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}/*`,
-    async (_req, res, ctx) => res(ctx.status(200), ctx.json({}))
+  http.delete(
+    `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}/:userId`,
+    async () => HttpResponse.json({}, { status: 200 })
   ),
 ];

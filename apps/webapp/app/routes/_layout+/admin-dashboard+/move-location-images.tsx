@@ -601,7 +601,10 @@ export default function MoveLocationImages() {
         </div>
 
         <div className="mt-4">
-          <Button disabled={numberOfLocationWithImages === 0 || disabled}>
+          <Button
+            type="submit"
+            disabled={numberOfLocationWithImages === 0 || disabled}
+          >
             Move {count} location images {shouldFix && "(with fixing)"}
           </Button>
         </div>

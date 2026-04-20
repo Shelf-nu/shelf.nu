@@ -61,6 +61,7 @@ export function ExportAssetsButton() {
 
   return (
     <Button
+      type="button"
       onClick={handleExport}
       variant="secondary"
       className="whitespace-nowrap font-medium"

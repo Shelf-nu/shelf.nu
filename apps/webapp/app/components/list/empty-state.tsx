@@ -65,6 +65,7 @@ export const EmptyState = ({
       // Both search and filters active — single "Clear All" button
       return (
         <Button
+          type="button"
           variant="secondary"
           onClick={() => {
             setSearchParams(() => new URLSearchParams());
@@ -78,6 +79,7 @@ export const EmptyState = ({
     if (hasSearch) {
       return (
         <Button
+          type="button"
           variant="secondary"
           onClick={() => {
             setSearchParams((prev) => {
@@ -95,6 +97,7 @@ export const EmptyState = ({
     // Only filters active
     return (
       <Button
+        type="button"
         variant="secondary"
         onClick={() => {
           setSearchParams((prev) => {

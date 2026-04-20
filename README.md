@@ -1,151 +1,171 @@
-# Shelf.nu
-
 <a href="https://www.shelf.nu/" target="_blank">
-<img width="100%" src="./apps/webapp/public/static/images/readme-cover.jpg" alt="Shelf.nu Cover" />
+<img width="100%" src="./apps/webapp/public/static/images/readme-cover.jpg" alt="Shelf.nu" />
 </a>
 
-<h4 align="center">
-✨ Open Source Asset Management Infrastructure for Everyone ✨
-</h4>
+<h3 align="center">Open-source asset management infrastructure for everyone.</h3>
 
 <p align="center">
-Shelf 🏷️ is a cutting-edge, open-source asset management platform designed to streamline tracking, organizing, and managing assets for individuals, businesses, and educational institutions.
+  <a href="https://github.com/Shelf-nu/shelf.nu/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Shelf-nu/shelf.nu?label=License" alt="License" /></a>
+  <a href="https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml"><img src="https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml/badge.svg" alt="Deploy" /></a>
+  <a href="https://github.com/Shelf-nu/shelf.nu/stargazers"><img src="https://img.shields.io/github/stars/Shelf-nu/shelf.nu" alt="Stars" /></a>
+  <a href="https://discord.gg/8he9W7aTJu"><img src="https://img.shields.io/badge/Discord-community-blue?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
-<div align="center" justify="center">
-<a href="https://www.shelf.nu/?ref=github" target="_blank"><b>Website</b></a> •
-<a href="https://docs.shelf.nu/?ref=github" target="_blank"><b>Documentation</b></a> •
-<a href="https://discord.gg/8he9W7aTJu" target="_blank"><b>Community</b></a> •
-<a href="https://twitter.com/ShelfQR/?ref=github" target="_blank"><b>Twitter</b></a> •
-
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
-
-</div>
-
-## Core Features 🚀
-
-- **QR Code Generation & Asset Tags**: Easily assign and track items with QR codes.
-- **Location Tracking**: Quickly locate assets using GPS and tagged locations.
-- **Team Collaboration**: Seamless collaboration with shared access for teams.
-- **Digital Asset Catalog**: Comprehensive, searchable database of all assets.
-- **Booking & Reservation Management**: Prevent double bookings and efficiently reserve assets.
-- **Remote Access**: Manage your inventory remotely from any location.
-- **Custom Fields**: Tailor item details, including purchase history, warranties, and conditions.
-- **Insights**: Analyze usage, condition, and other metrics levels at a glance.
-- **Instant Search**: Advanced, fast, and intuitive search through all assets.
+<p align="center">
+  <a href="https://www.shelf.nu/?ref=github"><b>Website</b></a> &middot;
+  <a href="https://docs.shelf.nu/?ref=github"><b>Documentation</b></a> &middot;
+  <a href="https://discord.gg/8he9W7aTJu"><b>Discord</b></a> &middot;
+  <a href="https://twitter.com/ShelfQR/?ref=github"><b>Twitter</b></a>
+</p>
 
 ---
 
-## Real Impact: Eastern Michigan University Case Study 🌟
+Shelf is a platform for tracking physical assets — equipment, devices, tools, vehicles, props, inventory. It's built for teams that need to know what they have, where it is, and who's using it. Organizations use Shelf to manage thousands of assets across locations with role-based access for their teams.
 
-Shelf revolutionized asset management for Eastern Michigan University's Theatre Program:
+## Features
 
-- **Centralized Inventory**: Moving from chaotic spreadsheets to an organized digital catalog.
-- **Remote Access**: Students coordinate props from different locations, streamlining pre-production.
-- **Time Savings**: Eliminated hours of searching through physical stock with remote asset visibility.
-- **Collaboration**: Enabled teams to collaborate on asset reservations and planning with ease.
+- **QR asset tags** — Generate and print QR codes. Scan with any phone to view, check out, or report an asset.
+- **Bookings and reservations** — Schedule equipment, prevent double-bookings, set checkout/return dates with calendar integration.
+- **Custody tracking** — Assign assets to team members. Know who has what at all times.
+- **Location management** — Hierarchical locations (buildings, floors, rooms, shelves). GPS tagging support.
+- **Team roles** — Owner, Admin, Base, and Self Service roles with granular permissions.
+- **Custom fields** — Add any metadata to assets: purchase date, warranty info, serial numbers, condition.
+- **Categories and tags** — Organize assets into categories. Tag for flexible cross-cutting grouping.
+- **Kits** — Bundle assets into kits (e.g., laptop + charger + dock) and manage them as a unit.
+- **Search and filtering** — Full-text search with advanced filters. Saved filter presets.
+- **CSV import/export** — Bulk import assets from spreadsheets. Export for reporting.
+- **Asset reminders** — Schedule alerts for maintenance, calibration, warranty expiry.
+- **Audit trail** — Notes and activity logs on every asset.
+- **Multi-workspace** — Manage separate inventories for different organizations or departments.
+- **Scanner** — Built-in QR/barcode scanner with bulk actions: assign custody, update location, add to bookings.
 
----
+## Tech Stack
 
-## Use Cases 💡
+| Layer      | Technology                                                                      |
+| ---------- | ------------------------------------------------------------------------------- |
+| Framework  | [React Router](https://reactrouter.com/) 7 (React 19)                           |
+| Language   | [TypeScript](https://www.typescriptlang.org/) 5                                 |
+| Database   | [PostgreSQL](https://www.postgresql.org/) via [Supabase](https://supabase.com/) |
+| ORM        | [Prisma](https://www.prisma.io/) 6                                              |
+| Styling    | [Tailwind CSS](https://tailwindcss.com/) 3                                      |
+| Components | [Radix UI](https://www.radix-ui.com/) primitives                                |
+| Auth       | [Supabase Auth](https://supabase.com/docs/guides/auth) (email, SSO)             |
+| Job queue  | [pg-boss](https://github.com/timgit/pg-boss)                                    |
+| Payments   | [Stripe](https://stripe.com/)                                                   |
+| Email      | [Nodemailer](https://nodemailer.com/) (SMTP)                                    |
+| Build      | [Vite](https://vite.dev/) 7, [Turborepo](https://turbo.build/)                  |
+| Testing    | [Vitest](https://vitest.dev/), [Playwright](https://playwright.dev/)            |
 
-Shelf is ideal for managing:
-
-- **Tool & Equipment Tracking**: For industries needing to oversee large-scale tools or equipment.
-- **IT Asset Management**: Track devices, peripherals, and office technology.
-- **Theatre & Arts**: Perfect for managing props, costumes, and scenic elements for productions.
-- **Home Inventory**: Organize and track personal items, manage warranties, and know their locations.
-- **Educational Institutions**: Centralize and manage department assets for **better** collaboration.
-
----
-
-## Quick Start 🚀
-
-Get Shelf running locally in just a few steps:
+## Getting Started
 
 ### Prerequisites
 
-- **Node.js** (v18 or higher)
-- **npm** or **yarn**
-- **Git**
+- [Node.js](https://nodejs.org/) >= 22.20.0
+- [pnpm](https://pnpm.io/) >= 9.15.4
+- A [Supabase](https://supabase.com/) project (free tier works)
 
-### 1. Clone & Install 📦
+### Setup
 
 ```bash
+# Clone the repository
 git clone https://github.com/Shelf-nu/shelf.nu.git
 cd shelf.nu
+
+# Install dependencies
 pnpm install
-```
 
-### 2. Setup Environment Variables 🔧
-
-```bash
+# Copy environment template
 cp .env.example .env
 ```
 
-### 3. Setup Supabase Database 🗄️
-
-You'll need a Supabase account and database. Follow our detailed [Supabase Setup Guide](./docs/supabase-setup.md) to:
-
-- Create your Supabase project
-- Configure authentication
-- Setup storage buckets
-- Get your connection strings and API keys
-
-### 4. Configure Your .env File ⚙️
-
-After completing the Supabase setup, update your `.env` file with the values from your Supabase dashboard.
-
-### 5. Initialize Database 🏗️
+Edit `.env` with your Supabase credentials and other configuration. See the [Supabase setup guide](https://docs.shelf.nu/supabase-setup) for step-by-step instructions.
 
 ```bash
+# Generate Prisma client and run migrations
 pnpm webapp:setup
-```
 
-### 6. Start Development Server 🎉
-
-```bash
+# Start development server
 pnpm webapp:dev
 ```
 
-Your app will be available at `http://localhost:3000` 🎊
+The app runs at `https://localhost:3000` (the dev server uses HTTPS with local certificates by default).
 
----
+For detailed setup instructions including SSL certificates and troubleshooting, see the [local development guide](https://docs.shelf.nu/local-development).
 
-## Documentation 📚
+## Project Structure
 
-- 📖 **[Local Development Guide](./docs/local-development.md)** - Detailed setup for local development
-- 🗄️ **[Supabase Setup Guide](./docs/supabase-setup.md)** - Complete Supabase configuration
-- 🚀 **[Deployment Guide](./docs/deployment.md)** - Deploy to production (Fly.io, GitHub Actions)
-- 🐳 **[Docker Guide](./docs/docker.md)** - Run with Docker
-- 🔧 **[All Documentation](./docs/)** - Browse all guides and references
+```
+shelf.nu/
+├── apps/
+│   ├── webapp/          # Main application (React Router + Hono)
+│   │   ├── app/
+│   │   │   ├── routes/      # File-based routing
+│   │   │   ├── modules/     # Business logic (booking, asset, kit, etc.)
+│   │   │   ├── components/  # React components
+│   │   │   └── utils/       # Shared utilities
+│   │   └── public/          # Static assets
+│   └── docs/            # Documentation site (VitePress)
+├── packages/
+│   └── database/        # Prisma schema, migrations, client
+└── tooling/
+    └── typescript/      # Shared TypeScript config
+```
 
----
+The monorepo is managed with pnpm workspaces and Turborepo. The `@shelf/database` package owns all database concerns — schema, migrations, and Prisma client generation.
 
-## Alternative Setup Options 🛠️
+## Commands
 
-### Docker 🐳
+| Command                     | Description                             |
+| --------------------------- | --------------------------------------- |
+| `pnpm webapp:dev`           | Start development server                |
+| `pnpm webapp:build`         | Production build                        |
+| `pnpm webapp:test`          | Run tests (Vitest)                      |
+| `pnpm webapp:validate`      | Lint + typecheck + test                 |
+| `pnpm webapp:setup`         | Generate Prisma client + run migrations |
+| `pnpm db:prepare-migration` | Create a new database migration         |
+| `pnpm db:deploy-migration`  | Apply pending migrations                |
+| `pnpm db:reset`             | Reset database (destructive)            |
+| `pnpm docs:dev`             | Start documentation site                |
+| `pnpm typecheck`            | TypeScript type checking                |
+| `pnpm lint`                 | ESLint                                  |
 
-Prefer containers? Check out our [Docker setup guide](./docs/docker.md).
+## Deployment
 
-### One-Click Deploy 🚀
+### Fly.io
 
-Ready for production? See our [deployment guide](./docs/deployment.md) for Fly.io and GitHub Actions setup.
+Shelf deploys to [Fly.io](https://fly.io/) with GitHub Actions for CI/CD. Pushes to `dev` trigger staging deploys and pushes to `main` trigger production deploys; in both cases we run lint, typecheck, test, Docker build, and deploy.
 
----
+See the [deployment guide](https://docs.shelf.nu/deployment) for full setup instructions.
 
-## Contributing 🤝
+### Docker
 
-We encourage contributions! See our [contribution guidelines](./CONTRIBUTING.md) to get started.
+Community-maintained Docker support is available for self-hosting. Requires an external Supabase instance.
 
----
+See the [Docker guide](https://docs.shelf.nu/docker).
 
-## License 📜
+## Documentation
 
-Shelf.nu is licensed under the [AGPL-3.0 License](./LICENSE).
+| Guide                                                        | Description                                  |
+| ------------------------------------------------------------ | -------------------------------------------- |
+| [Local Development](https://docs.shelf.nu/local-development) | Full local setup with SSL, monorepo overview |
+| [Supabase Setup](https://docs.shelf.nu/supabase-setup)       | Database, auth, storage configuration        |
+| [Deployment](https://docs.shelf.nu/deployment)               | Fly.io + GitHub Actions CI/CD                |
+| [Docker](https://docs.shelf.nu/docker)                       | Self-hosted Docker setup                     |
+| [App Configuration](https://docs.shelf.nu/app-configuration) | `shelf.config.ts` options                    |
+| [Error Handling](https://docs.shelf.nu/handling-errors)      | Error patterns and conventions               |
+| [Accessibility](https://docs.shelf.nu/accessibility)         | WCAG 2.1 AA compliance                       |
+| [Contributing](./CONTRIBUTING.md)                            | How to contribute                            |
 
----
+For developer onboarding and codebase conventions, see [`CLAUDE.md`](./CLAUDE.md).
 
-<p align="center">
-⭐️ Star the repo if you find Shelf helpful!
-</p>
+## Contributing
+
+We welcome contributions. Check the [contribution guidelines](./CONTRIBUTING.md) and look for issues labeled [**"Open for contributions"**](https://github.com/Shelf-nu/shelf.nu/issues?q=is%3Aissue+is%3Aopen+label%3A%22Open+for+contributions%22).
+
+The project uses [conventional commits](https://www.conventionalcommits.org/), enforced by commitlint. Pre-commit hooks run ESLint, Prettier, and TypeScript checking via Lefthook.
+
+Join the [Discord](https://discord.gg/8he9W7aTJu) if you have questions or want to discuss your contribution.
+
+## License
+
+Shelf.nu is licensed under [AGPL-3.0](./LICENSE).

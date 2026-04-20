@@ -58,6 +58,7 @@ function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           variant="link"
           icon="trash"
           className={tw(
@@ -90,14 +91,19 @@ function RemoveKitFromBooking({ kit }: { kit: Pick<Kit, "id" | "name"> }) {
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary" disabled={disabled}>
+              <Button type="button" variant="secondary" disabled={disabled}>
                 Cancel
               </Button>
             </AlertDialogCancel>
 
             <Form method="post">
               <input type="hidden" name="kitId" value={kit.id} />
-              <Button name="intent" value="removeKit" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeKit"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>

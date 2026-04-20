@@ -5,6 +5,9 @@ import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
 
+/** Domain used for soft-deleted user email addresses */
+export const SOFT_DELETED_EMAIL_DOMAIN = "@deleted.shelf.nu";
+
 // every node will execute 5 jobs(teamSize) every 3 minutes(newJobCheckIntervalSeconds),
 // increase teamSize if you need better concurrency
 // but keep email provider rate limiting and a potential n/w throughput load on postgress in mind
@@ -51,6 +54,13 @@ export const triggerEmail = async ({
   from,
   replyTo,
 }: EmailPayloadType) => {
+  if (to.endsWith(SOFT_DELETED_EMAIL_DOMAIN)) {
+    Logger.warn(
+      `Skipping email to soft-deleted user: ${to} (subject: ${subject})`
+    );
+    return;
+  }
+
   try {
     // send mail with defined transport object
     await transporter.sendMail({

@@ -173,6 +173,7 @@ function ConditionalDropdown() {
                 }}
               >
                 <Button
+                  type="button"
                   variant="link"
                   className={tw(
                     "flex w-full items-center  justify-start gap-2 px-4 py-3 text-gray-700 hover:text-gray-700"

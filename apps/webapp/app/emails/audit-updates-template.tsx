@@ -9,6 +9,7 @@ import {
 import type { ClientHint } from "~/utils/client-hints";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
@@ -36,6 +37,7 @@ export interface AuditForEmail {
   createdBy: {
     firstName: string | null;
     lastName: string | null;
+    displayName?: string | null;
   };
 }
 
@@ -64,9 +66,7 @@ export function AuditUpdatesEmailTemplate({
   completedAt,
   wasOverdue,
 }: Props) {
-  const creatorName = `${audit.createdBy.firstName || "Unknown"} ${
-    audit.createdBy.lastName || "User"
-  }`;
+  const creatorName = resolveUserDisplayName(audit.createdBy) || "Unknown User";
 
   const dueDateFormatted = audit.dueDate
     ? getDateTimeFormatFromHints(hints, {

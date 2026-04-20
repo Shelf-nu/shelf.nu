@@ -126,7 +126,7 @@ export default function DuplicateBooking() {
         </Button>
 
         <Form method="POST" className="flex-1">
-          <Button className="w-full" disabled={disabled}>
+          <Button type="submit" className="w-full" disabled={disabled}>
             Confirm
           </Button>
         </Form>

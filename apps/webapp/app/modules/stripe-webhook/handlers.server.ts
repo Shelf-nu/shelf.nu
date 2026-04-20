@@ -3,13 +3,17 @@ import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
+import { sendBarcodeTrialEndsSoonEmail } from "~/emails/stripe/barcode-trial-ends-soon";
 import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
-import { trialEndsSoonEmailText } from "~/emails/stripe/trial-ends-soon";
+import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { scheduleTrialEndsTomorrowEmail } from "~/modules/addon-trial/scheduler.server";
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
+import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   customerHasPaymentMethod,
   fetchStripeSubscription,
@@ -74,6 +78,13 @@ export async function handleCheckoutCompleted(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -121,13 +132,22 @@ export async function handleSubscriptionCreated(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
+  const isTransferredSubscription =
+    !!subscription.metadata?.transferred_from_subscription;
   const isTrialSubscription =
     !!subscription.trial_end && !!subscription.trial_start;
 
-  if (isTrialSubscription) {
+  if (isTrialSubscription && !isTransferredSubscription) {
     const trialUser = await db.user
       .update({
         where: { customerId },
@@ -135,7 +155,7 @@ export async function handleSubscriptionCreated(
           tierId: tierId as TierId,
           usedFreeTrial: true,
         },
-        select: { email: true },
+        select: { email: true, firstName: true, displayName: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -147,7 +167,28 @@ export async function handleSubscriptionCreated(
         });
       });
 
-    void sendTeamTrialWelcomeEmail({ email: trialUser.email });
+    void sendTeamTrialWelcomeEmail({
+      email: trialUser.email,
+      firstName: trialUser.firstName,
+    });
+  } else if (isTransferredSubscription) {
+    // Transferred subscription: update tier but skip welcome emails
+    // and don't set usedFreeTrial (already handled in transferOwnership)
+    await db.user
+      .update({
+        where: { customerId },
+        data: { tierId: tierId as TierId },
+        select: { id: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to update user tier",
+          additionalData: { customerId, tierId, event },
+          label: "Stripe webhook",
+          status: 500,
+        });
+      });
   } else {
     await db.user
       .update({
@@ -203,6 +244,13 @@ export async function handleSubscriptionPaused(
     const organizationId = subscription?.metadata?.organizationId;
     if (product?.metadata?.addon_type === "audits" && organizationId) {
       await handleAuditAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
         eventType: event.type,
         subscription,
         organizationId,
@@ -270,6 +318,13 @@ export async function handleSubscriptionUpdated(
         organizationId,
       });
     }
+    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
+      await handleBarcodeAddonWebhook({
+        eventType: event.type,
+        subscription,
+        organizationId,
+      });
+    }
     return OK();
   }
 
@@ -310,8 +365,26 @@ export async function handleSubscriptionDeleted(
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
-    if (product?.metadata?.addon_type === "audits" && organizationId) {
+    // Skip addon disable when this cancellation is part of a subscription
+    // transfer — the new subscription's create webhook already enabled the addon.
+    const isTransferCancellation =
+      !!subscription?.metadata?.transferred_to_subscription;
+    if (
+      product?.metadata?.addon_type === "audits" &&
+      organizationId &&
+      !isTransferCancellation
+    ) {
       await handleAuditAddonWebhook({
+        eventType: event.type,
+        organizationId,
+      });
+    }
+    if (
+      product?.metadata?.addon_type === "barcodes" &&
+      organizationId &&
+      !isTransferCancellation
+    ) {
+      await handleBarcodeAddonWebhook({
         eventType: event.type,
         organizationId,
       });
@@ -484,6 +557,21 @@ export async function handleInvoicePaid(
             await db.organization.update({
               where: { id: organizationId },
               data: { auditsEnabled: true },
+              select: { id: true },
+            });
+          }
+        }
+
+        // Handle barcode add-on invoice paid as safety net
+        if (
+          productType === "addon" &&
+          product?.metadata?.addon_type === "barcodes"
+        ) {
+          const organizationId = subscription?.metadata?.organizationId;
+          if (organizationId) {
+            await db.organization.update({
+              where: { id: organizationId },
+              data: { barcodesEnabled: true },
               select: { id: true },
             });
           }
@@ -674,15 +762,63 @@ export async function handleTrialWillEnd(
       additionalData: { subscription },
     })
   ) {
-    // Send trial ending email for audit add-on
-    if (subscription.trial_end && product?.metadata?.addon_type === "audits") {
+    const addonType = product?.metadata?.addon_type as
+      | "audits"
+      | "barcodes"
+      | undefined;
+
+    if (subscription.trial_end && addonType) {
       const hasPaymentMethod = await customerHasPaymentMethod(customerId);
-      void sendAuditTrialEndsSoonEmail({
-        firstName: user.firstName,
-        email: user.email,
-        hasPaymentMethod,
-        trialEndDate: new Date(subscription.trial_end * 1000),
-      });
+      const trialEndDate = new Date(subscription.trial_end * 1000);
+
+      // Send 3-day warning email
+      if (addonType === "audits") {
+        void sendAuditTrialEndsSoonEmail({
+          firstName: user.firstName,
+          email: user.email,
+          hasPaymentMethod,
+          trialEndDate,
+        });
+      } else {
+        void sendBarcodeTrialEndsSoonEmail({
+          firstName: user.firstName,
+          email: user.email,
+          hasPaymentMethod,
+          trialEndDate,
+        });
+      }
+
+      // Schedule 1-day warning email (only for users with payment method)
+      if (hasPaymentMethod) {
+        const oneDayBefore = new Date(
+          trialEndDate.getTime() - 24 * 60 * 60 * 1000
+        );
+        scheduleTrialEndsTomorrowEmail({
+          data: {
+            addonType,
+            userId: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            customerId,
+            subscriptionId: subscription.id,
+            trialEndDate: trialEndDate.toISOString(),
+          },
+          when: oneDayBefore,
+        }).catch((cause) => {
+          // Log but don't fail the webhook — the 1-day email is best-effort
+          Logger.error(
+            new ShelfError({
+              cause,
+              message: "Failed to schedule trial ends tomorrow email",
+              additionalData: {
+                addonType,
+                subscriptionId: subscription.id,
+              },
+              label: "Stripe",
+            })
+          );
+        });
+      }
     }
     return OK();
   }
@@ -691,13 +827,13 @@ export async function handleTrialWillEnd(
     subscription.trial_end && subscription.trial_start;
 
   if (isTrialSubscription) {
-    sendEmail({
-      to: user.email,
-      subject: "Your shelf.nu free trial is ending soon",
-      text: trialEndsSoonEmailText({
-        firstName: user?.firstName ?? null,
-        trialEndDate: new Date((subscription.trial_end as number) * 1000),
-      }),
+    const hasPaymentMethod = await customerHasPaymentMethod(customerId);
+    void sendTrialEndsSoonEmail({
+      firstName: user.firstName,
+      email: user.email,
+      hasPaymentMethod,
+      planName: product?.name || "Shelf",
+      trialEndDate: new Date((subscription.trial_end as number) * 1000),
     });
   }
 

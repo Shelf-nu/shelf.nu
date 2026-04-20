@@ -23,6 +23,7 @@ import {
 
 import { sendEmail } from "~/emails/mail.server";
 import { linkAuditAddonToOrganization } from "~/modules/audit/addon.server";
+import { linkBarcodeAddonToOrganization } from "~/modules/barcode/addon.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -161,6 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             customerId: true,
           } satisfies Prisma.UserSelect,
         });
@@ -199,12 +201,67 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
+    // Link barcode addon to new org if checkout included barcodes.
+    // Same graceful failure pattern as audits above.
+    const includesBarcodes =
+      url.searchParams.get("includesBarcodes") === "true";
+    let barcodeLinkFailed = false;
+
+    if (includesBarcodes) {
+      try {
+        const barcodeUser = await getUserByID(userId, {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            customerId: true,
+          } satisfies Prisma.UserSelect,
+        });
+        const barcodeCustomerId = await getOrCreateCustomerId(barcodeUser);
+        await linkBarcodeAddonToOrganization({
+          customerId: barcodeCustomerId,
+          organizationId: newOrg.id,
+        });
+      } catch (cause) {
+        barcodeLinkFailed = true;
+
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Failed to link barcode addon to new organization during workspace creation",
+            additionalData: { userId, organizationId: newOrg.id },
+            label: "Stripe",
+          })
+        );
+
+        // Notify admin so they can resolve manually
+        void sendEmail({
+          to: ADMIN_EMAIL,
+          subject: "ACTION REQUIRED: Barcode addon linking failed",
+          text: [
+            "A user created a workspace with a barcode addon subscription,",
+            "but the addon could not be linked automatically.",
+            "",
+            `User ID: ${userId}`,
+            `Organization ID: ${newOrg.id}`,
+            "",
+            "Please link the barcode addon to this organization manually.",
+          ].join("\n"),
+        });
+      }
+    }
+
+    const addonLinkFailed = auditLinkFailed || barcodeLinkFailed;
+
     sendNotification({
       title: "Workspace created",
-      message: auditLinkFailed
-        ? "Your workspace was created, but we couldn't activate the audit addon. An admin will contact you shortly to resolve this."
+      message: addonLinkFailed
+        ? "Your workspace was created, but we couldn't activate some add-ons. An admin will contact you shortly to resolve this."
         : "Your workspace has been created successfully",
-      icon: auditLinkFailed
+      icon: addonLinkFailed
         ? { name: "trash", variant: "error" }
         : { name: "success", variant: "success" },
       senderId: authSession.userId,

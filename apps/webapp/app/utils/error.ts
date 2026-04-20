@@ -89,6 +89,7 @@ export type FailureReason = {
     | "SSO"
     | "Kit"
     | "Note"
+    | "Team Member Note"
     | "Audit Image"
     // Other kinds of errors
     | "DB"
@@ -218,6 +219,10 @@ function isAbortError(cause: unknown) {
   if (cause instanceof Error) {
     const name = cause.name?.toLowerCase?.() ?? "";
     const message = cause.message?.toLowerCase?.() ?? "";
+    const code =
+      "code" in cause && typeof (cause as any).code === "string"
+        ? (cause as any).code
+        : "";
 
     if (name === "aborterror") {
       return true;
@@ -225,7 +230,9 @@ function isAbortError(cause: unknown) {
 
     if (
       message.includes("call aborted") ||
-      message.includes("request aborted")
+      message.includes("request aborted") ||
+      message === "aborted" ||
+      code === "ECONNRESET"
     ) {
       return true;
     }
@@ -281,7 +288,7 @@ export function isPrismaTransientError(cause: unknown): boolean {
   if ("code" in cause && typeof cause.code === "string") {
     return PRISMA_TRANSIENT_ERROR_CODES.has(cause.code);
   }
-  if (cause instanceof Error) {
+  if (cause instanceof Error && typeof cause.message === "string") {
     const msg = cause.message.toLowerCase();
     return (
       msg.includes("timed out fetching a new connection") ||
@@ -388,8 +395,11 @@ export type Options = Partial<
 export function notAllowedMethod(method: string, options?: Options) {
   return new ShelfError({
     shouldBeCaptured: false,
-    message: `"${method}" method is not allowed.`,
     ...options,
+    // Must come after the spread so that callers who pass
+    // `{ message: undefined }` (e.g. `assertIsPost(request)` with no message
+    // argument) don't clobber the default via spread semantics.
+    message: options?.message ?? `"${method}" method is not allowed.`,
     cause: null,
     status: 405,
     label: "Request validation",

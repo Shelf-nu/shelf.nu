@@ -1,13 +1,17 @@
+import { AuditStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   createAuditSession,
   addAssetsToAudit,
   removeAssetFromAudit,
   removeAssetsFromAudit,
   getPendingAuditsForOrganization,
+  getAuditWhereInput,
+  bulkArchiveAudits,
 } from "./service.server";
 
 // why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
@@ -19,6 +23,13 @@ vi.mock("./helpers.server", () => ({
   createAssetsRemovedFromAuditNote: vi.fn(),
 }));
 
+// why: deterministic note content for assertions; real impl returns markdoc syntax
+vi.mock("~/utils/markdoc-wrappers", () => ({
+  wrapUserLinkForNote: vi.fn(
+    ({ firstName, lastName }) => `@${firstName ?? ""}-${lastName ?? ""}`
+  ),
+}));
+
 vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
@@ -27,12 +38,15 @@ vi.mock("~/database/db.server", () => {
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     auditNote: {
       create: vi.fn(),
+      createMany: vi.fn(),
     },
     user: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
     auditAsset: {
       createMany: vi.fn(),
@@ -62,6 +76,15 @@ const mockDb = db as unknown as {
     findFirst: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
+  auditNote: {
+    create: ReturnType<typeof vi.fn>;
+    createMany: ReturnType<typeof vi.fn>;
+  };
+  user: {
+    findUnique: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
   };
   auditAsset: {
     createMany: ReturnType<typeof vi.fn>;
@@ -290,6 +313,7 @@ describe("audit service", () => {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
           assignments: {
@@ -298,6 +322,7 @@ describe("audit service", () => {
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                 },
               },
             },
@@ -631,6 +656,258 @@ describe("audit service", () => {
           userId: "user-1",
         })
       ).rejects.toThrow(ShelfError);
+    });
+  });
+
+  describe("bulk archive", () => {
+    describe("getAuditWhereInput", () => {
+      it("excludes ARCHIVED by default when no params are provided", () => {
+        const where = getAuditWhereInput({ organizationId: "org-1" });
+
+        expect(where).toEqual({
+          organizationId: "org-1",
+          status: { notIn: [AuditStatus.ARCHIVED] },
+        });
+      });
+
+      it("applies an explicit status when provided", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "status=COMPLETED",
+        });
+
+        expect(where).toEqual({
+          organizationId: "org-1",
+          status: "COMPLETED",
+        });
+      });
+
+      it("normalizes lowercase status values to uppercase", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "status=completed",
+        });
+
+        expect(where.status).toBe("COMPLETED");
+      });
+
+      it("falls through to default when status=ALL", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "status=ALL",
+        });
+
+        expect(where.status).toEqual({ notIn: [AuditStatus.ARCHIVED] });
+      });
+
+      it("falls back to default for an unknown status value", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "status=garbage",
+        });
+
+        expect(where.status).toEqual({ notIn: [AuditStatus.ARCHIVED] });
+      });
+
+      it("applies a case-insensitive OR search for the `s` param", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "s=camera",
+        });
+
+        expect(where.OR).toEqual([
+          { name: { contains: "camera", mode: "insensitive" } },
+          { description: { contains: "camera", mode: "insensitive" } },
+        ]);
+      });
+
+      it("scopes to the user's assignments when isSelfServiceOrBase with userId", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          userId: "user-1",
+          isSelfServiceOrBase: true,
+        });
+
+        expect(where.assignments).toEqual({ some: { userId: "user-1" } });
+      });
+
+      it("does not apply the assignments filter when isSelfServiceOrBase is false", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          userId: "user-1",
+          isSelfServiceOrBase: false,
+        });
+
+        expect(where.assignments).toBeUndefined();
+      });
+
+      it("does not apply the assignments filter when userId is missing", () => {
+        const where = getAuditWhereInput({
+          organizationId: "org-1",
+          isSelfServiceOrBase: true,
+        });
+
+        expect(where.assignments).toBeUndefined();
+      });
+    });
+
+    describe("bulkArchiveAudits", () => {
+      const matchingAudits = [
+        { id: "a1", status: AuditStatus.COMPLETED },
+        { id: "a2", status: AuditStatus.CANCELLED },
+      ];
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+        // why: re-install the $transaction behavior after clearAllMocks wipes it
+        mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
+        // why: default selection is all-terminal so the happy path works without per-test setup
+        mockDb.auditSession.findMany.mockResolvedValue(matchingAudits);
+        // why: updateMany.count must match findMany length to satisfy the TOCTOU guard
+        mockDb.auditSession.updateMany.mockResolvedValue({
+          count: matchingAudits.length,
+        });
+        // why: note generation reads user display name; return a deterministic identity
+        mockDb.user.findFirst.mockResolvedValue({
+          firstName: "Jane",
+          lastName: "Doe",
+        });
+        mockDb.auditNote.createMany.mockResolvedValue({
+          count: matchingAudits.length,
+        });
+      });
+
+      it("archives explicit terminal audits and writes an activity note per audit", async () => {
+        await bulkArchiveAudits({
+          auditIds: ["a1", "a2"],
+          organizationId: "org-1",
+          userId: "user-1",
+        });
+
+        expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: { in: ["a1", "a2"] },
+            status: {
+              in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED],
+            },
+          },
+          data: { status: AuditStatus.ARCHIVED },
+        });
+
+        expect(mockDb.auditNote.createMany).toHaveBeenCalledWith({
+          data: [
+            {
+              content: "@Jane-Doe archived the audit",
+              type: "UPDATE",
+              userId: "user-1",
+              auditSessionId: "a1",
+            },
+            {
+              content: "@Jane-Doe archived the audit",
+              type: "UPDATE",
+              userId: "user-1",
+              auditSessionId: "a2",
+            },
+          ],
+        });
+      });
+
+      it("rejects with ShelfError when no archivable audits are found", async () => {
+        mockDb.auditSession.findMany.mockResolvedValue([]);
+
+        await expect(
+          bulkArchiveAudits({
+            auditIds: ["a1"],
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toThrow(/No archivable audits were found/);
+      });
+
+      it("rejects when any selected audit is not in a terminal state", async () => {
+        mockDb.auditSession.findMany.mockResolvedValue([
+          { id: "a1", status: AuditStatus.COMPLETED },
+          { id: "a2", status: AuditStatus.PENDING },
+        ]);
+
+        await expect(
+          bulkArchiveAudits({
+            auditIds: ["a1", "a2"],
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toThrow(/not in a completed or cancelled state/);
+      });
+
+      it("resolves selection from filters when ALL_SELECTED_KEY is present", async () => {
+        await bulkArchiveAudits({
+          auditIds: [ALL_SELECTED_KEY],
+          currentSearchParams: "status=COMPLETED",
+          organizationId: "org-1",
+          userId: "user-1",
+          isSelfServiceOrBase: true,
+        });
+
+        const expectedWhere = getAuditWhereInput({
+          organizationId: "org-1",
+          currentSearchParams: "status=COMPLETED",
+          userId: "user-1",
+          isSelfServiceOrBase: true,
+        });
+
+        expect(mockDb.auditSession.findMany.mock.calls[0][0].where).toEqual(
+          expectedWhere
+        );
+      });
+
+      it("rejects with 409 when updateMany.count does not match the pre-read", async () => {
+        mockDb.auditSession.findMany.mockResolvedValue([
+          { id: "a1", status: AuditStatus.COMPLETED },
+          { id: "a2", status: AuditStatus.CANCELLED },
+          { id: "a3", status: AuditStatus.COMPLETED },
+        ]);
+        mockDb.auditSession.updateMany.mockResolvedValue({ count: 2 });
+
+        await expect(
+          bulkArchiveAudits({
+            auditIds: ["a1", "a2", "a3"],
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toMatchObject({
+          status: 409,
+          message: expect.stringMatching(/status changed/),
+        });
+      });
+
+      it("reads the user before opening the transaction", async () => {
+        await bulkArchiveAudits({
+          auditIds: ["a1", "a2"],
+          organizationId: "org-1",
+          userId: "user-1",
+        });
+
+        const userCallOrder = mockDb.user.findFirst.mock.invocationCallOrder[0];
+        const transactionCallOrder =
+          mockDb.$transaction.mock.invocationCallOrder[0];
+
+        expect(userCallOrder).toBeLessThan(transactionCallOrder);
+      });
+
+      it("wraps unknown causes in a 500 ShelfError", async () => {
+        mockDb.auditSession.findMany.mockRejectedValue(new Error("boom"));
+
+        await expect(
+          bulkArchiveAudits({
+            auditIds: ["a1"],
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toMatchObject({
+          status: 500,
+          message: expect.stringMatching(/Failed to bulk archive audits/),
+        });
+      });
     });
   });
 });

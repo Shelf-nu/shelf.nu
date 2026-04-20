@@ -1,4 +1,5 @@
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { InviteWithInviterAndOrg } from "./types";
 
 export function generateRandomCode(length: number): string {
@@ -22,16 +23,16 @@ export const inviteEmailText = ({
   extraMessage?: string | null;
 }) => `Howdy,
 
-${invite.inviter.firstName} ${
-  invite.inviter.lastName
-} invites you to join Shelf as a member of ${
+${resolveUserDisplayName(
+  invite.inviter
+)} invites you to join Shelf as a member of ${
   invite.organization.name
 }'s workspace.
 ${
   extraMessage
     ? `
 ---
-Message from ${invite.inviter.firstName} ${invite.inviter.lastName}:
+Message from ${resolveUserDisplayName(invite.inviter)}:
 
 ${extraMessage}
 ---
@@ -52,6 +53,23 @@ ${
 Thanks,
 The Shelf Team
 `;
+
+export function splitName(fullName?: string | null): {
+  firstName: string;
+  lastName: string;
+} {
+  const trimmed = (fullName ?? "").trim();
+  const spaceIndex = trimmed.indexOf(" ");
+
+  if (spaceIndex === -1) {
+    return { firstName: trimmed, lastName: "" };
+  }
+
+  return {
+    firstName: trimmed.slice(0, spaceIndex),
+    lastName: trimmed.slice(spaceIndex + 1).trim(),
+  };
+}
 
 export const revokeAccessEmailText = ({
   orgName,

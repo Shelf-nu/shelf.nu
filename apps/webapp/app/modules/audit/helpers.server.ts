@@ -24,6 +24,7 @@ export async function createAuditCreationNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -57,27 +58,38 @@ export async function createAssetScanNote({
   userId,
   isExpected,
   tx,
+  prefetchedUser,
+  prefetchedAsset,
 }: {
   auditSessionId: string;
   assetId: string;
   userId: string;
   isExpected: boolean;
   tx: any; // Prisma transaction client
+  prefetchedUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
+  prefetchedAsset?: { id: string; title: string } | null;
 }) {
-  // Fetch asset and user details in parallel
+  // Use pre-fetched data if available, otherwise fetch inside the transaction
   const [asset, scanner] = await Promise.all([
-    tx.asset.findUnique({
-      where: { id: assetId },
-      select: { id: true, title: true },
-    }),
-    tx.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-      },
-    }),
+    prefetchedAsset ??
+      tx.asset.findUnique({
+        where: { id: assetId },
+        select: { id: true, title: true },
+      }),
+    prefetchedUser ??
+      tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
+      }),
   ]);
 
   if (!asset || !scanner) {
@@ -126,6 +138,7 @@ export async function createAssetScanRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -158,19 +171,29 @@ export async function createAuditStartedNote({
   auditSessionId,
   userId,
   tx,
+  prefetchedUser,
 }: {
   auditSessionId: string;
   userId: string;
   tx: any; // Prisma transaction client
+  prefetchedUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+  } | null;
 }) {
-  const starter = await tx.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-    },
-  });
+  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  const starter =
+    prefetchedUser ??
+    (await tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      },
+    }));
 
   if (!starter) {
     return; // Skip note creation if user not found
@@ -220,6 +243,7 @@ export async function createAuditCompletedNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -288,6 +312,7 @@ export async function createAuditUpdateNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -341,6 +366,7 @@ export async function createAuditAssetImagesAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.auditAsset.findUnique({
@@ -406,6 +432,7 @@ export async function createDueDateChangedNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -489,6 +516,7 @@ export async function createAssigneeAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.user.findUnique({
@@ -497,6 +525,7 @@ export async function createAssigneeAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -546,6 +575,7 @@ export async function createAssigneeRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.user.findUnique({
@@ -554,6 +584,7 @@ export async function createAssigneeRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -606,6 +637,7 @@ export async function createAssetsAddedToAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findMany({
@@ -666,6 +698,7 @@ export async function createAssetRemovedFromAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findUnique({
@@ -718,6 +751,7 @@ export async function createAssetsRemovedFromAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findMany({

@@ -31,6 +31,7 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import jwt from "~/utils/jsonwebtoken.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const { inviteId } = getParams(params, z.object({ inviteId: z.string() }), {
@@ -53,6 +54,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -78,7 +80,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     }
 
     return payload({
-      inviter: `${invite.inviter.firstName} ${invite.inviter.lastName}`,
+      inviter: resolveUserDisplayName(invite.inviter),
       workspace: `${invite.organization.name}`,
     });
   } catch (cause) {

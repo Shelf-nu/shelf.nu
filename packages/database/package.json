@@ -26,15 +26,15 @@
     "db:reset:staging": "dotenv -e ../../.env.staging -- prisma migrate reset"
   },
   "dependencies": {
-    "@prisma/client": "^6.2.1"
+    "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
     "@shelf/typescript-config": "workspace:*",
-    "@types/node": "^22.0.0",
-    "dotenv": "^17.3.1",
-    "dotenv-cli": "^7.3.0",
-    "prisma": "^6.2.1",
-    "tsx": "^4.7.1",
-    "typescript": "^5.1.0"
+    "@types/node": "^22.19.17",
+    "dotenv": "^17.4.1",
+    "dotenv-cli": "^11.0.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   }
 }

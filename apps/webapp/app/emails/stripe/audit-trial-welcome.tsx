@@ -7,6 +7,7 @@ import {
   render,
   Text,
 } from "@react-email/components";
+import { AUDIT_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -17,22 +18,28 @@ import { styles } from "../styles";
 
 interface AuditTrialWelcomeProps {
   firstName?: string | null;
+  displayName?: string | null;
   email: string;
   hasPaymentMethod?: boolean;
 }
 
 export const sendAuditTrialWelcomeEmail = async ({
   firstName,
+  displayName,
   email,
   hasPaymentMethod,
 }: AuditTrialWelcomeProps) => {
   try {
     const subject = "Your 7-day Audits trial is now active!";
+    const greeting = displayName || firstName;
     const html = await auditTrialWelcomeEmailHtml({
-      firstName,
+      firstName: greeting,
       hasPaymentMethod,
     });
-    const text = auditTrialWelcomeEmailText({ firstName, hasPaymentMethod });
+    const text = auditTrialWelcomeEmailText({
+      firstName: greeting,
+      hasPaymentMethod,
+    });
 
     void sendEmail({
       to: email,
@@ -65,10 +72,7 @@ Great news - your 7-day Audits trial is now active! You have full access to all 
 
 Here's what you can do with Audits:
 
-- Create audits and assign auditors to verify your assets
-- Set due dates and track progress in real-time
-- Use QR code scanning for quick asset verification
-- Generate detailed audit reports
+${AUDIT_ADDON.features.map((f) => `- ${f}`).join("\n")}
 
 Get started now: ${SERVER_URL}/audits
 ${
@@ -116,18 +120,11 @@ function AuditTrialWelcomeEmailTemplate({
           </Text>
 
           <ul style={{ ...styles.li, paddingLeft: "20px" }}>
-            <li style={{ marginBottom: "8px" }}>
-              Create audits and assign auditors to verify your assets
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Set due dates and track progress in real-time
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Use QR code scanning for quick asset verification
-            </li>
-            <li style={{ marginBottom: "8px" }}>
-              Generate detailed audit reports
-            </li>
+            {AUDIT_ADDON.features.map((feature) => (
+              <li key={feature} style={{ marginBottom: "8px" }}>
+                {feature}
+              </li>
+            ))}
           </ul>
 
           <Button

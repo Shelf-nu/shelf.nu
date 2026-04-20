@@ -13,8 +13,11 @@ export function useNprogress() {
     "asset-index-settings-freeze-column",
     "updates-change",
     "add-note",
+    "add-user-note",
     "add-audit-note",
     "audit-scan-persist",
+    "archive-audit",
+    "cancel-audit",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(

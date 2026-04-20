@@ -21,8 +21,8 @@ export function createLoadUserForNotes(userId: User["id"]) {
     if (!cachedUser) {
       cachedUser = (await db.user.findFirst({
         where: { id: userId },
-        select: { firstName: true, lastName: true },
-      })) ?? { firstName: null, lastName: null };
+        select: { firstName: true, lastName: true, displayName: true },
+      })) ?? { firstName: null, lastName: null, displayName: null };
     }
 
     return cachedUser;

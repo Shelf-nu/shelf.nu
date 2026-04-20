@@ -1,6 +1,7 @@
 import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
 
 function isValidUser(
   userOrganizations: UserOrganization[] | null | undefined,
@@ -34,7 +35,7 @@ export function parseScanData({
       const user = scan?.user;
       scannedBy =
         user && isValidUser(user?.userOrganizations, scan?.qr?.organizationId)
-          ? `${user.firstName} ${user.lastName}(${user.email})`
+          ? `${resolveUserDisplayName(user)}(${user.email})`
           : "Unknown";
       const coordinates =
         scan.latitude && scan.longitude

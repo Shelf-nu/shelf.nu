@@ -194,10 +194,18 @@ export async function linkAuditAddonToOrganization({
       status: "all",
     });
 
-    // Check each active/trialing subscription's items by retrieving products
+    // Check each active/trialing subscription's items by retrieving products.
+    // Skip subscriptions linked to a *different* organization to avoid
+    // overwriting another org's linkage. Allow re-linking to the same org
+    // (both addons may share one subscription).
     let auditSubscription: Stripe.Subscription | undefined;
     for (const sub of subscriptions.data) {
       if (sub.status !== "active" && sub.status !== "trialing") continue;
+      if (
+        sub.metadata?.organizationId &&
+        sub.metadata.organizationId !== organizationId
+      )
+        continue;
 
       for (const item of sub.items.data) {
         const productId =
@@ -330,13 +338,16 @@ export async function handleAuditAddonWebhook({
     case "customer.subscription.created": {
       const isTrialSubscription =
         subscription && !!subscription.trial_end && !!subscription.trial_start;
+      const isTransferredSubscription =
+        !!subscription?.metadata?.transferred_from_subscription;
 
       await db.organization.update({
         where: { id: organizationId },
         data: {
           auditsEnabled: true,
           auditsEnabledAt: new Date(),
-          ...(isTrialSubscription && { usedAuditTrial: true }),
+          ...(isTrialSubscription &&
+            !isTransferredSubscription && { usedAuditTrial: true }),
         },
         select: { id: true },
       });

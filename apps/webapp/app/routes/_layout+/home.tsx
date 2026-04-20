@@ -145,6 +145,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
               email: true,
             },

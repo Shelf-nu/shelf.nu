@@ -11,6 +11,7 @@ import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import TextualDivider from "~/components/shared/textual-divider";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBooking } from "~/modules/booking/service.server";
 import {
@@ -20,7 +21,7 @@ import {
 } from "~/modules/booking-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   payload,
   error,
@@ -83,14 +84,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const method = getActionMethod(request);
+
+    if (method !== "POST" && method !== "DELETE") {
+      throw notAllowedMethod(method);
+    }
+
+    /*
+     * Permission required depends on the HTTP verb: POST creates a note,
+     * DELETE removes one. Using a single `bookingNote.create` check for both
+     * would let a role with only `create` delete notes it authored even when
+     * the permission matrix does not grant `bookingNote.delete` to that role
+     * (BASE / SELF_SERVICE have `create` + `read` but not `delete`).
+     */
+    const requiredAction =
+      method === "DELETE" ? PermissionAction.delete : PermissionAction.create;
+
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
-      action: PermissionAction.create,
+      action: requiredAction,
     });
 
-    const method = getActionMethod(request);
+    /*
+     * Validate that the booking belongs to the requester's current organization
+     * BEFORE performing any note mutation. This closes the cross-organization
+     * IDOR where an attacker in Org A could post/delete notes on Org B's
+     * bookings simply by knowing the bookingId. The service layer enforces the
+     * same invariant as defense-in-depth, but checking here produces a
+     * consistent 404 response shape and avoids spurious side effects (e.g.
+     * success toasts) prior to hitting the service.
+     */
+    const booking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { id: true },
+    });
+
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking not found or access denied",
+        additionalData: { userId, bookingId, organizationId },
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
     switch (method) {
       case "POST": {
@@ -102,17 +142,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        await createBookingNote({
+          content,
+          userId,
+          bookingId,
+          organizationId,
+        });
+
         sendNotification({
           title: "Note created",
           message: "Your note has been created successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
-        });
-
-        await createBookingNote({
-          content,
-          userId,
-          bookingId,
         });
 
         return payload({ success: true });
@@ -129,7 +170,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         await deleteBookingNote({
           id: noteId,
+          bookingId,
           userId,
+          organizationId,
         });
 
         sendNotification({

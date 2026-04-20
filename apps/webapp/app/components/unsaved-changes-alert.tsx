@@ -43,6 +43,7 @@ export default function UnsavedChangesAlert({
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
               <Button
+                type="button"
                 variant="secondary"
                 onClick={onCancel}
                 disabled={disabled}
@@ -51,7 +52,12 @@ export default function UnsavedChangesAlert({
               </Button>
             </AlertDialogCancel>
 
-            <Button onClick={onYes} disabled={disabled} variant="primary">
+            <Button
+              type="button"
+              onClick={onYes}
+              disabled={disabled}
+              variant="primary"
+            >
               Yes, confirm change
             </Button>
           </div>

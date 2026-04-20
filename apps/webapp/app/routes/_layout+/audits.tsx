@@ -19,9 +19,18 @@ import {
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { makeShelfError } from "~/utils/error";
-import { error, parseData } from "~/utils/http.server";
-import { getDomainUrl, getOrCreateCustomerId } from "~/utils/stripe.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { assertIsPost, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
+import {
+  customerHasPaymentMethod,
+  getDomainUrl,
+  getOrCreateCustomerId,
+} from "~/utils/stripe.server";
 import { canUseAudits } from "~/utils/subscription.server";
 
 export const meta = () => [{ title: appendToMetaTitle("Audits") }];
@@ -46,9 +55,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ? { month: null, year: null }
       : await getAuditAddonPrices();
 
-    // Fetch current subscription info when trial expired (paused sub)
+    const canStartTrial =
+      isOwner && !currentOrganization.usedAuditTrial && !hasAccess;
     const trialExpired = currentOrganization.usedAuditTrial && !hasAccess;
 
+    let hasPaymentMethod = false;
     let auditSubInfo: {
       interval: "month" | "year";
       amount: number;
@@ -56,6 +67,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       status: string;
     } | null = null;
 
+    // For trial CTA, check payment method without creating a Stripe customer
+    if (canStartTrial) {
+      const user = await getUserByID(userId, {
+        select: { customerId: true } satisfies Prisma.UserSelect,
+      });
+      if (user.customerId) {
+        hasPaymentMethod = await customerHasPaymentMethod(user.customerId);
+      }
+    }
+
+    // For expired trial, we need the full customer to fetch subscription info
     if (trialExpired) {
       const user = await getUserByID(userId, {
         select: {
@@ -64,6 +86,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           customerId: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       });
       const customerId = await getOrCreateCustomerId({
@@ -80,6 +103,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       monthlyPrice: prices.month,
       yearlyPrice: prices.year,
       auditSubInfo,
+      hasPaymentMethod,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -92,11 +116,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    const { priceId, intent } = parseData(
+    assertIsPost(request);
+
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.subscription,
+      action: PermissionAction.update,
+    });
+
+    const { priceId, intent, consentAcknowledged } = parseData(
       await request.formData(),
       z.object({
         priceId: z.string(),
         intent: z.enum(["trial", "subscribe"]),
+        consentAcknowledged: z
+          .string()
+          .transform((v) => v === "true")
+          .optional(),
       })
     );
 
@@ -108,6 +145,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -120,9 +158,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
     if (intent === "trial") {
       // Validate organization hasn't already used trial
       if (currentOrganization.usedAuditTrial) {
-        throw new Error(
-          "This workspace has already used the free audit trial."
-        );
+        throw new ShelfError({
+          cause: null,
+          message: "This workspace has already used the free audit trial.",
+          status: 400,
+          label: "Stripe",
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Server-side consent validation when payment method exists
+      const hasPaymentMethodOnFile = await customerHasPaymentMethod(customerId);
+      if (hasPaymentMethodOnFile && !consentAcknowledged) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "You must acknowledge the auto-charge terms before starting a trial.",
+          status: 400,
+          label: "Stripe",
+          shouldBeCaptured: false,
+        });
       }
 
       // Create trial subscription directly via Stripe API
@@ -146,6 +201,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       void sendAuditTrialWelcomeEmail({
         firstName: user.firstName,
+        displayName: user.displayName,
         email,
         hasPaymentMethod,
       });
@@ -197,6 +253,7 @@ export default function AuditsPage() {
     monthlyPrice,
     yearlyPrice,
     auditSubInfo,
+    hasPaymentMethod,
   } = useLoaderData<typeof loader>();
 
   if (!canUseAudits) {
@@ -207,6 +264,7 @@ export default function AuditsPage() {
         monthlyPrice={monthlyPrice}
         yearlyPrice={yearlyPrice}
         auditSubInfo={auditSubInfo}
+        hasPaymentMethod={hasPaymentMethod}
       />
     );
   }

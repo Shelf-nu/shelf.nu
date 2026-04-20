@@ -60,3 +60,5 @@ apps/docs/.vitepress/dist
 
 # Lefthook local overrides
 lefthook-local.yml
+.worktrees/
+node-compile-cache/

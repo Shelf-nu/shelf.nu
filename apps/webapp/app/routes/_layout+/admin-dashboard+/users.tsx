@@ -17,6 +17,7 @@ import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { getStripeCustomer } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -220,9 +221,7 @@ export default function Area51() {
 
 const ListUserContent = ({ item }: { item: UserWithSubscription }) => (
   <>
-    <Td>
-      {item.firstName} {item.lastName}
-    </Td>
+    <Td>{resolveUserDisplayName(item)}</Td>
     <Td>{item.email}</Td>
     <Td>
       <span className="capitalize">{item.tier.name}</span>

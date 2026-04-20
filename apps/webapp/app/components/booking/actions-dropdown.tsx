@@ -23,6 +23,7 @@ import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
 
 import ExtendBookingDialog from "./extend-booking-dialog";
+import ManageNotificationsDialog from "./manage-notifications-dialog";
 import RevertToDraftDialog from "./revert-to-draft-dialog";
 import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
@@ -34,8 +35,15 @@ interface Props {
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
-  const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatusHelpers(booking.status);
+  const {
+    isCompleted,
+    isOngoing,
+    isReserved,
+    isOverdue,
+    isDraft,
+    isArchived,
+    isCancelled,
+  } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
@@ -97,19 +105,16 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           <When truthy={isCompleted && canArchiveBooking}>
             <DropdownMenuItem asChild>
               <Button
+                type="button"
                 variant="link"
                 className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
                 width="full"
-                name="intent"
-                value="archive"
                 as="span"
                 /**
-                 * Here we have to deal with a interesting case that is in a way a conflict between how react works and web platform
-                 * So this button within the react code, is inside a form that is in the parent component, however because its a radix dropdown, it gets rendered within a portal
-                 * So the button is actually rendered outside the form, and when you click on it, it does not submit the form
-                 * So we have to manually submit the data here.
-                 *
-                 * Keep in mind that even though its rendered in the DOM within a portal, react will still detect it as being inside the form, so there could be some hydration errors
+                 * This button is rendered inside a Radix DropdownMenuPortal,
+                 * which places it outside the parent Form in the DOM.
+                 * We submit manually via onClick instead of relying on
+                 * native form submission.
                  */
                 onClick={() => {
                   const formData = new FormData();
@@ -132,6 +137,17 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               Duplicate booking
             </Button>
           </DropdownMenuItem>
+
+          <When
+            truthy={
+              !isBaseOrSelfService &&
+              !isCompleted &&
+              !isArchived &&
+              !isCancelled
+            }
+          >
+            <ManageNotificationsDialog />
+          </When>
 
           {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
 

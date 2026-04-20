@@ -23,6 +23,7 @@ export const DeleteNote = ({ noteId }: { noteId: string }) => {
       <div className="w-full">
         <AlertDialogTrigger asChild>
           <Button
+            type="button"
             variant="link"
             className="w-full cursor-pointer items-center justify-start text-gray-800 hover:text-gray-800"
             data-test-id="deleteNoteButton"
@@ -47,7 +48,7 @@ export const DeleteNote = ({ noteId }: { noteId: string }) => {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button variant="secondary" disabled={disabled}>
+            <Button type="button" variant="secondary" disabled={disabled}>
               Cancel
             </Button>
           </AlertDialogCancel>

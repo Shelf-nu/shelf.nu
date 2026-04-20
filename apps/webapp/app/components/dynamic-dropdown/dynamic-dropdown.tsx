@@ -192,6 +192,7 @@ export default function DynamicDropdown({
               )}
               <When truthy={selectedItems.length > 0 && showSearch}>
                 <Button
+                  type="button"
                   as="button"
                   variant="link"
                   className="whitespace-nowrap p-3 text-xs font-normal text-gray-500 hover:text-gray-600"
@@ -219,6 +220,7 @@ export default function DynamicDropdown({
                 />
                 <When truthy={Boolean(searchQuery)}>
                   <Button
+                    type="button"
                     icon="x"
                     variant="tertiary"
                     disabled={!searchQuery || searchQuery === ""}
@@ -400,6 +402,7 @@ export default function DynamicDropdown({
 
             <div className="flex justify-between gap-3 border-t p-3 md:hidden">
               <Button
+                type="button"
                 onClick={() => {
                   setIsPopoverOpen(false);
                 }}

@@ -1,7 +1,11 @@
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import type { AuditAssignment, AuditSession } from "@prisma/client";
+import type {
+  AuditAssignment,
+  AuditSession,
+  Organization,
+} from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
@@ -15,9 +19,11 @@ import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-
+import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
   sendAuditCancelledEmails,
@@ -36,16 +42,36 @@ import {
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
 } from "./helpers.server";
-
 import type { AuditSchedulerData } from "./types";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
+
+/**
+ * Rejects writes against archived audits.
+ * Call immediately after loading the session in every mutating service
+ * so the archive/read-only contract is enforced server-side.
+ */
+function assertAuditNotArchived(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (status === AuditStatus.ARCHIVED) {
+    throw new ShelfError({
+      cause: null,
+      message: "Archived audits are read-only.",
+      additionalData: details,
+      label,
+      status: 400,
+    });
+  }
+}
 
 export const AUDIT_LIST_INCLUDE = {
   createdBy: {
     select: {
       firstName: true,
       lastName: true,
+      displayName: true,
       email: true,
       profilePicture: true,
     },
@@ -56,6 +82,7 @@ export const AUDIT_LIST_INCLUDE = {
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
           email: true,
           profilePicture: true,
         },
@@ -95,6 +122,7 @@ export type AuditExpectedAsset = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  locationName?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -117,6 +145,7 @@ export type GetAuditSessionResult = {
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       email: string;
       profilePicture: string | null;
     };
@@ -181,6 +210,8 @@ export type AuditScanData = {
   auditNotesCount: number;
   /** Number of images on this audit asset */
   auditImagesCount: number;
+  /** Asset location name for display */
+  assetLocationName: string | null;
 };
 
 export async function createAuditSession(
@@ -385,6 +416,11 @@ export async function updateAuditSession({
       });
     }
 
+    assertAuditNotArchived(currentAudit.status, {
+      auditSessionId: id,
+      organizationId,
+    });
+
     if (currentAudit.status === AuditStatus.CANCELLED) {
       throw new ShelfError({
         cause: null,
@@ -566,6 +602,7 @@ export async function getAuditSessionDetails({
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 email: true,
                 profilePicture: true,
               },
@@ -577,6 +614,7 @@ export async function getAuditSessionDetails({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
             profilePicture: true,
           },
@@ -589,6 +627,11 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                location: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
             _count: {
@@ -653,6 +696,7 @@ export async function getAuditSessionDetails({
         auditImagesCount: auditAsset._count?.images ?? 0,
         mainImage: auditAsset.asset?.mainImage ?? null,
         thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+        locationName: auditAsset.asset?.location?.name ?? null,
       }));
 
     return {
@@ -921,6 +965,7 @@ export async function getAssetsForAuditSession({
                     id: true,
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     email: true,
                     profilePicture: true,
                   },
@@ -993,6 +1038,11 @@ export async function recordAuditScan(
       });
     }
 
+    assertAuditNotArchived(session.status, {
+      auditSessionId,
+      organizationId,
+    });
+
     // Check if this asset was already scanned in this audit
     const existingScan = await db.auditScan.findFirst({
       where: {
@@ -1015,121 +1065,144 @@ export async function recordAuditScan(
       };
     }
 
+    // Pre-fetch user and asset data for note creation outside the transaction
+    const [scannerUser, scannedAsset] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
+      }),
+      db.asset.findUnique({
+        where: { id: assetId },
+        select: { id: true, title: true },
+      }),
+    ]);
+
     // Record the scan in a transaction
-    const result = await db.$transaction(async (tx) => {
-      // If this is the first scan and audit is still PENDING, activate it
-      if (session.status === AuditStatus.PENDING) {
-        await tx.auditSession.update({
+    const result = await db.$transaction(
+      async (tx) => {
+        // If this is the first scan and audit is still PENDING, activate it
+        if (session.status === AuditStatus.PENDING) {
+          await tx.auditSession.update({
+            where: { id: auditSessionId },
+            data: {
+              status: AuditStatus.ACTIVE,
+              startedAt: new Date(),
+            },
+          });
+
+          // Create automatic note for audit being started
+          await createAuditStartedNote({
+            auditSessionId,
+            userId,
+            tx,
+            prefetchedUser: scannerUser,
+          });
+        }
+
+        // Create the scan record
+        const scan = await tx.auditScan.create({
+          data: {
+            auditSessionId,
+            code: qrId,
+            assetId,
+            scannedById: userId,
+            scannedAt: new Date(),
+          },
+        });
+
+        let auditAssetId: string | null = null;
+
+        // Update or create the audit asset record
+        if (isExpected) {
+          // Expected asset - update its status to FOUND
+          await tx.auditAsset.updateMany({
+            where: {
+              auditSessionId,
+              assetId,
+              expected: true,
+            },
+            data: {
+              status: AuditAssetStatus.FOUND,
+              scannedAt: new Date(),
+              scannedById: userId,
+            },
+          });
+
+          // Get the audit asset ID for return
+          const updatedAsset = await tx.auditAsset.findFirst({
+            where: {
+              auditSessionId,
+              assetId,
+              expected: true,
+            },
+            select: { id: true },
+          });
+
+          auditAssetId = updatedAsset?.id ?? null;
+        } else {
+          // Unexpected asset - create a new audit asset record
+          const auditAsset = await tx.auditAsset.create({
+            data: {
+              auditSessionId,
+              assetId,
+              expected: false,
+              status: AuditAssetStatus.UNEXPECTED,
+              scannedAt: new Date(),
+              scannedById: userId,
+            },
+          });
+          auditAssetId = auditAsset.id;
+        }
+
+        // Link the scan to the audit asset so we can query it later
+        if (auditAssetId) {
+          await tx.auditScan.update({
+            where: { id: scan.id },
+            data: { auditAssetId },
+          });
+        }
+
+        // Update the audit session counts
+        const updatedSession = await tx.auditSession.update({
           where: { id: auditSessionId },
           data: {
-            status: AuditStatus.ACTIVE,
-            startedAt: new Date(),
+            foundAssetCount: isExpected
+              ? { increment: 1 }
+              : session.foundAssetCount,
+            missingAssetCount: isExpected
+              ? { decrement: 1 }
+              : session.missingAssetCount,
+            unexpectedAssetCount: !isExpected
+              ? { increment: 1 }
+              : session.unexpectedAssetCount,
           },
         });
 
-        // Create automatic note for audit being started
-        await createAuditStartedNote({
+        // Create automatic note for asset scan using pre-fetched data
+        await createAssetScanNote({
           auditSessionId,
-          userId,
-          tx,
-        });
-      }
-
-      // Create the scan record
-      const scan = await tx.auditScan.create({
-        data: {
-          auditSessionId,
-          code: qrId,
           assetId,
-          scannedById: userId,
-          scannedAt: new Date(),
-        },
-      });
-
-      let auditAssetId: string | null = null;
-
-      // Update or create the audit asset record
-      if (isExpected) {
-        // Expected asset - update its status to FOUND
-        await tx.auditAsset.updateMany({
-          where: {
-            auditSessionId,
-            assetId,
-            expected: true,
-          },
-          data: {
-            status: AuditAssetStatus.FOUND,
-            scannedAt: new Date(),
-            scannedById: userId,
-          },
+          userId,
+          isExpected,
+          tx,
+          prefetchedUser: scannerUser,
+          prefetchedAsset: scannedAsset,
         });
 
-        // Get the audit asset ID for return
-        const updatedAsset = await tx.auditAsset.findFirst({
-          where: {
-            auditSessionId,
-            assetId,
-            expected: true,
-          },
-          select: { id: true },
-        });
-
-        auditAssetId = updatedAsset?.id ?? null;
-      } else {
-        // Unexpected asset - create a new audit asset record
-        const auditAsset = await tx.auditAsset.create({
-          data: {
-            auditSessionId,
-            assetId,
-            expected: false,
-            status: AuditAssetStatus.UNEXPECTED,
-            scannedAt: new Date(),
-            scannedById: userId,
-          },
-        });
-        auditAssetId = auditAsset.id;
-      }
-
-      // Link the scan to the audit asset so we can query it later
-      if (auditAssetId) {
-        await tx.auditScan.update({
-          where: { id: scan.id },
-          data: { auditAssetId },
-        });
-      }
-
-      // Update the audit session counts
-      const updatedSession = await tx.auditSession.update({
-        where: { id: auditSessionId },
-        data: {
-          foundAssetCount: isExpected
-            ? { increment: 1 }
-            : session.foundAssetCount,
-          missingAssetCount: isExpected
-            ? { decrement: 1 }
-            : session.missingAssetCount,
-          unexpectedAssetCount: !isExpected
-            ? { increment: 1 }
-            : session.unexpectedAssetCount,
-        },
-      });
-
-      // Create automatic note for asset scan
-      await createAssetScanNote({
-        auditSessionId,
-        assetId,
-        userId,
-        isExpected,
-        tx,
-      });
-
-      return {
-        scanId: scan.id,
-        auditAssetId,
-        foundAssetCount: updatedSession.foundAssetCount,
-        unexpectedAssetCount: updatedSession.unexpectedAssetCount,
-      };
-    });
+        return {
+          scanId: scan.id,
+          auditAssetId,
+          foundAssetCount: updatedSession.foundAssetCount,
+          unexpectedAssetCount: updatedSession.unexpectedAssetCount,
+        };
+      },
+      { timeout: 15000 }
+    );
 
     return result;
   } catch (cause) {
@@ -1183,6 +1256,11 @@ export async function getAuditScans({
           select: {
             id: true,
             title: true,
+            location: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
         auditAsset: {
@@ -1266,6 +1344,7 @@ export async function getAuditScans({
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
+        assetLocationName: scan.asset?.location?.name ?? null,
       };
     });
   } catch (cause) {
@@ -1316,11 +1395,22 @@ export async function completeAuditSession({
         });
       }
 
-      if (session.status === AuditStatus.COMPLETED) {
+      assertAuditNotArchived(session.status, {
+        auditSessionId: sessionId,
+        organizationId,
+      });
+
+      if (
+        session.status === AuditStatus.COMPLETED ||
+        session.status === AuditStatus.CANCELLED
+      ) {
         throw new ShelfError({
           cause: null,
-          message: "Audit session is already completed",
-          additionalData: { sessionId },
+          message:
+            session.status === AuditStatus.COMPLETED
+              ? "Audit session is already completed"
+              : "Cancelled audits cannot be completed.",
+          additionalData: { sessionId, status: session.status },
           status: 400,
           label,
         });
@@ -1418,6 +1508,7 @@ export async function completeAuditSession({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
         assignments: {
@@ -1427,6 +1518,7 @@ export async function completeAuditSession({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },
@@ -1462,6 +1554,7 @@ export async function completeAuditSession({
             email: completedAudit.createdBy.email,
             firstName: completedAudit.createdBy.firstName,
             lastName: completedAudit.createdBy.lastName,
+            displayName: completedAudit.createdBy.displayName,
           },
         });
       }
@@ -1479,11 +1572,15 @@ export async function completeAuditSession({
     // Cancel all scheduled reminder jobs
     await cancelAuditReminders(sessionId);
   } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
       cause,
-      message: "Failed to complete audit session",
+      message: isShelfError
+        ? cause.message
+        : "Failed to complete audit session",
       additionalData: { sessionId, organizationId, userId },
       label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
     });
   }
 }
@@ -1542,9 +1639,11 @@ export async function getAuditsForOrganization(params: {
       ];
     }
 
-    // Add status filter
+    // Add status filter — exclude ARCHIVED by default when no filter is set
     if (status) {
       where.status = status;
+    } else {
+      where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
     const [audits, totalAudits] = await Promise.all([
@@ -1685,6 +1784,7 @@ export async function cancelAuditSession({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
         organization: {
@@ -1701,6 +1801,7 @@ export async function cancelAuditSession({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
               },
             },
           },
@@ -1720,6 +1821,11 @@ export async function cancelAuditSession({
         status: 404,
       });
     }
+
+    assertAuditNotArchived(auditSession.status, {
+      auditSessionId,
+      organizationId,
+    });
 
     // Check if user is the creator
     if (auditSession.createdById !== userId) {
@@ -1756,10 +1862,20 @@ export async function cancelAuditSession({
       data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
+    // Fetch acting user's info for the activity note
+    const actingUser = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
     // Create activity note for cancellation
     await db.auditNote.create({
       data: {
-        content: `${auditSession.createdBy.firstName} ${auditSession.createdBy.lastName} cancelled the audit`,
+        content: `${wrapUserLinkForNote({
+          id: userId,
+          firstName: actingUser?.firstName,
+          lastName: actingUser?.lastName,
+        })} cancelled the audit`,
         type: "UPDATE",
         userId,
         auditSessionId,
@@ -1821,6 +1937,7 @@ export async function getPendingAuditsForOrganization({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       },
       assignments: {
@@ -1829,6 +1946,7 @@ export async function getPendingAuditsForOrganization({
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -2151,4 +2269,286 @@ export async function removeAssetsFromAudit({
 
       return { removedCount: result.removedCount };
     });
+}
+
+/**
+ * Archives a completed or cancelled audit session.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) can be archived.
+ * This is irreversible — there is no "unarchive" action.
+ *
+ * @param auditSessionId - The ID of the audit to archive
+ * @param organizationId - The organization ID for scoping
+ * @param userId - The user performing the archive action
+ * @throws {ShelfError} If the audit is not found or not in a terminal status
+ */
+export async function archiveAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    // Wrap status update + activity note in a transaction so both
+    // succeed or fail together (prevents orphaned state changes).
+    // The updateMany WHERE clause atomically validates existence,
+    // org scoping, and terminal status — no pre-read needed.
+    await db.$transaction(async (tx) => {
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: auditSessionId,
+          organizationId,
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      if (result.count === 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Audit could not be archived. It may not exist, is not in a terminal state, or was already modified.",
+          additionalData: { auditSessionId, organizationId },
+          label,
+          status: 409,
+        });
+      }
+
+      // Fetch user info for the activity note
+      const user = await tx.user.findFirst({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, displayName: true },
+      });
+
+      // Create activity note: "[User] archived the audit"
+      await tx.auditNote.create({
+        data: {
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE",
+          userId,
+          auditSessionId,
+        },
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to archive audit session",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Builds a Prisma WHERE clause for audits based on the current URL search
+ * params. Used by bulk operations when the user selects "all" items across
+ * pages so the operation respects any active filters.
+ *
+ * @param organizationId - The organization ID for scoping
+ * @param currentSearchParams - Serialized URL search params from the index page
+ * @param userId - The current user (used for assignment-scoped filters)
+ * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
+ *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
+ */
+export function getAuditWhereInput({
+  organizationId,
+  currentSearchParams,
+  userId,
+  isSelfServiceOrBase,
+}: {
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  userId?: string;
+  isSelfServiceOrBase?: boolean;
+}): Prisma.AuditSessionWhereInput {
+  const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+  // Filter by assignee for BASE/SELF_SERVICE users so select-all
+  // never pulls in audits outside the user's visible scope
+  if (isSelfServiceOrBase && userId) {
+    where.assignments = {
+      some: {
+        userId,
+      },
+    };
+  }
+
+  // Always parse params — even when empty/null, we need to apply
+  // default filters (e.g. exclude ARCHIVED) to mirror the index loader
+  const searchParams = new URLSearchParams(currentSearchParams ?? "");
+
+  // Normalize + validate the status param against the AuditStatus enum.
+  // "ALL" and any unknown value fall through to the default branch so we
+  // always exclude ARCHIVED unless a specific valid status is selected.
+  const rawStatus = searchParams.get("status");
+  const normalized = rawStatus ? rawStatus.toUpperCase() : null;
+  const status =
+    normalized &&
+    normalized !== "ALL" &&
+    (Object.values(AuditStatus) as string[]).includes(normalized)
+      ? (normalized as AuditStatus)
+      : null;
+
+  if (status) {
+    where.status = status;
+  } else {
+    // Mirror the index loader: exclude ARCHIVED by default when no
+    // explicit status filter is set, so select-all never pulls in
+    // audits the user didn't see in the list
+    where.status = { notIn: [AuditStatus.ARCHIVED] };
+  }
+
+  // Respect the active search term so select-all only targets the
+  // filtered subset the user sees, not every audit in the org
+  const search = searchParams.get("s");
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+/**
+ * Archives multiple audit sessions in a single transaction.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) will be archived.
+ * Creates an activity note on each archived audit.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ *
+ * @param params.auditIds - Array of audit IDs (or containing ALL_SELECTED_KEY)
+ * @param params.organizationId - Scoping organization
+ * @param params.userId - The user performing the archive (for activity notes)
+ * @param params.currentSearchParams - Serialized URL params for select-all filtering
+ * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
+ *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @throws {ShelfError} If the selection is empty or any selected audit is not
+ *   in a terminal state
+ */
+export async function bulkArchiveAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+  isSelfServiceOrBase,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+  isSelfServiceOrBase?: boolean;
+}) {
+  try {
+    /** When all items are selected, resolve from filters instead of IDs */
+    const where: Prisma.AuditSessionWhereInput = auditIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+        })
+      : { id: { in: auditIds }, organizationId };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No archivable audits were found for your selection.",
+        label,
+        additionalData: { auditIds, organizationId },
+        status: 400,
+      });
+    }
+
+    const someNotTerminal = audits.some(
+      (a) =>
+        a.status !== AuditStatus.COMPLETED && a.status !== AuditStatus.CANCELLED
+    );
+
+    if (someNotTerminal) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some audits are not in a completed or cancelled state. Only completed or cancelled audits can be archived.",
+        label,
+        additionalData: { auditIds, organizationId },
+      });
+    }
+
+    // Fetch user info once up-front for activity notes. Hoisted out of the
+    // transaction to keep the write-only work inside $transaction small and
+    // avoid holding a DB connection while reading unrelated data.
+    const user = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
+    await db.$transaction(async (tx) => {
+      // Keep terminal-state predicate on the write to guard against
+      // concurrent status changes between the read and this update,
+      // mirroring the single-item archiveAuditSession() pattern
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: { in: audits.map((a) => a.id) },
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      if (result.count !== audits.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some audits could not be archived because their status changed. Please refresh and try again.",
+          label,
+          additionalData: {
+            expected: audits.length,
+            actual: result.count,
+            organizationId,
+          },
+          status: 409,
+        });
+      }
+
+      // Create an activity note on each archived audit
+      await tx.auditNote.createMany({
+        data: audits.map((a) => ({
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE" as const,
+          userId,
+          auditSessionId: a.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk archive audits",
+      additionalData: { auditIds, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
 }

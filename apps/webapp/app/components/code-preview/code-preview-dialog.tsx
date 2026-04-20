@@ -146,7 +146,7 @@ export function CodePreviewDialog({
               </When>
             </div>
             <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
-              <Button variant="secondary" onClick={closeDialog}>
+              <Button type="button" variant="secondary" onClick={closeDialog}>
                 Close
               </Button>
             </div>

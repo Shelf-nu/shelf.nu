@@ -259,7 +259,11 @@ export default function ImageWithPreview({
                     </Button>
                   ) : null}
 
-                  <Button variant="secondary" onClick={handleCloseDialog}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleCloseDialog}
+                  >
                     Close
                   </Button>
                 </div>

@@ -62,7 +62,14 @@ afterAll(() => {
 // why: testing booking service business logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // why: handles both callback-style and array-style $transaction
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callbackOrArray) =>
+        typeof callbackOrArray === "function"
+          ? callbackOrArray(db)
+          : Promise.all(callbackOrArray)
+      ),
     $executeRaw: vitest.fn().mockResolvedValue(0),
     booking: {
       create: vitest.fn().mockResolvedValue({}),
@@ -166,6 +173,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdminsEmails: vitest
     .fn()
     .mockResolvedValue(["admin@example.com"]),
+  getOrganizationAdminsForNotification: vitest.fn().mockResolvedValue([
+    {
+      id: "admin-1",
+      email: "admin@example.com",
+      firstName: "Admin",
+      lastName: "User",
+    },
+  ]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -577,6 +592,7 @@ describe("getPartialCheckinHistory", () => {
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
             email: true,
           },
         },
@@ -1220,6 +1236,91 @@ describe("updateBookingAssets", () => {
       updateBookingAssets(mockUpdateBookingAssetsParams)
     ).rejects.toThrow(ShelfError);
   });
+
+  it("should throw 400 ShelfError when all assets have been deleted", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate all requested assets being deleted from DB
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    await expect(
+      updateBookingAssets(mockUpdateBookingAssetsParams)
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message:
+          "None of the selected assets exist. They may have been deleted.",
+        status: 400,
+      })
+    );
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("should throw 400 ShelfError when some assets have been deleted", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate one of two requested assets being deleted from DB
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(
+      updateBookingAssets(mockUpdateBookingAssetsParams)
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message:
+          "Some of the selected assets no longer exist. Please reload and try again.",
+        status: 400,
+      })
+    );
+
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("should handle duplicate asset IDs without false validation failures", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: simulate both unique assets existing — duplicates should be deduped
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
+    const params = {
+      ...mockUpdateBookingAssetsParams,
+      assetIds: ["asset-1", "asset-2", "asset-1"], // duplicate
+    };
+
+    const result = await updateBookingAssets(params);
+
+    expect(result).toEqual(mockBooking);
+    expect(db.$executeRaw).toHaveBeenCalled();
+  });
 });
 
 describe("reserveBooking", () => {
@@ -1356,7 +1457,7 @@ describe("checkoutBooking", () => {
   };
 
   it("should checkout booking successfully with no conflicts", async () => {
-    expect.assertions(3);
+    expect.assertions(2);
 
     const mockBooking = {
       ...mockBookingData,
@@ -1378,12 +1479,15 @@ describe("checkoutBooking", () => {
         },
       ],
     };
-    const checkedOutBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
 
+    /** findUniqueOrThrow is called twice: first for the pre-checkout
+     * lookup, then for the post-commit hydration of the return payload. */
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
     //@ts-expect-error missing vitest type
-    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(checkedOutBooking);
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
 
     const result = await checkoutBooking(mockCheckoutParams);
 
@@ -1392,27 +1496,9 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
-    expect(db.booking.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "booking-1" },
-        data: { status: BookingStatus.ONGOING },
-        include: expect.objectContaining({
-          _count: { select: { assets: true } },
-          assets: true,
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: expect.objectContaining({
-            include: expect.objectContaining({
-              owner: expect.objectContaining({
-                select: { email: true },
-              }),
-            }),
-          }),
-        }),
-      })
-    );
-
-    expect(result).toEqual(checkedOutBooking);
+    /** Assert observable behavior: the result is the fully hydrated
+     * booking returned by the post-commit findUniqueOrThrow. */
+    expect(result).toEqual(hydratedBooking);
   });
 
   it("should throw error when assets have booking conflicts", async () => {
@@ -2013,7 +2099,8 @@ describe("deleteBooking", () => {
 
     await deleteBooking(
       { id: "booking-1", organizationId: "org-1" },
-      mockClientHints
+      mockClientHints,
+      "user-1"
     );
 
     expect(db.booking.findUnique).toHaveBeenCalled();

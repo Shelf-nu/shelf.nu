@@ -33,7 +33,7 @@ function getStripeServerClient() {
   ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: "2026-01-28.clover",
+      apiVersion: "2026-03-25.dahlia",
     });
   }
   return _stripe;
@@ -73,6 +73,7 @@ export async function createStripeCheckoutSession({
   intent,
   shelfTier,
   auditPriceId,
+  barcodePriceId,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
@@ -81,6 +82,7 @@ export async function createStripeCheckoutSession({
   intent: "trial" | "subscribe";
   shelfTier: "tier_1" | "tier_2";
   auditPriceId?: string;
+  barcodePriceId?: string;
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -114,12 +116,17 @@ export async function createStripeCheckoutSession({
       lineItems.push({ price: auditPriceId, quantity: 1 });
     }
 
+    if (barcodePriceId) {
+      lineItems.push({ price: barcodePriceId, quantity: 1 });
+    }
+
     const successUrl = await generateReturnUrl({
       userId,
       shelfTier,
       intent,
       domainUrl,
       hasAuditAddon: !!auditPriceId,
+      hasBarcodeAddon: !!barcodePriceId,
     });
 
     const { url } = await stripe.checkout.sessions.create({
@@ -138,8 +145,11 @@ export async function createStripeCheckoutSession({
             },
           },
           trial_period_days: config.freeTrialDays,
-          ...(auditPriceId && {
-            metadata: { includesAuditAddon: "true" },
+          ...((auditPriceId || barcodePriceId) && {
+            metadata: {
+              ...(auditPriceId && { includesAuditAddon: "true" }),
+              ...(barcodePriceId && { includesBarcodeAddon: "true" }),
+            },
           }),
         },
         payment_method_collection: "if_required",
@@ -224,7 +234,6 @@ export async function getStripePricesForTrialPlanSelection() {
     const groupedPrices = groupPricesByInterval(
       pricesResponse.data as PriceWithProduct[]
     );
-    // console.log("groupedPrices", groupedPrices.year);
     return [
       ...groupedPrices.month.filter(
         (price) =>
@@ -498,6 +507,10 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
     const auditItem = items.find(
       (i) => i.productType === "addon" && i.addonType === "audits"
     );
+    // The barcode addon item is the one marked as addon with barcodes type
+    const barcodeItem = items.find(
+      (i) => i.productType === "addon" && i.addonType === "barcodes"
+    );
 
     // For backward compat: return tier product info, or fall back to first item
     const primaryItem = tierItem || items[0];
@@ -509,6 +522,7 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
       productType: primaryItem.productType,
       product: primaryItem.product,
       hasAuditAddon: !!auditItem,
+      hasBarcodeAddon: !!barcodeItem,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -561,11 +575,13 @@ export async function createTeamTrialSubscription({
   priceId,
   userId,
   auditPriceId,
+  barcodePriceId,
 }: {
   customerId: string;
   priceId: string;
   userId: User["id"];
   auditPriceId?: string;
+  barcodePriceId?: string;
 }) {
   try {
     if (!stripe) {
@@ -580,6 +596,9 @@ export async function createTeamTrialSubscription({
     const lineItems: { price: string }[] = [{ price: priceId }];
     if (auditPriceId) {
       lineItems.push({ price: auditPriceId });
+    }
+    if (barcodePriceId) {
+      lineItems.push({ price: barcodePriceId });
     }
 
     // If the customer already has a payment method, attach it so Stripe
@@ -606,6 +625,7 @@ export async function createTeamTrialSubscription({
         userId,
         createdByAction: "true",
         ...(auditPriceId && { includesAuditAddon: "true" }),
+        ...(barcodePriceId && { includesBarcodeAddon: "true" }),
       },
     });
 
@@ -628,12 +648,14 @@ export async function generateReturnUrl({
   intent,
   domainUrl,
   hasAuditAddon,
+  hasBarcodeAddon,
 }: {
   userId: User["id"];
   shelfTier: "tier_1" | "tier_2" | "free" | "custom";
   intent: "trial" | "subscribe";
   domainUrl: string;
   hasAuditAddon?: boolean;
+  hasBarcodeAddon?: boolean;
 }) {
   /**
    * Here we have a few cases:
@@ -658,6 +680,7 @@ export async function generateReturnUrl({
     ...(intent === "trial" && { trial: "true" }),
     ...(userTeamOrg && { hasExistingWorkspace: "true" }),
     ...(hasAuditAddon && { includesAudits: "true" }),
+    ...(hasBarcodeAddon && { includesBarcodes: "true" }),
   });
 
   return shelfTier === "tier_2" && !userTeamOrg // If the user is on tier_2, and they dont already OWN a team org we redirect them to create a team workspace
@@ -845,11 +868,16 @@ export async function getCustomerUpcomingInvoices(
   }
 }
 
+export type SubscriptionDetail = {
+  subscriptionId: string;
+  subscriptionName: string;
+  type: "tier" | "addon";
+};
+
 export type OwnerSubscriptionInfo = {
   hasActiveSubscription: boolean;
-  subscriptionName: string | null;
+  subscriptions: SubscriptionDetail[];
   tierId: string | null;
-  subscriptionId: string | null;
 };
 
 /**
@@ -887,19 +915,56 @@ export async function getUserActiveSubscription(
 }
 
 /**
- * Gets subscription info formatted for the transfer dialog display
- * Returns details about the owner's active subscription
+ * Gets ALL active/trialing subscriptions for a user.
+ * Used by the transfer flow to transfer all relevant subscriptions.
+ */
+export async function getUserActiveSubscriptions(
+  userId: string
+): Promise<Stripe.Subscription[]> {
+  try {
+    if (!stripe || !premiumIsEnabled) return [];
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { customerId: true },
+    });
+
+    if (!user?.customerId) return [];
+
+    const subscriptions = await getCustomerSubscriptionsWithProducts(
+      user.customerId
+    );
+
+    return subscriptions.filter(
+      (sub) => sub.status === "active" || sub.status === "trialing"
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get user active subscriptions",
+      additionalData: { userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Gets subscription info formatted for the transfer dialog display.
+ * Returns details about ALL of the owner's active subscriptions (tier + addons).
+ *
+ * @param ownerId - The user ID of the workspace owner
+ * @param organizationId - The workspace being transferred (used to filter addon subscriptions)
  */
 export async function getOwnerSubscriptionInfo(
-  ownerId: string
+  ownerId: string,
+  organizationId: string
 ): Promise<OwnerSubscriptionInfo> {
   try {
     if (!stripe || !premiumIsEnabled) {
       return {
         hasActiveSubscription: false,
-        subscriptionName: null,
+        subscriptions: [],
         tierId: null,
-        subscriptionId: null,
       };
     }
 
@@ -911,45 +976,70 @@ export async function getOwnerSubscriptionInfo(
     if (!user?.customerId) {
       return {
         hasActiveSubscription: false,
-        subscriptionName: null,
+        subscriptions: [],
         tierId: user?.tierId || null,
-        subscriptionId: null,
       };
     }
 
-    const subscriptions = await getCustomerSubscriptionsWithProducts(
+    const allSubscriptions = await getCustomerSubscriptionsWithProducts(
       user.customerId
     );
 
-    // Find active or trialing subscription
-    const activeSubscription = subscriptions.find(
+    // Filter to active or trialing subscriptions
+    const activeSubscriptions = allSubscriptions.filter(
       (sub) => sub.status === "active" || sub.status === "trialing"
     );
 
-    if (!activeSubscription) {
+    if (activeSubscriptions.length === 0) {
       return {
         hasActiveSubscription: false,
-        subscriptionName: null,
+        subscriptions: [],
         tierId: user.tierId,
-        subscriptionId: null,
       };
     }
 
-    // Get the product name from the subscription
-    const product = activeSubscription.items.data[0]?.price
-      ?.product as Stripe.Product | null;
+    // Classify each subscription by inspecting its line-item products
+    const details: SubscriptionDetail[] = [];
+    for (const sub of activeSubscriptions) {
+      for (const item of sub.items.data) {
+        const product = item.price?.product as Stripe.Product | null;
+        if (!product) continue;
+
+        const shelfTier = product.metadata?.shelf_tier;
+        const productType = product.metadata?.product_type;
+
+        if (shelfTier) {
+          details.push({
+            subscriptionId: sub.id,
+            subscriptionName: product.name || "Active Plan",
+            type: "tier",
+          });
+        } else if (productType === "addon") {
+          // Only include addon subscriptions linked to this workspace
+          const subOrgId = (
+            sub as Stripe.Subscription & { metadata: Record<string, string> }
+          ).metadata?.organizationId;
+          if (subOrgId === organizationId) {
+            details.push({
+              subscriptionId: sub.id,
+              subscriptionName: product.name || "Add-on",
+              type: "addon",
+            });
+          }
+        }
+      }
+    }
 
     return {
-      hasActiveSubscription: true,
-      subscriptionName: product?.name || "Active Plan",
+      hasActiveSubscription: details.length > 0,
+      subscriptions: details,
       tierId: user.tierId,
-      subscriptionId: activeSubscription.id,
     };
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Failed to get owner subscription info",
-      additionalData: { ownerId },
+      additionalData: { ownerId, organizationId },
       label,
     });
   }
@@ -993,8 +1083,16 @@ export async function transferSubscriptionToCustomer({
 
     // Capture the original renewal date before cancellation
     // In newer Stripe API, current_period_end is on subscription items
-    const originalRenewalDate =
-      existingSubscription.items.data[0].current_period_end;
+    const firstItem = existingSubscription.items.data[0];
+    if (!firstItem) {
+      throw new ShelfError({
+        cause: null,
+        message: "Subscription has no items",
+        additionalData: { subscriptionId },
+        label,
+      });
+    }
+    const originalRenewalDate = firstItem.current_period_end;
 
     // Create new subscription FIRST, before canceling the old one.
     // This ensures if creation fails, the original subscription is preserved.
@@ -1002,18 +1100,57 @@ export async function transferSubscriptionToCustomer({
     // charge happens when the previously-paid period ends.
     // proration_behavior 'none' ensures no charge for the partial period.
     // payment_behavior 'allow_incomplete' allows creation without payment method.
-    const newSubscription = await stripe.subscriptions.create({
+    const subscriptionParams: Stripe.SubscriptionCreateParams = {
       customer: newCustomerId,
       items: existingSubscription.items.data.map((item) => ({
         price: item.price.id,
         quantity: item.quantity ?? 1,
       })),
-      billing_cycle_anchor: originalRenewalDate,
       proration_behavior: "none",
       payment_behavior: "allow_incomplete",
       metadata: {
+        ...existingSubscription.metadata,
         transferred_from_subscription: subscriptionId,
       },
+    };
+
+    // Preserve trial status: if the original subscription is trialing,
+    // set trial_end so the new owner continues the trial instead of
+    // getting an immediately active subscription.
+    if (
+      existingSubscription.status === "trialing" &&
+      existingSubscription.trial_end
+    ) {
+      subscriptionParams.trial_end = existingSubscription.trial_end;
+    } else {
+      // For active (paid) subscriptions, preserve the billing cycle so the
+      // first charge happens when the previously-paid period ends.
+      subscriptionParams.billing_cycle_anchor = originalRenewalDate;
+    }
+
+    let newSubscription: Stripe.Subscription;
+    try {
+      newSubscription = await stripe.subscriptions.create(subscriptionParams);
+    } catch (anchorError: unknown) {
+      // billing_cycle_anchor can fail when the anchor date exceeds Stripe's
+      // "next natural billing date" (e.g. test clocks with forwarded time).
+      // Retry without the anchor so the transfer still succeeds.
+      const isAnchorError =
+        anchorError instanceof Error &&
+        anchorError.message?.includes("billing_cycle_anchor");
+
+      if (!isAnchorError) throw anchorError;
+
+      const { billing_cycle_anchor: _, ...paramsWithoutAnchor } =
+        subscriptionParams;
+      newSubscription = await stripe.subscriptions.create(paramsWithoutAnchor);
+    }
+
+    // Mark the old subscription as a transfer so the delete webhook
+    // doesn't undo work done by the new subscription's create webhook
+    // (e.g. disabling audits via handleAuditAddonWebhook).
+    await stripe.subscriptions.update(subscriptionId, {
+      metadata: { transferred_to_subscription: newSubscription.id },
     });
 
     // Only cancel the old subscription after the new one is successfully created

@@ -27,6 +27,7 @@ export default function RemoveKitFromLocation({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
+          type="button"
           variant="link"
           className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700"
           width="full"
@@ -53,12 +54,19 @@ export default function RemoveKitFromLocation({
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
+              <Button type="button" variant="secondary">
+                Cancel
+              </Button>
             </AlertDialogCancel>
 
             <Form method="post">
               <input type="hidden" name="kitId" value={kit.id} />
-              <Button name="intent" value="removeKit" disabled={disabled}>
+              <Button
+                type="submit"
+                name="intent"
+                value="removeKit"
+                disabled={disabled}
+              >
                 Remove
               </Button>
             </Form>

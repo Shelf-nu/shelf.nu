@@ -22,6 +22,7 @@ import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import { NotificationRecipientsField } from "./fields/notification-recipients";
 import { BookingFormSchema, type BookingFormSchemaType } from "./forms-schema";
 import { Button } from "../../shared/button";
 import { Card } from "../../shared/card";
@@ -183,6 +184,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   }
                 />
               </Card>
+              <Card className="field-card m-0 overflow-visible">
+                <NotificationRecipientsField
+                  disabled={disabled}
+                  isAdminOrOwner={isAdministratorOrOwner}
+                  creatorName="You"
+                />
+              </Card>
             </div>
           </div>
         </div>
@@ -211,6 +219,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               </Button>
             ) : null}
             <Button
+              type="submit"
               className="whitespace-nowrap"
               icon={assetIds ? undefined : "rows"}
               value="create"

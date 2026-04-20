@@ -62,6 +62,7 @@ export default function SuccessfulSubscriptionModal() {
                       before you continue.
                     </div>
                     <Button
+                      type="button"
                       width="full"
                       onClick={() => {
                         setSearchParams((prev) => {
@@ -130,6 +131,7 @@ function AreYouSureModal({ shouldBlock }: { shouldBlock: boolean }) {
         <AlertDialogFooter>
           <div className="flex w-full flex-col justify-center gap-2">
             <Button
+              type="button"
               variant="secondary"
               width="full"
               onClick={() => blocker.reset()}
@@ -138,6 +140,7 @@ function AreYouSureModal({ shouldBlock }: { shouldBlock: boolean }) {
             </Button>
 
             <Button
+              type="button"
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               onClick={() => blocker.proceed()}
             >

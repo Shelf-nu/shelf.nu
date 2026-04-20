@@ -179,6 +179,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
           organization: {
@@ -198,6 +199,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
                   email: true,
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                 },
               },
             },

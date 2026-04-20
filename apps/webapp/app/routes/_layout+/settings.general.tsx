@@ -55,6 +55,7 @@ import {
   canHideShelfBranding,
 } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -78,6 +79,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
             select: {
               firstName: true,
+              displayName: true,
               tierId: true,
               userOrganizations: {
                 include: {
@@ -96,6 +98,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                           id: true,
                           firstName: true,
                           lastName: true,
+                          displayName: true,
                           profilePicture: true,
                         },
                       },
@@ -118,9 +121,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           organizationId,
           organizations,
         }),
+
         getOrganizationAdmins({ organizationId }),
         // Get subscription info for the workspace owner (for transfer dialog)
-        getOwnerSubscriptionInfo(currentOrganization.userId),
+        getOwnerSubscriptionInfo(currentOrganization.userId, organizationId),
         // Load SCIM tokens for SSO-enabled organizations
         currentOrganization.enabledSso
           ? db.scimToken.findMany({
@@ -438,7 +442,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Ownership transferred",
-          message: `You have successfully transferred ownership of ${currentOrganization.name} to ${newOwner.firstName} ${newOwner.lastName}`,
+          message: `You have successfully transferred ownership of ${
+            currentOrganization.name
+          } to ${resolveUserDisplayName(newOwner)}`,
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -531,8 +537,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { organization, canExportAssets, scimTokens } =
-    useLoaderData<typeof loader>();
+  const {
+    organization,
+    canExportAssets,
+    scimTokens,
+    admins,
+    ownerSubscriptionInfo,
+    ownerOtherTeamWorkspacesCount,
+    premiumIsEnabled: premiumEnabled,
+  } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
       <WorkspaceEditForms
@@ -557,7 +570,12 @@ export default function GeneralPage() {
         <ExportBackupButton canExportAssets={canExportAssets} />
       </Card>
 
-      <TransferOwnershipCard />
+      <TransferOwnershipCard
+        admins={admins}
+        ownerSubscriptionInfo={ownerSubscriptionInfo}
+        ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
+        premiumIsEnabled={premiumEnabled}
+      />
     </div>
   );
 }

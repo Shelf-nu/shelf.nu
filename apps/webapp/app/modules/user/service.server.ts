@@ -19,6 +19,7 @@ import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
+import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -224,14 +225,15 @@ export async function createUserOrAttachOrg({
   roles,
   password,
   firstName,
+  lastName,
   createdWithInvite = false,
-}: Pick<User, "email" | "firstName"> & {
-  organizationId: Organization["id"];
-  roles: OrganizationRoles[];
-  password: string;
-  /** We mark  */
-  createdWithInvite: boolean;
-}) {
+}: Pick<User, "email" | "firstName"> &
+  Partial<Pick<User, "lastName">> & {
+    organizationId: Organization["id"];
+    roles: OrganizationRoles[];
+    password: string;
+    createdWithInvite: boolean;
+  }) {
   try {
     const shelfUser = await db.user.findFirst({
       where: { email },
@@ -271,6 +273,7 @@ export async function createUserOrAttachOrg({
         organizationId,
         roles,
         firstName,
+        lastName,
         createdWithInvite,
       });
 
@@ -367,7 +370,7 @@ export async function createUserFromSSO(
 
     // Rest of the existing SSO logic for organizations...
     const organizations = await getOrganizationsBySsoDomain(emailDomain);
-    const roles = [];
+    let firstMatchedOrg: (typeof organizations)[number] | null = null;
 
     for (const org of organizations) {
       const { ssoDetails } = org;
@@ -383,7 +386,7 @@ export async function createUserFromSSO(
         const role = getRoleFromGroupId(ssoDetails, groups);
 
         if (role) {
-          roles.push(role);
+          firstMatchedOrg ??= org;
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -399,18 +402,9 @@ export async function createUserFromSSO(
       }
     }
 
-    if (roles.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "No groups assigned",
-        message:
-          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
-        label: "Auth",
-        additionalData: { roles, organizations, email, userId },
-      });
-    }
-
-    return { user, org: organizations[0] || null };
+    // Return the first org that actually matched the user's groups, or
+    // null so the OAuth callback redirects to the "pending assignment" page.
+    return { user, org: firstMatchedOrg };
   } catch (cause: any) {
     throw new ShelfError({
       cause,
@@ -573,7 +567,7 @@ export async function updateUserFromSSO(
     const existingUserOrganizations = user.userOrganizations;
 
     const transitions: UserOrgTransition[] = [];
-    const desiredRoles = [];
+    let firstMatchedOrg: (typeof domainOrganizations)[number] | null = null;
 
     for (const org of domainOrganizations) {
       const { ssoDetails } = org;
@@ -592,7 +586,7 @@ export async function updateUserFromSSO(
         );
 
         if (desiredRole) {
-          desiredRoles.push(desiredRole);
+          firstMatchedOrg ??= org;
         }
 
         if (existingOrgAccess) {
@@ -627,28 +621,9 @@ export async function updateUserFromSSO(
       }
     }
 
-    if (desiredRoles.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "No groups assigned",
-        message:
-          "The user has no groups assigned that are available in shelf. Please contact an administrator for more information",
-        label: "Auth",
-        additionalData: { desiredRoles, domainOrganizations, email, userId },
-      });
-    }
-
-    const firstScimOrg = domainOrganizations.find(
-      (org) =>
-        org.ssoDetails &&
-        (org.ssoDetails.adminGroupId ||
-          org.ssoDetails.baseUserGroupId ||
-          org.ssoDetails.selfServiceGroupId)
-    );
-
     return {
       user,
-      org: firstScimOrg || null,
+      org: firstMatchedOrg,
       transitions,
     };
   } catch (cause) {
@@ -738,7 +713,10 @@ export async function createUser(
                      */
                     members: {
                       create: {
-                        name: `${firstName} ${lastName} (Owner)`,
+                        name: [
+                          ...[firstName, lastName].filter(Boolean),
+                          "(Owner)",
+                        ].join(" "),
                         user: { connect: { id: userId } },
                       },
                     },
@@ -837,11 +815,11 @@ export async function updateUser<T extends Prisma.UserInclude>(
           updateMany: {
             where: { userId: updateUserPayload.id },
             data: {
-              name: `${
-                updateUserPayload.firstName ? updateUserPayload.firstName : ""
-              } ${
-                updateUserPayload.lastName ? updateUserPayload.lastName : ""
-              }`,
+              name:
+                updateUserPayload.displayName ||
+                `${updateUserPayload.firstName || ""} ${
+                  updateUserPayload.lastName || ""
+                }`.trim(),
             },
           },
         },
@@ -1205,7 +1183,7 @@ export async function softDeleteUser(id: User["id"]) {
       await tx.user.update({
         where: { id },
         data: {
-          email: `deleted+${randomId}@deleted.shelf.nu`,
+          email: `deleted+${randomId}${SOFT_DELETED_EMAIL_DOMAIN}`,
           username: `deleted+${randomId}`,
           firstName: "Deleted",
           lastName: "User",
@@ -1244,12 +1222,20 @@ export async function softDeleteUser(id: User["id"]) {
     });
 
     if (error) {
-      throw new ShelfError({
-        cause: error,
-        message: "Failed to delete Auth user",
-        additionalData: { id, error },
-        label: "Auth",
-      });
+      // If the auth user is already gone (e.g., deleted externally),
+      // that's fine — we can proceed with the rest of the cleanup
+      const isUserNotFound =
+        error.status === 404 ||
+        ("code" in error && error.code === "user_not_found");
+
+      if (!isUserNotFound) {
+        throw new ShelfError({
+          cause: error,
+          message: "Failed to delete Auth user",
+          additionalData: { id, error },
+          label: "Auth",
+        });
+      }
     }
   } catch (cause) {
     if (

@@ -39,6 +39,7 @@ export function CommandPaletteButton({
     "locations.$locationId.edit",
     "$userId.assets",
     "$userId.bookings",
+    "$userId.notes",
   ].includes(
     // on the user bookings page we dont want to show the custodian filter becuase they are alreayd filtered for that user
     currentRoute?.handle?.name

@@ -219,6 +219,7 @@ export type AuditScannedItem = {
   auditStatus: AuditAssetStatus;
   expectedLocation?: string;
   currentLocation?: string;
+  locationName?: string | null;
   auditAssetId?: string; // Link to AuditAsset record for notes/images
   auditNotesCount?: number;
   auditImagesCount?: number;
@@ -268,6 +269,7 @@ export const auditResultsAtom = atom((get) => {
         auditStatus: expectedAssetIds.has(assetData.id)
           ? ("found" as const)
           : ("unexpected" as const),
+        locationName: assetData.location?.name ?? null,
       } satisfies AuditScannedItem;
     });
 

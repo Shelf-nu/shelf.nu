@@ -204,6 +204,7 @@ export function GenericItemRow<T>({
       </Td>
       <Td>
         <Button
+          type="button"
           className="border-none text-gray-500 hover:text-gray-700"
           variant="ghost"
           icon="trash"
