@@ -398,6 +398,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,
+          organizationId,
           kitIds: newlyAddedKitIds,
           kits: newlyAddedKits.map((kit) => ({ id: kit.id, name: kit.name })),
           userId,

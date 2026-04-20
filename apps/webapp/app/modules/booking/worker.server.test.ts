@@ -161,6 +161,7 @@ describe("autoArchiveHandler", () => {
     );
     expect(createStatusTransitionNote).toHaveBeenCalledWith({
       bookingId: "booking-1",
+      organizationId: "org-1",
       fromStatus: BookingStatus.COMPLETE,
       toStatus: BookingStatus.ARCHIVED,
       custodianUserId: "user-1",
