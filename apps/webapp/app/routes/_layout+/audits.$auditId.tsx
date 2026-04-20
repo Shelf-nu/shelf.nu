@@ -133,6 +133,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "archive-audit") {
+      // Archiving requires the explicit "archive" permission.
+      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.archive,
+      });
+
       // Only admin/owner can archive — UI gates this, but enforce server-side
       // to prevent direct POST bypass by self-service/base roles
       if (isSelfServiceOrBase) {

@@ -183,7 +183,8 @@ export default function AuditsIndexPage() {
   );
 }
 
-type AuditListItem = Prisma.AuditSessionGetPayload<{
+/** Shape of a row in the audits index list (includes relations from AUDIT_LIST_INCLUDE). */
+export type AuditListItem = Prisma.AuditSessionGetPayload<{
   include: typeof AUDIT_LIST_INCLUDE;
 }>;
 

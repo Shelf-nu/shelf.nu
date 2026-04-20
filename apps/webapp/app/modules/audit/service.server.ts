@@ -2352,24 +2352,51 @@ export async function archiveAuditSession({
  * Builds a Prisma WHERE clause for audits based on the current URL search
  * params. Used by bulk operations when the user selects "all" items across
  * pages so the operation respects any active filters.
+ *
+ * @param organizationId - The organization ID for scoping
+ * @param currentSearchParams - Serialized URL search params from the index page
+ * @param userId - The current user (used for assignment-scoped filters)
+ * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
+ *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
  */
-function getAuditWhereInput({
+export function getAuditWhereInput({
   organizationId,
   currentSearchParams,
+  userId,
+  isSelfServiceOrBase,
 }: {
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
+  userId?: string;
+  isSelfServiceOrBase?: boolean;
 }): Prisma.AuditSessionWhereInput {
   const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+  // Filter by assignee for BASE/SELF_SERVICE users so select-all
+  // never pulls in audits outside the user's visible scope
+  if (isSelfServiceOrBase && userId) {
+    where.assignments = {
+      some: {
+        userId,
+      },
+    };
+  }
 
   // Always parse params — even when empty/null, we need to apply
   // default filters (e.g. exclude ARCHIVED) to mirror the index loader
   const searchParams = new URLSearchParams(currentSearchParams ?? "");
 
+  // Normalize + validate the status param against the AuditStatus enum.
+  // "ALL" and any unknown value fall through to the default branch so we
+  // always exclude ARCHIVED unless a specific valid status is selected.
+  const rawStatus = searchParams.get("status");
+  const normalized = rawStatus ? rawStatus.toUpperCase() : null;
   const status =
-    searchParams.get("status") === "ALL"
-      ? null
-      : (searchParams.get("status") as AuditStatus);
+    normalized &&
+    normalized !== "ALL" &&
+    (Object.values(AuditStatus) as string[]).includes(normalized)
+      ? (normalized as AuditStatus)
+      : null;
 
   if (status) {
     where.status = status;
@@ -2404,31 +2431,51 @@ function getAuditWhereInput({
  * @param params.organizationId - Scoping organization
  * @param params.userId - The user performing the archive (for activity notes)
  * @param params.currentSearchParams - Serialized URL params for select-all filtering
- * @throws {ShelfError} If any selected audit is not in a terminal state
+ * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
+ *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @throws {ShelfError} If the selection is empty or any selected audit is not
+ *   in a terminal state
  */
 export async function bulkArchiveAudits({
   auditIds,
   organizationId,
   userId,
   currentSearchParams,
+  isSelfServiceOrBase,
 }: {
   auditIds: AuditSession["id"][];
   organizationId: Organization["id"];
   userId: string;
   currentSearchParams?: string | null;
+  isSelfServiceOrBase?: boolean;
 }) {
   try {
     /** When all items are selected, resolve from filters instead of IDs */
     const where: Prisma.AuditSessionWhereInput = auditIds.includes(
       ALL_SELECTED_KEY
     )
-      ? getAuditWhereInput({ currentSearchParams, organizationId })
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+        })
       : { id: { in: auditIds }, organizationId };
 
     const audits = await db.auditSession.findMany({
       where,
       select: { id: true, status: true },
     });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No archivable audits were found for your selection.",
+        label,
+        additionalData: { auditIds, organizationId },
+        status: 400,
+      });
+    }
 
     const someNotTerminal = audits.some(
       (a) =>
@@ -2444,6 +2491,14 @@ export async function bulkArchiveAudits({
         additionalData: { auditIds, organizationId },
       });
     }
+
+    // Fetch user info once up-front for activity notes. Hoisted out of the
+    // transaction to keep the write-only work inside $transaction small and
+    // avoid holding a DB connection while reading unrelated data.
+    const user = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
 
     await db.$transaction(async (tx) => {
       // Keep terminal-state predicate on the write to guard against
@@ -2471,12 +2526,6 @@ export async function bulkArchiveAudits({
           status: 409,
         });
       }
-
-      // Fetch user info once for activity notes
-      const user = await tx.user.findFirst({
-        where: { id: userId },
-        select: { firstName: true, lastName: true, displayName: true },
-      });
 
       // Create an activity note on each archived audit
       await tx.auditNote.createMany({

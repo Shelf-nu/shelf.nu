@@ -15,6 +15,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { AuditListItem } from "~/routes/_layout+/audits._index";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -41,7 +42,7 @@ export default function AuditIndexBulkActionsDropdown() {
 
   if (!isHydrated) {
     return (
-      <Button variant="secondary" to="#">
+      <Button type="button" variant="secondary" disabled>
         <span className="flex items-center gap-2">Actions</span>
       </Button>
     );
@@ -57,6 +58,7 @@ export default function AuditIndexBulkActionsDropdown() {
 /** Inner dropdown rendered only after hydration. */
 function ConditionalDropdown() {
   const selectedAudits = useAtomValue(selectedBulkItemsAtom);
+  const audits = selectedAudits as unknown as AuditListItem[];
 
   /**
    * Archive is only valid for COMPLETED or CANCELLED audits.
@@ -67,9 +69,7 @@ function ConditionalDropdown() {
   const allSelected = isSelectingAllItems(selectedAudits);
   const someNotArchivable =
     !allSelected &&
-    selectedAudits.some(
-      (a) => a.status !== "COMPLETED" && a.status !== "CANCELLED"
-    );
+    audits.some((a) => a.status !== "COMPLETED" && a.status !== "CANCELLED");
 
   const { roles } = useUserRoleHelper();
 
@@ -80,7 +80,7 @@ function ConditionalDropdown() {
   const canArchiveAudit = userHasPermission({
     roles,
     entity: PermissionEntity.audit,
-    action: PermissionAction.update,
+    action: PermissionAction.archive,
   });
 
   const {
