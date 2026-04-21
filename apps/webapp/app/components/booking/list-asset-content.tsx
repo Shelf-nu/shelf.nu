@@ -136,6 +136,19 @@ export default function ListAssetContent({
   const qtyBooked = item.bookedQuantity ?? 0;
   const qtyDispositioned = item.dispositionedQuantity ?? 0;
   const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+  /**
+   * Per-category disposition sums shipped by the overview loader so the
+   * tooltip can distinguish Returned (back to pool) from Lost / Damaged
+   * (deducted from pool) and Consumed (ONE_WAY). Missing shape falls
+   * back to all-zero — older routes that haven't adopted the breakdown
+   * still render (degrades to the previous "Checked in: N" display).
+   */
+  const qtyBreakdown = item.dispositionBreakdown ?? {
+    returned: 0,
+    consumed: 0,
+    lost: 0,
+    damaged: 0,
+  };
   const isQtyPartiallyCheckedIn =
     isQuantityTracked(item) &&
     qtyBooked > 0 &&
@@ -252,13 +265,45 @@ export default function ListAssetContent({
                         {qtyBooked}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-600">Checked in</span>
-                      <span className="tabular-nums text-gray-900">
-                        {qtyDispositioned}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
+                    {/* Per-category disposition breakdown. Only render
+                        the rows with non-zero counts so a ONE_WAY
+                        asset doesn't show a Returned=0 line, and
+                        vice versa. */}
+                    {qtyBreakdown.returned > 0 ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600">Returned</span>
+                        <span className="tabular-nums text-emerald-700">
+                          {qtyBreakdown.returned}
+                        </span>
+                      </div>
+                    ) : null}
+                    {qtyBreakdown.consumed > 0 ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600">Consumed</span>
+                        <span className="tabular-nums text-gray-900">
+                          {qtyBreakdown.consumed}
+                        </span>
+                      </div>
+                    ) : null}
+                    {qtyBreakdown.lost > 0 ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600">Lost</span>
+                        <span className="tabular-nums text-rose-700">
+                          {qtyBreakdown.lost}
+                        </span>
+                      </div>
+                    ) : null}
+                    {qtyBreakdown.damaged > 0 ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600">Damaged</span>
+                        <span className="tabular-nums text-amber-700">
+                          {qtyBreakdown.damaged}
+                        </span>
+                      </div>
+                    ) : null}
+                    {/* Summary row kept at the bottom as a total so
+                        operators can sanity-check the split adds up. */}
+                    <div className="mt-1 flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
                       <span className="text-gray-600">Remaining</span>
                       <span
                         className={tw(
@@ -314,7 +359,14 @@ export default function ListAssetContent({
               isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
             )}
           >
-            {isPartiallyCheckedIn ? (
+            {/* Only INDIVIDUAL partials populate `partialCheckinDetails`
+                (qty-tracked partials live in ConsumptionLog across
+                multiple sessions and don't have a single "checked in
+                at" timestamp to show). Guard on the lookup rather than
+                `isPartiallyCheckedIn` alone — the latter is also true
+                for qty-tracked partials, where the lookup is
+                undefined. */}
+            {isPartiallyCheckedIn && partialCheckinDetails[item.id] ? (
               <span className="text-sm text-gray-600">
                 <DateS
                   date={partialCheckinDetails[item.id].checkinDate}
@@ -332,7 +384,7 @@ export default function ListAssetContent({
               isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
             )}
           >
-            {isPartiallyCheckedIn ? (
+            {isPartiallyCheckedIn && partialCheckinDetails[item.id] ? (
               <span className="text-sm text-gray-600">
                 {(() => {
                   const details = partialCheckinDetails[item.id];

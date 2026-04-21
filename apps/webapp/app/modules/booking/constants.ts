@@ -97,6 +97,15 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           status: true,
           kitId: true,
           valuation: true,
+          // `mainImage`/`thumbnailImage` are consumed by the partial
+          // check-in drawer's "expected assets" list (see the loader in
+          // `bookings.$bookingId.overview.checkin-assets.tsx`) and by
+          // the synthetic scanned-item payload produced by
+          // `quickCheckinQtyAssetAtom`. Selecting them here keeps those
+          // flows on the existing booking query rather than issuing a
+          // second round-trip for images.
+          mainImage: true,
+          thumbnailImage: true,
           category: {
             select: {
               id: true,
@@ -104,9 +113,15 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
               color: true,
             },
           },
+          // `kit.id`/`kit.image` are needed by the partial check-in
+          // drawer so we can render a kit summary row grouped from
+          // `booking.bookingAssets`. Previously only `name` was selected
+          // because no downstream consumer needed the rest.
           kit: {
             select: {
+              id: true,
               name: true,
+              image: true,
             },
           },
         },

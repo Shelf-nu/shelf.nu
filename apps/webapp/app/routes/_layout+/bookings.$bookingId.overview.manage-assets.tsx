@@ -122,6 +122,18 @@ export type AssetWithBooking = Asset & {
    * Only meaningful for QUANTITY_TRACKED assets.
    */
   dispositionedQuantity?: number | null;
+  /**
+   * Per-category disposition split for the same (booking, asset) pair.
+   * Lets the qty tooltip show Returned / Consumed / Lost / Damaged
+   * separately — treating lost / damaged as "checked in" is misleading
+   * because those units are gone from the pool, not back in it.
+   */
+  dispositionBreakdown?: {
+    returned: number;
+    consumed: number;
+    lost: number;
+    damaged: number;
+  } | null;
 };
 
 export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];

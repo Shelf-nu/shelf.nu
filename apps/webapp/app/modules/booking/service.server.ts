@@ -2254,28 +2254,18 @@ export async function checkinBooking({
           }
         }
 
-        // Booking-side summary for qty-tracked totals (appended to the
-        // existing status transition note context).
-        const totals = qtySummariesRef.value.reduce(
-          (acc, s) => ({
-            returned: acc.returned + s.returned,
-            consumed: acc.consumed + s.consumed,
-            lost: acc.lost + s.lost,
-            damaged: acc.damaged + s.damaged,
-          }),
-          { returned: 0, consumed: 0, lost: 0, damaged: 0 }
+        // Booking-side summary for qty-tracked dispositions — one line
+        // per asset with a clickable link + non-zero category parts so
+        // the operator can see WHICH assets were touched, not just
+        // aggregate totals. Previously this note conflated everything
+        // into "10 returned, 2 lost" with no asset names.
+        const perAssetFragment = buildQtyPerAssetFragment(
+          qtySummariesRef.value
         );
-        const bits: string[] = [];
-        if (totals.returned > 0) bits.push(`${totals.returned} returned`);
-        if (totals.consumed > 0) bits.push(`${totals.consumed} consumed`);
-        if (totals.lost > 0) bits.push(`${totals.lost} lost`);
-        if (totals.damaged > 0) bits.push(`${totals.damaged} damaged`);
-        if (bits.length > 0) {
+        if (perAssetFragment) {
           await createSystemBookingNote({
             bookingId: updatedBooking.id,
-            content: `${actor} dispositioned quantity-tracked assets: ${bits.join(
-              ", "
-            )}.`,
+            content: `${actor} dispositioned quantity-tracked assets: ${perAssetFragment}.`,
           });
         }
       } catch (noteError) {
@@ -2398,6 +2388,48 @@ function sumDisposition(d: CheckinDispositionInput): number {
   );
 }
 
+/**
+ * Build a markdoc fragment naming each qty-tracked asset touched in
+ * this session along with its per-category disposition. Used by the
+ * booking-side activity note for both `partialCheckinBooking` and
+ * `checkinBooking` so the operator can see WHICH assets were
+ * dispositioned — not just aggregate totals.
+ *
+ * Produces something like:
+ *   `{% link to="/assets/<id>" text="Pens" /%} (10 returned), {% link
+ *    to="/assets/<id>" text="AA Batteries" /%} (5 consumed, 2 damaged)`
+ *
+ * Returns an empty string when no row has any non-zero disposition,
+ * so callers can safely concatenate without extra guards.
+ */
+function buildQtyPerAssetFragment(
+  summaries: Array<{
+    assetId: string;
+    title: string;
+    returned: number;
+    consumed: number;
+    lost: number;
+    damaged: number;
+    pendingAfter?: number;
+  }>
+): string {
+  const fragments: string[] = [];
+  for (const s of summaries) {
+    const parts: string[] = [];
+    if (s.returned > 0) parts.push(`${s.returned} returned`);
+    if (s.consumed > 0) parts.push(`${s.consumed} consumed`);
+    if (s.lost > 0) parts.push(`${s.lost} lost`);
+    if (s.damaged > 0) parts.push(`${s.damaged} damaged`);
+    if (s.pendingAfter && s.pendingAfter > 0) {
+      parts.push(`${s.pendingAfter} pending`);
+    }
+    if (parts.length === 0) continue;
+    const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
+    fragments.push(`${link} (${parts.join(", ")})`);
+  }
+  return fragments.join(", ");
+}
+
 export async function partialCheckinBooking({
   id,
   organizationId,
@@ -2417,16 +2449,36 @@ export async function partialCheckinBooking({
 }) {
   try {
     /**
-     * Resolve the effective per-asset payload. Callers MAY pass `checkins`
-     * directly (new drawer flow) or `assetIds` (legacy callers / pure
-     * INDIVIDUAL flows). When only `assetIds` is provided we synthesize a
-     * `checkins` array with no quantities — qty-tracked assets in that
-     * list will be rejected below.
+     * Resolve the effective per-asset payload. Callers MAY pass either
+     * or BOTH of:
+     *   - `checkins` — per-asset disposition for QUANTITY_TRACKED assets
+     *     (new drawer flow)
+     *   - `assetIds` — flat asset-id list (legacy callers + INDIVIDUAL
+     *     assets in the new drawer, which don't carry dispositions)
+     *
+     * When a mixed drawer session scans an INDIVIDUAL asset AND a
+     * qty-tracked asset with a disposition, BOTH arrays arrive
+     * populated. We merge them: every entry in `checkins` is used
+     * verbatim, and any `assetIds` entry not already covered by
+     * `checkins` is added as a no-disposition entry (the INDIVIDUAL
+     * status-update branch below picks them up).
+     *
+     * Treating the two as mutually exclusive was a regression —
+     * INDIVIDUAL scans would silently drop out whenever a qty-tracked
+     * disposition was in the same submit.
      */
-    const dispositions: CheckinDispositionInput[] =
-      checkins && checkins.length > 0
-        ? checkins
-        : (assetIds ?? []).map((assetId) => ({ assetId }));
+    const dispositionByAssetId = new Map<string, CheckinDispositionInput>();
+    for (const d of checkins ?? []) {
+      dispositionByAssetId.set(d.assetId, d);
+    }
+    for (const assetId of assetIds ?? []) {
+      if (!dispositionByAssetId.has(assetId)) {
+        dispositionByAssetId.set(assetId, { assetId });
+      }
+    }
+    const dispositions: CheckinDispositionInput[] = [
+      ...dispositionByAssetId.values(),
+    ];
 
     if (dispositions.length === 0) {
       throw new ShelfError({
@@ -2981,27 +3033,13 @@ export async function partialCheckinBooking({
         );
       }
 
-      // Qty disposition totals for the booking note (condensed, only
-      // non-zero fields rendered).
-      const qtyTotals = txResult.qtySummaries.reduce(
-        (acc, s) => ({
-          returned: acc.returned + s.returned,
-          consumed: acc.consumed + s.consumed,
-          lost: acc.lost + s.lost,
-          damaged: acc.damaged + s.damaged,
-          pending: acc.pending + s.pendingAfter,
-        }),
-        { returned: 0, consumed: 0, lost: 0, damaged: 0, pending: 0 }
-      );
-      const qtyParts: string[] = [];
-      if (qtyTotals.returned > 0)
-        qtyParts.push(`${qtyTotals.returned} returned`);
-      if (qtyTotals.consumed > 0)
-        qtyParts.push(`${qtyTotals.consumed} consumed`);
-      if (qtyTotals.lost > 0) qtyParts.push(`${qtyTotals.lost} lost`);
-      if (qtyTotals.damaged > 0) qtyParts.push(`${qtyTotals.damaged} damaged`);
-      if (qtyTotals.pending > 0) qtyParts.push(`${qtyTotals.pending} pending`);
-      const qtyTail = qtyParts.length > 0 ? ` (${qtyParts.join(", ")})` : "";
+      // Per-asset qty disposition fragment for the booking note —
+      // names each qty-tracked asset touched in this session (linked)
+      // with its non-zero categories. Replaces the old aggregate-only
+      // tail that just said "(10 returned, 2 lost)" with no asset
+      // names.
+      const qtyPerAsset = buildQtyPerAssetFragment(txResult.qtySummaries);
+      const qtyTail = qtyPerAsset ? ` — qty: ${qtyPerAsset}` : "";
 
       if (txResult.isComplete) {
         const fromStatusBadge = wrapBookingStatusForNote(
@@ -4829,11 +4867,24 @@ export async function getBookingFlags(
 
   const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
 
+  /**
+   * QUANTITY_TRACKED assets are exempt from the `CHECKED_OUT` /
+   * "already booked" conflict flags. For a qty-tracked asset,
+   * `Asset.status = CHECKED_OUT` only means at least ONE unit is out
+   * somewhere — the rest of the pool is still allocatable. The
+   * per-booking quantity availability is enforced at the service layer
+   * via `computeBookingAvailableQuantity()` when assets are added /
+   * quantities adjusted. Matches the logic in `hasAssetBookingConflicts`
+   * which already returns false for qty-tracked.
+   */
   const hasCheckedOutAssets = assets.some(
-    (asset) => asset.status === AssetStatus.CHECKED_OUT
+    (asset) =>
+      asset.type !== AssetType.QUANTITY_TRACKED &&
+      asset.status === AssetStatus.CHECKED_OUT
   );
 
   const hasAlreadyBookedAssets = assets.some((asset) => {
+    if (asset.type === AssetType.QUANTITY_TRACKED) return false;
     if (!asset.bookingAssets || asset.bookingAssets.length === 0) return false;
 
     return asset.bookingAssets.some((ba) => {

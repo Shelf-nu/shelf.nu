@@ -6,6 +6,7 @@ import useApiQuery from "~/hooks/use-api-query";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
+import { tw } from "~/utils/tw";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import {
@@ -200,15 +201,19 @@ function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   }
 
   return (
-    <div className="space-y-1 text-xs">
+    // Tooltip shell is `bg-white` — the previous `text-gray-300` on
+    // per-booking bullets and the "available" line rendered near-
+    // invisible. Use readable grays in the 600-800 range and let the
+    // headline stay at default (near-black).
+    <div className="space-y-1 text-xs text-gray-800">
       {/* Checked-out summary */}
       {checkedOut > 0 && (
         <div>
-          <p className="font-semibold">
+          <p className="font-semibold text-gray-900">
             {checkedOut} of {total} checked out
           </p>
           {ongoingBookings.map((b, i) => (
-            <p key={i} className="pl-2 text-gray-300">
+            <p key={i} className="pl-2 text-gray-600">
               • {b.name} — {b.quantity} {b.quantity === 1 ? "unit" : "units"}
             </p>
           ))}
@@ -218,11 +223,11 @@ function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
       {/* Reserved summary */}
       {reserved > 0 && (
         <div>
-          <p className="font-semibold">
+          <p className="font-semibold text-gray-900">
             {reserved} of {total} reserved
           </p>
           {reservedBookings.map((b, i) => (
-            <p key={i} className="pl-2 text-gray-300">
+            <p key={i} className="pl-2 text-gray-600">
               • {b.name} — {b.quantity} {b.quantity === 1 ? "unit" : "units"}
             </p>
           ))}
@@ -232,18 +237,26 @@ function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
       {/* Custody line (only when there's also booking data, otherwise
        * show a simpler format) */}
       {inCustody > 0 && (checkedOut > 0 || reserved > 0) && (
-        <p>{inCustody} in custody</p>
+        <p className="text-gray-700">{inCustody} in custody</p>
       )}
 
       {/* Simple custody-only format (no bookings involved) */}
       {inCustody > 0 && checkedOut === 0 && reserved === 0 && (
-        <p>
+        <p className="text-gray-700">
           {inCustody} of {total} in custody
         </p>
       )}
 
-      {/* Available line */}
-      <p className="text-gray-300">{available} available</p>
+      {/* Available line — emerald when non-zero so the "you can still
+          book N" signal pops; muted gray when zero. */}
+      <p
+        className={tw(
+          "font-medium",
+          available > 0 ? "text-emerald-700" : "text-gray-500"
+        )}
+      >
+        {available} available
+      </p>
     </div>
   );
 }

@@ -72,6 +72,18 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
   };
 }>;
 
+/**
+ * Per-asset disposition split used by the qty progress tooltip. Each
+ * field is a cumulative total of ConsumptionLog rows for the
+ * corresponding category for this booking+asset.
+ */
+export type DispositionBreakdown = {
+  returned: number;
+  consumed: number;
+  lost: number;
+  damaged: number;
+};
+
 interface BookingAssetsSidebarProps {
   booking: BookingWithAssets;
   trigger?: ReactNode;
@@ -86,6 +98,14 @@ interface BookingAssetsSidebarProps {
    * which keeps older call sites working without changes.
    */
   dispositionedByAsset?: Record<string, number>;
+  /**
+   * Optional map of `assetId → per-category split`. Lets the tooltip
+   * show Returned / Consumed / Lost / Damaged separately instead of
+   * conflating them into a single "Checked in" total — lost and
+   * damaged units shouldn't read the same as units back in the pool.
+   * When undefined, the tooltip falls back to the single-total layout.
+   */
+  dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
 }
 
 /** Asset enriched with the booked quantity from the BookingAsset pivot */
@@ -148,14 +168,18 @@ function AssetTitleAndStatus({
   asset,
   bookingStatus,
   dispositionedByAsset,
+  dispositionBreakdownByAsset,
 }: {
   asset: SidebarAsset;
   bookingStatus: BookingStatus;
   dispositionedByAsset?: Record<string, number>;
+  dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
 }) {
   const qtyBooked = asset.bookedQuantity ?? 0;
   const qtyDispositioned = dispositionedByAsset?.[asset.id] ?? 0;
   const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
+  const qtyBreakdown: DispositionBreakdown | undefined =
+    dispositionBreakdownByAsset?.[asset.id];
 
   const isQtyPartial =
     isQuantityTracked(asset) &&
@@ -217,13 +241,53 @@ function AssetTitleAndStatus({
                         {qtyBooked}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-gray-600">Checked in</span>
-                      <span className="tabular-nums text-gray-900">
-                        {qtyDispositioned}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
+                    {/* Per-category split when the loader ships it.
+                        Rows are conditional so ONE_WAY assets don't
+                        show "Returned: 0" and vice versa. */}
+                    {qtyBreakdown ? (
+                      <>
+                        {qtyBreakdown.returned > 0 ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-600">Returned</span>
+                            <span className="tabular-nums text-emerald-700">
+                              {qtyBreakdown.returned}
+                            </span>
+                          </div>
+                        ) : null}
+                        {qtyBreakdown.consumed > 0 ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-600">Consumed</span>
+                            <span className="tabular-nums text-gray-900">
+                              {qtyBreakdown.consumed}
+                            </span>
+                          </div>
+                        ) : null}
+                        {qtyBreakdown.lost > 0 ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-600">Lost</span>
+                            <span className="tabular-nums text-rose-700">
+                              {qtyBreakdown.lost}
+                            </span>
+                          </div>
+                        ) : null}
+                        {qtyBreakdown.damaged > 0 ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-600">Damaged</span>
+                            <span className="tabular-nums text-amber-700">
+                              {qtyBreakdown.damaged}
+                            </span>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600">Checked in</span>
+                        <span className="tabular-nums text-gray-900">
+                          {qtyDispositioned}
+                        </span>
+                      </div>
+                    )}
+                    <div className="mt-1 flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
                       <span className="text-gray-600">Remaining</span>
                       <span
                         className={tw(
@@ -264,6 +328,7 @@ export function BookingAssetsSidebar({
   booking,
   trigger,
   dispositionedByAsset,
+  dispositionBreakdownByAsset,
 }: BookingAssetsSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
@@ -432,6 +497,9 @@ export function BookingAssetsSidebar({
                                         dispositionedByAsset={
                                           dispositionedByAsset
                                         }
+                                        dispositionBreakdownByAsset={
+                                          dispositionBreakdownByAsset
+                                        }
                                       />
                                     </div>
                                   </div>
@@ -484,6 +552,9 @@ export function BookingAssetsSidebar({
                                 asset={asset}
                                 bookingStatus={booking.status}
                                 dispositionedByAsset={dispositionedByAsset}
+                                dispositionBreakdownByAsset={
+                                  dispositionBreakdownByAsset
+                                }
                               />
                             </div>
                           </div>

@@ -213,7 +213,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const dispositionRows =
       bookingIdsOnPage.length > 0
         ? await db.consumptionLog.groupBy({
-            by: ["bookingId", "assetId"],
+            by: ["bookingId", "assetId", "category"],
             where: {
               bookingId: { in: bookingIdsOnPage },
               category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
@@ -221,14 +221,49 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             _sum: { quantity: true },
           })
         : [];
+    /**
+     * Per-booking → per-asset disposition totals AND a per-category
+     * breakdown. The sidebar tooltip uses the breakdown to show
+     * Returned / Consumed / Lost / Damaged separately (lost and
+     * damaged units are conceptually different from returned ones).
+     * Both derivations come from the same single groupBy — no extra
+     * DB round-trip.
+     */
     const dispositionedByBooking: Record<string, Record<string, number>> = {};
+    const dispositionBreakdownByBooking: Record<
+      string,
+      Record<
+        string,
+        { returned: number; consumed: number; lost: number; damaged: number }
+      >
+    > = {};
     for (const row of dispositionRows) {
       if (!row.bookingId) continue;
+      const qty = row._sum.quantity ?? 0;
+
       if (!dispositionedByBooking[row.bookingId]) {
         dispositionedByBooking[row.bookingId] = {};
       }
       dispositionedByBooking[row.bookingId][row.assetId] =
-        row._sum.quantity ?? 0;
+        (dispositionedByBooking[row.bookingId][row.assetId] ?? 0) + qty;
+
+      if (!dispositionBreakdownByBooking[row.bookingId]) {
+        dispositionBreakdownByBooking[row.bookingId] = {};
+      }
+      const bucket =
+        dispositionBreakdownByBooking[row.bookingId][row.assetId] ??
+        ({
+          returned: 0,
+          consumed: 0,
+          lost: 0,
+          damaged: 0,
+        } as const);
+      const next = { ...bucket };
+      if (row.category === "RETURN") next.returned += qty;
+      else if (row.category === "CONSUME") next.consumed += qty;
+      else if (row.category === "LOSS") next.lost += qty;
+      else if (row.category === "DAMAGE") next.damaged += qty;
+      dispositionBreakdownByBooking[row.bookingId][row.assetId] = next;
     }
 
     const header: HeaderData = {
@@ -252,6 +287,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         hasActiveFilters,
         dispositionedByBooking,
+        dispositionBreakdownByBooking,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
@@ -491,6 +527,8 @@ const ListBookingsContent = ({
   const loaderData = useLoaderData<typeof loader>();
   const dispositionedByAsset =
     loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
+  const dispositionBreakdownByAsset =
+    loaderData?.dispositionBreakdownByBooking?.[item.id] ?? undefined;
 
   return (
     <>
@@ -542,6 +580,7 @@ const ListBookingsContent = ({
         <BookingAssetsSidebar
           booking={item}
           dispositionedByAsset={dispositionedByAsset}
+          dispositionBreakdownByAsset={dispositionBreakdownByAsset}
         />
       </Td>
 

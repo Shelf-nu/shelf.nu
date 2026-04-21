@@ -468,10 +468,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
       .map((ba) => ba.assetId);
 
+    /**
+     * Per-asset, per-category sums of disposition logs. Broken down so
+     * the row's tooltip can show Returned / Consumed / Lost / Damaged
+     * separately instead of conflating everything into a single
+     * "Checked in" total — lost and damaged units shouldn't read the
+     * same as units that came back to the pool.
+     */
     const dispositionSums =
       qtyAssetIdsInBooking.length > 0
         ? await db.consumptionLog.groupBy({
-            by: ["assetId"],
+            by: ["assetId", "category"],
             where: {
               bookingId: booking.id,
               assetId: { in: qtyAssetIdsInBooking },
@@ -480,9 +487,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             _sum: { quantity: true },
           })
         : [];
-    const dispositionedByAsset = new Map<string, number>(
-      dispositionSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
-    );
+
+    type DispositionBreakdown = {
+      returned: number;
+      consumed: number;
+      lost: number;
+      damaged: number;
+    };
+    const emptyBreakdown = (): DispositionBreakdown => ({
+      returned: 0,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
+
+    const breakdownByAsset = new Map<string, DispositionBreakdown>();
+    for (const row of dispositionSums) {
+      const qty = row._sum.quantity ?? 0;
+      const bucket = breakdownByAsset.get(row.assetId) ?? emptyBreakdown();
+      if (row.category === "RETURN") bucket.returned += qty;
+      else if (row.category === "CONSUME") bucket.consumed += qty;
+      else if (row.category === "LOSS") bucket.lost += qty;
+      else if (row.category === "DAMAGE") bucket.damaged += qty;
+      breakdownByAsset.set(row.assetId, bucket);
+    }
+
+    const dispositionedByAsset = new Map<string, number>();
+    for (const [assetId, b] of breakdownByAsset) {
+      dispositionedByAsset.set(
+        assetId,
+        b.returned + b.consumed + b.lost + b.damaged
+      );
+    }
 
     // Enrich the paginated items with full asset details, booked quantity,
     // and qty-tracked disposition progress.
@@ -494,6 +530,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           ...(details || asset),
           bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1,
           dispositionedQuantity: dispositionedByAsset.get(asset.id) ?? 0,
+          dispositionBreakdown:
+            breakdownByAsset.get(asset.id) ?? emptyBreakdown(),
         };
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
