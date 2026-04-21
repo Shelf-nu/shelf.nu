@@ -6,7 +6,13 @@ import type {
   MetaFunction,
   LinksFunction,
 } from "react-router";
-import { data, useLoaderData, Outlet, useMatches } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  Outlet,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { ActionsDropdown } from "~/components/audit/actions-dropdown";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
@@ -22,6 +28,7 @@ import {
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
+  deleteAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -161,6 +168,70 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       return payload({ success: true });
+    }
+
+    if (intent === "delete-audit") {
+      // Delete requires the explicit "delete" permission on the audit entity.
+      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.delete,
+      });
+
+      // UI hides the button for self-service/base, but enforce server-side
+      // to prevent direct POST bypass.
+      if (isSelfServiceOrBase) {
+        throw new ShelfError({
+          cause: null,
+          message: "You do not have permission to delete audits.",
+          additionalData: { userId, auditId },
+          label,
+          status: 403,
+        });
+      }
+
+      const { confirmation } = parseData(
+        formData,
+        z.object({ confirmation: z.string().min(1) })
+      );
+
+      // Re-read the audit name server-side so the confirmation check never
+      // trusts a name the client could have tampered with.
+      const session = await db.auditSession.findFirst({
+        where: { id: auditId, organizationId },
+        select: { name: true },
+      });
+      if (!session) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit not found.",
+          additionalData: { auditId, organizationId },
+          label,
+          status: 404,
+        });
+      }
+
+      if (confirmation.trim().toLowerCase() !== session.name.toLowerCase()) {
+        throw new ShelfError({
+          cause: null,
+          message: "Confirmation did not match the audit name.",
+          additionalData: { auditId },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
+      await deleteAuditSession({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+      });
+
+      // Audit no longer exists — redirect to the index.
+      throw redirect("/audits");
     }
 
     throw new ShelfError({

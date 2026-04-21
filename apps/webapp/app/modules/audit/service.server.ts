@@ -23,6 +23,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { removePublicFile } from "~/utils/storage.server";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -2546,6 +2547,285 @@ export async function bulkArchiveAudits({
     throw new ShelfError({
       cause,
       message: "Failed to bulk archive audits",
+      additionalData: { auditIds, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Removes an audit image's underlying files from Supabase storage.
+ * Swallows per-file failures and logs them: a stale storage object is
+ * a lesser evil than aborting the DB delete and leaving an orphaned
+ * AuditSession row behind. Caller is responsible for deleting the DB
+ * record afterwards (cascades from AuditSession handle that for us).
+ *
+ * @param image - The image record with public URLs to clean up
+ */
+async function safeRemoveAuditImageFiles(image: {
+  id: string;
+  imageUrl: string;
+  thumbnailUrl: string | null;
+}): Promise<void> {
+  try {
+    await removePublicFile({ publicUrl: image.imageUrl });
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to remove audit image from storage during delete",
+        additionalData: { imageId: image.id, url: image.imageUrl },
+        label,
+      })
+    );
+  }
+
+  if (image.thumbnailUrl) {
+    try {
+      await removePublicFile({ publicUrl: image.thumbnailUrl });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to remove audit thumbnail from storage during delete",
+          additionalData: { imageId: image.id, url: image.thumbnailUrl },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
+ * Permanently deletes an archived audit session and all related data.
+ *
+ * Prerequisites:
+ * - Audit must be in status `ARCHIVED` (enforced here and at the route).
+ *   Delete is the intentional escape hatch past the archive-first contract,
+ *   so `assertAuditNotArchived` is deliberately NOT called.
+ *
+ * Cascade behavior (via Prisma `onDelete: Cascade`):
+ * - AuditAsset, AuditScan, AuditNote, AuditImage, AuditAssignment all
+ *   removed by the database when the parent AuditSession row is deleted.
+ *
+ * Storage cleanup:
+ * - Audit image files in Supabase storage are removed BEFORE the DB delete
+ *   so we don't orphan files if the DB delete fails. Per-file failures are
+ *   logged and swallowed — see {@link safeRemoveAuditImageFiles}.
+ *
+ * @param auditSessionId - ID of the audit to delete
+ * @param organizationId - Scoping organization (enforces tenant isolation)
+ * @param userId - User performing the delete (for error context)
+ * @throws {ShelfError} 404 if not found; 409 if not ARCHIVED; 500 on DB failure
+ */
+export async function deleteAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: Organization["id"];
+  userId: string;
+}): Promise<void> {
+  try {
+    // Pre-read to validate existence, org scoping, and ARCHIVED status.
+    // We use a pre-read (not just an atomic deleteMany guard) because we
+    // need the image list for storage cleanup before the DB row is gone.
+    const audit = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { id: true, status: true },
+    });
+
+    if (!audit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found.",
+        additionalData: { auditSessionId, organizationId, userId },
+        label,
+        status: 404,
+      });
+    }
+
+    if (audit.status !== AuditStatus.ARCHIVED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Only archived audits can be deleted. Archive it first.",
+        additionalData: {
+          auditSessionId,
+          organizationId,
+          status: audit.status,
+        },
+        label,
+        status: 409,
+      });
+    }
+
+    // Collect every image for this audit so we can clean up storage.
+    // Cascade would delete the DB rows, but Supabase storage is external
+    // and needs explicit removal.
+    const images = await db.auditImage.findMany({
+      where: { auditSessionId, organizationId },
+      select: { id: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    for (const image of images) {
+      await safeRemoveAuditImageFiles(image);
+    }
+
+    // Final guard on the write: re-check ARCHIVED status atomically so a
+    // concurrent status change between the pre-read and here can't sneak
+    // a non-archived delete through.
+    const result = await db.auditSession.deleteMany({
+      where: {
+        id: auditSessionId,
+        organizationId,
+        status: AuditStatus.ARCHIVED,
+      },
+    });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Audit could not be deleted. Its status may have changed — please refresh and try again.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 409,
+      });
+    }
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete audit session",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Permanently deletes multiple archived audit sessions in a single operation.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ * When all items are selected, resolution goes through
+ * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
+ * so non-archived audits in the filtered view can never be pulled in.
+ *
+ * Storage cleanup for all images is done before the DB delete, in a single
+ * `findMany` + per-image loop. Not wrapped in a DB transaction because
+ * holding one open across N external Supabase HTTP calls invites pool
+ * starvation; the DB write itself is a single atomic `deleteMany`.
+ *
+ * @param auditIds - Array of audit IDs, or `[ALL_SELECTED_KEY]` for select-all
+ * @param organizationId - Scoping organization
+ * @param userId - User performing the bulk delete (for error context)
+ * @param currentSearchParams - Serialized URL params, used when ALL_SELECTED_KEY
+ * @param isSelfServiceOrBase - Restrict select-all to audits assigned to userId
+ * @returns Object with the count of audits actually deleted
+ * @throws {ShelfError} If selection is empty or any audit is not ARCHIVED
+ */
+export async function bulkDeleteAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+  isSelfServiceOrBase,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+  isSelfServiceOrBase?: boolean;
+}): Promise<{ count: number }> {
+  try {
+    const selectAll = auditIds.includes(ALL_SELECTED_KEY);
+
+    // When all items are selected across pages, rebuild the where clause
+    // from the current filters. Then narrow to ARCHIVED regardless — the
+    // filtered view may contain non-archived audits (e.g. status=ALL),
+    // and delete must never reach those.
+    const baseWhere: Prisma.AuditSessionWhereInput = selectAll
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+        })
+      : { id: { in: auditIds }, organizationId };
+
+    const where: Prisma.AuditSessionWhereInput = {
+      ...baseWhere,
+      status: AuditStatus.ARCHIVED,
+    };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No deletable audits were found for your selection.",
+        additionalData: { auditIds, organizationId },
+        label,
+        status: 400,
+      });
+    }
+
+    // For explicit id-list (not select-all), make sure the user hadn't
+    // selected any non-archived rows. Silent filtering would be confusing
+    // ("I selected 10 but only 6 got deleted"). Better to block and tell
+    // them.
+    if (!selectAll) {
+      const foundIds = new Set(audits.map((a) => a.id));
+      const missing = auditIds.filter(
+        (id) => id !== ALL_SELECTED_KEY && !foundIds.has(id)
+      );
+      if (missing.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some selected audits are not archived. Only archived audits can be deleted.",
+          additionalData: { missing, organizationId },
+          label,
+          status: 409,
+        });
+      }
+    }
+
+    // Batch-fetch every image for every target audit, then clean up
+    // storage per image. One query, not N.
+    const images = await db.auditImage.findMany({
+      where: {
+        auditSessionId: { in: audits.map((a) => a.id) },
+        organizationId,
+      },
+      select: { id: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    for (const image of images) {
+      await safeRemoveAuditImageFiles(image);
+    }
+
+    const result = await db.auditSession.deleteMany({
+      where: {
+        id: { in: audits.map((a) => a.id) },
+        organizationId,
+        status: AuditStatus.ARCHIVED,
+      },
+    });
+
+    return { count: result.count };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk delete audits",
       additionalData: { auditIds, organizationId, userId },
       label,
       status: 500,

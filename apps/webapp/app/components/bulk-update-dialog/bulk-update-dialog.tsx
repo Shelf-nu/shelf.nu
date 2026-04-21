@@ -51,7 +51,8 @@ type BulkDialogType =
   | "add-to-kit"
   | "remove-from-kit"
   | "start-audit"
-  | "add-to-audit";
+  | "add-to-audit"
+  | "delete-audit";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -229,7 +230,12 @@ const BulkUpdateDialogContent = forwardRef<
   }, [closeBulkDialog, type]);
 
   const handleBulkActionSuccess = useCallback(() => {
-    if (type === "trash" || type === "archive" || type === "cancel") {
+    if (
+      type === "trash" ||
+      type === "archive" ||
+      type === "cancel" ||
+      type === "delete-audit"
+    ) {
       setSelectedItems([]);
 
       if (!skipCloseOnSuccess) {

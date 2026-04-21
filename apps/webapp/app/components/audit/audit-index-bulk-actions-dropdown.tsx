@@ -2,11 +2,15 @@
  * @file Audit Index Bulk Actions Dropdown
  *
  * Renders the bulk actions dropdown on the audits index page (`/audits`).
- * Currently supports bulk-archiving audits that are in a terminal state
- * (COMPLETED or CANCELLED). Only visible to users with update permission
- * on the audit entity (admin/owner).
+ * Supports:
+ * - Bulk archive for COMPLETED/CANCELLED audits
+ * - Bulk delete for ARCHIVED audits
+ *
+ * Only visible to users with the matching permission on the audit entity
+ * (admin/owner). Server-side enforcement lives in the bulk-actions API.
  *
  * @see {@link file://./bulk-archive-audits-dialog.tsx} - Archive dialog
+ * @see {@link file://./bulk-delete-audits-dialog.tsx} - Delete dialog
  * @see {@link file://../../routes/_layout+/audits._index.tsx} - Consuming page
  */
 import { useAtomValue } from "jotai";
@@ -24,6 +28,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkArchiveAuditsDialog from "./bulk-archive-audits-dialog";
+import BulkDeleteAuditsDialog from "./bulk-delete-audits-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import {
@@ -70,6 +75,13 @@ function ConditionalDropdown() {
   const someNotArchivable =
     !allSelected &&
     audits.some((a) => a.status !== "COMPLETED" && a.status !== "CANCELLED");
+  /**
+   * Delete is only valid for ARCHIVED audits. Select-all spans all filtered
+   * rows including the ALL_SELECTED_KEY sentinel (no status) — the server
+   * re-narrows to ARCHIVED regardless, so we skip the client check there.
+   */
+  const someNotArchived =
+    !allSelected && audits.some((a) => a.status !== "ARCHIVED");
 
   const { roles } = useUserRoleHelper();
 
@@ -81,6 +93,11 @@ function ConditionalDropdown() {
     roles,
     entity: PermissionEntity.audit,
     action: PermissionAction.archive,
+  });
+  const canDeleteAudit = userHasPermission({
+    roles,
+    entity: PermissionEntity.audit,
+    action: PermissionAction.delete,
   });
 
   const {
@@ -108,6 +125,7 @@ function ConditionalDropdown() {
       )}
 
       <BulkArchiveAuditsDialog />
+      <BulkDeleteAuditsDialog />
 
       <DropdownMenu
         modal={false}
@@ -178,6 +196,30 @@ function ConditionalDropdown() {
                     ? {
                         reason:
                           "Some of the selected audits are not completed or cancelled. You can only archive audits that are completed or cancelled.",
+                      }
+                    : isLoading
+                }
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <BulkUpdateDialogTrigger
+                type="delete-audit"
+                label="Delete"
+                onClick={closeMenu}
+                disabled={
+                  !canDeleteAudit
+                    ? {
+                        reason: "You don't have permission to delete audits.",
+                      }
+                    : someNotArchived
+                    ? {
+                        reason:
+                          "Some of the selected audits are not archived. Only archived audits can be deleted.",
                       }
                     : isLoading
                 }
