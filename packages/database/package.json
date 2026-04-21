@@ -32,9 +32,9 @@
     "@shelf/typescript-config": "workspace:*",
     "@types/node": "^22.19.17",
     "dotenv": "^17.4.1",
-    "dotenv-cli": "^7.4.4",
+    "dotenv-cli": "^11.0.0",
     "prisma": "^6.19.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.2"
   }
 }

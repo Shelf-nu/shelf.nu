@@ -173,6 +173,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
   await createSystemBookingNote({
     bookingId: booking.id,
+    organizationId: booking.organizationId,
     content: `Booking became overdue. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
   });
 
@@ -288,6 +289,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     // Create system note for the status transition
     await createStatusTransitionNote({
       bookingId: booking.id,
+      organizationId: booking.organizationId,
       fromStatus: BookingStatus.COMPLETE,
       toStatus: BookingStatus.ARCHIVED,
       custodianUserId: booking.custodianUserId || undefined,
