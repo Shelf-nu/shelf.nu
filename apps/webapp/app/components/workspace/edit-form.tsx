@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type Organization,
   type Currency,
@@ -613,8 +613,7 @@ const WorkspaceScimTokensSection = ({
   const newToken = generateData?.rawToken;
 
   // Show dialog when a new token is generated (but not if already dismissed)
-  // Show dialog when a new token is generated (but not if already dismissed)
-  React.useEffect(() => {
+  useEffect(() => {
     if (newToken && newToken !== revealedToken && newToken !== dismissedToken) {
       setRevealedToken(newToken);
       setCopied(false);
@@ -674,6 +673,7 @@ const WorkspaceScimTokensSection = ({
                     </td>
                     <td className="py-3 text-right">
                       <Button
+                        type="button"
                         variant="secondary"
                         className="text-error-500 hover:text-error-600"
                         onClick={() => setTokenToDelete(token)}
@@ -731,10 +731,15 @@ const WorkspaceScimTokensSection = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant="secondary" onClick={() => setTokenToDelete(null)}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setTokenToDelete(null)}
+            >
               Cancel
             </Button>
             <Button
+              type="button"
               variant="primary"
               className="bg-error-500 hover:bg-error-600"
               onClick={async () => {
@@ -776,10 +781,11 @@ const WorkspaceScimTokensSection = ({
             </code>
           </div>
           <AlertDialogFooter>
-            <Button variant="secondary" onClick={handleCopy}>
+            <Button type="button" variant="secondary" onClick={handleCopy}>
               {copied ? "Copied!" : "Copy to clipboard"}
             </Button>
             <Button
+              type="button"
               onClick={() => {
                 setDismissedToken(revealedToken);
                 setRevealedToken(null);
