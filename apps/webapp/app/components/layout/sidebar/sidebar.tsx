@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
@@ -81,32 +82,70 @@ const SidebarProvider = forwardRef<
     const isMobile = useIsMobile();
     const [openMobile, setOpenMobile] = useState(false);
 
-    const sidebarTogglerFetcher = useFetcher();
+    const sidebarTogglerFetcher = useFetcher({ key: "sidebar-toggler" });
     const isSidebarToggling = isFormProcessing(sidebarTogglerFetcher.state);
 
     // This is the internal state of the sidebar.
     // We use openProp and setOpenProp for control from outside the component.
     const [_open, _setOpen] = useState(defaultOpen);
     const open = openProp ?? _open;
+
+    // Debounce cookie persistence so rapid CMD+B toggling only fires
+    // one request with the final state, instead of a POST per toggle.
+    const persistTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+      undefined
+    );
+
+    // Clean up debounce timer on unmount to prevent stale submissions
+    useEffect(
+      () => () => {
+        clearTimeout(persistTimerRef.current);
+      },
+      []
+    );
+
+    /** Debounced persistence — waits 300ms before POSTing so rapid
+     *  toggles only send one request with the final state. */
+    const persistSidebarState = useCallback(
+      (openState: boolean) => {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = setTimeout(() => {
+          const formData = new FormData();
+          formData.append("minimizeSidebar", openState ? "close" : "open");
+
+          void sidebarTogglerFetcher.submit(formData, {
+            method: "POST",
+            action: "/api/user/prefs/minimized-sidebar",
+          });
+        }, 300);
+      },
+      [sidebarTogglerFetcher]
+    );
+
+    // Track current open state in a ref so setOpen doesn't need
+    // `open` or `_open` in its dependency array. This keeps setOpen,
+    // toggleSidebar, and the keyboard useEffect stable across toggles.
+    const openRef = useRef(open);
+    openRef.current = open;
+
     const setOpen = useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
-        const openState = typeof value === "function" ? value(open) : value;
+        const openState =
+          typeof value === "function" ? value(openRef.current) : value;
+
+        // Update ref immediately so rapid toggles read the latest state
+        // before React re-renders (e.g. CMD+B pressed twice fast).
+        openRef.current = openState;
+
         if (setOpenProp) {
           setOpenProp(openState);
         } else {
           _setOpen(openState);
         }
 
-        /* Setting state of sidebar in cookies (userPrefs) */
-        const formData = new FormData();
-        formData.append("minimizeSidebar", openState ? "close" : "open");
-
-        void sidebarTogglerFetcher.submit(formData, {
-          method: "POST",
-          action: "/api/user/prefs/minimized-sidebar",
-        });
+        persistSidebarState(openState);
       },
-      [open, setOpenProp, sidebarTogglerFetcher]
+      [setOpenProp, persistSidebarState]
     );
 
     // Helper to toggle the sidebar.
