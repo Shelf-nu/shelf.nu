@@ -2611,9 +2611,13 @@ async function safeRemoveAuditImageFiles(image: {
  *   removed by the database when the parent AuditSession row is deleted.
  *
  * Storage cleanup:
- * - Audit image files in Supabase storage are removed BEFORE the DB delete
- *   so we don't orphan files if the DB delete fails. Per-file failures are
- *   logged and swallowed — see {@link safeRemoveAuditImageFiles}.
+ * - Image URLs are captured BEFORE the DB delete (the AuditImage rows
+ *   cascade-delete with the session, so we'd lose them afterwards).
+ * - Supabase storage removal runs AFTER the DB commit succeeds. A DB
+ *   rollback or ARCHIVED-guard miss must never leave a zombie audit row
+ *   pointing at already-deleted storage objects.
+ * - Per-file failures on cleanup are logged and swallowed — see
+ *   {@link safeRemoveAuditImageFiles}.
  *
  * @param auditSessionId - ID of the audit to delete
  * @param organizationId - Scoping organization (enforces tenant isolation)
@@ -2630,9 +2634,9 @@ export async function deleteAuditSession({
   userId: string;
 }): Promise<void> {
   try {
-    // Pre-read to validate existence, org scoping, and ARCHIVED status.
-    // We use a pre-read (not just an atomic deleteMany guard) because we
-    // need the image list for storage cleanup before the DB row is gone.
+    // Pre-read to validate existence, org scoping, and ARCHIVED status —
+    // also the only chance to collect image URLs before cascade wipes
+    // AuditImage rows.
     const audit = await db.auditSession.findFirst({
       where: { id: auditSessionId, organizationId },
       select: { id: true, status: true },
@@ -2662,17 +2666,13 @@ export async function deleteAuditSession({
       });
     }
 
-    // Collect every image for this audit so we can clean up storage.
-    // Cascade would delete the DB rows, but Supabase storage is external
-    // and needs explicit removal.
+    // Capture image URLs for post-commit cleanup. Don't touch storage yet —
+    // if the guarded deleteMany finds 0 rows due to a concurrent status
+    // change, we must leave both the DB row AND its files intact.
     const images = await db.auditImage.findMany({
       where: { auditSessionId, organizationId },
       select: { id: true, imageUrl: true, thumbnailUrl: true },
     });
-
-    for (const image of images) {
-      await safeRemoveAuditImageFiles(image);
-    }
 
     // Final guard on the write: re-check ARCHIVED status atomically so a
     // concurrent status change between the pre-read and here can't sneak
@@ -2695,6 +2695,13 @@ export async function deleteAuditSession({
         status: 409,
       });
     }
+
+    // DB commit succeeded — now best-effort storage cleanup. Failures are
+    // logged; stale storage objects are recoverable, a zombie DB row
+    // wouldn't be.
+    for (const image of images) {
+      await safeRemoveAuditImageFiles(image);
+    }
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
@@ -2715,10 +2722,20 @@ export async function deleteAuditSession({
  * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
  * so non-archived audits in the filtered view can never be pulled in.
  *
- * Storage cleanup for all images is done before the DB delete, in a single
- * `findMany` + per-image loop. Not wrapped in a DB transaction because
- * holding one open across N external Supabase HTTP calls invites pool
- * starvation; the DB write itself is a single atomic `deleteMany`.
+ * Ordering is all-or-nothing:
+ * 1. Pre-read the target audits (ARCHIVED only).
+ * 2. Capture image URLs for every target — needed BEFORE the cascade wipes
+ *    the AuditImage rows.
+ * 3. Run the guarded `deleteMany` inside a transaction. If the final count
+ *    doesn't match the pre-read count (concurrent status change), the
+ *    transaction throws and rolls back — no DB rows deleted.
+ * 4. After commit, best-effort Supabase storage cleanup using the
+ *    captured URLs. Per-file failures are logged and swallowed.
+ *
+ * Storage cleanup runs AFTER commit on purpose: a rolled-back transaction
+ * must never leave zombie DB rows pointing at already-deleted files. We
+ * don't wrap storage in the transaction because holding a DB connection
+ * across N external Supabase HTTP calls invites pool starvation.
  *
  * @param auditIds - Array of audit IDs, or `[ALL_SELECTED_KEY]` for select-all
  * @param organizationId - Scoping organization
@@ -2726,7 +2743,8 @@ export async function deleteAuditSession({
  * @param currentSearchParams - Serialized URL params, used when ALL_SELECTED_KEY
  * @param isSelfServiceOrBase - Restrict select-all to audits assigned to userId
  * @returns Object with the count of audits actually deleted
- * @throws {ShelfError} If selection is empty or any audit is not ARCHIVED
+ * @throws {ShelfError} If selection is empty, any audit is not ARCHIVED, or
+ *   if a concurrent status change makes the bulk delete non-atomic
  */
 export async function bulkDeleteAudits({
   auditIds,
@@ -2798,29 +2816,56 @@ export async function bulkDeleteAudits({
       }
     }
 
-    // Batch-fetch every image for every target audit, then clean up
-    // storage per image. One query, not N.
+    const targetIds = audits.map((a) => a.id);
+
+    // Capture every image URL BEFORE the delete so post-commit cleanup has
+    // something to work with (the AuditImage rows cascade away with the
+    // session). No storage side-effect yet — if the transaction rolls back
+    // we must not have touched any file.
     const images = await db.auditImage.findMany({
       where: {
-        auditSessionId: { in: audits.map((a) => a.id) },
+        auditSessionId: { in: targetIds },
         organizationId,
       },
       select: { id: true, imageUrl: true, thumbnailUrl: true },
     });
 
+    // All-or-nothing: either every pre-read audit deletes, or the whole
+    // thing rolls back. A mid-flight status change that shifts an audit
+    // out of ARCHIVED must not produce a partial result.
+    const { count } = await db.$transaction(async (tx) => {
+      const deleted = await tx.auditSession.deleteMany({
+        where: {
+          id: { in: targetIds },
+          organizationId,
+          status: AuditStatus.ARCHIVED,
+        },
+      });
+
+      if (deleted.count !== targetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some audits could not be deleted because their status changed. Please refresh and try again.",
+          additionalData: {
+            expected: targetIds.length,
+            actual: deleted.count,
+            organizationId,
+          },
+          label,
+          status: 409,
+        });
+      }
+
+      return deleted;
+    });
+
+    // Transaction committed — safe to remove storage objects now.
     for (const image of images) {
       await safeRemoveAuditImageFiles(image);
     }
 
-    const result = await db.auditSession.deleteMany({
-      where: {
-        id: { in: audits.map((a) => a.id) },
-        organizationId,
-        status: AuditStatus.ARCHIVED,
-      },
-    });
-
-    return { count: result.count };
+    return { count };
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({

@@ -962,7 +962,7 @@ describe("audit service", () => {
         });
       });
 
-      it("cleans up Supabase storage for each image before the DB delete", async () => {
+      it("runs storage cleanup for each image AFTER the DB delete commits", async () => {
         mockDb.auditImage.findMany.mockResolvedValue([
           {
             id: "img-1",
@@ -997,7 +997,14 @@ describe("audit service", () => {
         // thumbnailUrl was null on img-2; only the main URL should be attempted
         expect(removePublicFile).toHaveBeenCalledTimes(3);
 
-        expect(mockDb.auditSession.deleteMany).toHaveBeenCalled();
+        // Ordering matters: the DB delete must have happened before the
+        // first storage call. A zombie DB row pointing at deleted files is
+        // strictly worse than a stale file pointing at a deleted row.
+        const deleteOrder =
+          mockDb.auditSession.deleteMany.mock.invocationCallOrder[0];
+        const firstStorageOrder =
+          vi.mocked(removePublicFile).mock.invocationCallOrder[0];
+        expect(deleteOrder).toBeLessThan(firstStorageOrder);
       });
 
       it("swallows storage failures and still deletes the DB row", async () => {
@@ -1085,6 +1092,33 @@ describe("audit service", () => {
         });
       });
 
+      it("does NOT touch storage when the guarded deleteMany finds nothing", async () => {
+        // Regression guard: an earlier version cleaned storage BEFORE the
+        // guarded DB delete, which orphaned files whenever a concurrent
+        // status change turned the deleteMany into a no-op. Files now must
+        // survive the race.
+        mockDb.auditImage.findMany.mockResolvedValue([
+          {
+            id: "img-1",
+            imageUrl: "https://s.example.com/i1.jpg",
+            thumbnailUrl: "https://s.example.com/i1-thumb.jpg",
+          },
+        ]);
+        mockDb.auditSession.deleteMany.mockResolvedValue({ count: 0 });
+
+        const { removePublicFile } = await import("~/utils/storage.server");
+
+        await expect(
+          deleteAuditSession({
+            auditSessionId: "audit-1",
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toMatchObject({ status: 409 });
+
+        expect(removePublicFile).not.toHaveBeenCalled();
+      });
+
       it("wraps unknown causes in a 500 ShelfError", async () => {
         mockDb.auditSession.findFirst.mockRejectedValue(new Error("boom"));
 
@@ -1109,6 +1143,8 @@ describe("audit service", () => {
 
       beforeEach(() => {
         vi.clearAllMocks();
+        // why: re-install the $transaction behavior after clearAllMocks wipes it
+        mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
         mockDb.auditSession.findMany.mockResolvedValue(archivedAudits);
         mockDb.auditImage.findMany.mockResolvedValue([]);
         mockDb.auditSession.deleteMany.mockResolvedValue({
@@ -1196,7 +1232,7 @@ describe("audit service", () => {
         expect(whereArg.assignments).toEqual({ some: { userId: "user-1" } });
       });
 
-      it("calls removePublicFile for every image across targeted audits", async () => {
+      it("calls removePublicFile for every image AFTER the DB transaction commits", async () => {
         mockDb.auditImage.findMany.mockResolvedValue([
           {
             id: "img-1",
@@ -1219,6 +1255,47 @@ describe("audit service", () => {
         });
 
         expect(removePublicFile).toHaveBeenCalledTimes(3);
+
+        // Cleanup must happen after the $transaction has resolved — never
+        // before, and never during a rollback.
+        const txOrder = mockDb.$transaction.mock.invocationCallOrder[0];
+        const firstStorageOrder =
+          vi.mocked(removePublicFile).mock.invocationCallOrder[0];
+        expect(txOrder).toBeLessThan(firstStorageOrder);
+      });
+
+      it("rolls back and skips storage cleanup when deleteMany count mismatches pre-read", async () => {
+        // Three archived audits found in pre-read...
+        mockDb.auditSession.findMany.mockResolvedValue([
+          { id: "a1", status: AuditStatus.ARCHIVED },
+          { id: "a2", status: AuditStatus.ARCHIVED },
+          { id: "a3", status: AuditStatus.ARCHIVED },
+        ]);
+        // ...but by the time deleteMany runs, one slipped out of ARCHIVED.
+        mockDb.auditSession.deleteMany.mockResolvedValue({ count: 2 });
+        mockDb.auditImage.findMany.mockResolvedValue([
+          {
+            id: "img-1",
+            imageUrl: "https://s.example.com/a1.jpg",
+            thumbnailUrl: null,
+          },
+        ]);
+
+        const { removePublicFile } = await import("~/utils/storage.server");
+
+        await expect(
+          bulkDeleteAudits({
+            auditIds: ["a1", "a2", "a3"],
+            organizationId: "org-1",
+            userId: "user-1",
+          })
+        ).rejects.toMatchObject({
+          status: 409,
+          message: expect.stringMatching(/status changed/),
+        });
+
+        // Transaction threw — no storage side-effect is allowed.
+        expect(removePublicFile).not.toHaveBeenCalled();
       });
 
       it("wraps unknown causes in a 500 ShelfError", async () => {

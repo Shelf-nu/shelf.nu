@@ -16,6 +16,7 @@
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -76,12 +77,23 @@ function ConditionalDropdown() {
     !allSelected &&
     audits.some((a) => a.status !== "COMPLETED" && a.status !== "CANCELLED");
   /**
-   * Delete is only valid for ARCHIVED audits. Select-all spans all filtered
-   * rows including the ALL_SELECTED_KEY sentinel (no status) — the server
-   * re-narrows to ARCHIVED regardless, so we skip the client check there.
+   * Delete is only valid for ARCHIVED audits. For an explicit id-list we
+   * check statuses client-side; the server re-validates either way.
    */
   const someNotArchived =
     !allSelected && audits.some((a) => a.status !== "ARCHIVED");
+
+  /**
+   * Select-all delete is only allowed when the active status filter is
+   * ARCHIVED. Otherwise the user sees a total-items count that mixes
+   * statuses, clicks "Delete N", and the server would silently drop
+   * everything except the archived subset. Force them to narrow first
+   * so the count they see is the count that deletes.
+   */
+  const [searchParams] = useSearchParams();
+  const statusFilter = searchParams.get("status");
+  const selectAllButFilterNotArchived =
+    allSelected && statusFilter !== "ARCHIVED";
 
   const { roles } = useUserRoleHelper();
 
@@ -220,6 +232,11 @@ function ConditionalDropdown() {
                     ? {
                         reason:
                           "Some of the selected audits are not archived. Only archived audits can be deleted.",
+                      }
+                    : selectAllButFilterNotArchived
+                    ? {
+                        reason:
+                          "Filter the list to status = Archived before using Select all to delete.",
                       }
                     : isLoading
                 }

@@ -58,15 +58,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    const formData = await request.clone().formData();
+    const intent = formData.get("intent");
+
+    // Parse the intent first and derive the initial permission from it so
+    // delete-only callers aren't blocked by an `update` gate that isn't
+    // relevant to their action. (Today every delete-capable role also has
+    // update, but that alignment is not a guarantee we should lean on.)
+    const initialAction =
+      intent === "delete-audit"
+        ? PermissionAction.delete
+        : PermissionAction.update;
+
     const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
-      action: PermissionAction.update,
+      action: initialAction,
     });
-
-    const formData = await request.clone().formData();
-    const intent = formData.get("intent");
 
     if (intent === "edit-audit") {
       const parsedData = parseData(formData, EditAuditSchema);
@@ -171,14 +180,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "delete-audit") {
-      // Delete requires the explicit "delete" permission on the audit entity.
-      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.audit,
-        action: PermissionAction.delete,
-      });
+      // Outer requirePermission already gated on PermissionAction.delete
+      // for this intent — no redundant inner re-check.
 
       // UI hides the button for self-service/base, but enforce server-side
       // to prevent direct POST bypass.
@@ -230,8 +233,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         userId,
       });
 
-      // Audit no longer exists — redirect to the index.
-      throw redirect("/audits");
+      // Audit no longer exists — return the redirect so React Router
+      // navigates. `throw redirect(...)` here would be caught by the
+      // surrounding try/catch and turned into an error JSON response.
+      return redirect("/audits");
     }
 
     throw new ShelfError({
