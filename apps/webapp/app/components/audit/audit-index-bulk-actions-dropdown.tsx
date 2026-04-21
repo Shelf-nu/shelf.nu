@@ -91,7 +91,11 @@ function ConditionalDropdown() {
    * so the count they see is the count that deletes.
    */
   const [searchParams] = useSearchParams();
-  const statusFilter = searchParams.get("status");
+  // The audits index loader normalizes `status` to uppercase before querying
+  // (see `getAuditWhereInput`), so a deep-link like `?status=archived` still
+  // renders the archived list. Match that normalization here or the gate
+  // mis-fires against lowercase links.
+  const statusFilter = searchParams.get("status")?.toUpperCase();
   const selectAllButFilterNotArchived =
     allSelected && statusFilter !== "ARCHIVED";
 

@@ -1215,18 +1215,43 @@ describe("audit service", () => {
         expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
       });
 
-      it("forces ARCHIVED when ALL_SELECTED_KEY is present even if status=COMPLETED in params", async () => {
+      it.each([
+        ["status=COMPLETED", "COMPLETED"],
+        ["status=PENDING", "PENDING"],
+        ["status=ALL", "ALL"],
+        ["", undefined],
+      ])(
+        "rejects select-all (ALL_SELECTED_KEY) when params status=%s",
+        async (params, _paramStatus) => {
+          await expect(
+            bulkDeleteAudits({
+              auditIds: [ALL_SELECTED_KEY],
+              currentSearchParams: params,
+              organizationId: "org-1",
+              userId: "user-1",
+            })
+          ).rejects.toMatchObject({
+            status: 400,
+            message: expect.stringMatching(
+              /Select-all delete requires.*Archived/
+            ),
+          });
+
+          // Must fail fast — before the findMany pre-read runs.
+          expect(mockDb.auditSession.findMany).not.toHaveBeenCalled();
+        }
+      );
+
+      it("accepts select-all when params explicitly narrow to ARCHIVED (case-insensitive)", async () => {
         await bulkDeleteAudits({
           auditIds: [ALL_SELECTED_KEY],
-          currentSearchParams: "status=COMPLETED",
+          currentSearchParams: "status=archived",
           organizationId: "org-1",
           userId: "user-1",
           isSelfServiceOrBase: true,
         });
 
         const whereArg = mockDb.auditSession.findMany.mock.calls[0][0].where;
-        // Non-archived filter from URL params must be overridden — ARCHIVED
-        // is the only acceptable status for bulk delete.
         expect(whereArg.status).toBe(AuditStatus.ARCHIVED);
         expect(whereArg.organizationId).toBe("org-1");
         expect(whereArg.assignments).toEqual({ some: { userId: "user-1" } });

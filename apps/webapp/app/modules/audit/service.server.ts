@@ -2571,11 +2571,18 @@ async function safeRemoveAuditImageFiles(image: {
   try {
     await removePublicFile({ publicUrl: image.imageUrl });
   } catch (cause) {
+    // Intentionally omit the raw URL from additionalData — public
+    // Supabase URLs contain storage object keys and a trailing token;
+    // `imageId` is enough to trace the record if we need to.
     Logger.error(
       new ShelfError({
-        cause,
+        cause: null,
         message: "Failed to remove audit image from storage during delete",
-        additionalData: { imageId: image.id, url: image.imageUrl },
+        additionalData: {
+          imageId: image.id,
+          storageError:
+            cause instanceof Error ? cause.message : "Unknown storage error",
+        },
         label,
       })
     );
@@ -2587,10 +2594,14 @@ async function safeRemoveAuditImageFiles(image: {
     } catch (cause) {
       Logger.error(
         new ShelfError({
-          cause,
+          cause: null,
           message:
             "Failed to remove audit thumbnail from storage during delete",
-          additionalData: { imageId: image.id, url: image.thumbnailUrl },
+          additionalData: {
+            imageId: image.id,
+            storageError:
+              cause instanceof Error ? cause.message : "Unknown storage error",
+          },
           label,
         })
       );
@@ -2762,10 +2773,33 @@ export async function bulkDeleteAudits({
   try {
     const selectAll = auditIds.includes(ALL_SELECTED_KEY);
 
-    // When all items are selected across pages, rebuild the where clause
-    // from the current filters. Then narrow to ARCHIVED regardless — the
-    // filtered view may contain non-archived audits (e.g. status=ALL),
-    // and delete must never reach those.
+    // Defense-in-depth for select-all: if the caller's active status
+    // filter isn't ARCHIVED, refuse to force-narrow and delete only the
+    // archived subset behind the user's back. The UI already gates this
+    // (`audit-index-bulk-actions-dropdown.tsx`), but a direct POST to
+    // this endpoint would otherwise bypass that check. Fail closed on an
+    // irreversible operation.
+    if (selectAll) {
+      const paramStatus = new URLSearchParams(currentSearchParams ?? "")
+        .get("status")
+        ?.toUpperCase();
+      const isArchivedOnlyFilter =
+        paramStatus === AuditStatus.ARCHIVED.toString();
+      if (!isArchivedOnlyFilter) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Select-all delete requires the status filter to be set to Archived.",
+          additionalData: { paramStatus, organizationId },
+          label,
+          status: 400,
+        });
+      }
+    }
+
+    // Rebuild the where clause from the current filters for select-all,
+    // then narrow to ARCHIVED regardless — belt-and-suspenders for the
+    // status guard above.
     const baseWhere: Prisma.AuditSessionWhereInput = selectAll
       ? getAuditWhereInput({
           currentSearchParams,
