@@ -266,7 +266,11 @@ export async function replaceScimUser(
     },
   });
 
-  if (!user) {
+  // Use 404 for both "doesn't exist" and "not a member of the calling org"
+  // to avoid leaking whether a user with this ID exists globally. Reactivating
+  // a previously-deactivated user must go through PATCH (active: true) or a
+  // fresh POST; PUT on a non-member is rejected.
+  if (!user || user.userOrganizations.length === 0) {
     throw new ScimError("User not found", 404);
   }
 

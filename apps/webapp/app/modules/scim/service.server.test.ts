@@ -505,36 +505,23 @@ describe("replaceScimUser", () => {
     });
   });
 
-  it("should reactivate user when currently inactive and active is true", async () => {
+  it("should return 404 when user is not a member of the calling organization", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUnique.mockResolvedValue({
       ...mockShelfUser,
-      userOrganizations: [], // inactive
-    });
-    // @ts-expect-error - vitest mock type
-    mockDb.db.user.update.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockDb.db.teamMember.updateMany.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.create.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockTeamMemberService.createTeamMember.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
-
-    await replaceScimUser(ORG_ID, "user-abc", {
-      userName: "jane@example.com",
-      active: true,
-      name: { givenName: "Jane", familyName: "Doe" },
+      userOrganizations: [], // not a member of ORG_ID
     });
 
-    expect(mockDb.db.userOrganization.create).toHaveBeenCalledWith({
-      data: {
-        userId: "user-abc",
-        organizationId: ORG_ID,
-        roles: [OrganizationRoles.SELF_SERVICE],
-      },
-    });
+    await expect(
+      replaceScimUser(ORG_ID, "user-abc", {
+        userName: "jane@example.com",
+        active: true,
+        name: { givenName: "Jane", familyName: "Doe" },
+      })
+    ).rejects.toThrow("User not found");
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockDb.db.userOrganization.create).not.toHaveBeenCalled();
   });
 
   it("should not change activation when already in desired state", async () => {
