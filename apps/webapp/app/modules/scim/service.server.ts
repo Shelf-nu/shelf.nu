@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createTeamMember } from "~/modules/team-member/service.server";
@@ -8,6 +9,7 @@ import {
   createUser,
   revokeAccessToOrganization,
 } from "~/modules/user/service.server";
+import { isLikeShelfError } from "~/utils/error";
 import { ScimError } from "./errors.server";
 import { parseScimFilter } from "./filters.server";
 import { userToScimResource } from "./mappers.server";
@@ -185,17 +187,36 @@ export async function createScimUser(
   const placeholderId = randomUUID();
   const username = email.split("@")[0];
 
-  const newUser = await createUser({
-    userId: placeholderId,
-    email,
-    username,
-    firstName,
-    lastName,
-    organizationId,
-    roles: [OrganizationRoles.SELF_SERVICE],
-    isSSO: true,
-    skipPersonalOrg: true,
-  });
+  // The check-then-create above can race with a concurrent SCIM POST for the
+  // same email. Catch Prisma's unique-constraint violation and surface it as
+  // the SCIM-spec 409 "uniqueness" error rather than a generic 500.
+  let newUser;
+  try {
+    newUser = await createUser({
+      userId: placeholderId,
+      email,
+      username,
+      firstName,
+      lastName,
+      organizationId,
+      roles: [OrganizationRoles.SELF_SERVICE],
+      isSSO: true,
+      skipPersonalOrg: true,
+    });
+  } catch (err) {
+    const cause = isLikeShelfError(err) ? err.cause : err;
+    if (
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2002"
+    ) {
+      throw new ScimError(
+        `User with userName "${email}" already exists in this organization`,
+        409,
+        "uniqueness"
+      );
+    }
+    throw err;
+  }
 
   // Set scimExternalId and create TeamMember
   if (externalId) {
