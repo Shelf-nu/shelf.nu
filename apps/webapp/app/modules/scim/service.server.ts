@@ -474,6 +474,14 @@ export async function deactivateScimUser(
   }
 
   await revokeAccessToOrganization({ userId, organizationId });
+
+  // NOTE: We intentionally do not invalidate Supabase sessions here.
+  // `@supabase/auth-js` only exposes `admin.signOut(jwt, scope)`, which
+  // requires a JWT rather than a userId — we have no JWT in SCIM context.
+  // The deprovisioned user keeps a valid access token until it expires
+  // (~1h), but every Shelf loader/action re-checks org membership against
+  // `userOrganization`, so the stale session cannot access this org's data.
+  // Revisit if Supabase adds an admin "sign out by userId" API.
 }
 
 // ──────────────────────────────────────────────
