@@ -383,6 +383,7 @@ model AssetModel {
 
   // Relationships
   assets         Asset[]
+  modelRequests  BookingModelRequest[]
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
   createdBy      User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
@@ -394,6 +395,40 @@ model AssetModel {
 
   @@index([organizationId, name])
   @@index([userId])
+}
+
+/// Phase 3d (Book-by-Model): intent row attached to a booking for a
+/// quantity of assets of a given AssetModel, without yet picking
+/// specific assets. Concrete `BookingAsset` rows are only created at
+/// scan-to-assign time; when the last unit is assigned, the request
+/// row is deleted. `quantity` is the number of units still needing
+/// assignment (starts at the full requested total, decrements on scan).
+///
+/// Keeping model requests separate from `BookingAsset` means the ~40
+/// code paths that assume `BookingAsset.assetId` points to a real
+/// asset stay untouched — model-only bookings become concrete the
+/// moment they're checked out.
+model BookingModelRequest {
+  id String @id @default(cuid())
+
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  bookingId String
+
+  assetModel   AssetModel @relation(fields: [assetModelId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetModelId String
+
+  /// Units still needing assignment. Mutated by
+  /// `materializeModelRequestForAsset` on each successful scan; the
+  /// row is deleted when this hits zero.
+  quantity Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One request row per (booking, model) — reserving 5 × Dell Latitude
+  // is a single row with quantity=5, not five rows with quantity=1.
+  @@unique([bookingId, assetModelId])
+  @@index([assetModelId])
 }
 
 enum TagUseFor {
@@ -1310,6 +1345,9 @@ model Booking {
   bookingAssets   BookingAsset[]
   consumptionLogs ConsumptionLog[]
   notes           BookingNote[]
+  // Phase 3d: unfulfilled model-level requests (intent rows).
+  // Converted into concrete `bookingAssets` at scan-to-assign time.
+  modelRequests   BookingModelRequest[]
 
   tags            Tag[]
   partialCheckins PartialBookingCheckin[]

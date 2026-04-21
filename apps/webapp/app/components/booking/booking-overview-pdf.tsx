@@ -175,7 +175,16 @@ const BookingPDFPreview = ({
     assetIdToQrCodeMap,
     assetIdToQuantityMap,
     totalValue,
+    modelRequests,
   } = pdfMeta;
+
+  // Phase 3d (Book-by-Model): defensively re-filter here so a caller
+  // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
+  // model request was fulfilled concurrently) can't leak a zero-qty
+  // row into the printed PDF.
+  const outstandingModelRequests = (modelRequests ?? []).filter(
+    (req) => req.quantity > 0
+  );
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
         booking.custodianUser.email
@@ -411,6 +420,34 @@ const BookingPDFPreview = ({
             ))}
           </tbody>
         </table>
+
+        {/*
+         * Phase 3d (Book-by-Model): outstanding model-level reservations
+         * that have not yet been fulfilled by a scan. Rendered after the
+         * concrete assets table in natural reading order; omitted
+         * entirely (no heading) when the booking has no active model
+         * requests so PDFs for model-free bookings are unchanged.
+         */}
+        <When truthy={outstandingModelRequests.length > 0}>
+          <section className="mt-5 border border-gray-300">
+            <div className="border-b border-gray-300 bg-gray-50 p-2.5">
+              <h2 className="m-0 text-sm font-medium">Requested models</h2>
+            </div>
+            <ul className="m-0 list-none p-0">
+              {outstandingModelRequests.map((req) => (
+                <li
+                  key={req.id}
+                  className="flex items-center gap-2 border-b border-gray-300 p-2.5 text-sm text-gray-600 last:border-b-0"
+                >
+                  <span className="font-medium text-gray-900">
+                    {req.quantity} ×
+                  </span>
+                  <span>{req.assetModel.name}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </When>
       </div>
     </div>
   );

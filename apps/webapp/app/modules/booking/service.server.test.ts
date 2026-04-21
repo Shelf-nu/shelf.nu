@@ -135,6 +135,12 @@ vitest.mock("~/database/db.server", () => ({
       // deciding whether a shared pool can flip back to AVAILABLE.
       count: vitest.fn().mockResolvedValue(0),
     },
+    // why: Phase 3d checkoutBooking queries tx.bookingModelRequest.findMany
+    // to block RESERVED → ONGOING when model-level reservations haven't
+    // been materialised into concrete BookingAsset rows yet.
+    bookingModelRequest: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     consumptionLog: {
       create: vitest.fn().mockResolvedValue({}),
       findMany: vitest.fn().mockResolvedValue([]),
@@ -1735,6 +1741,124 @@ describe("checkoutBooking", () => {
 
     const result = await checkoutBooking(mockCheckoutParams);
     expect(result).toBeDefined();
+  });
+
+  /**
+   * Phase 3d (Book-by-Model) — checkout guard for outstanding
+   * BookingModelRequest rows. The guard must block RESERVED → ONGOING
+   * whenever the booking still has model-level reservations that
+   * haven't been materialised to concrete BookingAsset rows, and it
+   * must let checkout proceed when every request has been drained.
+   */
+  it("should refuse checkout when model requests still have outstanding quantity", async () => {
+    expect.assertions(4);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [], // No concrete assets; reservation is model-only
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: drives the new guard — two outstanding requests so we can
+    // assert that both model names surface in the operator-readable msg.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "mr-1",
+        bookingId: "booking-1",
+        assetModelId: "am-1",
+        quantity: 2,
+        assetModel: { name: "Dell Latitude 5550" },
+      },
+      {
+        id: "mr-2",
+        bookingId: "booking-1",
+        assetModelId: "am-2",
+        quantity: 3,
+        assetModel: { name: "HP MX-500" },
+      },
+    ]);
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      ShelfError
+    );
+
+    // Re-run to inspect the thrown ShelfError shape.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "mr-1",
+        bookingId: "booking-1",
+        assetModelId: "am-1",
+        quantity: 2,
+        assetModel: { name: "Dell Latitude 5550" },
+      },
+      {
+        id: "mr-2",
+        bookingId: "booking-1",
+        assetModelId: "am-2",
+        quantity: 3,
+        assetModel: { name: "HP MX-500" },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    try {
+      await checkoutBooking(mockCheckoutParams);
+    } catch (error) {
+      const shelfError = error as ShelfError;
+      expect(shelfError.status).toBe(400);
+      expect(shelfError.message).toContain("Dell Latitude 5550");
+      // Checkout must not flip the booking status when the guard fires.
+      expect(db.booking.update).not.toHaveBeenCalled();
+    }
+  });
+
+  it("should allow checkout when no model requests have outstanding quantity", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            kitId: null,
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t900",
+        },
+      ],
+    };
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
+    // why: no outstanding requests — guard must let the tx proceed.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    const result = await checkoutBooking(mockCheckoutParams);
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] } },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+    expect(result).toEqual(hydratedBooking);
   });
 });
 

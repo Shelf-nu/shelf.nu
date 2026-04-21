@@ -1,7 +1,26 @@
+/**
+ * Booking Assets Sidebar
+ *
+ * Right-side sheet that lists the concrete `BookingAsset` rows for a
+ * booking (kits + individual assets) along with qty-progress indicators
+ * for partial check-ins.
+ *
+ * Phase 3d (Book-by-Model) adds an "Unassigned model reservations"
+ * section that renders above the asset list whenever the booking has
+ * outstanding `BookingModelRequest` rows (quantity > 0). The new prop
+ * `booking.modelRequests` is optional so existing callers using the
+ * narrower inline Prisma shape (see `_layout+/bookings._index.tsx`)
+ * keep working — the section just renders nothing when the field is
+ * absent.
+ *
+ * @see {@link file://./../../modules/booking/constants.ts} BOOKING_WITH_ASSETS_INCLUDE
+ * @see {@link file://./../../modules/booking-model-request/service.server.ts}
+ */
 import React, { useState } from "react";
 import type { ReactNode } from "react";
 import type { BookingStatus, Prisma } from "@prisma/client";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, PackageIcon } from "lucide-react";
+import { Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
   Sheet,
@@ -17,6 +36,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -73,6 +93,20 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 }>;
 
 /**
+ * Shape of a single `BookingModelRequest` row as consumed by this
+ * sidebar. Matches the `BOOKING_WITH_ASSETS_INCLUDE` model-requests
+ * selector but is declared structurally so callers that load bookings
+ * with a narrower inline include (without `modelRequests`) can still
+ * pass their object through without widening the prop type.
+ */
+export type SidebarModelRequest = {
+  id: string;
+  assetModelId: string;
+  quantity: number;
+  assetModel: { id: string; name: string };
+};
+
+/**
  * Per-asset disposition split used by the qty progress tooltip. Each
  * field is a cumulative total of ConsumptionLog rows for the
  * corresponding category for this booking+asset.
@@ -85,7 +119,16 @@ export type DispositionBreakdown = {
 };
 
 interface BookingAssetsSidebarProps {
-  booking: BookingWithAssets;
+  /**
+   * Booking object to render. Typed as `BookingWithAssets` plus an
+   * optional `modelRequests` array so callers using the narrower inline
+   * include (`bookings._index.tsx`) can pass their object without a
+   * widening cast. When `modelRequests` is missing or empty, the
+   * "Unassigned model reservations" section is not rendered.
+   */
+  booking: BookingWithAssets & {
+    modelRequests?: SidebarModelRequest[] | null;
+  };
   trigger?: ReactNode;
   /**
    * Optional map of `assetId → dispositionedQuantity` for this booking,
@@ -324,6 +367,106 @@ function AssetTitleAndStatus({
   );
 }
 
+/**
+ * Render the "Unassigned model reservations" section shown above the
+ * asset list when a booking has outstanding `BookingModelRequest` rows.
+ *
+ * Rows with `quantity === 0` are filtered out so the section disappears
+ * the instant the last unit has been materialised into a concrete
+ * `BookingAsset` via scan-to-assign. The "Scan to assign" CTA is only
+ * rendered for ONGOING / OVERDUE bookings — for DRAFT / RESERVED the
+ * operator edits requests through manage-assets instead.
+ */
+function UnassignedModelRequestsSection({
+  bookingId,
+  bookingStatus,
+  modelRequests,
+}: {
+  bookingId: string;
+  bookingStatus: BookingStatus;
+  modelRequests: SidebarModelRequest[];
+}) {
+  const outstanding = modelRequests.filter((req) => req.quantity > 0);
+  if (outstanding.length === 0) {
+    return null;
+  }
+
+  const totalRemaining = outstanding.reduce(
+    (sum, req) => sum + req.quantity,
+    0
+  );
+
+  // Scan-to-assign only makes sense once the booking is live — pre-
+  // checkout the operator should tweak the request via manage-assets.
+  const canScanToAssign =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+
+  return (
+    <>
+      <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
+        <h5 className="text-left capitalize">
+          Unassigned model reservations ({totalRemaining})
+        </h5>
+        <p>
+          <span>
+            {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
+          </span>
+        </p>
+      </div>
+      <div className="border border-b-0 border-gray-200 bg-white md:mx-0">
+        <table className="w-full border-collapse">
+          <tbody>
+            {outstanding.map((req) => (
+              <tr
+                key={req.id}
+                className="border-b border-gray-200 last:border-b-0"
+              >
+                <td className="w-full whitespace-normal p-0 md:p-0">
+                  <div className="flex items-center gap-3 px-6 py-4 md:pr-6">
+                    {/* Model placeholder — we intentionally don't fetch
+                        a per-model image for the sidebar (extra query
+                        cost) so a neutral packaging glyph stands in. */}
+                    <div
+                      aria-hidden
+                      className="flex size-12 shrink-0 items-center justify-center rounded-[4px] border border-gray-200 bg-gray-50"
+                    >
+                      <PackageIcon className="size-5 text-gray-400" />
+                    </div>
+                    <div className="min-w-[180px]">
+                      <span className="word-break mb-1 block font-medium text-gray-700">
+                        {req.assetModel.name}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className="inline-flex items-center rounded-2xl px-2 py-[2px] text-[12px] font-medium"
+                          style={{
+                            backgroundColor: BADGE_COLORS.amber.bg,
+                            color: BADGE_COLORS.amber.text,
+                          }}
+                        >
+                          {req.quantity} remaining
+                        </span>
+                        {canScanToAssign ? (
+                          <Link
+                            to={`/bookings/${bookingId}/overview/scan-assets`}
+                            className="text-[12px] font-medium text-primary-700 hover:text-primary-800 hover:underline"
+                          >
+                            Scan to assign
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export function BookingAssetsSidebar({
   booking,
   trigger,
@@ -372,6 +515,13 @@ export function BookingAssetsSidebar({
           </SheetHeader>
 
           <div className="flex flex-1 flex-col overflow-hidden">
+            {booking.modelRequests && booking.modelRequests.length > 0 ? (
+              <UnassignedModelRequestsSection
+                bookingId={booking.id}
+                bookingStatus={booking.status}
+                modelRequests={booking.modelRequests}
+              />
+            ) : null}
             <div className="border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:px-6">
               <h5 className="text-left capitalize">Assets & kits</h5>
               <p>

@@ -37,6 +37,10 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
  * Extended include for reservation emails — adds minimal asset fields
  * (via the BookingAsset pivot) for displaying booked items in the email.
  * Only used in reserveBooking(), NOT in other email flows.
+ *
+ * Phase 3d (Book-by-Model): also pulls `modelRequests` with the related
+ * `assetModel` so the reservation email can render a "Requested models"
+ * section alongside the booked items list.
  */
 export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
   ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -56,6 +60,16 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
       },
     },
   },
+  modelRequests: {
+    include: {
+      assetModel: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.BookingInclude;
 
 /**
@@ -71,6 +85,15 @@ type BookingForReservationEmail = Prisma.BookingGetPayload<{
  */
 export type ReservationEmailAsset =
   BookingForReservationEmail["bookingAssets"][number];
+
+/**
+ * Type for a single outstanding `BookingModelRequest` row as returned
+ * in reservation emails (Phase 3d — Book-by-Model). Inferred from the
+ * Prisma include so the email renderer can rely on `assetModel.name`
+ * without restating the shape.
+ */
+export type ReservationEmailModelRequest =
+  BookingForReservationEmail["modelRequests"][number];
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
@@ -131,6 +154,17 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { asset: { createdAt: "asc" } }, // Then by creation order as fallback
     ],
+  },
+  // Phase 3d (Book-by-Model): surface any outstanding `BookingModelRequest`
+  // rows alongside concrete `bookingAssets` so every loader reusing this
+  // include can render the "unassigned model reservations" section and the
+  // checkout guard can enforce fulfilment. Intentionally kept cheap —
+  // `assetModel` selects just enough for UI/error messaging; no deep
+  // graph traversal required.
+  modelRequests: {
+    include: {
+      assetModel: true,
+    },
   },
 } satisfies Prisma.BookingInclude;
 

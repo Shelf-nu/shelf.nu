@@ -30,6 +30,7 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { materializeModelRequestForAsset } from "~/modules/booking-model-request/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import {
   computeBookingAvailableQuantity,
@@ -81,7 +82,10 @@ import {
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
 } from "./constants";
-import type { ReservationEmailAsset } from "./constants";
+import type {
+  ReservationEmailAsset,
+  ReservationEmailModelRequest,
+} from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -159,6 +163,7 @@ async function sendBookingEmailToAllRecipients({
     cancellationReason?: string;
     changes?: string[];
     assets?: ReservationEmailAsset[];
+    modelRequests?: ReservationEmailModelRequest[];
   };
 }) {
   for (const recipient of recipients) {
@@ -1096,6 +1101,16 @@ export async function reserveBooking({
         ? resolveUserDisplayName(bookingFound.custodianUser)
         : bookingFound.custodianTeamMember?.name ?? "";
 
+      // Phase 3d (Book-by-Model): only forward outstanding requests so
+      // the plain-text email doesn't render a "0 × …" row if a request
+      // was drained to zero but not yet cleaned up.
+      const outstandingModelRequests = bookingFound.modelRequests
+        .filter((req) => req.quantity > 0)
+        .map((req) => ({
+          quantity: req.quantity,
+          modelName: req.assetModel.name,
+        }));
+
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
         assetsCount: bookingFound._count.bookingAssets,
@@ -1105,6 +1120,7 @@ export async function reserveBooking({
         hints,
         bookingId: bookingFound.id,
         customEmailFooter: bookingFound.organization.customEmailFooter,
+        modelRequests: outstandingModelRequests,
       });
 
       await sendBookingEmailToAllRecipients({
@@ -1116,6 +1132,12 @@ export async function reserveBooking({
         hints,
         templateProps: {
           assets: bookingFound.bookingAssets,
+          // Phase 3d (Book-by-Model): forward any outstanding
+          // `BookingModelRequest` rows so the reservation email can
+          // render a "Requested models" section. The include widening
+          // on `BOOKING_INCLUDE_FOR_RESERVATION_EMAIL` guarantees
+          // `modelRequests` is present on the loaded booking.
+          modelRequests: bookingFound.modelRequests,
         },
       });
     }
@@ -1315,6 +1337,46 @@ export async function checkoutBooking({
 
     await db.$transaction(
       async (tx) => {
+        /**
+         * Phase 3d (Book-by-Model) — checkout guard for unfulfilled
+         * `BookingModelRequest` rows. Model requests represent units that
+         * were reserved at the model level but haven't been assigned to
+         * a concrete asset yet (the usual recovery path is to scan
+         * matching assets, which decrements the request). If any remain
+         * at checkout we refuse the RESERVED → ONGOING transition and
+         * surface the outstanding counts so the operator can either:
+         *   1. scan matching assets to drain the request, or
+         *   2. edit the requests from manage-assets (allowed while the
+         *      booking is still RESERVED — see the model-request service).
+         * This is a hard block — there is no force-partial escape hatch
+         * because ONGOING implies "assets are physically out", which
+         * unfulfilled requests directly contradict.
+         */
+        const outstandingRequests = await tx.bookingModelRequest.findMany({
+          where: { bookingId: id, quantity: { gt: 0 } },
+          include: { assetModel: { select: { name: true } } },
+        });
+
+        if (outstandingRequests.length > 0) {
+          const outstanding = outstandingRequests.map((req) => ({
+            assetModelName: req.assetModel.name,
+            remaining: req.quantity,
+          }));
+
+          const summary = outstanding
+            .map((row) => `${row.remaining} × ${row.assetModelName}`)
+            .join(", ");
+
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Cannot check out — ${summary} still unassigned. Scan matching assets to fulfil the reservation.`,
+            additionalData: { outstanding },
+          });
+        }
+
         /**
          * Validate quantity availability for QUANTITY_TRACKED assets.
          * Between when a booking was created and checkout, other
@@ -5538,10 +5600,51 @@ export async function addScannedAssetsToBooking({
 }) {
   try {
     /**
+     * Pre-fetch metadata for the scanned assets so we can run the
+     * Phase 3d model-request materialization loop — each scanned
+     * asset that matches an outstanding `BookingModelRequest` for
+     * its model decrements that request. Assets without a matching
+     * request (or with no model at all) fall through to the
+     * existing "direct BookingAsset create" path below.
+     */
+    const scannedAssetsMeta =
+      assetIds.length > 0
+        ? await db.asset.findMany({
+            where: { id: { in: assetIds }, organizationId },
+            select: {
+              id: true,
+              title: true,
+              type: true,
+              assetModelId: true,
+            },
+          })
+        : [];
+    const scannedAssetsMetaById = new Map(
+      scannedAssetsMeta.map((a) => [a.id, a])
+    );
+
+    /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets.
      */
     const updatedBooking = await db.$transaction(async (tx) => {
+      // Phase 3d: for each scanned asset, decrement a matching
+      // `BookingModelRequest` (if any). Runs before the BookingAsset
+      // create so a failure in the materialize path rolls the whole
+      // tx back — we never end up with concrete rows and a stale
+      // request count.
+      for (const assetId of assetIds) {
+        const meta = scannedAssetsMetaById.get(assetId);
+        if (!meta) continue; // asset not found in org — caught later by FK
+        await materializeModelRequestForAsset({
+          bookingId,
+          asset: meta,
+          organizationId,
+          userId,
+          tx,
+        });
+      }
+
       const booking = await tx.booking.update({
         where: { id: bookingId, organizationId },
         data: {

@@ -38,6 +38,7 @@ import { CategoryBadge } from "~/components/assets/category-badge";
 import { ConsumptionTypeBadge } from "~/components/assets/consumption-type-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { ManageModelRequests } from "~/components/booking/manage-model-requests";
 import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
 import { Form } from "~/components/custom-form";
@@ -75,6 +76,7 @@ import {
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
+import { getAssetModelAvailability } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -305,6 +307,79 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking.bookingAssets.map((ba) => ba.asset)
     );
 
+    /**
+     * Phase 3d (Book-by-Model) — Models tab payload.
+     *
+     * We always count the org's AssetModels so the UI knows whether to
+     * render the "Models" tab at all (hidden when the org has none).
+     * When there is at least one model we also fetch the list for the
+     * picker plus the per-model availability in the current booking's
+     * window. Capping at `MODEL_PICKER_LIMIT` keeps the loader cheap
+     * for large orgs; if an org has more models we paginate by just
+     * showing the first batch sorted by name.
+     *
+     * TODO(3d): add a paginated "search models" API once an org actually
+     * bumps into the MODEL_PICKER_LIMIT cap. Not blocking shipping.
+     */
+    const MODEL_PICKER_LIMIT = 50;
+    const assetModelsCount = await db.assetModel.count({
+      where: { organizationId },
+    });
+    const showModelsTab = assetModelsCount > 0;
+
+    let assetModels: {
+      id: string;
+      name: string;
+      total: number;
+      available: number;
+      reservedConcrete: number;
+      reservedViaRequest: number;
+      inCustody: number;
+    }[] = [];
+
+    if (showModelsTab) {
+      const rawModels = await db.assetModel.findMany({
+        where: { organizationId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: MODEL_PICKER_LIMIT,
+      });
+
+      const availabilities = await Promise.all(
+        rawModels.map((m) =>
+          getAssetModelAvailability({
+            assetModelId: m.id,
+            organizationId,
+            bookingId: booking.id,
+            from: booking.from,
+            to: booking.to,
+          })
+        )
+      );
+
+      assetModels = rawModels.map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        total: availabilities[i].total,
+        available: availabilities[i].available,
+        reservedConcrete: availabilities[i].reservedConcrete,
+        reservedViaRequest: availabilities[i].reservedViaRequest,
+        inCustody: availabilities[i].inCustody,
+      }));
+    }
+
+    /**
+     * Flatten the booking's existing model requests for the UI. The
+     * inner `assetModel` relation is included via
+     * `BOOKING_WITH_ASSETS_INCLUDE`, so we just project the fields the
+     * Models tab needs and leave the rest on the booking record.
+     */
+    const modelRequests = booking.modelRequests.map((req) => ({
+      assetModelId: req.assetModelId,
+      assetModelName: req.assetModel.name,
+      quantity: req.quantity,
+    }));
+
     return payload({
       header: {
         title: `Add assets for '${booking?.name}'`,
@@ -332,6 +407,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       bookingKitIds,
+      showModelsTab,
+      assetModels,
+      modelRequests,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -892,8 +970,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
  * specifying how many units to reserve for QUANTITY_TRACKED assets.
  */
 export default function AddAssetsToNewBooking() {
-  const { booking, bookingKitIds, items, totalItems } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    bookingKitIds,
+    items,
+    totalItems,
+    showModelsTab,
+    assetModels,
+    modelRequests,
+  } = useLoaderData<typeof loader>();
+
+  /**
+   * Local state for the active tab value. Only "models" is rendered
+   * inline on this route — switching to "kits" navigates away via the
+   * existing `onValueChange` handler. "assets" is the default on mount.
+   */
+  const [activeTab, setActiveTab] = useState<"assets" | "models">("assets");
 
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1044,18 +1136,36 @@ export default function AddAssetsToNewBooking() {
     setDisabledBulkItems(_disabledBulkItems);
   }, [items, setDisabledBulkItems]);
 
+  /**
+   * Total quantity reserved via model-level requests — shown as a count
+   * badge on the Models tab trigger so users see at a glance whether
+   * they have outstanding reservations.
+   */
+  const totalModelRequestUnits = useMemo(
+    () => modelRequests.reduce((acc, req) => acc + req.quantity, 0),
+    [modelRequests]
+  );
+
   return (
     <Tabs
       className="flex h-full max-h-full flex-col"
-      value="assets"
+      value={activeTab}
       activationMode="manual"
-      onValueChange={() => {
-        if (hasUnsavedChanges) {
-          setIsAlertOpen(true);
+      onValueChange={(nextValue) => {
+        // "kits" always navigates away (existing route). "assets" and
+        // "models" render inline on this route — just update the
+        // active-tab state.
+        if (nextValue === "kits") {
+          if (hasUnsavedChanges) {
+            setIsAlertOpen(true);
+            return;
+          }
+          void navigate(manageKitsUrl);
           return;
         }
-
-        void navigate(manageKitsUrl);
+        if (nextValue === "models" || nextValue === "assets") {
+          setActiveTab(nextValue);
+        }
       }}
     >
       <div className="border-b px-6 py-2">
@@ -1094,63 +1204,91 @@ export default function AddAssetsToNewBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
+          {showModelsTab ? (
+            <TabsTrigger
+              className="flex-1 gap-x-2"
+              value="models"
+              aria-label={`Models tab${
+                totalModelRequestUnits > 0
+                  ? ` (${totalModelRequestUnits} reserved)`
+                  : ""
+              }`}
+            >
+              Models
+              {totalModelRequestUnits > 0 ? (
+                <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                  {totalModelRequestUnits}
+                </GrayBadge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
       </div>
 
-      <Filters
-        slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          "right-of-search": <AvailabilitySelect />,
-        }}
-        className="justify-between !border-t-0 border-b px-6 md:flex"
-      />
+      {/*
+       * Asset filters + filter dropdowns only make sense on the Assets
+       * tab. The Models tab uses its own picker + availability hints.
+       */}
+      {activeTab === "assets" ? (
+        <>
+          <Filters
+            slots={{
+              "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+              "right-of-search": <AvailabilitySelect />,
+            }}
+            className="justify-between !border-t-0 border-b px-6 md:flex"
+          />
 
-      <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Categories <ChevronRight className="hidden rotate-90 md:inline" />
-            </div>
-          }
-          model={{ name: "category", queryKey: "name" }}
-          label="Filter by category"
-          placeholder="Search categories"
-          initialDataKey="categories"
-          countKey="totalCategories"
-        />
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Tags <ChevronRight className="hidden rotate-90 md:inline" />
-            </div>
-          }
-          model={{ name: "tag", queryKey: "name" }}
-          label="Filter by tag"
-          initialDataKey="tags"
-          countKey="totalTags"
-        />
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Locations <ChevronRight className="hidden rotate-90 md:inline" />
-            </div>
-          }
-          model={{ name: "location", queryKey: "name" }}
-          label="Filter by location"
-          initialDataKey="locations"
-          countKey="totalLocations"
-          renderItem={({ metadata }) => (
-            <div className="flex items-center gap-2">
-              <ImageWithPreview
-                thumbnailUrl={metadata.thumbnailUrl}
-                alt={metadata.name}
-                className="size-6 rounded-[2px]"
-              />
-              <div>{metadata.name}</div>
-            </div>
-          )}
-        />
-      </div>
+          <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
+            <DynamicDropdown
+              trigger={
+                <div className="flex h-6 cursor-pointer items-center gap-2">
+                  Categories{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "category", queryKey: "name" }}
+              label="Filter by category"
+              placeholder="Search categories"
+              initialDataKey="categories"
+              countKey="totalCategories"
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex h-6 cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", queryKey: "name" }}
+              label="Filter by tag"
+              initialDataKey="tags"
+              countKey="totalTags"
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex h-6 cursor-pointer items-center gap-2">
+                  Locations{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "location", queryKey: "name" }}
+              label="Filter by location"
+              initialDataKey="locations"
+              countKey="totalLocations"
+              renderItem={({ metadata }) => (
+                <div className="flex items-center gap-2">
+                  <ImageWithPreview
+                    thumbnailUrl={metadata.thumbnailUrl}
+                    alt={metadata.name}
+                    className="size-6 rounded-[2px]"
+                  />
+                  <div>{metadata.name}</div>
+                </div>
+              )}
+            />
+          </div>
+        </>
+      ) : null}
 
       <TabsContent value="assets" asChild>
         <List
@@ -1205,56 +1343,81 @@ export default function AddAssetsToNewBooking() {
         />
       </TabsContent>
 
-      {/* Footer of the modal */}
-      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
-        <p>
-          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
-          selected
-        </p>
+      {showModelsTab ? (
+        <TabsContent
+          value="models"
+          className="mt-0 flex min-h-0 flex-1 flex-col"
+        >
+          <ManageModelRequests
+            bookingId={booking.id}
+            assetModels={assetModels}
+            modelRequests={modelRequests}
+          />
+        </TabsContent>
+      ) : null}
 
-        <div className="flex gap-3">
-          <Button variant="secondary" to={".."}>
+      {/*
+       * Footer of the modal. Only rendered on the Assets tab — the
+       * Models tab submits each model reservation inline via the
+       * model-requests API route, so there's nothing to "Confirm" here.
+       */}
+      {activeTab === "assets" ? (
+        <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
+          <p>
+            {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
+            selected
+          </p>
+
+          <div className="flex gap-3">
+            <Button variant="secondary" to={".."}>
+              Close
+            </Button>
+            <Form method="post" ref={formRef}>
+              {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+              {removedAssets.map((asset, i) => (
+                <input
+                  key={asset.id}
+                  type="hidden"
+                  name={`removedAssetIds[${i}]`}
+                  value={asset.id}
+                />
+              ))}
+              {/* These are the ids selected by the user and stored in the atom */}
+              {selectedBulkItems.map((asset, i) => (
+                <input
+                  key={asset.id}
+                  type="hidden"
+                  name={`assetIds[${i}]`}
+                  value={asset.id}
+                />
+              ))}
+              {/* JSON-encoded quantities for QUANTITY_TRACKED assets */}
+              <input
+                type="hidden"
+                name="quantities"
+                value={JSON.stringify(quantities)}
+              />
+              {hasUnsavedChanges && isAlertOpen ? (
+                <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+              ) : null}
+              <Button
+                type="submit"
+                name="intent"
+                value="addAssets"
+                disabled={isSearching}
+              >
+                Confirm
+              </Button>
+            </Form>
+          </div>
+        </footer>
+      ) : (
+        <footer className="item-center mt-auto flex shrink-0 justify-end border-t px-6 py-3">
+          <Button type="button" variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post" ref={formRef}>
-            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
-            {removedAssets.map((asset, i) => (
-              <input
-                key={asset.id}
-                type="hidden"
-                name={`removedAssetIds[${i}]`}
-                value={asset.id}
-              />
-            ))}
-            {/* These are the ids selected by the user and stored in the atom */}
-            {selectedBulkItems.map((asset, i) => (
-              <input
-                key={asset.id}
-                type="hidden"
-                name={`assetIds[${i}]`}
-                value={asset.id}
-              />
-            ))}
-            {/* JSON-encoded quantities for QUANTITY_TRACKED assets */}
-            <input
-              type="hidden"
-              name="quantities"
-              value={JSON.stringify(quantities)}
-            />
-            {hasUnsavedChanges && isAlertOpen ? (
-              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
-            ) : null}
-            <Button
-              type="submit"
-              name="intent"
-              value="addAssets"
-              disabled={isSearching}
-            >
-              Confirm
-            </Button>
-          </Form>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       <UnsavedChangesAlert
         open={isAlertOpen}

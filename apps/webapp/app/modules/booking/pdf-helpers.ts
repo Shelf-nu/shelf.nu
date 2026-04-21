@@ -22,6 +22,20 @@ export interface SortParams {
   orderDirection?: "asc" | "desc";
 }
 
+/**
+ * Minimal shape of a `BookingModelRequest` row as consumed by the PDF
+ * preview's "Requested models" section (Phase 3d — Book-by-Model).
+ * Declared structurally so callers that query a booking via
+ * `BOOKING_WITH_ASSETS_INCLUDE` (which includes `modelRequests` with
+ * `assetModel`) can pass their rows through without a widening cast.
+ */
+export type PdfModelRequest = {
+  id: string;
+  assetModelId: string;
+  quantity: number;
+  assetModel: { id: string; name: string };
+};
+
 export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
     include: {
@@ -43,6 +57,13 @@ export interface PdfDbResult {
   assetIdToQrCodeMap: Record<string, string>;
   /** Maps asset ID to booked quantity for quantity-tracked assets */
   assetIdToQuantityMap: Record<string, number>;
+  /**
+   * Outstanding model-level reservations on the booking (Phase 3d).
+   * Only rows with `quantity > 0` are meaningful for the PDF — the
+   * renderer filters defensively and omits the section entirely when
+   * nothing is outstanding.
+   */
+  modelRequests: PdfModelRequest[];
   from?: string;
   to?: string;
   originalFrom?: string;
@@ -149,6 +170,26 @@ export async function fetchAllPdfRelatedData(
       }
     }
 
+    // Phase 3d (Book-by-Model): surface outstanding model-level
+    // reservations so the PDF can render a dedicated "Requested models"
+    // section. `getBooking` merges with `BOOKING_WITH_ASSETS_INCLUDE`
+    // which already pulls `modelRequests` with `assetModel`, so this
+    // pass-through is cheap — no extra database query required.
+    const modelRequests: PdfModelRequest[] = (
+      (booking as unknown as { modelRequests?: PdfModelRequest[] })
+        .modelRequests ?? []
+    )
+      .filter((req) => req.quantity > 0)
+      .map((req) => ({
+        id: req.id,
+        assetModelId: req.assetModelId,
+        quantity: req.quantity,
+        assetModel: {
+          id: req.assetModel.id,
+          name: req.assetModel.name,
+        },
+      }));
+
     return {
       booking,
       assets: sortedAssets,
@@ -160,6 +201,7 @@ export async function fetchAllPdfRelatedData(
       organization,
       assetIdToQrCodeMap,
       assetIdToQuantityMap,
+      modelRequests,
     };
   } catch (cause) {
     throw new ShelfError({
