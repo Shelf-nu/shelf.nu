@@ -184,8 +184,12 @@ export async function createScimUser(
   // We do NOT create a Supabase auth account here. When the user signs in
   // via SSO, the SSO callback will create the auth account and link it
   // to this Shelf user by updating the user ID.
+  //
+  // Using email as username (User.username is @unique): deriving from the
+  // local-part would collide across SCIM orgs with a common local-part
+  // (e.g. two distinct orgs both provisioning `jane@…`).
   const placeholderId = randomUUID();
-  const username = email.split("@")[0];
+  const username = email;
 
   // The check-then-create above can race with a concurrent SCIM POST for the
   // same email. Catch Prisma's unique-constraint violation and surface it as

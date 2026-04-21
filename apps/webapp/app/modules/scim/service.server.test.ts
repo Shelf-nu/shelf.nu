@@ -352,7 +352,7 @@ describe("createScimUser", () => {
     expect(mockUserService.createUser).toHaveBeenCalledWith(
       expect.objectContaining({
         email: "jane@example.com",
-        username: "jane",
+        username: "jane@example.com",
         firstName: "Jane",
         lastName: "Doe",
         organizationId: ORG_ID,
