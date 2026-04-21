@@ -1,6 +1,6 @@
 import type { Organization, SsoDetails } from "@prisma/client";
-import type { AuthSession } from "@server/session";
 import { isAuthApiError } from "@supabase/supabase-js";
+import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
