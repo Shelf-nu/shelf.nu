@@ -59,6 +59,7 @@ import {
   KITS_INCLUDE_FIELDS,
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
@@ -168,7 +169,18 @@ export async function createKit({
       data.location = { connect: { id: locationId } };
     }
 
-    return await db.kit.create({ data });
+    const kit = await db.kit.create({ data });
+
+    await recordEvent({
+      organizationId,
+      actorUserId: createdById,
+      action: "KIT_CREATED",
+      entityType: "KIT",
+      entityId: kit.id,
+      kitId: kit.id,
+    });
+
+    return kit;
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -258,6 +270,15 @@ export async function updateKit({
         userId: createdById,
       });
     }
+
+    await recordEvent({
+      organizationId,
+      actorUserId: createdById,
+      action: "KIT_UPDATED",
+      entityType: "KIT",
+      entityId: kit.id,
+      kitId: kit.id,
+    });
 
     return kit;
   } catch (cause) {
@@ -822,6 +843,22 @@ export async function releaseCustody({
       assetIds: kit.assets.map((asset) => asset.id),
     });
 
+    // Activity events — one CUSTODY_RELEASED per asset in the kit.
+    await recordEvents(
+      kit.assets.map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "CUSTODY_RELEASED",
+        entityType: "ASSET",
+        entityId: asset.id,
+        assetId: asset.id,
+        kitId: kit.id,
+        teamMemberId: kit.custody?.custodian?.id ?? undefined,
+        targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+        meta: { viaKit: true },
+      }))
+    );
+
     return kit;
   } catch (cause) {
     throw new ShelfError({
@@ -1188,6 +1225,23 @@ export async function bulkAssignKitCustody({
           };
         }),
       });
+
+      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      await recordEvents(
+        allAssetsOfAllKits.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: asset.kit?.id ?? undefined,
+          teamMemberId: custodianId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
   } catch (cause) {
     const message =
@@ -1324,6 +1378,22 @@ export async function bulkReleaseKitCustody({
           };
         }),
       });
+
+      // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
+      await recordEvents(
+        allAssetsOfAllKits.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: asset.kit?.id ?? undefined,
+          teamMemberId: custodian?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
   } catch (cause) {
     const message =
@@ -2171,6 +2241,36 @@ export async function updateKitAssets({
       removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
       userId,
     });
+
+    // Activity events — one ASSET_KIT_CHANGED per asset added or removed.
+    const kitChangeEvents: Parameters<typeof recordEvents>[0] = [
+      ...newlyAddedAssets.map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_KIT_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: asset.id,
+        assetId: asset.id,
+        kitId: kit.id,
+        field: "kitId",
+        fromValue: asset.kit?.id ?? null,
+        toValue: kit.id,
+      })),
+      ...(addOnly ? [] : removedAssets).map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_KIT_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: asset.id,
+        assetId: asset.id,
+        field: "kitId",
+        fromValue: kit.id,
+        toValue: null,
+      })),
+    ];
+    if (kitChangeEvents.length > 0) {
+      await recordEvents(kitChangeEvents);
+    }
 
     // Handle location cascade for newly added assets (after kit assignment notes)
     if (newlyAddedAssets.length > 0) {

@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
@@ -289,6 +290,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
+    });
+
+    await recordEvent({
+      organizationId,
+      actorUserId: userId,
+      action: "CUSTODY_ASSIGNED",
+      entityType: "ASSET",
+      entityId: asset.id,
+      assetId: asset.id,
+      teamMemberId: custodianId,
+      targetUserId: custodianTeamMember.user?.id ?? undefined,
     });
 
     sendNotification({
