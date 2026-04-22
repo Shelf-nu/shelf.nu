@@ -289,8 +289,14 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
-    // @ts-expect-error
-    const isRateLimitError = cause.code === "over_email_send_rate_limit";
+    // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
+    // `unknown`, and a bare property access would throw at runtime if it
+    // were null/undefined.
+    const errorCode =
+      typeof cause === "object" && cause !== null && "code" in cause
+        ? (cause as { code: unknown }).code
+        : undefined;
+    const isRateLimitError = errorCode === "over_email_send_rate_limit";
     // Supabase 504s and intermittent fetch failures resolve on retry.
     const isTransientFetchError = isAuthRetryableFetchError(cause);
     // "Database error finding user" — Supabase backend hiccup, not actionable.
