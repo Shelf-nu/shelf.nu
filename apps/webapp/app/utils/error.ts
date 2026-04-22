@@ -334,7 +334,7 @@ export function isZodValidationError(cause: unknown) {
 export function makeShelfError(
   cause: unknown,
   additionalData?: AdditionalData,
-  shouldBeCaptured: boolean = true
+  shouldBeCaptured?: boolean
 ) {
   if (isAbortError(cause)) {
     return new ShelfError({
@@ -374,13 +374,32 @@ export function makeShelfError(
     });
   }
 
+  // Bare Prisma `P2025` (record not found) reaching the catch-all path means
+  // a route did `findUniqueOrThrow().catch(makeShelfError)` without wrapping
+  // the not-found case explicitly. Surface a 404 and skip Sentry capture by
+  // default — these are user-facing "the thing you asked for doesn't exist"
+  // outcomes, not engineering bugs. Callers can still force capture with
+  // an explicit `shouldBeCaptured: true` argument.
+  if (isNotFoundError(cause)) {
+    return new ShelfError({
+      cause,
+      message: "The requested resource could not be found.",
+      additionalData,
+      label: "Unknown",
+      status: 404,
+      shouldBeCaptured: shouldBeCaptured ?? false,
+    });
+  }
+
   // 🤷‍♂️ We don't know what this error is, so we create a new default one.
+  // Default to `true` for the unknown-error path: an unrecognised throw
+  // really should reach Sentry unless a caller explicitly opts out.
   return new ShelfError({
     cause,
     message: "Sorry, something went wrong.",
     additionalData,
     label: "Unknown",
-    shouldBeCaptured,
+    shouldBeCaptured: shouldBeCaptured ?? true,
   });
 }
 
