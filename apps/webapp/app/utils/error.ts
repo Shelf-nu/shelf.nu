@@ -363,6 +363,23 @@ export function makeShelfError(
     });
   }
 
+  // Bare Prisma `P2025` (record not found) reaching the catch-all path means
+  // a route did `findUniqueOrThrow().catch(makeShelfError)` without wrapping
+  // the not-found case explicitly. Surface a 404 and skip Sentry capture by
+  // default — these are user-facing "the thing you asked for doesn't exist"
+  // outcomes, not engineering bugs. Callers that genuinely want to capture
+  // a not-found can still pass `shouldBeCaptured: true` explicitly.
+  if (isNotFoundError(cause)) {
+    return new ShelfError({
+      cause,
+      message: "The requested resource could not be found.",
+      additionalData,
+      label: "Unknown",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
   // 🤷‍♂️ We don't know what this error is, so we create a new default one.
   return new ShelfError({
     cause,

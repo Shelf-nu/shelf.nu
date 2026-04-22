@@ -1501,6 +1501,9 @@ export async function updateLocationAssets({
           additionalData: { locationId, userId, organizationId },
           status: 404,
           label: "Location",
+          // Suppress only true Prisma not-found (P2025); let DB / connectivity
+          // failures bubble up to Sentry as 5xx.
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1692,6 +1695,9 @@ export async function updateLocationKits({
           additionalData: { locationId, userId, organizationId },
           status: 404,
           label: "Location",
+          // Suppress only true Prisma not-found (P2025); let DB / connectivity
+          // failures bubble up to Sentry as 5xx.
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
