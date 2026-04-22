@@ -210,7 +210,13 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
   );
 }
 
-function isAbortError(cause: unknown) {
+/**
+ * Detects whether an error (or any error in its `cause` chain) represents a
+ * cancelled / aborted request. Used to suppress noise from client disconnects
+ * and stream-handler aborts both in `makeShelfError` and in the Sentry
+ * `beforeSend` hook on the server.
+ */
+export function isAbortError(cause: unknown) {
   if (!cause) {
     return false;
   }
@@ -218,10 +224,13 @@ function isAbortError(cause: unknown) {
   if (cause instanceof Error) {
     const name = cause.name?.toLowerCase?.() ?? "";
     const message = cause.message?.toLowerCase?.() ?? "";
-    const code =
-      "code" in cause && typeof (cause as any).code === "string"
-        ? (cause as any).code
-        : "";
+    // Read `code` by narrowing from `unknown` rather than `any` — some error
+    // shapes (Node `ECONNRESET`, AbortSignal, etc.) carry it as a sibling
+    // field. Other browser-side AbortError variants surface their reason via
+    // `message` ("The operation was aborted", "Fetch is aborted") and are
+    // already covered by the message checks below.
+    const codeCandidate: unknown = (cause as { code?: unknown }).code;
+    const code = typeof codeCandidate === "string" ? codeCandidate : "";
 
     if (name === "aborterror") {
       return true;
@@ -230,6 +239,8 @@ function isAbortError(cause: unknown) {
     if (
       message.includes("call aborted") ||
       message.includes("request aborted") ||
+      message.includes("the operation was aborted") ||
+      message.includes("fetch is aborted") ||
       message === "aborted" ||
       code === "ECONNRESET"
     ) {

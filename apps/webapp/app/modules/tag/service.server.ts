@@ -9,7 +9,11 @@ import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  isNotFoundError,
+  ShelfError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -228,6 +232,9 @@ export async function getTag({
         "The tag you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      // Suppress only true Prisma not-found (P2025); let DB / connectivity
+      // failures bubble up to Sentry.
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
