@@ -634,6 +634,7 @@ export async function getTeamMember({
       additionalData: { id, organizationId },
       label,
       status: 404,
+      shouldBeCaptured: false,
     });
   }
 }

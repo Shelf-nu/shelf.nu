@@ -228,6 +228,7 @@ export async function getTag({
         "The tag you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 }

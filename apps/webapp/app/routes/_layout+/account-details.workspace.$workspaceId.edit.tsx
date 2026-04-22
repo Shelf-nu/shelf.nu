@@ -98,6 +98,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
           label: "Organization",
           status: 403,
+          shouldBeCaptured: false,
         });
       });
 
@@ -216,6 +217,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           },
           label: "Organization",
           status: 403,
+          shouldBeCaptured: false,
         });
       });
 

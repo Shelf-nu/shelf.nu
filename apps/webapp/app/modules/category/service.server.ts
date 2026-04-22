@@ -198,6 +198,7 @@ export async function getCategory({
       additionalData: { id, organizationId },
       label,
       status: 404,
+      shouldBeCaptured: false,
     });
   }
 }

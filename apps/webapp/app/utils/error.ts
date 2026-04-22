@@ -210,7 +210,13 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
   );
 }
 
-function isAbortError(cause: unknown) {
+/**
+ * Detects whether an error (or any error in its `cause` chain) represents a
+ * cancelled / aborted request. Used to suppress noise from client disconnects
+ * and stream-handler aborts both in `makeShelfError` and in the Sentry
+ * `beforeSend` hook on the server.
+ */
+export function isAbortError(cause: unknown) {
   if (!cause) {
     return false;
   }

@@ -287,6 +287,7 @@ export async function editAssetReminder({
       cause,
       message,
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -310,6 +311,7 @@ export async function deleteAssetReminder({
         ? "Reminder not found or you are viewing in wrong organization."
         : "Something went wrong while deleting reminder.",
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

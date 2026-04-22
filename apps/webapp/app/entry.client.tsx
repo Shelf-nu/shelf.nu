@@ -55,12 +55,16 @@ if (window.env?.SENTRY_DSN) {
 
       const message = event.exception?.values?.[0]?.value || "";
 
-      // Filter browser compatibility / extension errors (not actionable)
+      // Filter browser compatibility / extension errors (not actionable).
+      // "Expected fetcher: " and "No result found for routeId" are React Router
+      // internal races during navigation, not actionable from app code.
       const ignoredPatterns = [
         "feature named",
         "Unexpected identifier 'https'",
         "Unable to decode turbo-stream",
         "Error in input stream",
+        "Expected fetcher: ",
+        "No result found for routeId",
       ];
       if (ignoredPatterns.some((pattern) => message.includes(pattern))) {
         return null;
@@ -71,12 +75,15 @@ if (window.env?.SENTRY_DSN) {
         return null;
       }
 
-      // Filter client-side network errors (not actionable)
+      // Filter client-side network errors and aborted requests (not actionable)
       if (
         message.includes("Load failed") ||
         message.includes("Failed to fetch") ||
         message.includes("NetworkError") ||
-        message.includes("fetch failed")
+        message.includes("fetch failed") ||
+        message.includes("AbortError") ||
+        message.includes("The operation was aborted") ||
+        message.includes("Fetch is aborted")
       ) {
         return null;
       }

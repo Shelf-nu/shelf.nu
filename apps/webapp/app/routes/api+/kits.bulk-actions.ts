@@ -100,6 +100,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
             additionalData: { userId, kitIds, custodian },
             label: "Kit",
             status: 404,
+            shouldBeCaptured: false,
           });
         });
 
