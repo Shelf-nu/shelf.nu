@@ -380,6 +380,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       quantity: req.quantity,
     }));
 
+    /**
+     * Phase 3d — shape for {@link DynamicSelect}. The picker reads
+     * `initialAssetModels` as its seed list and `totalAssetModels`
+     * to decide whether to offer the "show all / search" affordance.
+     * Availability goes on `metadata` so the renderItem can show
+     * e.g. "5 / 5 available" inline per option.
+     *
+     * Full-org `totalAssetModels` is the right denominator (not the
+     * truncated first-50 list) so the picker can present "searching
+     * 80 of 120 models" correctly.
+     */
+    const initialAssetModels = assetModels.map((m) => ({
+      id: m.id,
+      name: m.name,
+      metadata: {
+        total: m.total,
+        available: m.available,
+        reservedConcrete: m.reservedConcrete,
+        reservedViaRequest: m.reservedViaRequest,
+        inCustody: m.inCustody,
+      },
+    }));
+
     return payload({
       header: {
         title: `Add assets for '${booking?.name}'`,
@@ -409,6 +432,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingKitIds,
       showModelsTab,
       assetModels,
+      initialAssetModels,
+      totalAssetModels: assetModelsCount,
       modelRequests,
     });
   } catch (cause) {

@@ -9,10 +9,14 @@
  *
  * Responsibilities:
  *   1. List existing `BookingModelRequest` rows with a "Remove" button.
- *   2. Offer a picker + quantity input to add a new reservation for a
- *      model that isn't already reserved on this booking.
- *   3. Surface availability ("3 / 5 available") via
- *      {@link AvailabilityBadge} so the user never over-reserves.
+ *   2. Offer a searchable picker + quantity input to add a new
+ *      reservation for a model that isn't already reserved on this
+ *      booking. The picker is {@link DynamicSelect} backed by the
+ *      shared `api+/model-filters.ts` endpoint, so orgs with many
+ *      models (50+) get proper typeahead instead of a flat `<select>`.
+ *   3. Surface availability ("3 / 5 available") inside each picker
+ *      option and on the selected-model hint so the user never
+ *      over-reserves.
  *
  * Submits to
  * {@link file://../../routes/api+/bookings.$bookingId.model-requests.ts}.
@@ -20,15 +24,11 @@
  * {@link getValidationErrors} as a fallback when client-side checks
  * pass but the server still rejects (see CLAUDE.md form-validation
  * pattern).
- *
- * TODO(3d): the picker is a native `<select>` for simplicity — the
- * plan allows falling back from `DynamicSelect` when the wiring is
- * heavyweight. Revisit once this flow graduates to support searching
- * through 500+ models.
  */
 
 import { useMemo, useState } from "react";
 import { useFetcher } from "react-router";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
@@ -65,7 +65,13 @@ export type ManageModelRequestsRequest = {
 export interface ManageModelRequestsProps {
   /** The booking being edited — used to build the API endpoint URL. */
   bookingId: string;
-  /** All AssetModels the user can pick from, pre-sorted by name asc. */
+  /**
+   * Initial page of AssetModels (capped at `MODEL_PICKER_LIMIT` in
+   * the loader) with pre-computed availability on each. Used both as
+   * the fast lookup for the selected model's availability and as the
+   * seed list for `DynamicSelect` — the picker falls through to the
+   * shared `api+/model-filters` endpoint for search beyond this seed.
+   */
   assetModels: ManageModelRequestsModel[];
   /** Existing model-level reservations on this booking. */
   modelRequests: ManageModelRequestsRequest[];
@@ -86,14 +92,12 @@ export function ManageModelRequests({
   /**
    * Models still available to add (i.e. not already reserved on this
    * booking). Recomputed whenever the loader refreshes `modelRequests`.
+   * Passed to {@link DynamicSelect} as `excludeItems` so the picker
+   * hides them server-side and via typeahead.
    */
   const reservedModelIds = useMemo(
-    () => new Set(modelRequests.map((r) => r.assetModelId)),
+    () => modelRequests.map((r) => r.assetModelId),
     [modelRequests]
-  );
-  const pickableModels = useMemo(
-    () => assetModels.filter((m) => !reservedModelIds.has(m.id)),
-    [assetModels, reservedModelIds]
   );
 
   return (
@@ -104,7 +108,11 @@ export function ManageModelRequests({
         modelRequests={modelRequests}
       />
 
-      <AddRequestRow bookingId={bookingId} pickableModels={pickableModels} />
+      <AddRequestRow
+        bookingId={bookingId}
+        assetModels={assetModels}
+        excludeModelIds={reservedModelIds}
+      />
     </div>
   );
 }
@@ -247,28 +255,42 @@ function ExistingRequestRow({
 }
 
 /**
- * The "Add model reservation" row. Picks an unreserved model, clamps
- * the quantity to availability, and POSTs to the model-requests API.
+ * The "Add model reservation" row. Uses {@link DynamicSelect} for the
+ * model picker so large orgs can type-search through their models,
+ * clamps the quantity to the selected model's availability, and POSTs
+ * to the model-requests API.
+ *
+ * Layout: picker + qty input + button on a single row with aligned
+ * bottoms. Helper text (availability hint, validation errors) lives
+ * in a full-width row below so the form controls themselves stay
+ * visually level.
  */
 function AddRequestRow({
   bookingId,
-  pickableModels,
+  assetModels,
+  excludeModelIds,
 }: {
   bookingId: string;
-  pickableModels: ManageModelRequestsModel[];
+  assetModels: ManageModelRequestsModel[];
+  excludeModelIds: string[];
 }) {
   const fetcher = useFetcher({ key: "booking-model-request-add" });
   const disabled = useDisabled(fetcher);
 
-  const [assetModelId, setAssetModelId] = useState<string>(
-    pickableModels[0]?.id ?? ""
+  const [assetModelId, setAssetModelId] = useState<string | undefined>(
+    undefined
   );
   const [quantity, setQuantity] = useState<number>(1);
 
-  /** The currently selected model (for availability hints + max clamp). */
+  /**
+   * Selected model's availability, if we have it locally (initial 50).
+   * Picks up `undefined` for models fetched via typeahead beyond the
+   * loader's seed list — in that case we skip the client-side clamp
+   * and let the server's availability guard handle over-reservation.
+   */
   const selectedModel = useMemo(
-    () => pickableModels.find((m) => m.id === assetModelId),
-    [assetModelId, pickableModels]
+    () => assetModels.find((m) => m.id === assetModelId),
+    [assetModelId, assetModels]
   );
 
   // `getValidationErrors` handles server-side validation errors that
@@ -283,83 +305,91 @@ function AddRequestRow({
       ? (fetcher.data.error as { message?: string }).message ?? null
       : null;
 
-  // We clamp the client-side `max` to the selected model's availability
-  // so the browser's built-in validation is aligned with the server.
-  const maxQuantity = selectedModel?.available ?? 1;
-  const hasAvailability = (selectedModel?.available ?? 0) > 0;
+  // Clamp the client-side `max` to the selected model's availability
+  // when we have it. Beyond the seed list fall back to a permissive
+  // cap — the server is the authoritative guard.
+  const maxQuantity = selectedModel?.available ?? 9999;
+  const hasAvailability = selectedModel == null || selectedModel.available > 0;
+  const pickerHasOptions = assetModels.some(
+    (m) => !excludeModelIds.includes(m.id)
+  );
 
-  if (pickableModels.length === 0) {
-    return (
-      <div>
-        <h3 className="mb-1 text-sm font-semibold text-gray-700">
-          Add model reservation
-        </h3>
-        <p className="text-sm text-gray-500">
-          All available models already have reservations on this booking. Adjust
-          an existing reservation above or remove one first.
-        </p>
-      </div>
-    );
-  }
+  // Render helper text beneath the whole row (availability for the
+  // selected model + "pick something first" prompt).
+  const selectionHint = selectedModel
+    ? `${selectedModel.available} / ${selectedModel.total} available in this window`
+    : assetModelId
+    ? null // selected but not in seed list — no local hint, server validates
+    : "Pick a model to see its availability.";
 
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-gray-700">
         Add model reservation
       </h3>
+
       <fetcher.Form
         method="POST"
         action={`/api/bookings/${bookingId}/model-requests`}
-        className="flex flex-col gap-3 sm:flex-row sm:items-end"
+        className="flex flex-col gap-3 sm:flex-row sm:items-start"
       >
-        <div className="flex-1">
-          <label
-            htmlFor="model-request-picker"
-            className="mb-1 block text-xs font-medium text-gray-700"
-          >
-            Model
-          </label>
-          <select
-            id="model-request-picker"
-            name="assetModelId"
-            value={assetModelId}
-            onChange={(e) => {
-              setAssetModelId(e.target.value);
-              // Reset qty to 1 when switching models so we never carry
-              // a value over the new model's availability.
+        {/* Model picker — DynamicSelect searches the shared model-filters
+            endpoint so orgs with 50+ models get proper typeahead. The
+            `onChange` callback updates our local state so the Qty
+            input can clamp its max based on the selected model's
+            availability. */}
+        <div className="min-w-0 flex-1">
+          <DynamicSelect
+            fieldName="assetModelId"
+            model={{ name: "assetModel", queryKey: "name" }}
+            label="Model"
+            placeholder="Search models..."
+            contentLabel="Asset models"
+            initialDataKey="initialAssetModels"
+            countKey="totalAssetModels"
+            selectionMode="none"
+            closeOnSelect
+            showSearch
+            excludeItems={excludeModelIds}
+            defaultValue={assetModelId}
+            onChange={(id) => {
+              setAssetModelId(id);
               setQuantity(1);
             }}
-            className={tw(
-              "h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm",
-              "focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            )}
-            aria-describedby="model-request-picker-availability"
-          >
-            {pickableModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} — {m.available} / {m.total} available
-              </option>
-            ))}
-          </select>
-          <p
-            id="model-request-picker-availability"
-            className="mt-1 text-xs text-gray-500"
-          >
-            {selectedModel
-              ? `${selectedModel.available} / ${selectedModel.total} available in this window`
-              : null}
-          </p>
-          {validationErrors?.assetModelId?.message ? (
-            <p className="mt-1 text-xs text-error-600" role="alert">
-              {validationErrors.assetModelId.message}
-            </p>
-          ) : null}
+            disabled={disabled}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left"
+            // Render each option with availability on the right so the
+            // operator can see capacity without leaving the dropdown.
+            renderItem={(item) => {
+              const meta = item.metadata as
+                | Partial<ManageModelRequestsModel>
+                | undefined;
+              const available = meta?.available;
+              const total = meta?.total;
+              return (
+                <div className="flex w-full items-center justify-between gap-3">
+                  <span className="truncate">{item.name}</span>
+                  {available != null && total != null ? (
+                    <span
+                      className={tw(
+                        "shrink-0 text-xs tabular-nums",
+                        available > 0 ? "text-gray-500" : "text-amber-600"
+                      )}
+                    >
+                      {available} / {total}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            }}
+          />
         </div>
 
-        <div className="w-full sm:w-32">
+        {/* Quantity — sibling column, same top alignment as the picker. */}
+        <div className="w-full sm:w-28">
           <label
             htmlFor="model-request-quantity"
-            className="mb-1 block text-xs font-medium text-gray-700"
+            className="mb-[6px] block text-[14px] font-medium text-gray-700"
           >
             Quantity
           </label>
@@ -378,41 +408,67 @@ function AddRequestRow({
               setQuantity(clamped);
             }}
             className={tw(
-              "h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm",
+              "h-[38px] w-full rounded-md border border-gray-300 bg-white px-3 text-sm",
               "focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             )}
             aria-label="Quantity to reserve"
+            disabled={disabled || !assetModelId}
           />
-          {validationErrors?.quantity?.message ? (
-            <p className="mt-1 text-xs text-error-600" role="alert">
-              {validationErrors.quantity.message}
-            </p>
-          ) : null}
         </div>
 
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={disabled || !hasAvailability}
-          aria-label="Add model reservation"
-        >
-          {disabled ? "Adding..." : "Add"}
-        </Button>
+        {/* Submit — Add button aligns with the inputs' TOP edge (h-[38px]
+            buttons + matching label spacer) so the whole row reads as
+            three equal-height columns. */}
+        <div className="w-full sm:w-auto">
+          {/* Spacer matching label height so the button sits level with
+              the two inputs. Only visible on sm+ where labels are inline. */}
+          <div
+            aria-hidden
+            className="mb-[6px] hidden h-[18px] text-[14px] leading-none sm:block"
+          />
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={disabled || !assetModelId || !hasAvailability}
+            aria-label="Add model reservation"
+            className="h-[38px] w-full sm:w-auto"
+          >
+            {disabled ? "Adding..." : "Add"}
+          </Button>
+        </div>
       </fetcher.Form>
 
-      {genericServerError &&
-      !validationErrors?.assetModelId &&
-      !validationErrors?.quantity ? (
-        <p className="mt-2 text-xs text-error-600" role="alert">
-          {genericServerError}
-        </p>
-      ) : null}
+      {/* Full-width helper + error line. Kept below the form so the
+          control row stays level regardless of whether a hint is
+          shown. */}
+      <div className="mt-2 min-h-4 text-xs">
+        {validationErrors?.assetModelId?.message ? (
+          <p className="text-error-600" role="alert">
+            {validationErrors.assetModelId.message}
+          </p>
+        ) : validationErrors?.quantity?.message ? (
+          <p className="text-error-600" role="alert">
+            {validationErrors.quantity.message}
+          </p>
+        ) : genericServerError ? (
+          <p className="text-error-600" role="alert">
+            {genericServerError}
+          </p>
+        ) : selectedModel && !hasAvailability ? (
+          <p className="text-amber-700">
+            No units of{" "}
+            <span className="font-semibold">{selectedModel.name}</span> are
+            available in this window.
+          </p>
+        ) : selectionHint ? (
+          <p className="text-gray-500">{selectionHint}</p>
+        ) : null}
+      </div>
 
-      {selectedModel && !hasAvailability ? (
-        <p className="mt-2 text-xs text-amber-700">
-          No units of{" "}
-          <span className="font-semibold">{selectedModel.name}</span> are
-          available in this window.
+      {!pickerHasOptions ? (
+        <p className="mt-2 text-xs text-gray-500">
+          All available models already have reservations on this booking. Adjust
+          an existing reservation above or remove one first.
         </p>
       ) : null}
     </div>
