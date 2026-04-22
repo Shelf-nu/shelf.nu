@@ -31,12 +31,17 @@ if (window.env?.SENTRY_DSN) {
         return null;
       }
 
-      // Suppress consecutive HTTP on /assets/new — React Router form + revalidation
+      // Suppress consecutive HTTP on /assets/new. The route inherently
+      // chains form submit + revalidation + image upload across multiple
+      // HTTP spans, which Sentry's perf detector groups as
+      // `performance_consecutive_http`. Drop any transaction on this route
+      // that includes the form-data submit span — the previous threshold
+      // (`> 1` matching spans) was too narrow and let most events through.
       if (event.transaction === "/assets/new") {
-        const assetNewSpans = spans.filter(
+        const hasAssetNewDataSpan = spans.some(
           (s) => s.description?.includes("/assets/new.data")
         );
-        if (assetNewSpans.length > 1) {
+        if (hasAssetNewDataSpan) {
           return null;
         }
       }
@@ -44,27 +49,59 @@ if (window.env?.SENTRY_DSN) {
       return event;
     },
     beforeSend(event) {
-      // Always send errors from the error boundary — these are user-visible
-      // crashes that must be searchable by the Error ID shown to the user.
-      // Sentry.captureException() returns the event ID synchronously before
-      // beforeSend runs, so filtering here would silently drop the event
-      // while the UI still displays the (now-orphaned) Error ID.
+      const message = event.exception?.values?.[0]?.value || "";
+
+      // Hard-filter browser/framework quirks that are not actionable even
+      // when they bubble up through React Router's error boundary. These
+      // are stream-decode races, React reconciliation aborts mid-navigation,
+      // and browser-extension DOM mutation collisions — all known noise
+      // with no app-side fix. Tradeoff: when one of these surfaces in the
+      // UI, the displayed Error ID will not exist in Sentry. That is
+      // acceptable here because the error itself is not actionable; the
+      // user is told to retry, and Sentry would only collect duplicate
+      // reports of the same untriageable race.
+      const hardIgnoredPatterns = [
+        "Unable to decode turbo-stream",
+        "Error in input stream",
+      ];
+      if (hardIgnoredPatterns.some((pattern) => message.includes(pattern))) {
+        return null;
+      }
+
+      // Same hard-filter for the NotFoundError variants from React DOM
+      // reconciliation (`removeChild`/`insertBefore` on a non-child).
+      // These reach the error boundary because they happen during commit.
+      if (
+        event.exception?.values?.some(
+          (v) =>
+            v.type === "NotFoundError" &&
+            (v.value?.includes("removeChild") ||
+              v.value?.includes("insertBefore"))
+        )
+      ) {
+        return null;
+      }
+
+      // Always send remaining errors from the error boundary — these are
+      // user-visible crashes that must be searchable by the Error ID shown
+      // to the user. Sentry.captureException() returns the event ID
+      // synchronously before beforeSend runs, so filtering past this point
+      // would silently drop the event while the UI still displays the
+      // (now-orphaned) Error ID.
       if (event.tags?.source === "error-boundary") {
         return event;
       }
 
-      const message = event.exception?.values?.[0]?.value || "";
-
       // Filter browser compatibility / extension errors (not actionable).
-      // "Expected fetcher: " and "No result found for routeId" are React Router
-      // internal races during navigation, not actionable from app code.
+      // "Expected fetcher: " and "No result found for routeId" are React
+      // Router internal races during navigation. "Cannot submit a <button>"
+      // is a fetcher.submit edge case from React Router's form helper.
       const ignoredPatterns = [
         "feature named",
         "Unexpected identifier 'https'",
-        "Unable to decode turbo-stream",
-        "Error in input stream",
         "Expected fetcher: ",
         "No result found for routeId",
+        "Cannot submit a <button>",
       ];
       if (ignoredPatterns.some((pattern) => message.includes(pattern))) {
         return null;
@@ -84,18 +121,6 @@ if (window.env?.SENTRY_DSN) {
         message.includes("AbortError") ||
         message.includes("The operation was aborted") ||
         message.includes("Fetch is aborted")
-      ) {
-        return null;
-      }
-
-      // Filter DOM errors from browser extensions (removeChild/insertBefore on non-child)
-      if (
-        event.exception?.values?.some(
-          (v) =>
-            v.type === "NotFoundError" &&
-            (v.value?.includes("removeChild") ||
-              v.value?.includes("insertBefore"))
-        )
       ) {
         return null;
       }
