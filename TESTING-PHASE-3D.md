@@ -77,18 +77,18 @@ rows are created at scan-to-assign time. Scope covered:
 
 ## 2. Reserve a model — happy path
 
-- [ ] On a fresh DRAFT booking with a valid `from` / `to` window:
+- [x] On a fresh DRAFT booking with a valid `from` / `to` window:
       switch to Models tab
-- [ ] Dell Latitude 5550 picker shows availability `5 / 5` (or
+- [x] Dell Latitude 5550 picker shows availability `5 / 5` (or
       similar — total and available match for an unreserved pool)
-- [ ] Enter quantity `3` → click "Add"
-- [ ] Row appears in the "Existing reservations" section:
+- [x] Enter quantity `3` → click "Add"
+- [x] Row appears in the "Existing reservations" section:
       `Dell Latitude 5550 — 3` with a Remove button
-- [ ] Picker excludes Dell Latitude from the Add dropdown (can't
+- [x] Picker excludes Dell Latitude from the Add dropdown (can't
       double-add the same model)
-- [ ] Booking activity log has:
+- [x] Booking activity log has:
       `{actor} reserved **3 × Dell Latitude 5550** for this booking.`
-- [ ] DB: one row in `BookingModelRequest` with `quantity: 3`
+- [x] DB: one row in `BookingModelRequest` with `quantity: 3`
       (SQL below)
 
 ## 3. Over-reserve rejection

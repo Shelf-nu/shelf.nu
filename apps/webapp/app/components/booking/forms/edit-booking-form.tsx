@@ -40,6 +40,12 @@ import { BookingFormSchema } from "./forms-schema";
 
 type BookingFlags = {
   hasAssets: boolean;
+  /**
+   * Phase 3d: booking has ≥ 1 outstanding `BookingModelRequest` row.
+   * Together with `hasAssets`, this lets the Reserve button accept
+   * bookings that only hold model-level reservations.
+   */
+  hasModelRequests?: boolean;
   hasUnavailableAssets: boolean;
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
@@ -256,7 +262,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 disabled={
                   disabled ||
                   isLoadingWorkingHours ||
-                  !bookingFlags?.hasAssets ||
+                  (!bookingFlags?.hasAssets &&
+                    !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasUnavailableAssets
                     ? {
@@ -266,7 +273,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                           ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                           : isProcessing || isLoadingWorkingHours
                           ? undefined
-                          : "You need to add assets to your booking before you can reserve it",
+                          : "You need to add assets or reserve at least one model on your booking before you can reserve it",
                       }
                     : false
                 }

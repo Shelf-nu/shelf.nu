@@ -4868,6 +4868,14 @@ export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
 export async function getBookingFlags(
   booking: Pick<Booking, "id" | "from" | "to"> & {
     assetIds: Asset["id"][];
+    /**
+     * Count of outstanding `BookingModelRequest` rows on this booking.
+     * Phase 3d: a booking with no concrete `BookingAsset` rows but at
+     * least one model-level reservation is still a valid thing to
+     * reserve/check out. Without this, the Reserve button stays
+     * disabled on pure book-by-model bookings.
+     */
+    modelRequestCount?: number;
   }
 ) {
   const assets = await db.asset.findMany({
@@ -4971,6 +4979,7 @@ export async function getBookingFlags(
   );
 
   const hasKits = assets.some((asset) => !!asset.kitId);
+  const hasModelRequests = (booking.modelRequestCount ?? 0) > 0;
 
   return {
     hasAssets,
@@ -4979,6 +4988,7 @@ export async function getBookingFlags(
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
     hasKits,
+    hasModelRequests,
   };
 }
 

@@ -485,7 +485,15 @@ export function BookingAssetsSidebar({
     }));
   };
 
-  const hasItems = booking.bookingAssets.length > 0;
+  // The drawer is worth opening whenever the booking contains anything
+  // worth showing — concrete assets OR outstanding model-level
+  // reservations (Phase 3d). Pure book-by-model bookings legitimately
+  // have `bookingAssets.length === 0` but still carry content.
+  const outstandingModelRequestCount = (booking.modelRequests ?? []).filter(
+    (req) => req.quantity > 0
+  ).length;
+  const hasItems =
+    booking.bookingAssets.length > 0 || outstandingModelRequestCount > 0;
   const defaultTrigger = (
     <Button
       type="button"

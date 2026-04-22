@@ -63,6 +63,7 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -1009,8 +1010,14 @@ export default function AddAssetsToNewBooking() {
    * Local state for the active tab value. Only "models" is rendered
    * inline on this route — switching to "kits" navigates away via the
    * existing `onValueChange` handler. "assets" is the default on mount.
+   *
+   * Seeded from the `tab` search param so callers (e.g. the Reserved
+   * Models section on the booking overview) can deep-link straight
+   * into the Models tab rather than forcing a manual click.
    */
-  const [activeTab, setActiveTab] = useState<"assets" | "models">("assets");
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") === "models" ? "models" : "assets";
+  const [activeTab, setActiveTab] = useState<"assets" | "models">(initialTab);
 
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);

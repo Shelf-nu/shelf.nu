@@ -26,12 +26,13 @@
  * pattern).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
+import { useZorm } from "react-zorm";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
-import type { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
+import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
@@ -184,10 +185,18 @@ function ExistingRequestRow({
   /** Matching loader row — missing when the model was deleted out-of-band. */
   model?: ManageModelRequestsModel;
 }) {
-  const fetcher = useFetcher({
+  // Two fetchers per row — one for the inline upsert (Update button)
+  // and one for the DELETE (Remove button). Keyed per-request so
+  // multiple rows don't share loading state.
+  const updateFetcher = useFetcher({
+    key: `booking-model-request-update-${request.assetModelId}`,
+  });
+  const removeFetcher = useFetcher({
     key: `booking-model-request-remove-${request.assetModelId}`,
   });
-  const disabled = useDisabled(fetcher);
+  const isUpdating = useDisabled(updateFetcher);
+  const isRemoving = useDisabled(removeFetcher);
+  const disabled = isUpdating || isRemoving;
 
   // The loader-provided `available` already excludes the current
   // booking's reservation, so `available + request.quantity` is the
@@ -199,57 +208,190 @@ function ExistingRequestRow({
   const hasShortfall =
     capacityForThisBooking != null && request.quantity > capacityForThisBooking;
 
-  // Surface server-side error from the last delete attempt. Using
-  // `getValidationErrors` with the delete schema isn't worth the
-  // weight — DELETE errors are typically "booking not in DRAFT state"
-  // messages rather than per-field validation.
-  const serverError =
-    fetcher.data && "error" in fetcher.data && fetcher.data.error != null
-      ? (fetcher.data.error as { message?: string }).message ?? null
+  // Inline-edit state for the quantity. Resets whenever the loader
+  // refreshes the server-authoritative `request.quantity` (e.g. after
+  // our own update, or after a concurrent change).
+  const [quantityInput, setQuantityInput] = useState<string>(
+    String(request.quantity)
+  );
+  useEffect(() => {
+    setQuantityInput(String(request.quantity));
+  }, [request.quantity]);
+
+  /**
+   * Client schema for the inline update — same shape as the server
+   * schema, with a superRefine that enforces "can't exceed the cap
+   * this booking is allowed to climb to". We fall back to the bare
+   * server schema when loader-side availability is missing (model
+   * fetched via typeahead beyond the seed list) and let the server
+   * be the authority.
+   */
+  const clientSchema = useMemo(() => {
+    if (capacityForThisBooking == null || model == null) {
+      return UpsertModelRequestSchema;
+    }
+    const max = capacityForThisBooking;
+    const total = model.total;
+    return UpsertModelRequestSchema.superRefine((data, ctx) => {
+      if (data.quantity > max) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["quantity"],
+          message: `Only ${max} of ${total} available in this window — reduce the quantity to continue.`,
+        });
+      }
+    });
+  }, [capacityForThisBooking, model]);
+
+  const zo = useZorm(`EditModelRequest-${request.assetModelId}`, clientSchema);
+
+  const liveParse = useMemo(
+    () =>
+      clientSchema.safeParse({
+        assetModelId: request.assetModelId,
+        quantity: quantityInput,
+      }),
+    [clientSchema, request.assetModelId, quantityInput]
+  );
+  const isValid = liveParse.success;
+  const liveFieldErrors = !liveParse.success
+    ? liveParse.error.flatten().fieldErrors
+    : undefined;
+  const isDirty = quantityInput.trim() !== String(request.quantity);
+
+  const updateServerErrors = getValidationErrors<
+    typeof UpsertModelRequestSchema
+  >(
+    updateFetcher.data && "error" in updateFetcher.data
+      ? updateFetcher.data.error
+      : undefined
+  );
+  const updateGenericError =
+    updateFetcher.data &&
+    "error" in updateFetcher.data &&
+    updateFetcher.data.error != null
+      ? (updateFetcher.data.error as { message?: string }).message ?? null
+      : null;
+  const removeGenericError =
+    removeFetcher.data &&
+    "error" in removeFetcher.data &&
+    removeFetcher.data.error != null
+      ? (removeFetcher.data.error as { message?: string }).message ?? null
       : null;
 
+  const quantityError =
+    updateServerErrors?.quantity?.message ||
+    zo.errors.quantity()?.message ||
+    liveFieldErrors?.quantity?.[0];
+
   return (
-    <li className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-gray-900">
-          {request.assetModelName}
-        </span>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-          <span>
-            {request.quantity} reserved
-            {model ? ` · ${model.total} total in workspace` : null}
+    <li className="flex flex-col gap-3 p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="truncate text-sm font-medium text-gray-900">
+            {request.assetModelName}
           </span>
-          {hasShortfall ? (
-            <AvailabilityBadge
-              badgeText="Over-reserved"
-              tooltipTitle="Model over-reserved"
-              tooltipContent={`Only ${capacityForThisBooking} unit${
-                capacityForThisBooking === 1 ? "" : "s"
-              } available for this window — someone else may have reserved more after you. Reduce the quantity or remove the reservation to resolve.`}
-            />
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span>
+              {request.quantity} reserved
+              {model ? ` · ${model.total} total in workspace` : null}
+            </span>
+            {hasShortfall ? (
+              <AvailabilityBadge
+                badgeText="Over-reserved"
+                tooltipTitle="Model over-reserved"
+                tooltipContent={`Only ${capacityForThisBooking} unit${
+                  capacityForThisBooking === 1 ? "" : "s"
+                } available for this window — someone else may have reserved more after you. Reduce the quantity or remove the reservation to resolve.`}
+              />
+            ) : null}
+          </div>
         </div>
-        {serverError ? (
-          <span className="text-xs text-error-600" role="alert">
-            {serverError}
-          </span>
-        ) : null}
+
+        <div className="flex items-center gap-2">
+          {/* Inline upsert form — same endpoint as the Add row, just
+              pre-filled with this row's assetModelId. Enables the
+              "edit existing reservation" flow per TESTING-PHASE-3D §4. */}
+          <updateFetcher.Form
+            ref={zo.ref}
+            method="POST"
+            action={`/api/bookings/${bookingId}/model-requests`}
+            className="flex items-center gap-2"
+          >
+            <input
+              type="hidden"
+              name={zo.fields.assetModelId()}
+              value={request.assetModelId}
+            />
+            <label
+              htmlFor={`model-request-quantity-${request.assetModelId}`}
+              className="sr-only"
+            >
+              Quantity for {request.assetModelName}
+            </label>
+            <input
+              id={`model-request-quantity-${request.assetModelId}`}
+              type="number"
+              name={zo.fields.quantity()}
+              min={1}
+              step={1}
+              value={quantityInput}
+              onChange={(e) => setQuantityInput(e.target.value)}
+              className={tw(
+                "h-[34px] w-20 rounded-md border bg-white px-2 text-sm tabular-nums",
+                "focus:outline-none focus:ring-1",
+                quantityError
+                  ? "border-error-500 focus:border-error-500 focus:ring-error-500"
+                  : "border-gray-300 focus:border-primary-500 focus:ring-primary-500"
+              )}
+              aria-label={`New quantity for ${request.assetModelName}`}
+              aria-invalid={quantityError ? true : undefined}
+              disabled={disabled}
+            />
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={disabled || !isDirty || !isValid}
+              aria-label={`Update reservation for ${request.assetModelName}`}
+            >
+              {isUpdating ? "Saving..." : "Update"}
+            </Button>
+          </updateFetcher.Form>
+
+          <removeFetcher.Form
+            method="DELETE"
+            action={`/api/bookings/${bookingId}/model-requests`}
+          >
+            <input
+              type="hidden"
+              name="assetModelId"
+              value={request.assetModelId}
+            />
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={disabled}
+              aria-label={`Remove reservation for ${request.assetModelName}`}
+            >
+              {isRemoving ? "Removing..." : "Remove"}
+            </Button>
+          </removeFetcher.Form>
+        </div>
       </div>
 
-      <fetcher.Form
-        method="DELETE"
-        action={`/api/bookings/${bookingId}/model-requests`}
-      >
-        <input type="hidden" name="assetModelId" value={request.assetModelId} />
-        <Button
-          type="submit"
-          variant="secondary"
-          disabled={disabled}
-          aria-label={`Remove reservation for ${request.assetModelName}`}
-        >
-          {disabled ? "Removing..." : "Remove"}
-        </Button>
-      </fetcher.Form>
+      {quantityError ? (
+        <p className="text-xs text-error-600" role="alert">
+          {quantityError}
+        </p>
+      ) : updateGenericError ? (
+        <p className="text-xs text-error-600" role="alert">
+          {updateGenericError}
+        </p>
+      ) : removeGenericError ? (
+        <p className="text-xs text-error-600" role="alert">
+          {removeGenericError}
+        </p>
+      ) : null}
     </li>
   );
 }
@@ -280,42 +422,98 @@ function AddRequestRow({
   const [assetModelId, setAssetModelId] = useState<string | undefined>(
     undefined
   );
-  const [quantity, setQuantity] = useState<number>(1);
+  // Controlled so we can imperatively reset on successful submit + on
+  // model change without fighting the browser's number input.
+  const [quantityInput, setQuantityInput] = useState<string>("1");
 
   /**
    * Selected model's availability, if we have it locally (initial 50).
    * Picks up `undefined` for models fetched via typeahead beyond the
-   * loader's seed list — in that case we skip the client-side clamp
-   * and let the server's availability guard handle over-reservation.
+   * loader's seed list — in that case we rely on the server's
+   * availability guard to reject over-reservation.
    */
   const selectedModel = useMemo(
     () => assetModels.find((m) => m.id === assetModelId),
     [assetModelId, assetModels]
   );
 
-  // `getValidationErrors` handles server-side validation errors that
-  // slipped past client-side checks (e.g. someone concurrently reserved
-  // and dropped our availability to zero). Per CLAUDE.md form-validation
-  // pattern.
-  const validationErrors = getValidationErrors<typeof UpsertModelRequestSchema>(
-    fetcher.data && "error" in fetcher.data ? fetcher.data.error : undefined
+  /**
+   * Client-side schema: same contract as the server's
+   * `UpsertModelRequestSchema`, plus a `superRefine` that enforces the
+   * selected model's availability so users get inline feedback without
+   * a server round-trip. The server schema remains authoritative — this
+   * is strictly a UX layer. Rebuilt whenever the selected model (and
+   * therefore its availability) changes.
+   */
+  const clientSchema = useMemo(() => {
+    if (!selectedModel) return UpsertModelRequestSchema;
+    const { available, total } = selectedModel;
+    return UpsertModelRequestSchema.superRefine((data, ctx) => {
+      if (data.quantity > available) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["quantity"],
+          message: `Only ${available} of ${total} available in this window — reduce the quantity to continue.`,
+        });
+      }
+    });
+  }, [selectedModel]);
+
+  const zo = useZorm("AddModelRequest", clientSchema);
+
+  /**
+   * Live parse of the current form state. Drives the Add button's
+   * `disabled` attribute so users can't submit invalid data in the
+   * first place. `z.coerce.number()` accepts the input string directly.
+   */
+  const liveParse = useMemo(
+    () =>
+      clientSchema.safeParse({
+        assetModelId: assetModelId ?? "",
+        quantity: quantityInput,
+      }),
+    [clientSchema, assetModelId, quantityInput]
   );
+  const isValid = liveParse.success;
+  const liveFieldErrors = !liveParse.success
+    ? liveParse.error.flatten().fieldErrors
+    : undefined;
+
+  // After a successful Add, wipe the local picker + quantity. Without
+  // this the just-reserved model is still "selected" in the UI even
+  // though the loader has already moved it into the excluded list.
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    const hasError = "error" in fetcher.data && fetcher.data.error != null;
+    if (hasError) return;
+    setAssetModelId(undefined);
+    setQuantityInput("1");
+  }, [fetcher.state, fetcher.data]);
+
+  // Server-side errors take precedence over live client errors — a
+  // concurrent reservation may have dropped availability after the user
+  // typed. Per CLAUDE.md form-validation pattern.
+  const serverValidationErrors = getValidationErrors<
+    typeof UpsertModelRequestSchema
+  >(fetcher.data && "error" in fetcher.data ? fetcher.data.error : undefined);
   const genericServerError =
     fetcher.data && "error" in fetcher.data && fetcher.data.error != null
       ? (fetcher.data.error as { message?: string }).message ?? null
       : null;
 
-  // Clamp the client-side `max` to the selected model's availability
-  // when we have it. Beyond the seed list fall back to a permissive
-  // cap — the server is the authoritative guard.
-  const maxQuantity = selectedModel?.available ?? 9999;
   const hasAvailability = selectedModel == null || selectedModel.available > 0;
   const pickerHasOptions = assetModels.some(
     (m) => !excludeModelIds.includes(m.id)
   );
 
-  // Render helper text beneath the whole row (availability for the
-  // selected model + "pick something first" prompt).
+  // Only show the quantity-specific client error once the user has
+  // picked a model — before that, the button is disabled and the hint
+  // below prompts them to pick.
+  const quantityError =
+    serverValidationErrors?.quantity?.message ||
+    zo.errors.quantity()?.message ||
+    (assetModelId ? liveFieldErrors?.quantity?.[0] : undefined);
+
   const selectionHint = selectedModel
     ? `${selectedModel.available} / ${selectedModel.total} available in this window`
     : assetModelId
@@ -329,18 +527,18 @@ function AddRequestRow({
       </h3>
 
       <fetcher.Form
+        ref={zo.ref}
         method="POST"
         action={`/api/bookings/${bookingId}/model-requests`}
         className="flex flex-col gap-3 sm:flex-row sm:items-start"
       >
         {/* Model picker — DynamicSelect searches the shared model-filters
             endpoint so orgs with 50+ models get proper typeahead. The
-            `onChange` callback updates our local state so the Qty
-            input can clamp its max based on the selected model's
-            availability. */}
+            `fieldName` is driven by zorm so the submitted form payload
+            matches the server schema exactly. */}
         <div className="min-w-0 flex-1">
           <DynamicSelect
-            fieldName="assetModelId"
+            fieldName={zo.fields.assetModelId()}
             model={{ name: "assetModel", queryKey: "name" }}
             label="Model"
             placeholder="Search models..."
@@ -354,7 +552,7 @@ function AddRequestRow({
             defaultValue={assetModelId}
             onChange={(id) => {
               setAssetModelId(id);
-              setQuantity(1);
+              setQuantityInput("1");
             }}
             disabled={disabled}
             triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left"
@@ -396,22 +594,20 @@ function AddRequestRow({
           <input
             id="model-request-quantity"
             type="number"
-            name="quantity"
+            name={zo.fields.quantity()}
             min={1}
-            max={maxQuantity}
             step={1}
-            value={quantity}
-            onChange={(e) => {
-              const parsed = Number(e.target.value);
-              if (Number.isNaN(parsed)) return;
-              const clamped = Math.max(1, Math.min(parsed, maxQuantity));
-              setQuantity(clamped);
-            }}
+            value={quantityInput}
+            onChange={(e) => setQuantityInput(e.target.value)}
             className={tw(
-              "h-[38px] w-full rounded-md border border-gray-300 bg-white px-3 text-sm",
-              "focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              "h-[38px] w-full rounded-md border bg-white px-3 text-sm",
+              "focus:outline-none focus:ring-1",
+              quantityError
+                ? "border-error-500 focus:border-error-500 focus:ring-error-500"
+                : "border-gray-300 focus:border-primary-500 focus:ring-primary-500"
             )}
             aria-label="Quantity to reserve"
+            aria-invalid={quantityError ? true : undefined}
             disabled={disabled || !assetModelId}
           />
         </div>
@@ -429,7 +625,7 @@ function AddRequestRow({
           <Button
             type="submit"
             variant="primary"
-            disabled={disabled || !assetModelId || !hasAvailability}
+            disabled={disabled || !isValid || !hasAvailability}
             aria-label="Add model reservation"
             className="h-[38px] w-full sm:w-auto"
           >
@@ -440,22 +636,24 @@ function AddRequestRow({
 
       {/* Full-width helper + error line. Kept below the form so the
           control row stays level regardless of whether a hint is
-          shown. */}
+          shown. Priority: server asset-model error → server generic
+          error → quantity error (server → zorm → live) → no-availability
+          hint → availability hint. */}
       <div className="mt-2 min-h-4 text-xs">
-        {validationErrors?.assetModelId?.message ? (
+        {serverValidationErrors?.assetModelId?.message ? (
           <p className="text-error-600" role="alert">
-            {validationErrors.assetModelId.message}
-          </p>
-        ) : validationErrors?.quantity?.message ? (
-          <p className="text-error-600" role="alert">
-            {validationErrors.quantity.message}
+            {serverValidationErrors.assetModelId.message}
           </p>
         ) : genericServerError ? (
           <p className="text-error-600" role="alert">
             {genericServerError}
           </p>
+        ) : quantityError ? (
+          <p className="text-error-600" role="alert">
+            {quantityError}
+          </p>
         ) : selectedModel && !hasAvailability ? (
-          <p className="text-amber-700">
+          <p className="text-error-600">
             No units of{" "}
             <span className="font-semibold">{selectedModel.name}</span> are
             available in this window.

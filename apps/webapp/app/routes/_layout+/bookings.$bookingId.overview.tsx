@@ -417,6 +417,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getBookingFlags({
         id: booking.id,
         assetIds: bookingAssets.map((a) => a.id),
+        // Phase 3d: an "empty" booking with only model-level reservations
+        // must still be reservable. Passing the count lets the flags
+        // helper surface `hasModelRequests` for the Reserve disable check.
+        modelRequestCount: booking.modelRequests?.length ?? 0,
         from: booking.from,
         to: booking.to,
       }),

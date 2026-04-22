@@ -292,6 +292,18 @@ export async function upsertBookingModelRequest({
         });
       }
 
+      // Peek at the existing row so we can write a note that
+      // distinguishes create / increase / decrease / no-op. Without
+      // this, every upsert produced an identical "reserved N × Model"
+      // line which was indistinguishable from the next update.
+      const existing = await tx.bookingModelRequest.findUnique({
+        where: {
+          bookingId_assetModelId: { bookingId, assetModelId },
+        },
+        select: { quantity: true },
+      });
+      const previousQuantity = existing?.quantity ?? null;
+
       const request = await tx.bookingModelRequest.upsert({
         where: {
           bookingId_assetModelId: { bookingId, assetModelId },
@@ -304,19 +316,36 @@ export async function upsertBookingModelRequest({
         update: { quantity },
       });
 
-      return { request, booking, assetModel };
+      return { request, booking, assetModel, previousQuantity };
     });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
-    // can't roll back the upsert.
-    try {
-      const actor = await loadActor(userId);
-      await createSystemBookingNote({
-        bookingId,
-        content: `${actor} reserved **${quantity} × ${result.assetModel.name}** for this booking.`,
-      });
-    } catch {
-      // note failure is non-fatal — the reservation itself committed
+    // can't roll back the upsert. Phrasing depends on whether this was
+    // a create, an increase, a decrease, or a no-op:
+    //   - create   : "reserved **N × Model** for this booking."
+    //   - increase : "increased the **Model** reservation from **M** to **N**."
+    //   - decrease : "decreased the **Model** reservation from **M** to **N**."
+    //   - no-op    : skip the note entirely (nothing actually changed)
+    const { assetModel, previousQuantity } = result;
+    let content: string | null = null;
+    if (previousQuantity == null) {
+      content = `{actor} reserved **${quantity} × ${assetModel.name}** for this booking.`;
+    } else if (quantity > previousQuantity) {
+      content = `{actor} increased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+    } else if (quantity < previousQuantity) {
+      content = `{actor} decreased the **${assetModel.name}** reservation from **${previousQuantity}** to **${quantity}**.`;
+    }
+
+    if (content != null) {
+      try {
+        const actor = await loadActor(userId);
+        await createSystemBookingNote({
+          bookingId,
+          content: content.replace("{actor}", actor),
+        });
+      } catch {
+        // note failure is non-fatal — the reservation itself committed
+      }
     }
 
     return result.request;

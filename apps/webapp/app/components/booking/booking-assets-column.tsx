@@ -152,11 +152,33 @@ export function BookingAssetsColumn() {
       .flat();
   }
 
+  // Phase 3d: surface any outstanding model-level reservations in a
+  // dedicated section above the asset filters. Rows with `quantity: 0`
+  // (fully materialised into concrete BookingAssets) are filtered out
+  // so the section disappears once every unit has been scanned to a
+  // specific asset.
+  const outstandingModelRequests = useMemo(
+    () =>
+      (booking.modelRequests ?? []).filter(
+        (req: { quantity: number }) => req.quantity > 0
+      ),
+    [booking.modelRequests]
+  );
+
   return (
     <div className="flex-1">
       <div className="w-full">
         <TextualDivider text="Assets & Kits" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden"></div>
+
+        {outstandingModelRequests.length > 0 ? (
+          <ReservedModelsSection
+            modelRequests={outstandingModelRequests}
+            manageAssetsUrl={manageAssetsUrl}
+            manageAssetsButtonDisabled={manageAssetsButtonDisabled}
+          />
+        ) : null}
+
         <div className="flex flex-col">
           {/* Filters */}
           <div className="mb-2">
@@ -377,6 +399,84 @@ function BookingAssetsHeader({
           </Button>
         </div>
       </When>
+    </div>
+  );
+}
+
+/**
+ * Reserved models section (Phase 3d — Book-by-Model).
+ *
+ * Displays outstanding `BookingModelRequest` rows as a standalone block
+ * above the filtered asset/kit list, so operators can see what's
+ * reserved at the model level without opening the manage-assets modal.
+ * Visual style mirrors the asset table header + list-container so it
+ * sits comfortably alongside the existing Assets & Kits block.
+ *
+ * When the booking is in a state that accepts edits (controlled by
+ * `manageAssetsButtonDisabled`), the header exposes a direct link to
+ * the Models tab in manage-assets for quick adjustments.
+ */
+function ReservedModelsSection({
+  modelRequests,
+  manageAssetsUrl,
+  manageAssetsButtonDisabled,
+}: {
+  modelRequests: Array<{
+    id: string;
+    assetModelId: string;
+    quantity: number;
+    assetModel: { id: string; name: string };
+  }>;
+  manageAssetsUrl: string;
+  manageAssetsButtonDisabled: BookingAssetsHeaderProps["manageAssetsButtonDisabled"];
+}) {
+  const totalUnits = useMemo(
+    () => modelRequests.reduce((sum, req) => sum + req.quantity, 0),
+    [modelRequests]
+  );
+
+  return (
+    <div className="mb-6">
+      <div className="-mx-4 flex items-center justify-between border border-b-0 bg-white px-4 pb-3 pt-4 md:mx-0 md:rounded-t md:px-6">
+        <div>
+          <h5 className="text-left text-[16px] font-semibold text-gray-900">
+            Reserved models ({totalUnits})
+          </h5>
+          <p className="text-sm text-gray-500">
+            {modelRequests.length}{" "}
+            {modelRequests.length === 1 ? "model" : "models"} reserved — units
+            are materialised onto specific assets via scan-to-assign.
+          </p>
+        </div>
+        <Button
+          to={`${manageAssetsUrl}&tab=models`}
+          variant="secondary"
+          size="sm"
+          disabled={manageAssetsButtonDisabled}
+          className="whitespace-nowrap"
+        >
+          Manage
+        </Button>
+      </div>
+      <div className="-mx-4 overflow-x-auto border border-gray-200 bg-white md:mx-0 md:rounded-b">
+        <table className="w-full border-collapse">
+          <tbody>
+            {modelRequests.map((req) => (
+              <tr
+                key={req.id}
+                className="border-b border-gray-200 last:border-b-0"
+              >
+                <td className="px-6 py-3 text-sm font-medium text-gray-900">
+                  {req.assetModel.name}
+                </td>
+                <td className="px-6 py-3 text-right text-sm tabular-nums text-gray-700">
+                  × {req.quantity}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

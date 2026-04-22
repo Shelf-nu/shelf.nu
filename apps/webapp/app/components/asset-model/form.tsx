@@ -70,6 +70,8 @@ export default function AssetModelForm({
 }: AssetModelFormProps) {
   const zo = useZorm("AssetModelForm", AssetModelFormSchema);
   const fetcher = useFetcherWithReset<typeof action>();
+  // Fetcher-scoped disabled for the inline/dialog mode. The full-page mode
+  // uses navigation-based disabled wired up inside FullPageForm.
   const disabled = useDisabled(fetcher);
 
   /** Whether the form is used inside a dialog with an onSuccess callback. */
@@ -170,7 +172,7 @@ export default function AssetModelForm({
   /*  Full-page Card mode                                                */
   /* ------------------------------------------------------------------ */
 
-  return <FullPageForm assetModel={assetModel} disabled={disabled} />;
+  return <FullPageForm assetModel={assetModel} />;
 }
 
 /* ====================================================================== */
@@ -184,12 +186,13 @@ export default function AssetModelForm({
  */
 function FullPageForm({
   assetModel,
-  disabled,
 }: {
   assetModel?: AssetModelFormProps["assetModel"];
-  disabled: boolean;
 }) {
   const zo = useZorm("AssetModelForm", AssetModelFormSchema);
+  // Page form submits via navigation, so the disabled state must watch the
+  // router's navigation state — not a fetcher.
+  const disabled = useDisabled();
   const { currency } = useLoaderData<{
     currency: string;
     categories: unknown[];

@@ -156,7 +156,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
-        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        extraInclude: {
+          tags: TAG_WITH_COLOR_SELECT,
+          // Phase 3d: include outstanding model-level reservations so the
+          // assets-sidebar drawer can render the "Unassigned model
+          // reservations (N)" section — and so the drawer trigger opens
+          // for pure book-by-model bookings (0 concrete assets, N
+          // reserved models).
+          modelRequests: {
+            include: {
+              assetModel: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
       }),
 
       // team members for filter dropdown
@@ -510,6 +524,16 @@ const ListBookingsContent = ({
       custodianUser: true;
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
+      // Phase 3d: included via `extraInclude` in the loader above so
+      // the assets-sidebar drawer can show outstanding model
+      // reservations.
+      modelRequests: {
+        include: {
+          assetModel: {
+            select: { id: true; name: true };
+          };
+        };
+      };
     };
   }>;
 }) => {
