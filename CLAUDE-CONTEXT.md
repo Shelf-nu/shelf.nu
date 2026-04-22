@@ -273,15 +273,98 @@ returnedQty)` matrix.
 
 ---
 
-### Sub-phase 3d: Book-by-Model (NOT STARTED)
+### Sub-phase 3d: Book-by-Model (COMPLETED)
 
-- New `BookingModelRequest` model (schema change needed)
-- Reserve by model service
-- Scan-to-assign at checkout
-- Availability accounting for model requests
-- UI: model picker, fulfillment status, scanner drawer mode
-- Depends on sub-phase 3c so model-based bookings check in with the same
-  quantity/consumption semantics as direct qty bookings.
+Shipped in commit `e5cbd7568`. Plan file:
+`/home/donkoko/.claude/plans/phase-3d-book-by-model.md`. Manual test
+checklist: `TESTING-PHASE-3D.md` at repo root.
+
+- New `BookingModelRequest` pivot table (`{bookingId, assetModelId,
+quantity}` with `@@unique([bookingId, assetModelId])`). Intent
+  row; decrements on scan, deletes on last unit.
+- Migration: `20260421125426_add_booking_model_request`.
+- Service module `modules/booking-model-request/service.server.ts`:
+  `getAssetModelAvailability`, `upsertBookingModelRequest`,
+  `removeBookingModelRequest`, `materializeModelRequestForAsset`.
+  All tx-aware; availability subtracts custody + concrete
+  BookingAsset reservations + other bookings' model-level
+  requests within the date window.
+- Checkout hard-block in `checkoutBooking` when any request has
+  `quantity > 0`. No `forcePartial` — security over flexibility.
+  Error payload carries `outstanding: [{assetModelName, remaining}]`
+  for UI surfacing.
+- Scan-to-assign integrates into `addScannedAssetsToBooking`:
+  unmatched scans fall through to the existing direct-
+  BookingAsset path (no regression for model-free bookings).
+- HTTP route `api+/bookings.$bookingId.model-requests.ts` (POST
+  upsert / DELETE remove).
+- UI: manage-assets gains a **Models** tab (picker + per-model
+  availability hints + remove buttons); sidebar shows
+  "Unassigned model reservations (N)" above the asset list;
+  reservation email + PDF both gain "Requested models" sections.
+- +17 unit tests (15 service + 2 checkout guard); full
+  `webapp:validate` green (130 files, 1742 tests).
+
+### Sub-phase 3d follow-ups (NOT STARTED)
+
+Found during manual testing of 3d — worth a dedicated sub-phase
+rather than stretching 3d itself.
+
+1. **Bulk-create assets per model.** Currently you can only create
+   one asset at a time from an `AssetModel`. For orgs with large
+   fleets (10 of the same laptop, 20 of the same battery) this is
+   tedious. Add a "Create N assets from this model" action on the
+   AssetModel detail page that:
+   - Takes a quantity + a title-template (e.g. `Dell Latitude {i}`)
+     or a base title that gets suffixed
+   - Creates all assets in one transaction with the model's
+     defaults (category, valuation) pre-applied
+   - Surfaces progress / rolls back on partial failure
+   - Could also support per-asset QR codes generated up-front
+2. **Asset index grouped by model.** The current asset index lists
+   every asset flat. For orgs using models heavily, a "group by
+   model" view would:
+   - Show each `AssetModel` as a collapsible header with the
+     count of assets underneath and a "N available / M total"
+     summary
+   - Collapse individual assets under the header by default; click
+     to expand
+   - Filter / search still works across the flattened list — the
+     grouping is purely a view toggle
+   - Needs server-side aggregation since client-side grouping
+     across pages doesn't work
+3. **Import round-trip for `AssetModel`.** The export CSV already
+   includes an `assetModel` column (see `csv.server.ts:505`
+   reading `asset.assetModelName`), but
+   `createAssetsFromContentImport` in `modules/asset/service.server.ts:2495`
+   does NOT handle it — the module uses
+   `createKitsIfNotExists` / `createCategoriesIfNotExists` /
+   `createLocationsIfNotExists` / `createTagsIfNotExists` /
+   `createTeamMembersIfNotExists` / `createCustomFieldsIfNotExists`
+   but has no `createAssetModelsIfNotExists` sibling, so the
+   export→import round-trip silently drops the model link.
+   Add:
+   - `createAssetModelsIfNotExists({ data, userId, organizationId })`
+     helper that upserts `AssetModel` rows by name (org-scoped,
+     case-insensitive match to tolerate casing drift in CSVs)
+   - Wire the helper into the `Promise.all` batch around
+     `service.server.ts:2558-2580` alongside the other related
+     entities
+   - Pass the resolved `assetModelId` into the per-asset `create`
+     block in the same tx (mirrors the existing `categoryId`
+     handling)
+   - Update the sample / downloadable template CSV so admins
+     know the column exists on import, not just export
+   - Handles `assetModel = ""` as "no model" (clears on update
+     imports per the backup-import path)
+   - Backup import (`createAssetsFromBackupImport` at
+     `service.server.ts:2867`) needs the same treatment
+
+Tracking as a future Phase 3d.1 (or whatever we call it) — blocks
+nothing, worth scoping once we decide the model UX direction.
+Natural order: bulk-create first (operators need to populate
+models), then import round-trip (CSV parity with categories /
+kits), then index grouping (last because it's the most UX-heavy).
 
 ### Sub-phase 3e: Calendar + Polish (NOT STARTED)
 
