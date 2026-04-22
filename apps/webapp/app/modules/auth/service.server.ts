@@ -296,7 +296,12 @@ export async function sendOTP(email: string) {
       typeof cause === "object" && cause !== null && "code" in cause
         ? (cause as { code: unknown }).code
         : undefined;
-    const isRateLimitError = errorCode === "over_email_send_rate_limit";
+    // Match `signInWithEmail`'s rate-limit handling: cover both the
+    // Supabase OTP-specific `over_email_send_rate_limit` code and the
+    // generic HTTP 429 `AuthApiError` (which can carry a different code).
+    const isRateLimitError =
+      errorCode === "over_email_send_rate_limit" ||
+      (isAuthApiError(cause) && cause.status === 429);
     // Supabase 504s and intermittent fetch failures resolve on retry.
     const isTransientFetchError = isAuthRetryableFetchError(cause);
     // "Database error finding user" — Supabase backend hiccup, not actionable.
