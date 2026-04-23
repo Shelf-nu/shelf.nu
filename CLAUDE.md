@@ -206,6 +206,33 @@ const disabled = useDisabled(fetcher);
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
 
+### Suppressing react-doctor / lint findings
+
+`pnpm webapp:doctor` is advisory, not a CI gate, but we aim to keep it clean. When a finding is a documented false positive or fixing it would regress UX, suppress it with the standard ESLint inline comment **and** a `why:` line:
+
+```tsx
+// eslint-disable-next-line <rule-name> -- why: <reason>
+<SomeComponent />
+```
+
+The `--` separator is ESLint's standard form for disable-with-explanation.
+
+Example — intentional modal focus management:
+
+```tsx
+// eslint-disable-next-line jsx-a11y/no-autofocus -- why: first-field focus is intentional modal behavior
+<Input autoFocus />
+```
+
+**When to suppress vs refactor:**
+
+- **Suppress** — when the finding is a proven false positive (static template, server-controlled content, intentional UX pattern) OR when the refactor would regress behavior.
+- **Refactor** — when the finding represents an actual bug or code smell. Default to fixing; suppression is the escape hatch, not the norm.
+
+**The `why:` line is mandatory.** It mirrors the mock-justification convention from the testing section — reviewers must be able to judge whether the suppression is still valid later.
+
+**For static CSS injection (the `react/no-danger` rule)**, prefer React's native `<style>{cssString}</style>` form — it's safe, raises no finding, and needs no suppression. See `apps/webapp/app/components/shared/mobile-dropdown-styles.tsx` for the reusable mobile-dropdown helper.
+
 ### Form Validation Pattern (Required)
 
 **IMPORTANT:** All forms MUST display server-side validation errors as a fallback. Client-side validation can fail or be bypassed, so server-side errors must always be shown to users.

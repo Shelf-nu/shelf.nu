@@ -21,6 +21,7 @@ import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { CloudflareWebAnalytics } from "./components/marketing/cloudflare-web-analytics";
+import { AnimationProvider } from "./components/shared/animation-provider";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
@@ -144,7 +145,9 @@ function App() {
     />
   ) : (
     <PwaManagerProvider>
-      <Outlet />
+      <AnimationProvider>
+        <Outlet />
+      </AnimationProvider>
     </PwaManagerProvider>
   );
 }
