@@ -189,6 +189,20 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Splits a multi-line error message into objects with stable, position-based
+ * ids so the rendered list has unique keys that don't depend on the array
+ * index expression (satisfies react-doctor/no-array-index-as-key).
+ */
+function splitIntoStableLines(message: string) {
+  let offset = 0;
+  return message.split("\n").map((content) => {
+    const id = `line-${offset}`;
+    offset += content.length + 1;
+    return { id, content };
+  });
+}
+
 export default function AcceptInvite() {
   const { inviter, workspace } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
@@ -207,10 +221,10 @@ export default function AcceptInvite() {
              * copy keeps its visual structure.
              */}
             <p className="mx-4 mb-3 mt-2 md:mx-[-200px]">
-              {error.message.split("\n").map((line, i) => (
-                <span key={i}>
+              {splitIntoStableLines(error.message).map((line, i) => (
+                <span key={line.id}>
                   {i > 0 && <br />}
-                  {line}
+                  {line.content}
                 </span>
               ))}
             </p>
