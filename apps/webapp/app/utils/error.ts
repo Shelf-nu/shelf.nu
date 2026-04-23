@@ -210,7 +210,13 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
   );
 }
 
-function isAbortError(cause: unknown) {
+/**
+ * Detects whether an error (or any error in its `cause` chain) represents a
+ * cancelled / aborted request. Used to suppress noise from client disconnects
+ * and stream-handler aborts both in `makeShelfError` and in the Sentry
+ * `beforeSend` hook on the server.
+ */
+export function isAbortError(cause: unknown) {
   if (!cause) {
     return false;
   }
@@ -218,10 +224,13 @@ function isAbortError(cause: unknown) {
   if (cause instanceof Error) {
     const name = cause.name?.toLowerCase?.() ?? "";
     const message = cause.message?.toLowerCase?.() ?? "";
-    const code =
-      "code" in cause && typeof (cause as any).code === "string"
-        ? (cause as any).code
-        : "";
+    // Read `code` by narrowing from `unknown` rather than `any` — some error
+    // shapes (Node `ECONNRESET`, AbortSignal, etc.) carry it as a sibling
+    // field. Other browser-side AbortError variants surface their reason via
+    // `message` ("The operation was aborted", "Fetch is aborted") and are
+    // already covered by the message checks below.
+    const codeCandidate: unknown = (cause as { code?: unknown }).code;
+    const code = typeof codeCandidate === "string" ? codeCandidate : "";
 
     if (name === "aborterror") {
       return true;
@@ -230,6 +239,8 @@ function isAbortError(cause: unknown) {
     if (
       message.includes("call aborted") ||
       message.includes("request aborted") ||
+      message.includes("the operation was aborted") ||
+      message.includes("fetch is aborted") ||
       message === "aborted" ||
       code === "ECONNRESET"
     ) {
@@ -287,7 +298,7 @@ export function isPrismaTransientError(cause: unknown): boolean {
   if ("code" in cause && typeof cause.code === "string") {
     return PRISMA_TRANSIENT_ERROR_CODES.has(cause.code);
   }
-  if (cause instanceof Error) {
+  if (cause instanceof Error && typeof cause.message === "string") {
     const msg = cause.message.toLowerCase();
     return (
       msg.includes("timed out fetching a new connection") ||
@@ -310,6 +321,21 @@ function hasTransientCause(error: unknown): boolean {
 }
 
 /**
+ * Walks the cause chain of an error to detect if a Prisma `P2025`
+ * (record-not-found) error is buried inside ShelfError wrappers. Used by
+ * `makeShelfError` so that a `prisma.x.update()` failure on a
+ * deleted-since-load record collapses to a 404 even when a service-layer
+ * `try/catch` already re-wrapped it as a generic 5xx ShelfError.
+ */
+function hasNotFoundCause(error: unknown): boolean {
+  if (isNotFoundError(error)) return true;
+  if (typeof error === "object" && error !== null && "cause" in error) {
+    return hasNotFoundCause((error as { cause: unknown }).cause);
+  }
+  return false;
+}
+
+/**
  * This function is used to check if the error is a zod validation error.
  */
 export function isZodValidationError(cause: unknown) {
@@ -323,7 +349,7 @@ export function isZodValidationError(cause: unknown) {
 export function makeShelfError(
   cause: unknown,
   additionalData?: AdditionalData,
-  shouldBeCaptured: boolean = true
+  shouldBeCaptured?: boolean
 ) {
   if (isAbortError(cause)) {
     return new ShelfError({
@@ -350,6 +376,29 @@ export function makeShelfError(
     });
   }
 
+  // Detect Prisma `P2025` (record not found) anywhere in the cause chain —
+  // even when a service-layer `try/catch` already re-wrapped it as a generic
+  // 5xx ShelfError. Race conditions like "asset deleted between form load
+  // and submit" surface here, and they belong as 404s, not as paged 5xxs.
+  // We preserve the wrapper's user-facing message + label when present so
+  // the toast still says "Booking not found, are you sure …" rather than
+  // a generic message; only the status and capture decision change.
+  // Callers can force capture with an explicit `shouldBeCaptured: true`.
+  if (hasNotFoundCause(cause)) {
+    const wrapper = isLikeShelfError(cause) ? cause : null;
+    return new ShelfError({
+      cause,
+      message: wrapper?.message ?? "The requested resource could not be found.",
+      label: wrapper?.label ?? "Unknown",
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
+      status: 404,
+      shouldBeCaptured: shouldBeCaptured ?? false,
+    });
+  }
+
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
     return new ShelfError({
@@ -364,12 +413,14 @@ export function makeShelfError(
   }
 
   // 🤷‍♂️ We don't know what this error is, so we create a new default one.
+  // Default to `true` for the unknown-error path: an unrecognised throw
+  // really should reach Sentry unless a caller explicitly opts out.
   return new ShelfError({
     cause,
     message: "Sorry, something went wrong.",
     additionalData,
     label: "Unknown",
-    shouldBeCaptured,
+    shouldBeCaptured: shouldBeCaptured ?? true,
   });
 }
 
@@ -394,8 +445,11 @@ export type Options = Partial<
 export function notAllowedMethod(method: string, options?: Options) {
   return new ShelfError({
     shouldBeCaptured: false,
-    message: `"${method}" method is not allowed.`,
     ...options,
+    // Must come after the spread so that callers who pass
+    // `{ message: undefined }` (e.g. `assertIsPost(request)` with no message
+    // argument) don't clobber the default via spread semantics.
+    message: options?.message ?? `"${method}" method is not allowed.`,
     cause: null,
     status: 405,
     label: "Request validation",

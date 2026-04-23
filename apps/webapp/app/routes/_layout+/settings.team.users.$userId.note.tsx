@@ -179,6 +179,7 @@ async function resolveTeamMemberForUser({
       status: 404,
       additionalData: { targetUserId, organizationId },
       label: "Team Member Note",
+      shouldBeCaptured: false,
     });
   }
 

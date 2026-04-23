@@ -74,6 +74,7 @@ export async function getPaginatedAndFilterableSettingUsers({
             include: {
               teamMembers: {
                 where: { organizationId },
+                take: 1,
                 include: {
                   _count: {
                     select: { custodies: true },

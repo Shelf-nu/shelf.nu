@@ -4,7 +4,7 @@ import { type Event, type EventHint } from "@sentry/react-router";
 
 import { SENTRY_DSN } from "~/utils/env";
 import type { ShelfError } from "~/utils/error";
-import { isLikeShelfError } from "~/utils/error";
+import { isAbortError, isLikeShelfError } from "~/utils/error";
 
 if (SENTRY_DSN) {
   Sentry.init({
@@ -56,6 +56,12 @@ function handleBeforeSend<E extends Event>(event: E, hint: EventHint) {
     !(exception instanceof Error) ||
     (isLikeShelfError(exception) && !exception.shouldBeCaptured)
   ) {
+    return null;
+  }
+
+  // Drop aborted-request errors that bypass `makeShelfError` — usually thrown
+  // raw from streaming handlers or middleware when a client disconnects.
+  if (isAbortError(exception)) {
     return null;
   }
 

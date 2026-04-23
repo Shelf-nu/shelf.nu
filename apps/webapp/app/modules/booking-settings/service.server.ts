@@ -23,6 +23,8 @@ export async function getBookingSettingsForOrganization(
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
         organizationId,
       },
       select: {
@@ -35,6 +37,23 @@ export async function getBookingSettingsForOrganization(
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -59,6 +78,8 @@ export async function updateBookingSettings({
   autoArchiveDays,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
+  notifyBookingCreator,
+  notifyAdminsOnNewBooking,
 }: {
   organizationId: string;
   bufferStartTime?: number;
@@ -69,6 +90,8 @@ export async function updateBookingSettings({
   autoArchiveDays?: number;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
+  notifyBookingCreator?: boolean;
+  notifyAdminsOnNewBooking?: boolean;
 }) {
   try {
     const updateData: Prisma.BookingSettingsUpdateInput = {};
@@ -90,6 +113,10 @@ export async function updateBookingSettings({
     if (requireExplicitCheckinForSelfService !== undefined)
       updateData.requireExplicitCheckinForSelfService =
         requireExplicitCheckinForSelfService;
+    if (notifyBookingCreator !== undefined)
+      updateData.notifyBookingCreator = notifyBookingCreator;
+    if (notifyAdminsOnNewBooking !== undefined)
+      updateData.notifyAdminsOnNewBooking = notifyAdminsOnNewBooking;
 
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
@@ -104,6 +131,23 @@ export async function updateBookingSettings({
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -121,6 +165,130 @@ export async function updateBookingSettings({
         autoArchiveBookings,
         autoArchiveDays,
       },
+      label,
+    });
+  }
+}
+
+/**
+ * Lean query that returns only the notification-related booking settings
+ * for an organization: `notifyBookingCreator`, `notifyAdminsOnNewBooking`,
+ * and the `alwaysNotifyTeamMembers` relation.
+ *
+ * This is intentionally separate from `getBookingSettingsForOrganization()`
+ * (which fetches the full settings object including buffer times, archive
+ * config, etc.) to keep the notification resolver lightweight and avoid
+ * pulling unnecessary data on every booking email.
+ *
+ * Uses `upsert` to lazily create default settings if the organization
+ * doesn't have a `BookingSettings` row yet.
+ *
+ * @param organizationId - The organization whose settings to fetch
+ * @returns Notification flags and the always-notify team member list
+ */
+export async function getBookingNotificationSettingsForOrg(
+  organizationId: string
+) {
+  try {
+    return await db.bookingSettings.upsert({
+      where: { organizationId },
+      update: {},
+      create: {
+        organizationId,
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+      },
+      select: {
+        notifyBookingCreator: true,
+        notifyAdminsOnNewBooking: true,
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to retrieve booking notification settings",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Replaces the "always notify" team member list for booking notifications.
+ *
+ * Uses Prisma's `set` operation, which disconnects all existing relations
+ * and reconnects only the provided IDs. This means the caller must always
+ * pass the complete desired list — omitting an ID removes that member.
+ *
+ * @param organizationId - The organization whose settings to update
+ * @param teamMemberIds - Complete list of team member IDs that should
+ *   always receive booking notifications. Pass an empty array to clear.
+ * @returns The updated always-notify team member list with user details
+ */
+export async function updateAlwaysNotifyTeamMembers({
+  organizationId,
+  teamMemberIds,
+}: {
+  organizationId: string;
+  teamMemberIds: string[];
+}) {
+  try {
+    // Validate that all provided team member IDs belong to this organization,
+    // preventing cross-org data injection.
+    const validTeamMembers = await db.teamMember.findMany({
+      where: {
+        organizationId,
+        id: { in: teamMemberIds },
+      },
+      select: { id: true },
+    });
+    const validTeamMemberIds = validTeamMembers.map((m) => m.id);
+
+    return await db.bookingSettings.update({
+      where: { organizationId },
+      data: {
+        alwaysNotifyTeamMembers: {
+          set: validTeamMemberIds.map((id) => ({ id })),
+        },
+      },
+      select: {
+        alwaysNotifyTeamMembers: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update always-notify team members",
+      additionalData: { organizationId, teamMemberIds },
       label,
     });
   }

@@ -19,8 +19,8 @@ export const test = base.extend<{}, { account: Account }>({
 
       const email = testAccount.user;
       const password = testAccount.pass;
-      const firstName = faker.name.firstName();
-      const lastName = faker.name.lastName();
+      const firstName = faker.person.firstName();
+      const lastName = faker.person.lastName();
 
       const page = await browser.newPage();
 

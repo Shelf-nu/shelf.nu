@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
@@ -92,8 +92,10 @@ export default function BulkPartialCheckinDialog({
       return contextStatus === AssetStatus.CHECKED_OUT;
     });
 
-  // Create a mutable ref object for the portal container
-  const formRef = useRef<HTMLFormElement>(null);
+  /** Use state instead of ref so the component re-renders once the form
+   * mounts — this guarantees portalContainer is the real DOM node
+   * when the user opens the early-checkin dialog. */
+  const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
 
   // Check if this would be a final check-in (all remaining CHECKED_OUT assets are being selected)
   // Need to exclude assets that have already been checked in through partial check-ins
@@ -161,7 +163,7 @@ export default function BulkPartialCheckinDialog({
         <Form
           method="post"
           className="px-6 pb-6"
-          ref={formRef}
+          ref={setFormElement}
           id="bulk-partial-checkin-form"
         >
           <input type="hidden" name="returnJson" value="true" />
@@ -318,7 +320,7 @@ export default function BulkPartialCheckinDialog({
                 label={`Check in  item${totalSelectedItems !== 1 ? "s" : ""}`}
                 variant="primary"
                 disabled={disabled}
-                portalContainer={formRef.current || undefined}
+                portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedItems.map((item: any) => item.id)}

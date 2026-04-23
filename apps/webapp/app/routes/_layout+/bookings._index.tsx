@@ -39,6 +39,7 @@ import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
   getTeamMemberForCustodianFilter,
   getTeamMemberForForm,
+  getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -130,6 +131,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       teamMembersData,
       teamMembersForFormData,
       tags,
+      notifyData,
     ] = await Promise.all([
       getBookings({
         organizationId,
@@ -182,6 +184,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
+      getTeamMembersForNotify({ organizationId }),
     ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
@@ -212,6 +215,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         teamMembersForForm:
           teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
         isSelfServiceOrBase,
+        ...notifyData,
         tags,
         totalTags: tags.length,
         searchFieldTooltip: {

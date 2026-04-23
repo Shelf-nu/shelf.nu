@@ -657,6 +657,10 @@ model TeamMember {
   assetReminders  AssetReminder[]
   teamMemberNotes TeamMemberNote[]
 
+  // Booking notification settings
+  alwaysNotifyBookingSettings BookingSettings[] @relation("BookingSettingsAlwaysNotify")
+  bookingNotifications        Booking[]         @relation("BookingNotificationRecipients")
+
   // Special GIN index for optimization of simple search queries
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
   // Indexes for foreign keys
@@ -1201,11 +1205,17 @@ model Booking {
 
   cancellationReason String?
 
+  // Per-booking notification recipients (team members who receive all email updates for this booking)
+  notificationRecipients TeamMember[] @relation("BookingNotificationRecipients")
+
   // Indexes for foreign keys
   @@index([creatorId])
   @@index([custodianTeamMemberId])
   @@index([custodianUserId])
   @@index([organizationId])
+  // Speeds up status filtering when joining from Asset → Booking
+  // (e.g. fetching ONGOING/OVERDUE bookings for asset custodian display)
+  @@index([status])
 }
 
 model BookingSettings {
@@ -1222,6 +1232,11 @@ model BookingSettings {
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
+
+  // Notification settings
+  notifyBookingCreator     Boolean @default(true) // Whether the booking creator receives email notifications
+  notifyAdminsOnNewBooking Boolean @default(true) // Whether all admins receive a notification when a booking is reserved
+  alwaysNotifyTeamMembers  TeamMember[] @relation("BookingSettingsAlwaysNotify") // Team members who always receive ALL booking email notifications
 
   // Relationships
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
@@ -1463,6 +1478,7 @@ enum AuditStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+  ARCHIVED
 }
 
 enum AuditAssetStatus {

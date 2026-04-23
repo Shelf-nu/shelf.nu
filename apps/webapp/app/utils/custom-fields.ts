@@ -349,8 +349,20 @@ export const buildCustomFieldValue = (
 
     switch (def.type) {
       case "BOOLEAN": {
-        const finalValue =
-          typeof raw === "string" ? raw === "yes" : Boolean(raw);
+        let finalValue: boolean;
+        if (typeof raw === "string") {
+          const normalized = raw.trim().toLowerCase();
+          if (normalized === "yes") {
+            finalValue = true;
+          } else if (normalized === "no") {
+            finalValue = false;
+          } else {
+            // Unrecognized boolean string — skip instead of coercing
+            return undefined;
+          }
+        } else {
+          finalValue = Boolean(raw);
+        }
         return { raw, valueBoolean: finalValue };
       }
       case "DATE": {

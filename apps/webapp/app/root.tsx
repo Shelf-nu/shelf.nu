@@ -20,6 +20,7 @@ import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
+import { CloudflareWebAnalytics } from "./components/marketing/cloudflare-web-analytics";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
@@ -118,6 +119,7 @@ export function Layout({ children }: { children: ReactNode }) {
             __html: `window.env = ${JSON.stringify(data?.env)}`,
           }}
         />
+        <CloudflareWebAnalytics />
         <Scripts />
       </body>
     </html>
