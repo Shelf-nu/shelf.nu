@@ -16,7 +16,12 @@ import {
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  makeShelfError,
+  ShelfError,
+} from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -100,6 +105,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
             additionalData: { userId, kitIds, custodian },
             label: "Kit",
             status: 404,
+            // `getTeamMember` already classifies its errors — forward that
+            // decision so DB / connectivity failures inside it still reach
+            // Sentry. Fall back to the Prisma not-found check otherwise.
+            shouldBeCaptured: isLikeShelfError(cause)
+              ? cause.shouldBeCaptured
+              : !isNotFoundError(cause),
           });
         });
 

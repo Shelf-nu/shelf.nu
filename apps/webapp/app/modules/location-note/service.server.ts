@@ -95,6 +95,7 @@ export async function getLocationNotes({
         additionalData: { locationId, organizationId },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
