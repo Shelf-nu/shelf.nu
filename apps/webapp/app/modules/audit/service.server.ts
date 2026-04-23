@@ -1753,6 +1753,7 @@ export function requireAuditAssigneeForBaseSelfService({
         additionalData: { auditId, userId },
         status: 403,
         label,
+        shouldBeCaptured: false,
       });
     }
   }

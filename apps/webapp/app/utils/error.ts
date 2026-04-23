@@ -321,6 +321,21 @@ function hasTransientCause(error: unknown): boolean {
 }
 
 /**
+ * Walks the cause chain of an error to detect if a Prisma `P2025`
+ * (record-not-found) error is buried inside ShelfError wrappers. Used by
+ * `makeShelfError` so that a `prisma.x.update()` failure on a
+ * deleted-since-load record collapses to a 404 even when a service-layer
+ * `try/catch` already re-wrapped it as a generic 5xx ShelfError.
+ */
+function hasNotFoundCause(error: unknown): boolean {
+  if (isNotFoundError(error)) return true;
+  if (typeof error === "object" && error !== null && "cause" in error) {
+    return hasNotFoundCause((error as { cause: unknown }).cause);
+  }
+  return false;
+}
+
+/**
  * This function is used to check if the error is a zod validation error.
  */
 export function isZodValidationError(cause: unknown) {
@@ -361,6 +376,29 @@ export function makeShelfError(
     });
   }
 
+  // Detect Prisma `P2025` (record not found) anywhere in the cause chain —
+  // even when a service-layer `try/catch` already re-wrapped it as a generic
+  // 5xx ShelfError. Race conditions like "asset deleted between form load
+  // and submit" surface here, and they belong as 404s, not as paged 5xxs.
+  // We preserve the wrapper's user-facing message + label when present so
+  // the toast still says "Booking not found, are you sure …" rather than
+  // a generic message; only the status and capture decision change.
+  // Callers can force capture with an explicit `shouldBeCaptured: true`.
+  if (hasNotFoundCause(cause)) {
+    const wrapper = isLikeShelfError(cause) ? cause : null;
+    return new ShelfError({
+      cause,
+      message: wrapper?.message ?? "The requested resource could not be found.",
+      label: wrapper?.label ?? "Unknown",
+      additionalData: {
+        ...(wrapper?.additionalData ?? {}),
+        ...additionalData,
+      },
+      status: 404,
+      shouldBeCaptured: shouldBeCaptured ?? false,
+    });
+  }
+
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
     return new ShelfError({
@@ -371,23 +409,6 @@ export function makeShelfError(
       },
       shouldBeCaptured:
         "shouldBeCaptured" in cause ? cause.shouldBeCaptured : shouldBeCaptured,
-    });
-  }
-
-  // Bare Prisma `P2025` (record not found) reaching the catch-all path means
-  // a route did `findUniqueOrThrow().catch(makeShelfError)` without wrapping
-  // the not-found case explicitly. Surface a 404 and skip Sentry capture by
-  // default — these are user-facing "the thing you asked for doesn't exist"
-  // outcomes, not engineering bugs. Callers can still force capture with
-  // an explicit `shouldBeCaptured: true` argument.
-  if (isNotFoundError(cause)) {
-    return new ShelfError({
-      cause,
-      message: "The requested resource could not be found.",
-      additionalData,
-      label: "Unknown",
-      status: 404,
-      shouldBeCaptured: shouldBeCaptured ?? false,
     });
   }
 

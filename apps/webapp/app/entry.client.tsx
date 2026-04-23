@@ -82,6 +82,35 @@ if (window.env?.SENTRY_DSN) {
         return null;
       }
 
+      // Hard-filter client-side network errors and aborted requests
+      // regardless of source — they bubble up through React Router's error
+      // boundary when a route loader's fetch is interrupted, but they are
+      // *never* actionable from app code (user closed the tab, lost
+      // connection, hit back, or the browser cancelled an in-flight load).
+      // Same Error-ID tradeoff as the hard-filtered patterns above. Also
+      // check `exception.type` for `AbortError` — Sentry serializes the
+      // error name into `.type` separately from `.value` (the message),
+      // and some AbortErrors arrive with empty/generic messages.
+      if (
+        message.includes("Load failed") ||
+        message.includes("Failed to fetch") ||
+        message.includes("NetworkError") ||
+        message.includes("fetch failed") ||
+        message.includes("AbortError") ||
+        message.includes("The operation was aborted") ||
+        message.includes("Fetch is aborted") ||
+        event.exception?.values?.some((v) => v.type === "AbortError")
+      ) {
+        return null;
+      }
+
+      // Hard-filter `<unknown>` messages: these carry no signal, and the
+      // error-boundary path produces them when the failure has no
+      // serializable shape (cross-origin script errors, etc.).
+      if (message === "<unknown>") {
+        return null;
+      }
+
       // Always send remaining errors from the error boundary — these are
       // user-visible crashes that must be searchable by the Error ID shown
       // to the user. Sentry.captureException() returns the event ID
@@ -109,24 +138,6 @@ if (window.env?.SENTRY_DSN) {
 
       // Filter non-Error promise rejections with value: false
       if (message === "false") {
-        return null;
-      }
-
-      // Filter client-side network errors and aborted requests (not actionable)
-      if (
-        message.includes("Load failed") ||
-        message.includes("Failed to fetch") ||
-        message.includes("NetworkError") ||
-        message.includes("fetch failed") ||
-        message.includes("AbortError") ||
-        message.includes("The operation was aborted") ||
-        message.includes("Fetch is aborted")
-      ) {
-        return null;
-      }
-
-      // Filter unknown/empty error messages (no actionable info)
-      if (message === "<unknown>") {
         return null;
       }
 
