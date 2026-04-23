@@ -32,6 +32,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
 - `pnpm run format` - Prettier code formatting (root-level)
 - `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
+- `pnpm webapp:doctor` - Run [react-doctor](https://www.react.doctor/) against the webapp (React health diagnostics: hook misuse, perf, a11y, architecture). Advisory only — not wired into `validate` or CI gates.
 
 ### Database
 
