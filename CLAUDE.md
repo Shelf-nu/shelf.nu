@@ -206,32 +206,25 @@ const disabled = useDisabled(fetcher);
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
 
-### Suppressing react-doctor / lint findings
+### Silencing react-doctor findings
 
-`pnpm webapp:doctor` is advisory, not a CI gate, but we aim to keep it clean. When a finding is a documented false positive or fixing it would regress UX, suppress it with the standard ESLint inline comment **and** a `why:` line:
+`pnpm webapp:doctor` is advisory, not a CI gate, but we aim to keep it clean.
+
+**Important:** `react-doctor` does **not** respect `// eslint-disable-next-line` comments. The only way to silence a finding is to refactor the code so the pattern no longer matches. Standard ESLint disable comments still work for `pnpm webapp:lint` — they just don't help with `pnpm webapp:doctor`.
+
+**Refactor strategies for common findings:**
+
+- **`react/no-danger` for static CSS injection** — use React's native `<style>{cssString}</style>` form (safe text child). See `apps/webapp/app/components/shared/mobile-dropdown-styles.tsx` for the reusable mobile-dropdown helper.
+- **`jsx-a11y/no-autofocus`** — remove the `autoFocus` prop, then focus imperatively with `ref.current?.focus()` inside a `useEffect` when intentional modal/form focus is needed. This satisfies the rule and keeps the UX.
+- **`react/no-danger` for scripts (e.g., `<script>` injecting `window.env`)** — if no refactor is possible, the finding will remain. Leave a short `// why:` comment above the call site so maintainers understand why it's there, and treat it as an accepted residual.
+
+**When you must leave a finding in place** (e.g., SSR script injection, third-party API that only returns HTML), add a `// why:` comment above the code even though the finding will still appear in scans. The comment is for humans reviewing the diff later, not for the tool.
 
 ```tsx
-// eslint-disable-next-line <rule-name> -- why: <reason>
-<SomeComponent />
+// why: <explanation>
+// react-doctor flags this but refactoring would regress <X>
+<script ... />
 ```
-
-The `--` separator is ESLint's standard form for disable-with-explanation.
-
-Example — intentional modal focus management:
-
-```tsx
-// eslint-disable-next-line jsx-a11y/no-autofocus -- why: first-field focus is intentional modal behavior
-<Input autoFocus />
-```
-
-**When to suppress vs refactor:**
-
-- **Suppress** — when the finding is a proven false positive (static template, server-controlled content, intentional UX pattern) OR when the refactor would regress behavior.
-- **Refactor** — when the finding represents an actual bug or code smell. Default to fixing; suppression is the escape hatch, not the norm.
-
-**The `why:` line is mandatory.** It mirrors the mock-justification convention from the testing section — reviewers must be able to judge whether the suppression is still valid later.
-
-**For static CSS injection (the `react/no-danger` rule)**, prefer React's native `<style>{cssString}</style>` form — it's safe, raises no finding, and needs no suppression. See `apps/webapp/app/components/shared/mobile-dropdown-styles.tsx` for the reusable mobile-dropdown helper.
 
 ### Form Validation Pattern (Required)
 

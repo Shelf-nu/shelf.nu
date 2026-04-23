@@ -95,7 +95,6 @@ export default function NewCategoryForm({
           disabled={disabled}
           error={nameError}
           hideErrorText={!hasOnSuccessFunc}
-          autoFocus
           data-dialog-initial-focus
           required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
         />

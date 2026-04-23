@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
@@ -94,6 +95,12 @@ export default function AddMember() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the name field when the modal route mounts (replaces autoFocus). */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    nameInputRef.current?.focus();
+  }, []);
+
   return (
     <>
       <div className="modal-content-wrapper">
@@ -109,13 +116,13 @@ export default function AddMember() {
         </div>
         <Form method="post" ref={zo.ref}>
           <Input
+            ref={nameInputRef}
             name={zo.fields.name()}
             type="text"
             label="Name"
             className="mb-8"
             placeholder="Enter team member’s name"
             required
-            autoFocus
             error={zo.errors.name()?.message}
             disabled={disabled}
           />

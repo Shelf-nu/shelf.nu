@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -178,6 +179,12 @@ export default function IndexLoginForm() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the email field on mount (intentional first-field focus on auth pages). */
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    emailInputRef.current?.focus();
+  }, []);
+
   return (
     <div className="w-full max-w-md">
       {acceptedInvite ? (
@@ -196,11 +203,11 @@ export default function IndexLoginForm() {
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
         <div>
           <Input
+            ref={emailInputRef}
             data-test-id="email"
             label="Email address"
             placeholder="zaans@huisje.com"
             required
-            autoFocus={true}
             name={zo.fields.email()}
             type="email"
             autoComplete="username"

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Popover,
   PopoverTrigger,
@@ -111,9 +111,10 @@ function AdvancedModeDropdown() {
   const freezeColumn = useAssetIndexFreezeColumn();
   const showAssetImage = useAssetIndexShowImage();
 
-  useEffect(() => {
-    setIsPopoverOpen(false);
-  }, [freezeColumn, showAssetImage]);
+  // Close the popover directly from the submit handlers instead of mirroring the
+  // loader-derived values into an effect. This keeps the close reaction in the
+  // event path that triggered the change (no useEffect derived-state sync).
+  const closePopover = () => setIsPopoverOpen(false);
 
   return (
     <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -127,7 +128,11 @@ function AdvancedModeDropdown() {
             "z-20 mt-2 w-[200px] rounded-md border border-gray-300 bg-white p-0"
           )}
         >
-          <freezeFetcher.Form action="/api/asset-index-settings" method="post">
+          <freezeFetcher.Form
+            action="/api/asset-index-settings"
+            method="post"
+            onSubmit={closePopover}
+          >
             <input
               type="hidden"
               name="freezeColumn"
@@ -149,6 +154,7 @@ function AdvancedModeDropdown() {
           <showImageFetcher.Form
             action="/api/asset-index-settings"
             method="post"
+            onSubmit={closePopover}
           >
             <input
               type="hidden"

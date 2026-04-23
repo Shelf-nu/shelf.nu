@@ -201,10 +201,19 @@ export default function AcceptInvite() {
         {error ? (
           <div>
             <h2>{error.title}</h2>
-            <p
-              className="mx-4 mb-3 mt-2 md:mx-[-200px]"
-              dangerouslySetInnerHTML={{ __html: error.message }}
-            />
+            {/*
+             * Render the error message as text (not HTML) to avoid any XSS
+             * surface. Newlines are preserved via <br/> so multi-line error
+             * copy keeps its visual structure.
+             */}
+            <p className="mx-4 mb-3 mt-2 md:mx-[-200px]">
+              {error.message.split("\n").map((line, i) => (
+                <span key={i}>
+                  {i > 0 && <br />}
+                  {line}
+                </span>
+              ))}
+            </p>
             <Button to="/" variant={"secondary"}>
               Back to home
             </Button>

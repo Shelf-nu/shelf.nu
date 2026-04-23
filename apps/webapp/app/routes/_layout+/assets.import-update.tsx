@@ -44,11 +44,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       action: PermissionAction.import,
     });
 
-    await assertUserCanImportAssets({ organizationId, organizations });
-
-    // Clone the request so we can read formData here for intent/validation
-    // while preserving the original body for csvDataFromRequest() below
-    const clonedFormData = await request.clone().formData();
+    // Subscription assertion and form data read are independent — run in parallel
+    const [, clonedFormData] = await Promise.all([
+      assertUserCanImportAssets({ organizationId, organizations }),
+      // Clone the request so we can read formData here for intent/validation
+      // while preserving the original body for csvDataFromRequest() below
+      request.clone().formData(),
+    ]);
     const { intent } = parseData(
       clonedFormData,
       z.object({

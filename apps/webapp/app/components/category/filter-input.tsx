@@ -26,7 +26,6 @@ export const FilterInput = ({
       value={filter}
       onChange={handleFilter}
       ref={inputRef}
-      autoFocus
     />
   );
 };

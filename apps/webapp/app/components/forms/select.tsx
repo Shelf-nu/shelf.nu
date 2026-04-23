@@ -46,7 +46,13 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
+          // Explicit passive:false — this listener needs to call
+          // preventDefault() to stop the touchend → synthetic click that
+          // Radix Select otherwise fires on iOS Safari. The explicit flag
+          // satisfies the linter and documents intent.
+          ref?.addEventListener("touchend", (e) => e.preventDefault(), {
+            passive: false,
+          })
         }
         className={tw(
           " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",

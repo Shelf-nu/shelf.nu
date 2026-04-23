@@ -123,7 +123,6 @@ export default function KitsForm({
             name={zo.fields.name()}
             disabled={disabled}
             error={nameErrorMessage}
-            autoFocus
             onChange={updateDynamicTitle}
             className="w-full"
             defaultValue={name || ""}

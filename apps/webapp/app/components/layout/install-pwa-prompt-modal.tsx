@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useLoaderData, useFetcher } from "react-router";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import { usePwaManager } from "~/utils/pwa-manager";
@@ -19,7 +19,7 @@ export function InstallPwaPromptModal() {
 
   return optimisticHideInstallPwaPrompt ? null : (
     <AnimatePresence>
-      <motion.div
+      <m.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
@@ -119,7 +119,7 @@ export function InstallPwaPromptModal() {
             </div>
           </dialog>
         </div>
-      </motion.div>
+      </m.div>
     </AnimatePresence>
   );
 }

@@ -1,4 +1,4 @@
-import { type ChangeEvent } from "react";
+import { type ChangeEvent, useEffect, useRef } from "react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
 
@@ -37,6 +37,15 @@ export function RenamePresetDialog({
 }) {
   const zo = useZorm("rename-preset", RenamePresetFormSchema);
 
+  /** Ref for the rename input so we can focus it on open without autoFocus. */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      nameInputRef.current?.focus();
+    }
+  }, [open]);
+
   // Combine client-side and server-side validation errors
   const nameError =
     validationErrors?.name?.message ?? zo.errors.name()?.message;
@@ -61,13 +70,13 @@ export function RenamePresetDialog({
             <input type="hidden" name="intent" value="rename-preset" />
             <input type="hidden" name="presetId" value={presetId} />
             <Input
+              ref={nameInputRef}
               label="New name"
               name="name"
               value={name}
               onChange={onNameChange}
               placeholder="Enter new name"
               maxLength={60}
-              autoFocus
               error={nameError}
             />
             <div className="mt-4 flex justify-end gap-2">

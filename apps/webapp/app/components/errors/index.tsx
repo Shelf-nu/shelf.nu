@@ -52,8 +52,11 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     );
   }
 
-  // Creating a string with <br/> tags for line breaks
-  const messageHtml = { __html: message.split("\n").join("<br/>") };
+  // Preserve newlines as <br/> without injecting HTML: split the message on
+  // "\n" and interleave <br/> elements between segments. Keeps the same
+  // visual output as the previous dangerouslySetInnerHTML approach while
+  // avoiding any raw HTML injection.
+  const messageLines = message.split("\n");
 
   return (
     <div
@@ -67,7 +70,14 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
           <ErrorIcon />
         </span>
         <h2 className="mb-2">{title}</h2>
-        <p className="max-w-[550px]" dangerouslySetInnerHTML={messageHtml} />
+        <p className="max-w-[550px]">
+          {messageLines.map((line, i) => (
+            <span key={i}>
+              {i > 0 && <br />}
+              {line}
+            </span>
+          ))}
+        </p>
         {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
         {sentryEventId && (
           <p className="text-gray-400">(Error ID: {sentryEventId})</p>

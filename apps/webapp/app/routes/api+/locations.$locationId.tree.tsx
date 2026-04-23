@@ -31,6 +31,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
+    // why: requirePermission must resolve first (auth gate + organizationId),
+    // and getLocation depends on its result. Hierarchy and descendants below
+    // are parallelized once location is resolved.
     const { organizationId, userOrganizations } = await requirePermission({
       userId,
       request,
@@ -45,19 +48,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const hierarchy = await getLocationHierarchy({
-      organizationId: location.organizationId,
-      locationId,
-    });
+    // Hierarchy (ancestors) and descendants tree are independent — fetch in parallel
+    const [hierarchy, descendants] = await Promise.all([
+      getLocationHierarchy({
+        organizationId: location.organizationId,
+        locationId,
+      }),
+      getLocationDescendantsTree({
+        organizationId: location.organizationId,
+        locationId,
+      }),
+    ]);
     const ancestors =
       hierarchy.length > 1
         ? hierarchy.slice(0, -1).map(({ id, name }) => ({ id, name }))
         : [];
-
-    const descendants = await getLocationDescendantsTree({
-      organizationId: location.organizationId,
-      locationId,
-    });
 
     return data(
       payload<LocationTreePayload>({

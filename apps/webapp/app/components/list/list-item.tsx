@@ -1,7 +1,7 @@
 import type React from "react";
 import type { ReactNode } from "react";
 import type { MotionProps } from "framer-motion";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { tw } from "~/utils/tw";
 
 export interface ListItemData {
@@ -87,14 +87,14 @@ export const ListItem = function ListItem({
   // The vast majority of rows (asset index) don't animate, so we skip the overhead.
   if (motionProps) {
     return (
-      <motion.tr
+      <m.tr
         onClick={handleClick}
         className={sharedClassName}
         style={CHROMIUM_HOVER_FIX}
         {...motionProps}
       >
         {children}
-      </motion.tr>
+      </m.tr>
     );
   }
 

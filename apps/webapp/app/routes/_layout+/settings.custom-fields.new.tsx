@@ -37,17 +37,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    await assertUserCanCreateMoreCustomFields({
-      organizations,
-      organizationId,
-    });
-
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
+    // Subscription assertion and categories lookup are independent — run in parallel
+    const [, categoriesResult] = await Promise.all([
+      assertUserCanCreateMoreCustomFields({
+        organizations,
+        organizationId,
+      }),
+      getCategoriesForCreateAndEdit({
         organizationId,
         request,
-      }
-    );
+      }),
+    ]);
+    const { categories, totalCategories } = categoriesResult;
 
     const header = {
       title,

@@ -144,7 +144,6 @@ export default function EditCategory() {
             disabled={disabled}
             error={zo.errors.name()?.message}
             hideErrorText
-            autoFocus
             required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
             defaultValue={category.name}
           />

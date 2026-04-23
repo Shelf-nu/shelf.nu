@@ -40,7 +40,11 @@ export function AutoArchiveSettings({
   const fetcher = useFetcher();
   const toggleDisabled = useDisabled(fetcher);
   const daysDisabled = useDisabled();
-  const [isEnabled, setIsEnabled] = useState(defaultAutoArchiveBookings);
+  // Lazy initializer avoids a false-positive derived-state lint: this drives optimistic
+  // UI for the toggle. After mount it's user-controlled; it must NOT re-sync with the
+  // server-provided default (that would overwrite the optimistic value before the
+  // fetcher revalidates).
+  const [isEnabled, setIsEnabled] = useState(() => defaultAutoArchiveBookings);
 
   const toggleZo = useZorm("AutoArchiveToggleForm", AutoArchiveToggleSchema);
   const daysZo = useZorm("AutoArchiveDaysForm", AutoArchiveDaysSchema);

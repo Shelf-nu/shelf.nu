@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -99,17 +100,24 @@ export default function SSOLogin() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
+
+  /** Focus the domain field on mount (intentional first-field focus on auth pages). */
+  const domainInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    domainInputRef.current?.focus();
+  }, []);
+
   return (
     <>
       <div className="flex flex-col gap-3">
         <Form method="post" ref={zo.ref}>
           <div className="flex flex-col gap-3">
             <Input
+              ref={domainInputRef}
               data-test-id="domain"
               label="Company domain"
               placeholder="yourdomain.com"
               required
-              autoFocus={true}
               name={zo.fields.domain()}
               type="text"
               autoComplete="domain"

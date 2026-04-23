@@ -27,7 +27,6 @@ export function NameField({
         name={fieldName}
         disabled={disabled}
         error={error}
-        autoFocus
         onChange={onChange}
         className="mobile-styling-only w-full p-0"
         defaultValue={name}

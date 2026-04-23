@@ -145,7 +145,6 @@ export default function EditTag() {
               disabled={disabled}
               error={zo.errors.name()?.message}
               hideErrorText
-              autoFocus
               required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
               defaultValue={tag.name}
             />

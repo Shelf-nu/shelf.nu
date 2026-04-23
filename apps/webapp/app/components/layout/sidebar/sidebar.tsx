@@ -707,7 +707,7 @@ const SidebarMenuSkeleton = forwardRef<
   }
 >(({ className, showIcon = false, ...props }, ref) => {
   // Random width between 50 to 90%.
-  const width = useMemo(() => `${Math.floor(Math.random() * 40) + 50}%`, []);
+  const width = `${Math.floor(Math.random() * 40) + 50}%`;
 
   return (
     <div

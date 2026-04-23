@@ -58,12 +58,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const booking = await getBooking({ id, organizationId, request });
-
-    const bookingNotes = await getBookingNotes({
-      bookingId: id,
-      organizationId,
-    });
+    const [booking, bookingNotes] = await Promise.all([
+      getBooking({ id, organizationId, request }),
+      getBookingNotes({
+        bookingId: id,
+        organizationId,
+      }),
+    ]);
 
     const header: HeaderData = {
       title: `${booking.name}'s activity`,
