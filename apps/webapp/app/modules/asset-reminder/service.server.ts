@@ -109,11 +109,20 @@ async function validateTeamMembersForReminder(
   });
 
   if (teamMembersWithUserCount !== teamMembers.length) {
+    // Stale form state: a team member the user selected has since been
+    // removed, lost their linked user account, or never belonged to this
+    // workspace. This is a 4xx, not a 5xx — surface it without paging.
     throw new ShelfError({
       cause: null,
       label,
       message:
-        "Something went wrong while validating team members for reminder. Please contact support",
+        "One or more selected team members are no longer available. Please refresh the page and pick recipients again.",
+      additionalData: {
+        requestedTeamMemberCount: teamMembers.length,
+        validTeamMemberCount: teamMembersWithUserCount,
+      },
+      status: 400,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -287,6 +296,7 @@ export async function editAssetReminder({
       cause,
       message,
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -310,6 +320,7 @@ export async function deleteAssetReminder({
         ? "Reminder not found or you are viewing in wrong organization."
         : "Something went wrong while deleting reminder.",
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
