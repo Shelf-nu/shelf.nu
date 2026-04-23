@@ -1495,13 +1495,20 @@ export async function updateLocationAssets({
         },
       })
       .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
+        // Only the genuine "record not found" path should become a
+        // user-facing 404. Re-throw anything else so the outer try/catch
+        // (or `makeShelfError`) can wrap it as a 5xx with capture enabled.
+        if (isNotFoundError(cause)) {
+          throw new ShelfError({
+            cause,
+            message: "Location not found",
+            additionalData: { locationId, userId, organizationId },
+            status: 404,
+            label: "Location",
+            shouldBeCaptured: false,
+          });
+        }
+        throw cause;
       });
 
     /**
@@ -1686,13 +1693,20 @@ export async function updateLocationKits({
         },
       })
       .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
+        // Only the genuine "record not found" path should become a
+        // user-facing 404. Re-throw anything else so the outer try/catch
+        // (or `makeShelfError`) can wrap it as a 5xx with capture enabled.
+        if (isNotFoundError(cause)) {
+          throw new ShelfError({
+            cause,
+            message: "Location not found",
+            additionalData: { locationId, userId, organizationId },
+            status: 404,
+            label: "Location",
+            shouldBeCaptured: false,
+          });
+        }
+        throw cause;
       });
 
     /**

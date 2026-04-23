@@ -187,23 +187,30 @@ export async function signInWithEmail(email: string, password: string) {
 
     return mapAuthSession(session);
   } catch (cause) {
-    let message =
-      "Something went wrong. Please try again later or contact support.";
-    let shouldBeCaptured = true;
+    const isInvalidCredentials =
+      isAuthApiError(cause) && cause.message === "Invalid login credentials";
+    // Supabase 504s and intermittent fetch failures surface as
+    // `AuthRetryableFetchError`. They resolve on retry and shouldn't page us.
+    const isTransientFetchError = isAuthRetryableFetchError(cause);
+    // "Database error finding user" / similar transient backend hiccups.
+    const isDatabaseError =
+      isAuthApiError(cause) && cause.message.includes("Database error");
+    const isRateLimitError = isAuthApiError(cause) && cause.status === 429;
 
-    if (
-      isAuthApiError(cause) &&
-      cause.message === "Invalid login credentials"
-    ) {
-      message = "Incorrect email or password";
-      shouldBeCaptured = false;
-    }
+    const message = isInvalidCredentials
+      ? "Incorrect email or password"
+      : "Something went wrong. Please try again later or contact support.";
 
     throw new ShelfError({
       cause,
       message,
       label,
-      shouldBeCaptured,
+      shouldBeCaptured: !(
+        isInvalidCredentials ||
+        isTransientFetchError ||
+        isDatabaseError ||
+        isRateLimitError
+      ),
     });
   }
 }
@@ -282,8 +289,30 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
-    // @ts-expect-error
-    const isRateLimitError = cause.code === "over_email_send_rate_limit";
+    // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
+    // `unknown`, and a bare property access would throw at runtime if it
+    // were null/undefined.
+    const errorCode =
+      typeof cause === "object" && cause !== null && "code" in cause
+        ? (cause as { code: unknown }).code
+        : undefined;
+    // Match `signInWithEmail`'s rate-limit handling: cover both the
+    // Supabase OTP-specific `over_email_send_rate_limit` code and the
+    // generic HTTP 429 `AuthApiError` (which can carry a different code).
+    const isRateLimitError =
+      errorCode === "over_email_send_rate_limit" ||
+      (isAuthApiError(cause) && cause.status === 429);
+    // Supabase 504s and intermittent fetch failures resolve on retry.
+    const isTransientFetchError = isAuthRetryableFetchError(cause);
+    // "Database error finding user" — Supabase backend hiccup, not actionable.
+    const isDatabaseError =
+      isAuthApiError(cause) && cause.message.includes("Database error");
+    // SSO-mismatch / similar `validateNonSSOUser` rejections already opt out
+    // via their own `shouldBeCaptured: false` — preserve that decision.
+    const inheritedShouldBeCaptured = isLikeShelfError(cause)
+      ? cause.shouldBeCaptured
+      : undefined;
+
     const fallbackMessage =
       "Something went wrong while sending the OTP. Please try again later or contact support.";
 
@@ -300,7 +329,10 @@ export async function sendOTP(email: string) {
       message: hasUsableMessage ? cause.message : fallbackMessage,
       additionalData: { email },
       label,
-      shouldBeCaptured: isRateLimitError ? false : undefined,
+      shouldBeCaptured:
+        inheritedShouldBeCaptured === false
+          ? false
+          : !(isRateLimitError || isTransientFetchError || isDatabaseError),
     });
   }
 }
