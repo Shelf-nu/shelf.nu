@@ -2,16 +2,21 @@
  * @file Audit Index Bulk Actions Dropdown
  *
  * Renders the bulk actions dropdown on the audits index page (`/audits`).
- * Currently supports bulk-archiving audits that are in a terminal state
- * (COMPLETED or CANCELLED). Only visible to users with update permission
- * on the audit entity (admin/owner).
+ * Supports:
+ * - Bulk archive for COMPLETED/CANCELLED audits
+ * - Bulk delete for ARCHIVED audits
+ *
+ * Only visible to users with the matching permission on the audit entity
+ * (admin/owner). Server-side enforcement lives in the bulk-actions API.
  *
  * @see {@link file://./bulk-archive-audits-dialog.tsx} - Archive dialog
+ * @see {@link file://./bulk-delete-audits-dialog.tsx} - Delete dialog
  * @see {@link file://../../routes/_layout+/audits._index.tsx} - Consuming page
  */
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -24,6 +29,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkArchiveAuditsDialog from "./bulk-archive-audits-dialog";
+import BulkDeleteAuditsDialog from "./bulk-delete-audits-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import {
@@ -70,6 +76,28 @@ function ConditionalDropdown() {
   const someNotArchivable =
     !allSelected &&
     audits.some((a) => a.status !== "COMPLETED" && a.status !== "CANCELLED");
+  /**
+   * Delete is only valid for ARCHIVED audits. For an explicit id-list we
+   * check statuses client-side; the server re-validates either way.
+   */
+  const someNotArchived =
+    !allSelected && audits.some((a) => a.status !== "ARCHIVED");
+
+  /**
+   * Select-all delete is only allowed when the active status filter is
+   * ARCHIVED. Otherwise the user sees a total-items count that mixes
+   * statuses, clicks "Delete N", and the server would silently drop
+   * everything except the archived subset. Force them to narrow first
+   * so the count they see is the count that deletes.
+   */
+  const [searchParams] = useSearchParams();
+  // The audits index loader normalizes `status` to uppercase before querying
+  // (see `getAuditWhereInput`), so a deep-link like `?status=archived` still
+  // renders the archived list. Match that normalization here or the gate
+  // mis-fires against lowercase links.
+  const statusFilter = searchParams.get("status")?.toUpperCase();
+  const selectAllButFilterNotArchived =
+    allSelected && statusFilter !== "ARCHIVED";
 
   const { roles } = useUserRoleHelper();
 
@@ -81,6 +109,11 @@ function ConditionalDropdown() {
     roles,
     entity: PermissionEntity.audit,
     action: PermissionAction.archive,
+  });
+  const canDeleteAudit = userHasPermission({
+    roles,
+    entity: PermissionEntity.audit,
+    action: PermissionAction.delete,
   });
 
   const {
@@ -108,6 +141,7 @@ function ConditionalDropdown() {
       )}
 
       <BulkArchiveAuditsDialog />
+      <BulkDeleteAuditsDialog />
 
       <DropdownMenu
         modal={false}
@@ -178,6 +212,35 @@ function ConditionalDropdown() {
                     ? {
                         reason:
                           "Some of the selected audits are not completed or cancelled. You can only archive audits that are completed or cancelled.",
+                      }
+                    : isLoading
+                }
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <BulkUpdateDialogTrigger
+                type="delete-audit"
+                label="Delete"
+                onClick={closeMenu}
+                disabled={
+                  !canDeleteAudit
+                    ? {
+                        reason: "You don't have permission to delete audits.",
+                      }
+                    : someNotArchived
+                    ? {
+                        reason:
+                          "Some of the selected audits are not archived. Only archived audits can be deleted.",
+                      }
+                    : selectAllButFilterNotArchived
+                    ? {
+                        reason:
+                          "Filter the list to status = Archived before using Select all to delete.",
                       }
                     : isLoading
                 }
