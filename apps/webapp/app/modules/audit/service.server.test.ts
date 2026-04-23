@@ -930,27 +930,32 @@ describe("audit service", () => {
 
   describe("delete", () => {
     describe("deleteAuditSession", () => {
+      // Shared happy-path input — tests override individual fields as needed.
+      const baseInput = {
+        auditSessionId: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        expectedName: "Q4 Audit",
+      };
+
       beforeEach(() => {
         vi.clearAllMocks();
         // why: default to an archived audit so happy-path tests don't need per-test findFirst setup
         mockDb.auditSession.findFirst.mockResolvedValue({
           id: "audit-1",
           status: AuditStatus.ARCHIVED,
+          name: "Q4 Audit",
         });
         mockDb.auditImage.findMany.mockResolvedValue([]);
         mockDb.auditSession.deleteMany.mockResolvedValue({ count: 1 });
       });
 
       it("deletes an archived audit via deleteMany with an ARCHIVED guard", async () => {
-        await deleteAuditSession({
-          auditSessionId: "audit-1",
-          organizationId: "org-1",
-          userId: "user-1",
-        });
+        await deleteAuditSession(baseInput);
 
         expect(mockDb.auditSession.findFirst).toHaveBeenCalledWith({
           where: { id: "audit-1", organizationId: "org-1" },
-          select: { id: true, status: true },
+          select: { id: true, status: true, name: true },
         });
 
         expect(mockDb.auditSession.deleteMany).toHaveBeenCalledWith({
@@ -960,6 +965,37 @@ describe("audit service", () => {
             status: AuditStatus.ARCHIVED,
           },
         });
+      });
+
+      it("accepts the confirmation after trim + NFC + case-insensitive compare", async () => {
+        // DB name is NFC-composed "Résumé Q4"; user types a lowercase,
+        // whitespace-padded, NFD-decomposed variant. All three get normalized
+        // away before the compare.
+        mockDb.auditSession.findFirst.mockResolvedValue({
+          id: "audit-1",
+          status: AuditStatus.ARCHIVED,
+          name: "Résumé Q4".normalize("NFC"),
+        });
+
+        await expect(
+          deleteAuditSession({
+            ...baseInput,
+            expectedName: "  résumé q4  ".normalize("NFD"),
+          })
+        ).resolves.toBeUndefined();
+
+        expect(mockDb.auditSession.deleteMany).toHaveBeenCalled();
+      });
+
+      it("rejects with 400 when the confirmation doesn't match the audit name", async () => {
+        await expect(
+          deleteAuditSession({ ...baseInput, expectedName: "Wrong Name" })
+        ).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringMatching(/Confirmation did not match/),
+        });
+
+        expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
       });
 
       it("runs storage cleanup for each image AFTER the DB delete commits", async () => {
@@ -979,11 +1015,7 @@ describe("audit service", () => {
         // why: import inside the test so the mocked module is bound correctly
         const { removePublicFile } = await import("~/utils/storage.server");
 
-        await deleteAuditSession({
-          auditSessionId: "audit-1",
-          organizationId: "org-1",
-          userId: "user-1",
-        });
+        await deleteAuditSession(baseInput);
 
         expect(removePublicFile).toHaveBeenCalledWith({
           publicUrl: "https://s.example.com/i1.jpg",
@@ -1019,13 +1051,7 @@ describe("audit service", () => {
         const { removePublicFile } = await import("~/utils/storage.server");
         vi.mocked(removePublicFile).mockRejectedValueOnce(new Error("s3 down"));
 
-        await expect(
-          deleteAuditSession({
-            auditSessionId: "audit-1",
-            organizationId: "org-1",
-            userId: "user-1",
-          })
-        ).resolves.toBeUndefined();
+        await expect(deleteAuditSession(baseInput)).resolves.toBeUndefined();
 
         expect(mockDb.auditSession.deleteMany).toHaveBeenCalled();
       });
@@ -1034,11 +1060,7 @@ describe("audit service", () => {
         mockDb.auditSession.findFirst.mockResolvedValue(null);
 
         await expect(
-          deleteAuditSession({
-            auditSessionId: "missing",
-            organizationId: "org-1",
-            userId: "user-1",
-          })
+          deleteAuditSession({ ...baseInput, auditSessionId: "missing" })
         ).rejects.toMatchObject({
           status: 404,
           message: expect.stringMatching(/Audit not found/),
@@ -1058,15 +1080,10 @@ describe("audit service", () => {
           mockDb.auditSession.findFirst.mockResolvedValue({
             id: "audit-1",
             status,
+            name: "Q4 Audit",
           });
 
-          await expect(
-            deleteAuditSession({
-              auditSessionId: "audit-1",
-              organizationId: "org-1",
-              userId: "user-1",
-            })
-          ).rejects.toMatchObject({
+          await expect(deleteAuditSession(baseInput)).rejects.toMatchObject({
             status: 409,
             message: expect.stringMatching(
               /Only archived audits can be deleted/
@@ -1080,13 +1097,7 @@ describe("audit service", () => {
       it("rejects with 409 when the atomic deleteMany finds nothing (TOCTOU race)", async () => {
         mockDb.auditSession.deleteMany.mockResolvedValue({ count: 0 });
 
-        await expect(
-          deleteAuditSession({
-            auditSessionId: "audit-1",
-            organizationId: "org-1",
-            userId: "user-1",
-          })
-        ).rejects.toMatchObject({
+        await expect(deleteAuditSession(baseInput)).rejects.toMatchObject({
           status: 409,
           message: expect.stringMatching(/status may have changed/),
         });
@@ -1108,13 +1119,9 @@ describe("audit service", () => {
 
         const { removePublicFile } = await import("~/utils/storage.server");
 
-        await expect(
-          deleteAuditSession({
-            auditSessionId: "audit-1",
-            organizationId: "org-1",
-            userId: "user-1",
-          })
-        ).rejects.toMatchObject({ status: 409 });
+        await expect(deleteAuditSession(baseInput)).rejects.toMatchObject({
+          status: 409,
+        });
 
         expect(removePublicFile).not.toHaveBeenCalled();
       });
@@ -1122,13 +1129,7 @@ describe("audit service", () => {
       it("wraps unknown causes in a 500 ShelfError", async () => {
         mockDb.auditSession.findFirst.mockRejectedValue(new Error("boom"));
 
-        await expect(
-          deleteAuditSession({
-            auditSessionId: "audit-1",
-            organizationId: "org-1",
-            userId: "user-1",
-          })
-        ).rejects.toMatchObject({
+        await expect(deleteAuditSession(baseInput)).rejects.toMatchObject({
           status: 500,
           message: expect.stringMatching(/Failed to delete audit session/),
         });
@@ -1248,13 +1249,16 @@ describe("audit service", () => {
           currentSearchParams: "status=archived",
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: true,
         });
 
         const whereArg = mockDb.auditSession.findMany.mock.calls[0][0].where;
+        // Force-narrow to ARCHIVED must survive even when the caller sends
+        // lowercase, and the org scope is always present.
         expect(whereArg.status).toBe(AuditStatus.ARCHIVED);
         expect(whereArg.organizationId).toBe("org-1");
-        expect(whereArg.assignments).toEqual({ some: { userId: "user-1" } });
+        // PermissionAction.delete is ADMIN/OWNER-only, so assignments-based
+        // scoping has no place here — guard against re-introduction.
+        expect(whereArg.assignments).toBeUndefined();
       });
 
       it("calls removePublicFile for every image AFTER the DB transaction commits", async () => {

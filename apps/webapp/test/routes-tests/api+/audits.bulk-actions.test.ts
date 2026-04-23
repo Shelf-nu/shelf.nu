@@ -307,7 +307,7 @@ describe("api/audits.bulk-actions action", () => {
     it("forwards auditIds + search params to the service and reports the deleted count in the notification", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: true,
+        isSelfServiceOrBase: false,
       } as any);
       vi.mocked(bulkDeleteAudits).mockResolvedValue({ count: 3 } as any);
 
@@ -320,12 +320,14 @@ describe("api/audits.bulk-actions action", () => {
         })
       );
 
+      // isSelfServiceOrBase is intentionally NOT forwarded — delete is
+      // ADMIN/OWNER-only, so plumbing the flag would be dead weight. Assert
+      // the explicit shape so a future re-add is caught.
       expect(bulkDeleteAudits).toHaveBeenCalledWith({
         auditIds: ["a1", "a2", "a3"],
         organizationId: "org-1",
         userId: "user-1",
         currentSearchParams: "status=ARCHIVED",
-        isSelfServiceOrBase: true,
       });
       expect(sendNotification).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -335,7 +337,7 @@ describe("api/audits.bulk-actions action", () => {
       );
     });
 
-    it("uses singular 'audit' in the notification when count is 1", async () => {
+    it("uses singular 'audit' (title + message) in the notification when count is 1", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
         isSelfServiceOrBase: false,
@@ -352,6 +354,7 @@ describe("api/audits.bulk-actions action", () => {
 
       expect(sendNotification).toHaveBeenCalledWith(
         expect.objectContaining({
+          title: "Audit deleted",
           message: expect.stringMatching(/1 audit\./),
         })
       );

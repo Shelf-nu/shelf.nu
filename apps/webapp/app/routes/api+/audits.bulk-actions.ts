@@ -89,13 +89,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
-          isSelfServiceOrBase,
         });
 
+        const isSingle = count === 1;
         sendNotification({
-          title: "Audits deleted",
+          title: isSingle ? "Audit deleted" : "Audits deleted",
           message: `Permanently deleted ${count} ${
-            count === 1 ? "audit" : "audits"
+            isSingle ? "audit" : "audits"
           }.`,
           icon: { name: "success", variant: "success" },
           senderId: userId,

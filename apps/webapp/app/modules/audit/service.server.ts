@@ -2610,12 +2610,25 @@ async function safeRemoveAuditImageFiles(image: {
 }
 
 /**
+ * Normalize audit-name confirmation strings for comparison.
+ * Trims whitespace, applies Unicode NFC, and lower-cases. NFC matters
+ * because macOS keyboards can emit decomposed characters (NFD) while
+ * the DB stores the composed form, so `"Résumé" !== "Résumé"` without
+ * normalization even when a user types the name exactly.
+ */
+const normalizeAuditName = (s: string): string =>
+  s.trim().normalize("NFC").toLowerCase();
+
+/**
  * Permanently deletes an archived audit session and all related data.
  *
  * Prerequisites:
  * - Audit must be in status `ARCHIVED` (enforced here and at the route).
  *   Delete is the intentional escape hatch past the archive-first contract,
  *   so `assertAuditNotArchived` is deliberately NOT called.
+ * - Caller supplies the user's typed confirmation via `expectedName`. The
+ *   compare is server-side and case-insensitive after NFC normalization,
+ *   so a tampered client value can't bypass the name check.
  *
  * Cascade behavior (via Prisma `onDelete: Cascade`):
  * - AuditAsset, AuditScan, AuditNote, AuditImage, AuditAssignment all
@@ -2632,25 +2645,29 @@ async function safeRemoveAuditImageFiles(image: {
  *
  * @param auditSessionId - ID of the audit to delete
  * @param organizationId - Scoping organization (enforces tenant isolation)
- * @param userId - User performing the delete (for error context)
- * @throws {ShelfError} 404 if not found; 409 if not ARCHIVED; 500 on DB failure
+ * @param userId - User performing the delete (for error context + log trail)
+ * @param expectedName - Confirmation string the user typed in the dialog
+ * @throws {ShelfError} 400 if confirmation doesn't match the stored name;
+ *   404 if not found; 409 if not ARCHIVED; 500 on DB failure
  */
 export async function deleteAuditSession({
   auditSessionId,
   organizationId,
   userId,
+  expectedName,
 }: {
   auditSessionId: AuditSession["id"];
   organizationId: Organization["id"];
   userId: string;
+  expectedName: string;
 }): Promise<void> {
   try {
-    // Pre-read to validate existence, org scoping, and ARCHIVED status —
-    // also the only chance to collect image URLs before cascade wipes
-    // AuditImage rows.
+    // Pre-read to validate existence, org scoping, name, and ARCHIVED
+    // status — also the only chance to collect image URLs before cascade
+    // wipes AuditImage rows.
     const audit = await db.auditSession.findFirst({
       where: { id: auditSessionId, organizationId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, name: true },
     });
 
     if (!audit) {
@@ -2660,6 +2677,17 @@ export async function deleteAuditSession({
         additionalData: { auditSessionId, organizationId, userId },
         label,
         status: 404,
+      });
+    }
+
+    if (normalizeAuditName(expectedName) !== normalizeAuditName(audit.name)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Confirmation did not match the audit name.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2707,9 +2735,16 @@ export async function deleteAuditSession({
       });
     }
 
+    // Permanent deletion leaves no AuditNote trail (cascade wipes them).
+    // Emit a server-side info log so we retain a trace of who deleted what.
+    Logger.info(
+      `Permanently deleted audit ${auditSessionId} (org=${organizationId}, user=${userId})`
+    );
+
     // DB commit succeeded — now best-effort storage cleanup. Failures are
     // logged; stale storage objects are recoverable, a zombie DB row
-    // wouldn't be.
+    // wouldn't be. Sequential is fine here: a single audit has at most a
+    // handful of images.
     for (const image of images) {
       await safeRemoveAuditImageFiles(image);
     }
@@ -2733,6 +2768,13 @@ export async function deleteAuditSession({
  * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
  * so non-archived audits in the filtered view can never be pulled in.
  *
+ * Note: `isSelfServiceOrBase` is intentionally not a parameter here.
+ * `PermissionAction.delete` on the audit entity is ADMIN/OWNER-only
+ * (see `permission.data.ts`), so by the time we reach this function the
+ * caller is already guaranteed not to be self-service/base. Wiring the
+ * flag through would be dead plumbing that implies a policy choice
+ * (delete-your-assigned-archives) no one has actually made.
+ *
  * Ordering is all-or-nothing:
  * 1. Pre-read the target audits (ARCHIVED only).
  * 2. Capture image URLs for every target — needed BEFORE the cascade wipes
@@ -2750,9 +2792,8 @@ export async function deleteAuditSession({
  *
  * @param auditIds - Array of audit IDs, or `[ALL_SELECTED_KEY]` for select-all
  * @param organizationId - Scoping organization
- * @param userId - User performing the bulk delete (for error context)
+ * @param userId - User performing the bulk delete (for error context + log trail)
  * @param currentSearchParams - Serialized URL params, used when ALL_SELECTED_KEY
- * @param isSelfServiceOrBase - Restrict select-all to audits assigned to userId
  * @returns Object with the count of audits actually deleted
  * @throws {ShelfError} If selection is empty, any audit is not ARCHIVED, or
  *   if a concurrent status change makes the bulk delete non-atomic
@@ -2762,13 +2803,11 @@ export async function bulkDeleteAudits({
   organizationId,
   userId,
   currentSearchParams,
-  isSelfServiceOrBase,
 }: {
   auditIds: AuditSession["id"][];
   organizationId: Organization["id"];
   userId: string;
   currentSearchParams?: string | null;
-  isSelfServiceOrBase?: boolean;
 }): Promise<{ count: number }> {
   try {
     const selectAll = auditIds.includes(ALL_SELECTED_KEY);
@@ -2783,9 +2822,7 @@ export async function bulkDeleteAudits({
       const paramStatus = new URLSearchParams(currentSearchParams ?? "")
         .get("status")
         ?.toUpperCase();
-      const isArchivedOnlyFilter =
-        paramStatus === AuditStatus.ARCHIVED.toString();
-      if (!isArchivedOnlyFilter) {
+      if (paramStatus !== AuditStatus.ARCHIVED) {
         throw new ShelfError({
           cause: null,
           message:
@@ -2804,8 +2841,6 @@ export async function bulkDeleteAudits({
       ? getAuditWhereInput({
           currentSearchParams,
           organizationId,
-          userId,
-          isSelfServiceOrBase,
         })
       : { id: { in: auditIds }, organizationId };
 
@@ -2894,10 +2929,22 @@ export async function bulkDeleteAudits({
       return deleted;
     });
 
+    // Permanent deletion leaves no AuditNote trail for any of these rows
+    // (cascade wipes them). Structured info log retains a trace.
+    Logger.info(
+      `Permanently deleted ${count} audits (org=${organizationId}, user=${userId}, ids=${targetIds.join(
+        ","
+      )})`
+    );
+
     // Transaction committed — safe to remove storage objects now.
-    for (const image of images) {
-      await safeRemoveAuditImageFiles(image);
-    }
+    // safeRemoveAuditImageFiles already logs + swallows per-file failures,
+    // so Promise.allSettled is strictly a latency win (Toby's cleanup of
+    // 125+ archived audits × multiple images each would otherwise be
+    // minutes of serial HTTP).
+    await Promise.allSettled(
+      images.map((image) => safeRemoveAuditImageFiles(image))
+    );
 
     return { count };
   } catch (cause) {

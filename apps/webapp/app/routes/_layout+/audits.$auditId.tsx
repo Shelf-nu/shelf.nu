@@ -200,37 +200,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         z.object({ confirmation: z.string().min(1) })
       );
 
-      // Re-read the audit name server-side so the confirmation check never
-      // trusts a name the client could have tampered with.
-      const session = await db.auditSession.findFirst({
-        where: { id: auditId, organizationId },
-        select: { name: true },
-      });
-      if (!session) {
-        throw new ShelfError({
-          cause: null,
-          message: "Audit not found.",
-          additionalData: { auditId, organizationId },
-          label,
-          status: 404,
-        });
-      }
-
-      if (confirmation.trim().toLowerCase() !== session.name.toLowerCase()) {
-        throw new ShelfError({
-          cause: null,
-          message: "Confirmation did not match the audit name.",
-          additionalData: { auditId },
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
-
+      // Name-match verification lives inside deleteAuditSession — it
+      // re-reads the audit for existence/status anyway, so folding the
+      // compare into the same query avoids a second round-trip and keeps
+      // the "never trust client-supplied names" guarantee in one place.
       await deleteAuditSession({
         auditSessionId: auditId,
         organizationId,
         userId,
+        expectedName: confirmation,
       });
 
       // Audit no longer exists — return the redirect so React Router
