@@ -53,26 +53,35 @@ const defaultComponents = {
   TagComponent,
 };
 
+/**
+ * Stable, module-scope default for the `components` prop.
+ * Declared outside the component so memoised derivations don't invalidate
+ * on every render (`rerender-memo-with-default-value`).
+ */
+const EMPTY_COMPONENTS: Record<string, ComponentType> = {};
+
+/**
+ * Module-scope wrapper that injects `disablePortal` into AuditImagesComponent.
+ * Hoisted out of MarkdownViewer to avoid `no-nested-component-definition`.
+ */
+const AuditImagesComponentNoPortal = (props: any) => (
+  <AuditImagesComponent {...props} disablePortal={true} />
+);
+AuditImagesComponentNoPortal.displayName = "AuditImagesComponentNoPortal";
+
 export const MarkdownViewer = ({
   content,
-  components = {},
+  components = EMPTY_COMPONENTS,
   pre,
   className,
   disablePortal,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
-  // Memoize the wrapped AuditImagesComponent to prevent recreation
-  const WrappedAuditImages = React.useMemo(() => {
-    if (!disablePortal) return AuditImagesComponent;
-
-    // Create a stable wrapper that injects disablePortal
-    const Wrapped = (props: any) => (
-      <AuditImagesComponent {...props} disablePortal={true} />
-    );
-    Wrapped.displayName = "WrappedAuditImagesComponent";
-    return Wrapped as any;
-  }, [disablePortal]);
+  // Select which AuditImagesComponent variant to render based on disablePortal.
+  const WrappedAuditImages = disablePortal
+    ? AuditImagesComponentNoPortal
+    : AuditImagesComponent;
 
   // Merge custom components with defaults
   const allComponents = React.useMemo(

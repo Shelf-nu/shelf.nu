@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { useAtom } from "jotai";
@@ -429,6 +429,13 @@ function ScannerMode({
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Focus the scanner input on mount so users can start scanning immediately.
+  // Implemented via ref + effect (instead of autoFocus) to satisfy
+  // jsx-a11y/no-autofocus while preserving the same UX.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   const handleInputSubmit = useCallback(
     async (input: HTMLInputElement) => {
       const rawValue = input.value.trim();
@@ -485,7 +492,6 @@ function ScannerMode({
       <div className="relative flex items-center gap-3">
         <Input
           ref={inputRef}
-          autoFocus
           className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
           inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
           disabled={paused}
@@ -526,6 +532,63 @@ function ScannerMode({
   );
 }
 
+/** Internal state for the camera stream — constraints, active device, and
+ * whether we've already tried a fallback after a failed getUserMedia call. */
+type CameraStateValue = {
+  videoConstraints: MediaTrackConstraints;
+  internalDeviceId: string | null;
+  hasRetriedConstraints: boolean;
+};
+
+type CameraStateAction =
+  | {
+      type: "switchDevice";
+      deviceId: string;
+    }
+  | {
+      type: "setConstraints";
+      constraints: MediaTrackConstraints;
+    }
+  | {
+      type: "setInternalDeviceId";
+      deviceId: string;
+    }
+  | {
+      type: "markRetriedWithConstraints";
+      constraints: MediaTrackConstraints;
+    };
+
+/**
+ * Reducer for the camera state. Consolidates updates that previously used
+ * multiple setState calls in a single effect/handler so they apply atomically
+ * and don't trigger `no-cascading-set-state`.
+ */
+function cameraStateReducer(
+  state: CameraStateValue,
+  action: CameraStateAction
+): CameraStateValue {
+  switch (action.type) {
+    case "switchDevice":
+      return {
+        ...state,
+        videoConstraints: { deviceId: { exact: action.deviceId } },
+        internalDeviceId: action.deviceId,
+      };
+    case "setConstraints":
+      return { ...state, videoConstraints: action.constraints };
+    case "setInternalDeviceId":
+      return { ...state, internalDeviceId: action.deviceId };
+    case "markRetriedWithConstraints":
+      return {
+        ...state,
+        hasRetriedConstraints: true,
+        videoConstraints: action.constraints,
+      };
+    default:
+      return state;
+  }
+}
+
 function CameraMode({
   isLoading,
   setIsLoading,
@@ -556,18 +619,21 @@ function CameraMode({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrame = useRef<number>(0);
   const [error, setError] = useState<string | null>(null);
-  // Use saved camera ID for initial constraint if available, otherwise default to back camera
-  const [videoConstraints, setVideoConstraints] =
-    useState<MediaTrackConstraints>(() =>
-      savedCameraId
-        ? { deviceId: { exact: savedCameraId } }
-        : { facingMode: "environment" }
-    );
-  const [hasRetriedConstraints, setHasRetriedConstraints] = useState(false);
-  // Track internal device ID to detect external changes
-  const [internalDeviceId, setInternalDeviceId] = useState<string | null>(
-    savedCameraId ?? null
-  );
+
+  // Consolidated camera state managed via reducer. These three pieces of state
+  // (video constraints, active device id, retry flag) are always updated
+  // together when the camera switches or we fall back, so grouping them into
+  // a single reducer keeps transitions atomic and avoids
+  // react-doctor/no-cascading-set-state warnings.
+  const [cameraState, dispatchCamera] = useReducer(cameraStateReducer, {
+    videoConstraints: savedCameraId
+      ? { deviceId: { exact: savedCameraId } }
+      : { facingMode: "environment" },
+    internalDeviceId: savedCameraId ?? null,
+    hasRetriedConstraints: false,
+  });
+  const { videoConstraints, internalDeviceId, hasRetriedConstraints } =
+    cameraState;
 
   // Enumerate video devices and get current device ID from stream
   const enumerateAndReportDevices = useCallback(async () => {
@@ -600,7 +666,10 @@ function CameraMode({
       // Only update internalDeviceId when a non-empty deviceId is available
       // Safari/iOS may return undefined or empty string from track settings
       if (activeDeviceId) {
-        setInternalDeviceId(activeDeviceId);
+        dispatchCamera({
+          type: "setInternalDeviceId",
+          deviceId: activeDeviceId,
+        });
       }
       onDevicesEnumerated(videoDevices, activeDeviceId);
     } catch {
@@ -626,9 +695,9 @@ function CameraMode({
         video.srcObject = null;
       }
 
-      // Update constraints to use the new device
-      setVideoConstraints({ deviceId: { exact: currentDeviceId } });
-      setInternalDeviceId(currentDeviceId);
+      // Update constraints + active device id atomically via the reducer so
+      // we no longer trip no-cascading-set-state.
+      dispatchCamera({ type: "switchDevice", deviceId: currentDeviceId });
       setIsLoading(true);
     }
   }, [currentDeviceId, internalDeviceId, paused, isLoading, setIsLoading]);
@@ -646,7 +715,6 @@ function CameraMode({
           errorName === "NotFoundError");
 
       if (shouldAttemptFallback) {
-        setHasRetriedConstraints(true);
         setError(null);
 
         const enumerateDevices =
@@ -667,7 +735,11 @@ function CameraMode({
 
             if (fallbackDevice) {
               setIsLoading(true);
-              setVideoConstraints({ deviceId: fallbackDevice.deviceId });
+              // Atomically flag the retry and swap constraints.
+              dispatchCamera({
+                type: "markRetriedWithConstraints",
+                constraints: { deviceId: fallbackDevice.deviceId },
+              });
               return;
             }
           } catch {
@@ -676,7 +748,11 @@ function CameraMode({
         }
 
         setIsLoading(true);
-        setVideoConstraints({});
+        // Atomically flag the retry and clear constraints.
+        dispatchCamera({
+          type: "markRetriedWithConstraints",
+          constraints: {},
+        });
         return;
       }
 
@@ -693,69 +769,61 @@ function CameraMode({
     [hasRetriedConstraints, setIsLoading]
   );
 
-  // Start the animation loop when the video starts playing
+  // Synchronizes the animation loop with the `paused` state and the
+  // <video> element lifecycle. When paused, we cancel any in-flight frame
+  // processing; when unpaused, we kick off processFrame once the video's
+  // metadata is available. Consolidated into a single effect to satisfy
+  // react-doctor/no-effect-event-handler — previously split into two
+  // effects that both reacted to the same dependency set.
   useEffect(() => {
     const videoElement = videoRef.current?.video;
     const canvasElement = canvasRef.current;
-    if (videoElement && canvasElement) {
-      const handleMetadata = async () => {
-        // Video metadata is loaded, safe to start capturing
-        if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-          await processFrame({
-            video: videoElement,
-            canvas: canvasElement,
-            animationFrame,
-            paused,
-            setPaused,
-            onCodeDetectionSuccess,
-            allowNonShelfCodes,
-            setError,
-          });
-        }
-      };
-      videoElement.addEventListener("loadedmetadata", handleMetadata);
-      return () => {
-        videoElement.removeEventListener("loadedmetadata", handleMetadata);
-      };
-    }
-    return () => {
-      if (animationFrame.current) {
-        cancelAnimationFrame(animationFrame.current);
-      }
-    };
-  }, [allowNonShelfCodes, onCodeDetectionSuccess, paused, setPaused]);
 
-  // Effect to handle pause and resume
-  useEffect(() => {
     if (paused) {
-      // Cancel the animation frame when paused
+      // Cancel any frame work scheduled while unpaused.
       if (animationFrame.current) {
         cancelAnimationFrame(animationFrame.current);
         animationFrame.current = 0;
       }
-    } else {
-      // Start processing frames when unpaused
-      const videoElement = videoRef.current?.video;
-      const canvasElement = canvasRef.current;
-      if (videoElement && canvasElement) {
-        const handleMetadata = async () => {
-          // Video metadata is loaded, safe to start capturing
-          if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-            await processFrame({
-              video: videoElement,
-              canvas: canvasElement,
-              animationFrame,
-              paused,
-              setPaused,
-              onCodeDetectionSuccess,
-              allowNonShelfCodes,
-              setError,
-            });
-          }
-        };
-        void handleMetadata();
-      }
+      return;
     }
+
+    if (!videoElement || !canvasElement) {
+      return;
+    }
+
+    let cancelled = false;
+    const startCapture = async () => {
+      if (cancelled) return;
+      // Video metadata is loaded, safe to start capturing
+      if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+        await processFrame({
+          video: videoElement,
+          canvas: canvasElement,
+          animationFrame,
+          paused,
+          setPaused,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          setError,
+        });
+      }
+    };
+
+    // If metadata is already available (e.g. resuming), start immediately.
+    if (videoElement.readyState >= 1 /* HAVE_METADATA */) {
+      void startCapture();
+    }
+    videoElement.addEventListener("loadedmetadata", startCapture);
+
+    return () => {
+      cancelled = true;
+      videoElement.removeEventListener("loadedmetadata", startCapture);
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+        animationFrame.current = 0;
+      }
+    };
   }, [paused, allowNonShelfCodes, onCodeDetectionSuccess, setPaused]);
 
   return (

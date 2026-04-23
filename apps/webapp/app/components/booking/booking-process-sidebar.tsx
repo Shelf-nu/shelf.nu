@@ -11,6 +11,8 @@ type BookingProcessSidebarProps = {
 };
 
 type ProcessItem = {
+  /** Stable id used as React key when rendering the list. */
+  id: string;
   icon: LucideIcon;
   title: string;
   description: string;
@@ -19,12 +21,14 @@ type ProcessItem = {
 
 const ITEMS: Array<ProcessItem> = [
   {
+    id: "submit-request",
     icon: ClockIcon,
     title: "Submit Request",
     description: `Fill in all required information and select the assets you need. Click "Request reservation" to submit your request.`,
     iconClassName: "bg-blue-100 text-blue-500",
   },
   {
+    id: "admin-review",
     icon: InfoIcon,
     title: "Admin Review",
     description:
@@ -32,6 +36,7 @@ const ITEMS: Array<ProcessItem> = [
     iconClassName: "bg-warning-100 text-warning-500",
   },
   {
+    id: "check-out",
     icon: ArrowRight,
     title: "Check-Out",
     description:
@@ -39,6 +44,7 @@ const ITEMS: Array<ProcessItem> = [
     iconClassName: "bg-violet-100 text-violet-500",
   },
   {
+    id: "check-in",
     icon: ArrowLeft,
     title: "Check-In",
     description:
@@ -78,7 +84,7 @@ export default function BookingProcessSidebar({
         </div>
 
         <div className="p-4">
-          <p className="mb-8 border-l-4 border-blue-500 bg-blue-50 p-2 text-blue-500">
+          <p className="mb-8 border-b-2 border-blue-500 bg-blue-50 p-2 text-blue-500">
             Base users reserve bookings that require admin approval and can be
             cancelled at any time if there are conflicts with other bookings.
             Admins handle equipment check-out and check-in.
@@ -86,7 +92,7 @@ export default function BookingProcessSidebar({
 
           <div className="mb-8 flex flex-col gap-4">
             {ITEMS.map((item, i) => (
-              <div key={i} className="flex items-start gap-4">
+              <div key={item.id} className="flex items-start gap-4">
                 <div
                   className={tw(
                     "flex items-center justify-center rounded-full p-4",

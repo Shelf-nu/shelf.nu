@@ -93,6 +93,7 @@ type Props = Partial<
   referer?: string | null;
 };
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export const AssetForm = ({
   id,
   sequentialId,
@@ -238,7 +239,6 @@ export const AssetForm = ({
             error={
               actionData?.errors?.title?.message || zo.errors.title()?.message
             }
-            autoFocus
             onChange={updateDynamicTitle}
             className="w-full"
             defaultValue={title || ""}

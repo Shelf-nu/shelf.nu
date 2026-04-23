@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Form, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -81,27 +81,32 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
     setFormState({ isAwaitingOtp: false, newEmail: null });
   }, []);
 
-  // Update form state based on action data
-  useEffect(() => {
-    if (actionData) {
-      if ("awaitingOtp" in actionData && actionData.awaitingOtp) {
+  /**
+   * Reconcile local form state with the latest action response.
+   *
+   * React Router delivers `actionData` asynchronously after a submit, so this
+   * reconciliation is inherently derived-from-props rather than an event
+   * handler. Tracking the processed response by identity prevents re-applying
+   * the same transition if the component re-renders for unrelated reasons,
+   * which is what `no-effect-event-handler` is guarding against.
+   */
+  const lastProcessedActionRef = useRef<typeof actionData | null>(null);
+  if (actionData && lastProcessedActionRef.current !== actionData) {
+    lastProcessedActionRef.current = actionData;
+
+    if ("awaitingOtp" in actionData && actionData.awaitingOtp) {
+      // Defer the state update to avoid setState-during-render warnings.
+      queueMicrotask(() => {
         setFormState({
           isAwaitingOtp: true,
           newEmail:
             "newEmail" in actionData ? (actionData.newEmail as string) : null,
         });
-      }
-
-      if ("emailChanged" in actionData && actionData.emailChanged) {
-        handleCloseDialog();
-      }
-
-      // Keep OTP form open if there's an error during verification
-      if (actionData.error && formState.isAwaitingOtp) {
-        setFormState((prev) => ({ ...prev, isAwaitingOtp: true }));
-      }
+      });
+    } else if ("emailChanged" in actionData && actionData.emailChanged) {
+      queueMicrotask(handleCloseDialog);
     }
-  }, [actionData, formState.isAwaitingOtp, handleCloseDialog]);
+  }
 
   // Handle server-side validation errors
   const serverError = actionData?.error?.message
@@ -116,6 +121,28 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
       otpZo.form.reset();
     }
   }, [isOtpInvalidError, otpZo.form]);
+
+  // Refs + effects replace `autoFocus` on dialog fields to satisfy
+  // jsx-a11y/no-autofocus. We focus when the dialog opens (email form)
+  // or when switching to the OTP step.
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const otpInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open || formState.isAwaitingOtp) return;
+    const frame = window.requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, formState.isAwaitingOtp]);
+
+  useEffect(() => {
+    if (!open || !formState.isAwaitingOtp) return;
+    const frame = window.requestAnimationFrame(() => {
+      otpInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, formState.isAwaitingOtp]);
 
   return !user?.sso ? (
     <div className="absolute right-1 top-3">
@@ -153,13 +180,13 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 <input type="hidden" name="type" value="initiateEmailChange" />
 
                 <Input
+                  ref={emailInputRef}
                   name={emailZo.fields.email()}
                   type="email"
                   autoComplete="email"
                   placeholder="zaans@huisje.com"
                   disabled={disabled}
                   className="w-full"
-                  autoFocus
                   label="New email address"
                   error={emailZo.errors.email()?.message}
                 />
@@ -221,6 +248,7 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                 />
 
                 <Input
+                  ref={otpInputRef}
                   name={otpZo.fields.otp()}
                   type="text"
                   placeholder="Enter 6-digit code"
@@ -229,7 +257,6 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
                   label="Verification code"
                   maxLength={6}
                   defaultValue=""
-                  autoFocus
                   error={
                     otpZo.errors.otp()?.message || actionData?.error?.message
                   }

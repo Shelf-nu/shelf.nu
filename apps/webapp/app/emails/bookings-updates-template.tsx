@@ -203,7 +203,7 @@ export function BookingUpdatesEmailTemplate({
             style={{
               margin: "0 0 24px",
               padding: "16px",
-              borderLeft: "4px solid #F79009",
+              borderBottom: "3px solid #F79009",
               backgroundColor: "#FFFAEB",
               textAlign: "left",
               borderRadius: "4px",
@@ -244,8 +244,10 @@ export function BookingUpdatesEmailTemplate({
               What changed:
             </p>
             <ul style={{ margin: "0", paddingLeft: "20px" }}>
-              {changes.map((change, i) => (
-                <li key={i} style={{ ...styles.li, marginBottom: "4px" }}>
+              {changes.map((change) => (
+                // Each change string is a unique human-readable line, so the
+                // string itself is a stable key (avoids array-index-as-key).
+                <li key={change} style={{ ...styles.li, marginBottom: "4px" }}>
                   {change}
                 </li>
               ))}

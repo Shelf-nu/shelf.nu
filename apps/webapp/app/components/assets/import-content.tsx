@@ -6,7 +6,7 @@
  * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
  */
 import type { ChangeEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
@@ -282,6 +282,10 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
+  // Ref to the "I AGREE" confirmation input so we can programmatically
+  // focus it when the confirmation dialog opens (replaces `autoFocus`).
+  const agreeInputRef = useRef<HTMLInputElement>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcherWithReset<typeof action>();
 
   const { data } = fetcher;
@@ -300,6 +304,19 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       setSelectedFile(selectedFile);
     }
   };
+
+  // Focus the confirmation input when the dialog opens, and only then.
+  // This replaces the prior `autoFocus` prop which fires too eagerly.
+  useEffect(() => {
+    if (isDialogOpen && !isSuccessful) {
+      // Radix mounts the dialog content on the next tick; defer focus so
+      // the input exists in the DOM before we call focus().
+      const id = window.setTimeout(() => {
+        agreeInputRef.current?.focus();
+      }, 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [isDialogOpen, isSuccessful]);
 
   return (
     <fetcher.Form
@@ -321,6 +338,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
       <AlertDialog
         onOpenChange={(open) => {
+          setIsDialogOpen(open);
           if (!open) {
             // Reset form state when dialog is closed
             setAgreed("");
@@ -352,7 +370,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 <Input
                   type="text"
                   label={"Confirmation"}
-                  autoFocus
+                  ref={agreeInputRef}
                   name="agree"
                   value={agreed}
                   onChange={(e) => setAgreed(e.target.value.toUpperCase())}
@@ -449,8 +467,14 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                         kit: string;
                         issue: string;
                       }>
-                    ).map((conflict, index: number) => (
-                      <tr key={index} className="border-b">
+                    ).map((conflict) => (
+                      <tr
+                        // Compose a stable key from the conflict fields —
+                        // the backend can surface the same asset twice
+                        // for different issues, so include `issue` too.
+                        key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
+                        className="border-b"
+                      >
                         <td className="px-2 py-1">{conflict.asset}</td>
                         <td className="px-2 py-1">{conflict.custodian}</td>
                         <td className="px-2 py-1">{conflict.kit}</td>
@@ -588,8 +612,12 @@ function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
               <Td className="align-top">{barcode.value}</Td>
               <Td className="whitespace-normal">
                 <ul className="list-disc pl-4">
-                  {barcode.assets.map((asset, i) => (
-                    <li key={i}>
+                  {barcode.assets.map((asset) => (
+                    // CSV `row` number is unique per imported asset
+                    // within a single error payload, so it's a stable
+                    // key (include title+type to be extra safe if the
+                    // same row ever surfaces under multiple barcodes).
+                    <li key={`${asset.row}-${asset.type}-${asset.title}`}>
                       {asset.title} ({asset.type}): Line {asset.row}
                     </li>
                   ))}
