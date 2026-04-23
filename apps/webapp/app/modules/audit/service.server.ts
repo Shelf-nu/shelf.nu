@@ -2728,7 +2728,7 @@ export async function deleteAuditSession({
       throw new ShelfError({
         cause: null,
         message:
-          "Audit could not be deleted. Its status may have changed — please refresh and try again.",
+          "Audit could not be deleted. Its status may have changed, or it was removed by another process — please refresh and try again.",
         additionalData: { auditSessionId, organizationId },
         label,
         status: 409,
@@ -2914,8 +2914,12 @@ export async function bulkDeleteAudits({
       if (deleted.count !== targetIds.length) {
         throw new ShelfError({
           cause: null,
+          // The pre-read already confirmed every id was ARCHIVED + in-org,
+          // so a mismatch here means a concurrent process either changed
+          // an audit's status OR deleted an audit outright between the
+          // pre-read and this write. Cover both causes in the message.
           message:
-            "Some audits could not be deleted because their status changed. Please refresh and try again.",
+            "Some audits could not be deleted because their status changed or they were removed by another process. Please refresh and try again.",
           additionalData: {
             expected: targetIds.length,
             actual: deleted.count,
@@ -2939,12 +2943,18 @@ export async function bulkDeleteAudits({
 
     // Transaction committed — safe to remove storage objects now.
     // safeRemoveAuditImageFiles already logs + swallows per-file failures,
-    // so Promise.allSettled is strictly a latency win (Toby's cleanup of
-    // 125+ archived audits × multiple images each would otherwise be
-    // minutes of serial HTTP).
-    await Promise.allSettled(
-      images.map((image) => safeRemoveAuditImageFiles(image))
-    );
+    // so parallelism is strictly a latency win. A select-all delete for a
+    // large org could fan out thousands of concurrent Supabase requests
+    // (throttling + event-loop pressure), so cap concurrency with a small
+    // batch size.
+    const STORAGE_CLEANUP_BATCH_SIZE = 10;
+    for (let i = 0; i < images.length; i += STORAGE_CLEANUP_BATCH_SIZE) {
+      await Promise.allSettled(
+        images
+          .slice(i, i + STORAGE_CLEANUP_BATCH_SIZE)
+          .map((image) => safeRemoveAuditImageFiles(image))
+      );
+    }
 
     return { count };
   } catch (cause) {

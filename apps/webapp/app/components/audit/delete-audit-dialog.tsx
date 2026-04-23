@@ -15,7 +15,7 @@
  * @see {@link file://../../routes/_layout+/audits.$auditId.tsx} - Action handler
  * @see {@link file://../custom-fields/delete-dialog.tsx} - Pattern reference
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import Input from "~/components/forms/input";
 import { TrashIcon } from "~/components/icons/library";
@@ -58,12 +58,13 @@ export function DeleteAuditDialog({
   const disabled = useDisabled(fetcher);
   const [confirmation, setConfirmation] = useState("");
 
-  const confirmationMatches =
-    confirmation.trim().toLowerCase() === auditName.toLowerCase();
-
-  /** Stabilize onClose in a ref to avoid stale closures in effects. */
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  // Must mirror the service-side normalization (see deleteAuditSession).
+  // Without NFC, a macOS user typing a composed character (e.g. "é" via
+  // option-e + e) can have the button stay disabled even though the
+  // server would accept the confirmation.
+  const normalize = (s: string): string =>
+    s.trim().normalize("NFC").toLowerCase();
+  const confirmationMatches = normalize(confirmation) === normalize(auditName);
 
   // Reset the input whenever the dialog closes so the next open starts fresh
   // (users shouldn't see their previous attempt lingering in the field).
