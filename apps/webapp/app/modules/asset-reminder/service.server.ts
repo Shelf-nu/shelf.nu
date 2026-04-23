@@ -296,7 +296,14 @@ export async function editAssetReminder({
       cause,
       message,
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      // Forward the inner ShelfError's decision when the cause is already
+      // a ShelfError — otherwise this wrapper re-captures intentional 4xx
+      // throws like the stale-team-member validator (`shouldBeCaptured:
+      // false`) or the "Edit is not allowed" guard above. Fall back to the
+      // Prisma not-found check for raw causes.
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
@@ -320,7 +327,11 @@ export async function deleteAssetReminder({
         ? "Reminder not found or you are viewing in wrong organization."
         : "Something went wrong while deleting reminder.",
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      // Forward the inner ShelfError's decision when present so this
+      // wrapper does not re-capture intentional 4xx throws.
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
