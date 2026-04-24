@@ -33,6 +33,8 @@ export type PdfModelRequest = {
   id: string;
   assetModelId: string;
   quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: Date | string | null;
   assetModel: { id: string; name: string };
 };
 
@@ -179,11 +181,13 @@ export async function fetchAllPdfRelatedData(
       (booking as unknown as { modelRequests?: PdfModelRequest[] })
         .modelRequests ?? []
     )
-      .filter((req) => req.quantity > 0)
+      .filter((req) => req.fulfilledAt === null)
       .map((req) => ({
         id: req.id,
         assetModelId: req.assetModelId,
         quantity: req.quantity,
+        fulfilledQuantity: req.fulfilledQuantity,
+        fulfilledAt: req.fulfilledAt,
         assetModel: {
           id: req.assetModel.id,
           name: req.assetModel.name,

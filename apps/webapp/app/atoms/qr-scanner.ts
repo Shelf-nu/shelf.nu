@@ -507,3 +507,128 @@ export const quickCheckinQtyAssetAtom = atom(
     });
   }
 );
+
+/*******************************/
+
+/* BOOKING FULFIL-AND-CHECKOUT ATOMS */
+
+/**
+ * Phase 3d-Polish "Fulfil reservations & check out" flow atoms.
+ *
+ * These sit alongside the booking check-in session atoms above. The
+ * check-in flow reconciles BookingAsset rows that already exist on a
+ * booking; this flow resolves outstanding `BookingModelRequest`s (the
+ * "N × AssetModel" reservations introduced in Phase 3d) by scanning
+ * concrete assets to materialize them, then transitions RESERVED →
+ * ONGOING in a single atomic submit.
+ *
+ * Why a separate parallel atom family (instead of generalising
+ * `bookingCheckinSessionAtom`)? The two sessions have divergent data
+ * models — check-in tracks per-asset `remaining` quantities on
+ * existing BookingAssets, whereas fulfil tracks per-model `booked`
+ * vs `remaining` counts on BookingModelRequests plus a read-only
+ * "already included" list of concrete assets. Sharing a single atom
+ * would force every consumer to discriminate by tag on every read.
+ * Keeping them parallel preserves the shared `scannedItemsAtom`
+ * substrate while each flow owns its own session shape.
+ */
+
+/**
+ * One expected entry per outstanding `BookingModelRequest`. The
+ * drawer renders `booked` synthetic pending rows per model and
+ * decrements `remaining` as matching scans arrive.
+ */
+export type ExpectedModelRequest = {
+  assetModelId: string;
+  assetModelName: string;
+  /** Original `BookingModelRequest.quantity` at session start. */
+  booked: number;
+  /** Units still pending in this session (client-side derived). */
+  remaining: number;
+};
+
+/**
+ * Fulfil-and-checkout session metadata. Null when no session is
+ * active. `bookingFrom` is kept as ISO string because the atom layer
+ * shouldn't own `Date` instances (they serialize poorly across
+ * loader boundaries); consumers parse it when computing
+ * `isBookingEarlyCheckout`.
+ */
+export type FulfilSessionInfo = {
+  bookingId: string;
+  bookingName: string;
+  /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
+  bookingFrom: string;
+  expectedModelRequests: ExpectedModelRequest[];
+  /**
+   * Concrete BookingAssets already on the booking before this
+   * session. Rendered in the drawer's "Already included" section as
+   * a visual-only, non-interactive list so operators see the full
+   * picture (mirrors the audit expected-list UX). Never mutated
+   * client-side — the server owns these rows.
+   */
+  alreadyIncluded: Array<{
+    id: string;
+    title: string;
+    mainImage: string | null;
+    thumbnailImage: string | null;
+    assetModelId: string | null;
+    kitId: string | null;
+    /**
+     * `BookingAsset.quantity` on this booking — `1` for INDIVIDUAL
+     * assets, `N` for QUANTITY_TRACKED. Lets the "Already included"
+     * collapser render `"Pens × 20"` for qty-tracked rows instead
+     * of hiding the unit count entirely.
+     */
+    bookedQuantity: number;
+    /**
+     * Asset type so the renderer knows whether to show the quantity
+     * suffix (`QUANTITY_TRACKED`) or suppress it (`INDIVIDUAL`, which
+     * is implicitly `× 1`).
+     */
+    type: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  }>;
+} | null;
+
+/** Current fulfil-and-checkout session metadata. */
+export const fulfilSessionAtom = atom<FulfilSessionInfo>(null);
+
+/**
+ * Expected model-request list for the current session. Kept as a
+ * separate atom (rather than reading through `fulfilSessionAtom`)
+ * so per-scan derivations can subscribe without re-rendering on
+ * every session-info change.
+ */
+export const expectedModelRequestsAtom = atom<ExpectedModelRequest[]>([]);
+
+/**
+ * Write-only: mount-time setter for the fulfil session.
+ *
+ * Mirrors `startBookingCheckinSessionAtom`. Writes both the session
+ * metadata and the expected-model-requests list in one action, and
+ * clears `scannedItemsAtom` so a prior session's scans (e.g. from
+ * `scan-assets` or a previous fulfil attempt) don't leak into this
+ * one. Called by the fulfil init hook on mount.
+ */
+export const setFulfilSessionAtom = atom(
+  null,
+  (_get, set, info: Exclude<FulfilSessionInfo, null>) => {
+    set(fulfilSessionAtom, info);
+    set(expectedModelRequestsAtom, info.expectedModelRequests);
+    set(scannedItemsAtom, {});
+  }
+);
+
+/**
+ * Write-only: teardown for the fulfil session.
+ *
+ * Mirrors `endBookingCheckinSessionAtom`. Clears session info, the
+ * expected list, and the shared scanned-items container. Called by
+ * the fulfil init hook on unmount so returning to this flow later
+ * starts from a clean slate.
+ */
+export const endFulfilSessionAtom = atom(null, (_get, set) => {
+  set(fulfilSessionAtom, null);
+  set(expectedModelRequestsAtom, []);
+  set(scannedItemsAtom, {});
+});

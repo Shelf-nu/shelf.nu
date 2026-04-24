@@ -33,6 +33,7 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { getValidationErrors } from "~/utils/http";
 import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
@@ -59,7 +60,17 @@ export type ManageModelRequestsModel = {
 export type ManageModelRequestsRequest = {
   assetModelId: string;
   assetModelName: string;
+  /** Original reserved quantity. Never decreases on scan. */
   quantity: number;
+  /** Units already materialised into concrete `BookingAsset` rows. */
+  fulfilledQuantity: number;
+  /**
+   * Set when every unit has been materialised (`fulfilledQuantity
+   * === quantity`). `null` means still outstanding. Fulfilled rows
+   * stay in the DB as an audit trail and render in a read-only
+   * "Fulfilled" section of the tab.
+   */
+  fulfilledAt: string | null;
 };
 
 /** Props for {@link ManageModelRequests}. */
@@ -101,12 +112,21 @@ export function ManageModelRequests({
     [modelRequests]
   );
 
+  const activeRequests = useMemo(
+    () => modelRequests.filter((r) => r.fulfilledAt === null),
+    [modelRequests]
+  );
+  const fulfilledRequests = useMemo(
+    () => modelRequests.filter((r) => r.fulfilledAt !== null),
+    [modelRequests]
+  );
+
   return (
     <div className="flex flex-col gap-6 overflow-y-auto px-6 py-4">
       <ExistingRequestsList
         bookingId={bookingId}
         assetModels={assetModels}
-        modelRequests={modelRequests}
+        modelRequests={activeRequests}
       />
 
       <AddRequestRow
@@ -114,6 +134,63 @@ export function ManageModelRequests({
         assetModels={assetModels}
         excludeModelIds={reservedModelIds}
       />
+
+      {fulfilledRequests.length > 0 ? (
+        <FulfilledRequestsList modelRequests={fulfilledRequests} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Read-only list of fully-fulfilled model reservations. Shown as an
+ * audit trail below the active-editing section so operators on
+ * ONGOING bookings can still see "this booking originally reserved
+ * 3 × Dell Latitude, all assigned". No edit / remove controls — the
+ * units are materialised, editing the intent record post-fulfilment
+ * would orphan the concrete BookingAssets.
+ */
+function FulfilledRequestsList({
+  modelRequests,
+}: {
+  modelRequests: ManageModelRequestsRequest[];
+}) {
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-gray-700">
+        Fulfilled reservations
+      </h3>
+      <p className="mb-2 text-xs text-gray-500">
+        These model-level reservations were fulfilled by scanning specific
+        assets. Shown here as an audit trail — edit or remove the concrete
+        assets via the Assets tab.
+      </p>
+      <ul className="flex flex-col divide-y divide-gray-100 rounded-md border border-gray-200">
+        {modelRequests.map((req) => (
+          <li
+            key={req.assetModelId}
+            className="flex items-center justify-between gap-3 p-3"
+          >
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="truncate text-sm font-medium text-gray-900">
+                {req.assetModelName}
+              </span>
+              <span className="text-xs text-gray-500">
+                {req.fulfilledQuantity} of {req.quantity} fulfilled
+              </span>
+            </div>
+            <span
+              className="inline-flex items-center rounded-2xl px-2 py-[2px] text-[12px] font-medium"
+              style={{
+                backgroundColor: BADGE_COLORS.green.bg,
+                color: BADGE_COLORS.green.text,
+              }}
+            >
+              Fulfilled
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

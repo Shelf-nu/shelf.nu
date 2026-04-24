@@ -74,11 +74,11 @@ export function BookingUpdatesEmailTemplate({
   recipientEmail,
 }: Props) {
   // Phase 3d (Book-by-Model): only surface outstanding model-level
-  // reservations. A request drained to zero is kept in the database
-  // until it can be cleaned up, so we filter defensively here to avoid
-  // a "0 × Dell Latitude" row in the email.
+  // reservations. Fulfilled rows carry a `fulfilledAt` timestamp and
+  // represent historical fulfilment — they shouldn't appear in a
+  // reservation notification email.
   const outstandingModelRequests = (modelRequests ?? []).filter(
-    (req) => req.quantity > 0
+    (req) => req.fulfilledAt === null
   );
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -251,7 +251,7 @@ export function BookingUpdatesEmailTemplate({
                   }}
                 >
                   <span style={{ fontWeight: 500, color: "#101828" }}>
-                    {req.quantity} ×
+                    {req.quantity - req.fulfilledQuantity} ×
                   </span>{" "}
                   {req.assetModel.name}
                 </li>

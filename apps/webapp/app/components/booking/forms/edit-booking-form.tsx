@@ -87,8 +87,25 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    teamMembers,
+    teamMembersForForm,
+    userId,
+    currentOrganization,
+    booking: loaderBooking,
+  } = useLoaderData<BookingPageLoaderData>();
+
+  /**
+   * Phase 3d-Polish: bookings with outstanding `BookingModelRequest` rows
+   * must route through the fulfil-and-checkout scanner instead of the
+   * normal checkout alert — the server's `RESERVED → ONGOING` guard
+   * refuses transitions while any request still has `quantity > 0`.
+   * Derived inline from `booking.modelRequests` (already loaded via
+   * `BOOKING_WITH_ASSETS_INCLUDE`) to avoid a new loader field.
+   */
+  const outstandingModelRequestCount =
+    loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
+    0;
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -289,11 +306,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
             {/* When booking is reserved, we show the check-out button */}
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-              <CheckoutDialog
-                portalContainer={formElement || undefined}
-                formId="edit-booking-form"
-                booking={{ id, name: name!, from: new Date(startDate!) }}
-                disabled={
+              {(() => {
+                const checkoutDisabled =
                   disabled ||
                   isLoadingWorkingHours ||
                   bookingFlags?.hasUnavailableAssets ||
@@ -309,9 +323,27 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                           ? undefined
                           : "Some assets in this booking are not Available because they're part of an Ongoing or Overdue booking",
                       }
-                    : false
-                }
-              />
+                    : false;
+
+                // When requests are outstanding, the normal checkout would hit the guard — route through the fulfil scanner instead.
+                return outstandingModelRequestCount > 0 ? (
+                  <Button
+                    to="fulfil-and-checkout"
+                    disabled={checkoutDisabled}
+                    className="grow"
+                    size="sm"
+                  >
+                    Check Out
+                  </Button>
+                ) : (
+                  <CheckoutDialog
+                    portalContainer={formElement || undefined}
+                    formId="edit-booking-form"
+                    booking={{ id, name: name!, from: new Date(startDate!) }}
+                    disabled={checkoutDisabled}
+                  />
+                );
+              })()}
             </When>
 
             <When

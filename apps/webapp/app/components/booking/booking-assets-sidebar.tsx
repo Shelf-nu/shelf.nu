@@ -102,7 +102,12 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
 export type SidebarModelRequest = {
   id: string;
   assetModelId: string;
+  /** Total reserved units (original intent). Does not decrease on scan. */
   quantity: number;
+  /** Units already materialised into `BookingAsset` rows via scan. */
+  fulfilledQuantity: number;
+  /** Set when `fulfilledQuantity === quantity`. `null` means outstanding. */
+  fulfilledAt: Date | string | null;
   assetModel: { id: string; name: string };
 };
 
@@ -371,11 +376,13 @@ function AssetTitleAndStatus({
  * Render the "Unassigned model reservations" section shown above the
  * asset list when a booking has outstanding `BookingModelRequest` rows.
  *
- * Rows with `quantity === 0` are filtered out so the section disappears
- * the instant the last unit has been materialised into a concrete
- * `BookingAsset` via scan-to-assign. The "Scan to assign" CTA is only
- * rendered for ONGOING / OVERDUE bookings — for DRAFT / RESERVED the
- * operator edits requests through manage-assets instead.
+ * Rows with `fulfilledAt !== null` (fully fulfilled) are filtered out
+ * so the section disappears once every unit has been materialised.
+ * The "Scan to assign" CTA routes to the generic scan-assets drawer —
+ * scans materialise the matching request via the shared code path.
+ * The *checkout* flow (with fulfil-enforcement + early-date alert)
+ * lives separately on the main booking URL's Check Out button, which
+ * routes to `/fulfil-and-checkout`.
  */
 function UnassignedModelRequestsSection({
   bookingId,
@@ -386,20 +393,24 @@ function UnassignedModelRequestsSection({
   bookingStatus: BookingStatus;
   modelRequests: SidebarModelRequest[];
 }) {
-  const outstanding = modelRequests.filter((req) => req.quantity > 0);
+  const outstanding = modelRequests.filter((req) => req.fulfilledAt === null);
   if (outstanding.length === 0) {
     return null;
   }
 
   const totalRemaining = outstanding.reduce(
-    (sum, req) => sum + req.quantity,
+    (sum, req) => sum + (req.quantity - req.fulfilledQuantity),
     0
   );
 
-  // Scan-to-assign only makes sense once the booking is live — pre-
-  // checkout the operator should tweak the request via manage-assets.
+  // Scan-to-assign is available whenever the booking is in a
+  // manage-assets-eligible state. Keeps DRAFT/RESERVED unblocked — the
+  // checkout guard requires all requests to be drained before ONGOING.
   const canScanToAssign =
-    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+    bookingStatus === "DRAFT" ||
+    bookingStatus === "RESERVED" ||
+    bookingStatus === "ONGOING" ||
+    bookingStatus === "OVERDUE";
 
   return (
     <>
@@ -444,7 +455,7 @@ function UnassignedModelRequestsSection({
                             color: BADGE_COLORS.amber.text,
                           }}
                         >
-                          {req.quantity} remaining
+                          {req.quantity - req.fulfilledQuantity} remaining
                         </span>
                         {canScanToAssign ? (
                           <Link
@@ -490,7 +501,7 @@ export function BookingAssetsSidebar({
   // reservations (Phase 3d). Pure book-by-model bookings legitimately
   // have `bookingAssets.length === 0` but still carry content.
   const outstandingModelRequestCount = (booking.modelRequests ?? []).filter(
-    (req) => req.quantity > 0
+    (req) => req.fulfilledAt === null
   ).length;
   const hasItems =
     booking.bookingAssets.length > 0 || outstandingModelRequestCount > 0;

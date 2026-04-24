@@ -180,10 +180,11 @@ const BookingPDFPreview = ({
 
   // Phase 3d (Book-by-Model): defensively re-filter here so a caller
   // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
-  // model request was fulfilled concurrently) can't leak a zero-qty
-  // row into the printed PDF.
+  // model request was fulfilled concurrently) can't leak a fulfilled
+  // historical row into the printed PDF. `fulfilledAt IS NULL` is the
+  // canonical outstanding filter.
   const outstandingModelRequests = (modelRequests ?? []).filter(
-    (req) => req.quantity > 0
+    (req) => req.fulfilledAt === null
   );
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
@@ -440,7 +441,7 @@ const BookingPDFPreview = ({
                   className="flex items-center gap-2 border-b border-gray-300 p-2.5 text-sm text-gray-600 last:border-b-0"
                 >
                   <span className="font-medium text-gray-900">
-                    {req.quantity} ×
+                    {req.quantity - req.fulfilledQuantity} ×
                   </span>
                   <span>{req.assetModel.name}</span>
                 </li>

@@ -27,6 +27,7 @@ import {
   updateBookingAssets,
   reserveBooking,
   checkoutBooking,
+  fulfilModelRequestsAndCheckout,
   checkinBooking,
   archiveBooking,
   cancelBooking,
@@ -217,6 +218,20 @@ vitest.mock(
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
+}));
+
+// why: `fulfilModelRequestsAndCheckout` calls `materializeModelRequestForAsset`
+// per scanned asset inside its transaction. The real helper issues writes to
+// `tx.bookingModelRequest.update/delete` + `tx.bookingNote.create` that aren't
+// the unit under test here — we care that the service composes the scan-drain
+// + checkout writes atomically, not that the helper itself works (it has its
+// own tests in booking-model-request/service.server.test.ts). Tests below
+// override `mockResolvedValueOnce` per scenario when they need to assert on
+// specific match/no-match behaviour.
+vitest.mock("~/modules/booking-model-request/service.server", () => ({
+  materializeModelRequestForAsset: vitest
+    .fn()
+    .mockResolvedValue({ matched: true, remaining: 0 }),
 }));
 
 // why: spying on booking update email calls without executing
@@ -1595,25 +1610,30 @@ describe("reserveBooking", () => {
     );
   });
 
-  it("should handle booking reservation with different status", async () => {
-    expect.assertions(1);
+  it("should refuse to reserve a booking that isn't DRAFT", async () => {
+    expect.assertions(2);
 
+    // Previously the service happily ran on any status — that let a
+    // stale tab write a spurious `Reserved → Reserved` transition note
+    // (and re-send the reservation email). The guard now refuses any
+    // non-DRAFT source status.
     const mockBooking = {
       ...mockBookingData,
       status: BookingStatus.ONGOING,
       from: mockReserveParams.from,
       to: mockReserveParams.to,
-      bookingAssets: [], // No assets to conflict
+      bookingAssets: [],
     };
-    const reservedBooking = { ...mockBooking, status: BookingStatus.RESERVED };
 
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
-    //@ts-expect-error missing vitest type
-    db.booking.update.mockResolvedValue(reservedBooking);
 
-    const result = await reserveBooking(mockReserveParams);
-    expect(result).toEqual(reservedBooking);
+    await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+      /only DRAFT bookings can be reserved/i
+    );
+    // The guard fires before any write happens — no status flip, no
+    // booking.update call.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 });
 
@@ -1859,6 +1879,410 @@ describe("checkoutBooking", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
     expect(result).toEqual(hydratedBooking);
+  });
+});
+
+/**
+ * Phase 3d-Polish — `fulfilModelRequestsAndCheckout` composes
+ * `addScannedAssetsToBookingWithinTx` + `checkoutBookingWritesWithinTx` in
+ * one atomic transaction so scan-materialisation and the checkout status
+ * flip either commit together or roll back together. These tests pin down
+ * the behaviour that matters for that composition — they don't re-cover
+ * ground the individual helpers already cover in their own describes.
+ */
+describe("fulfilModelRequestsAndCheckout", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockFulfilParams = {
+    bookingId: "booking-1",
+    organizationId: "org-1",
+    userId: "user-1",
+    hints: mockClientHints,
+    from: futureFromDate,
+    to: futureToDate,
+  };
+
+  /**
+   * `addScannedAssetsToBookingWithinTx` always calls `tx.booking.update`
+   * to append BookingAssets (with `data.bookingAssets.create`). The
+   * SEPARATE checkout-transition update carries `data.status`. Tests use
+   * this helper to locate the latter call when asserting on status flips
+   * or date adjustments.
+   */
+  function findStatusUpdateCall() {
+    const calls = (db.booking.update as ReturnType<typeof vitest.fn>).mock
+      .calls;
+    return calls
+      .map((c) => c[0])
+      .find(
+        (arg) =>
+          arg?.data?.status === BookingStatus.ONGOING ||
+          arg?.data?.status === BookingStatus.OVERDUE
+      );
+  }
+
+  function hasStatusUpdate() {
+    return findStatusUpdateCall() !== undefined;
+  }
+
+  /**
+   * Build a pre-tx booking payload matching the service's expected shape,
+   * including the `_count.bookingAssets` field that `runCheckoutSideEffects`
+   * reads post-commit. Callers override `bookingAssets` + `from` as needed.
+   */
+  function buildPreTxBooking(overrides?: {
+    from?: Date;
+    bookingAssets?: Array<{
+      asset: {
+        id: string;
+        kitId: string | null;
+        title: string;
+        status: AssetStatus;
+        bookingAssets: Array<unknown>;
+      };
+      assetId: string;
+      quantity: number;
+      id: string;
+    }>;
+  }) {
+    return {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      from: overrides?.from ?? futureFromDate,
+      bookingAssets: overrides?.bookingAssets ?? [],
+      _count: { bookingAssets: overrides?.bookingAssets?.length ?? 0 },
+    };
+  }
+
+  it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
+    expect.assertions(2);
+
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: [
+        {
+          asset: {
+            id: "hp-1",
+            kitId: null,
+            title: "HP LaserJet 2020",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [],
+          },
+          assetId: "hp-1",
+          quantity: 1,
+          id: "ba-hp",
+        },
+      ],
+    });
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
+    // why: scanned asset metadata lookup inside the tx — the service needs
+    // assetModelId for each scanned asset so materialize can match against
+    // outstanding requests. Return the 3 Dells with a shared model id.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+      {
+        id: "dell-2",
+        title: "Dell #2",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+      {
+        id: "dell-3",
+        title: "Dell #3",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+    ]);
+    // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
+    // booking by this point (1 pre-existing HP + 3 newly materialized Dells).
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-2", title: "Dell #2", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-3", title: "Dell #3", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: outstanding-request guard inside checkoutBookingWritesWithinTx
+    // — empty result means materialize drained everything, so the guard
+    // passes and the tx proceeds.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    const result = await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1", "dell-2", "dell-3"],
+    });
+
+    // Observable outcome: status transition writes include all 4 asset ids
+    // (pre-existing HP + 3 newly-scanned Dells) — this proves the post-scan
+    // snapshot was used for the CHECKED_OUT update rather than the pre-tx
+    // asset list.
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["hp-1", "dell-1", "dell-2", "dell-3"] } },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+    expect(result).toEqual(hydratedBooking);
+  });
+
+  it("should roll back the whole tx when requests remain outstanding after scanning", async () => {
+    expect.assertions(3);
+
+    const mockBooking = buildPreTxBooking();
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: 2 Dell units still outstanding after the operator only scanned 1
+    // — the in-tx guard must refuse the status transition to ONGOING.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "mr-1",
+        bookingId: "booking-1",
+        assetModelId: "am-dell",
+        quantity: 2,
+        assetModel: { name: "Dell Latitude 5550" },
+      },
+    ]);
+
+    await expect(
+      fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Rollback semantics: the callback-style `$transaction` mock doesn't
+    // simulate rollback, so the in-tx `booking.update` that appends the
+    // scanned BookingAsset DOES fire. What must NOT fire is the
+    // checkout-transition: no status flip to ONGOING, and no CHECKED_OUT
+    // asset update — those live downstream of the outstanding-request guard.
+    expect(hasStatusUpdate()).toBe(false);
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("should rewrite booking.from and set originalFrom when checkoutIntentChoice = with-adjusted-date", async () => {
+    expect.assertions(4);
+
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: [
+        {
+          asset: {
+            id: "hp-1",
+            kitId: null,
+            title: "HP",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [],
+          },
+          assetId: "hp-1",
+          quantity: 1,
+          id: "ba-hp",
+        },
+      ],
+    });
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    const nowBeforeCall = Date.now();
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: [],
+      // why: explicit user choice to pull the start-date forward. The service
+      // must write `originalFrom` = the old future date AND a fresh `from`
+      // close to "now".
+      checkoutIntentChoice: "with-adjusted-date" as never,
+    });
+
+    const updateCall = findStatusUpdateCall();
+    expect(updateCall?.data?.originalFrom).toEqual(futureFromDate);
+
+    const rewrittenFrom = updateCall?.data?.from as Date;
+    // Rewritten `from` must move the start meaningfully forward from the
+    // original future booking window (the whole point of "Adjust Date").
+    // We don't pin to a tight "close to now" window because the service
+    // round-trips the date through `DATE_TIME_FORMAT` which truncates
+    // precision and can drift several seconds near minute boundaries —
+    // the invariant that matters is "much earlier than the 30-day-out
+    // original" and "not absurdly wrong".
+    expect(rewrittenFrom.getTime()).toBeLessThan(futureFromDate.getTime());
+    expect(Math.abs(rewrittenFrom.getTime() - nowBeforeCall)).toBeLessThan(
+      5 * 60 * 1000
+    );
+    expect(updateCall?.data?.status).toBe(BookingStatus.ONGOING);
+  });
+
+  it("should NOT rewrite booking.from when checkoutIntentChoice = without-adjusted-date", async () => {
+    expect.assertions(2);
+
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: [
+        {
+          asset: {
+            id: "hp-1",
+            kitId: null,
+            title: "HP",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [],
+          },
+          assetId: "hp-1",
+          quantity: 1,
+          id: "ba-hp",
+        },
+      ],
+    });
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: [],
+      checkoutIntentChoice: "without-adjusted-date" as never,
+    });
+
+    const updateCall = findStatusUpdateCall();
+    // "Don't Adjust Date" must leave the original `from` + `originalFrom`
+    // untouched — the booking window is preserved even though checkout
+    // happened early.
+    expect(updateCall?.data?.originalFrom).toBeUndefined();
+    expect(updateCall?.data?.from).toBeUndefined();
+  });
+
+  it("should fire the outstanding-request guard when operator scans only off-model assets", async () => {
+    expect.assertions(2);
+
+    const mockBooking = buildPreTxBooking();
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // Scanned asset is a Bomag — doesn't match the outstanding Dell request.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "bomag-1",
+        title: "Bomag",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-bomag",
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "bomag-1", title: "Bomag", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: Dell request still at quantity 2 because the Bomag scan didn't
+    // match its assetModelId — the guard must surface the Dell shortfall,
+    // not the Bomag's presence.
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "mr-1",
+        bookingId: "booking-1",
+        assetModelId: "am-dell",
+        quantity: 2,
+        assetModel: { name: "Dell Latitude 5550" },
+      },
+    ]);
+
+    try {
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["bomag-1"],
+      });
+      throw new Error("should have thrown");
+    } catch (error) {
+      const shelfError = error as ShelfError;
+      // Error must name the still-outstanding Dell model, not the Bomag that
+      // was scanned — confirms the guard reads the request table, not the
+      // scanned set.
+      expect(shelfError.message).toContain("Dell Latitude 5550");
+      // Checkout-transition never happened: the BookingAsset append
+      // (`data.bookingAssets.create`) may land in the unrolled mock tx, but
+      // the status flip must not.
+      expect(hasStatusUpdate()).toBe(false);
+    }
   });
 });
 

@@ -19,7 +19,6 @@ import {
   NoteType,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
-import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {

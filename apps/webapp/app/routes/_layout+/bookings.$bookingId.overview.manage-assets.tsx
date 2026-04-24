@@ -375,10 +375,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `BOOKING_WITH_ASSETS_INCLUDE`, so we just project the fields the
      * Models tab needs and leave the rest on the booking record.
      */
+    // Ship all requests (outstanding + fulfilled). The Models tab UI
+    // splits them into "Active reservations" (editable, not yet fully
+    // fulfilled) and "Fulfilled" (historical, read-only). Fulfilled
+    // rows are the audit trail for "this booking started life as 3 ×
+    // Dell" on an ONGOING booking.
     const modelRequests = booking.modelRequests.map((req) => ({
       assetModelId: req.assetModelId,
       assetModelName: req.assetModel.name,
       quantity: req.quantity,
+      fulfilledQuantity: req.fulfilledQuantity,
+      fulfilledAt:
+        req.fulfilledAt instanceof Date
+          ? req.fulfilledAt.toISOString()
+          : req.fulfilledAt,
     }));
 
     /**

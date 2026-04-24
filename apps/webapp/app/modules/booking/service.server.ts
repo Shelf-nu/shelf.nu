@@ -947,6 +947,24 @@ export async function reserveBooking({
         });
       });
 
+    /**
+     * Guard: reserveBooking is `DRAFT → RESERVED` only. Without this
+     * check, clicking Reserve on an already-RESERVED booking (e.g.
+     * from a stale tab) re-runs the entire action and writes a
+     * spurious `"Reserved → Reserved"` status-transition note into
+     * the activity log — plus sends another reservation email and
+     * re-schedules jobs. Refuse the no-op up front.
+     */
+    if (bookingFound.status !== BookingStatus.DRAFT) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message: `This booking is already ${bookingFound.status.toLowerCase()}. Only DRAFT bookings can be reserved.`,
+      });
+    }
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
@@ -1102,12 +1120,14 @@ export async function reserveBooking({
         : bookingFound.custodianTeamMember?.name ?? "";
 
       // Phase 3d (Book-by-Model): only forward outstanding requests so
-      // the plain-text email doesn't render a "0 × …" row if a request
-      // was drained to zero but not yet cleaned up.
+      // the email doesn't render fulfilled historical rows. `fulfilledAt
+      // IS NULL` is the canonical outstanding filter in the new schema;
+      // each row shows the STILL-PENDING unit count
+      // (`quantity - fulfilledQuantity`).
       const outstandingModelRequests = bookingFound.modelRequests
-        .filter((req) => req.quantity > 0)
+        .filter((req) => req.fulfilledAt === null)
         .map((req) => ({
-          quantity: req.quantity,
+          quantity: req.quantity - req.fulfilledQuantity,
           modelName: req.assetModel.name,
         }));
 
@@ -1161,6 +1181,318 @@ export async function reserveBooking({
         : "Could not reserve the booking.",
     });
   }
+}
+
+/**
+ * Transaction-body helper shared by {@link checkoutBooking} and
+ * {@link fulfilModelRequestsAndCheckout}.
+ *
+ * Runs the write-side of the RESERVED → ONGOING transition under the
+ * caller's transaction:
+ *   1. Re-reads `BookingModelRequest` rows with `quantity > 0` and throws
+ *      a 400 `ShelfError` if any remain (Phase 3d hard block).
+ *   2. For every QUANTITY_TRACKED booking asset, acquires a row lock and
+ *      validates available pool capacity inside the tx — closes the TOCTOU
+ *      window against sibling writers (other checkouts, custody
+ *      assignments, quantity adjustments).
+ *   3. Flips the checked-out assets + kits to `CHECKED_OUT` and updates
+ *      the booking row with `dataToUpdate` (status + optional adjusted
+ *      dates).
+ *
+ * Extracted so `fulfilModelRequestsAndCheckout` can compose
+ * `addScannedAssetsToBookingWithinTx` and this body into a single atomic
+ * unit — a failure here (availability, outstanding request, etc.) rolls
+ * back BookingAsset creation AND the model-request materialisation in one
+ * shot.
+ *
+ * @param tx - Prisma transaction client
+ * @param args.bookingId - Booking being transitioned
+ * @param args.bookingAssetIds - All asset IDs currently on the booking (used to fan the CHECKED_OUT status update)
+ * @param args.qtyTrackedBookingAssets - Booking-asset pairs whose asset is QUANTITY_TRACKED (used for the availability guard)
+ * @param args.uniqueQtyTrackedAssetIds - Deduplicated IDs from the above list
+ * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom)
+ * @param args.kitIds - Kits to flip to `CHECKED_OUT`
+ * @param args.hasKits - Whether the kit update should fire
+ * @throws {ShelfError} 400 when any model request is unfulfilled
+ * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function checkoutBookingWritesWithinTx(
+  tx: any,
+  {
+    bookingId,
+    bookingAssetIds,
+    qtyTrackedBookingAssets,
+    uniqueQtyTrackedAssetIds,
+    dataToUpdate,
+    kitIds,
+    hasKits,
+  }: {
+    bookingId: Booking["id"];
+    bookingAssetIds: Asset["id"][];
+    qtyTrackedBookingAssets: Array<{
+      quantity: number;
+      asset: Pick<Asset, "id" | "title">;
+    }>;
+    uniqueQtyTrackedAssetIds: Asset["id"][];
+    dataToUpdate: Prisma.BookingUpdateInput;
+    kitIds: string[];
+    hasKits: boolean;
+  }
+) {
+  /**
+   * Phase 3d (Book-by-Model) — checkout guard for unfulfilled
+   * `BookingModelRequest` rows. Model requests represent units that
+   * were reserved at the model level but haven't been assigned to
+   * a concrete asset yet (the usual recovery path is to scan
+   * matching assets, which decrements the request). If any remain
+   * at checkout we refuse the RESERVED → ONGOING transition and
+   * surface the outstanding counts so the operator can either:
+   *   1. scan matching assets to drain the request, or
+   *   2. edit the requests from manage-assets (allowed while the
+   *      booking is still RESERVED — see the model-request service).
+   * This is a hard block — there is no force-partial escape hatch
+   * because ONGOING implies "assets are physically out", which
+   * unfulfilled requests directly contradict.
+   *
+   * Also enforced independently by `fulfilModelRequestsAndCheckout`
+   * as defence in depth: the drawer disables submit while
+   * `remaining > 0`, but a tampered payload would still hit this
+   * guard inside the shared transaction and roll everything back.
+   */
+  const outstandingRequests = await tx.bookingModelRequest.findMany({
+    // `fulfilledAt IS NULL` is the canonical "outstanding" filter —
+    // replaces the pre-audit-trail `quantity > 0` check. Rows where
+    // every unit has been materialised into a `BookingAsset` carry a
+    // timestamp and must not block checkout.
+    where: { bookingId, fulfilledAt: null },
+    include: { assetModel: { select: { name: true } } },
+  });
+
+  if (outstandingRequests.length > 0) {
+    // `tx` is typed `any` so the result shape is lost; annotate the callback.
+    //
+    // Report `req.quantity` (the original reservation intent), NOT
+    // `quantity - fulfilledQuantity`. This throw rolls the whole tx
+    // back — including the in-tx `fulfilledQuantity` increments from
+    // `addScannedAssetsToBookingWithinTx`. So the number the operator
+    // sees post-failure is the pre-tx outstanding count, which equals
+    // `quantity` for rows whose `fulfilledAt` is still null. Showing
+    // `quantity - fulfilledQuantity` here would report a mid-tx view
+    // that doesn't match post-rollback reality.
+    const outstanding: Array<{ assetModelName: string; remaining: number }> =
+      outstandingRequests.map(
+        (req: { assetModel: { name: string }; quantity: number }) => ({
+          assetModelName: req.assetModel.name,
+          remaining: req.quantity,
+        })
+      );
+
+    const summary = outstanding
+      .map((row) => `${row.remaining} × ${row.assetModelName}`)
+      .join(", ");
+
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      message: `Cannot check out — ${summary} still unassigned. Scan matching assets to fulfil the reservation.`,
+      additionalData: { outstanding },
+    });
+  }
+
+  /**
+   * Validate quantity availability for QUANTITY_TRACKED assets.
+   * Between when a booking was created and checkout, other
+   * operations (custody assignments, other booking checkouts) may
+   * have consumed some units. We check here — under the row lock —
+   * so the user gets a clear error listing which assets need
+   * their quantities adjusted before proceeding, and no two
+   * concurrent writers can both pass this guard against the same
+   * snapshot.
+   *
+   * `computeBookingAvailableQuantity` doesn't take a `tx`, but
+   * read-committed isolation combined with the row lock acquired
+   * above guarantees that once any competing writer has committed
+   * its change it is visible here; any still-open writer is
+   * blocked on the same row lock until we commit or roll back.
+   */
+  if (uniqueQtyTrackedAssetIds.length > 0) {
+    const insufficientQtyWarnings: string[] = [];
+
+    for (const assetId of uniqueQtyTrackedAssetIds) {
+      await lockAssetForQuantityUpdate(tx, assetId);
+
+      const { available } = await computeBookingAvailableQuantity(
+        assetId,
+        bookingId
+      );
+
+      // Sum the requested units for this asset on this booking.
+      // (Typically there's one BookingAsset per asset, but we sum
+      // defensively in case the invariant ever changes.)
+      const requested = qtyTrackedBookingAssets
+        .filter((ba) => ba.asset.id === assetId)
+        .reduce((sum, ba) => sum + ba.quantity, 0);
+
+      if (requested > available) {
+        const title =
+          qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
+            .title ?? "";
+        insufficientQtyWarnings.push(
+          `"${title}": requested ${requested}, only ${available} available`
+        );
+      }
+    }
+
+    if (insufficientQtyWarnings.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
+          "\n"
+        )}\nPlease adjust quantities in the booking before checkout.`,
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+  }
+
+  await tx.asset.updateMany({
+    where: {
+      id: { in: bookingAssetIds },
+    },
+    data: { status: AssetStatus.CHECKED_OUT },
+  });
+
+  await tx.booking.update({
+    where: { id: bookingId },
+    data: dataToUpdate,
+    select: { id: true },
+  });
+
+  if (hasKits) {
+    await tx.kit.updateMany({
+      where: { id: { in: kitIds } },
+      data: { status: KitStatus.CHECKED_OUT },
+    });
+  }
+}
+
+/**
+ * Post-commit side-effects shared by {@link checkoutBooking} and
+ * {@link fulfilModelRequestsAndCheckout}.
+ *
+ * These operations MUST run after the checkout transaction has committed
+ * — they touch external systems (scheduler) and write notes that should
+ * reflect the post-commit truth.
+ *
+ *   1. Writes the RESERVED → ONGOING/OVERDUE status transition note.
+ *   2. Cancels any outstanding scheduler job for the booking.
+ *   3. Either sends the check-in reminder now (if under an hour to
+ *      booking.to) + schedules the overdue handler, or schedules the
+ *      check-in reminder for ~1h before booking.to.
+ *   4. Hydrates and returns the full booking payload.
+ *
+ * @returns The hydrated booking row with reservation-email includes.
+ */
+async function runCheckoutSideEffects({
+  bookingFound,
+  userId,
+  effectiveStatus,
+  effectiveBooking,
+  effectiveTo,
+  hints,
+  organizationId,
+  isExpired,
+}: {
+  bookingFound: BookingForEmail;
+  userId?: string;
+  effectiveStatus: BookingStatus;
+  effectiveBooking: BookingForEmail;
+  effectiveTo: Date | null | undefined;
+  hints: ClientHint;
+  organizationId: Booking["organizationId"];
+  isExpired: boolean;
+}) {
+  // Create status transition note
+  if (userId) {
+    await createStatusTransitionNote({
+      bookingId: bookingFound.id,
+      fromStatus: bookingFound.status,
+      toStatus: effectiveStatus,
+      userId,
+      custodianUserId: bookingFound.custodianUserId || undefined,
+    });
+  }
+
+  /** Calculate the time difference between the booking.to and the current time */
+  const { hours } = calcTimeDifference(effectiveTo!, new Date());
+  const lessThanOneHourToCheckin = hours < 1;
+
+  /** We cancel just in case there is something pending */
+  await cancelScheduler(bookingFound);
+
+  /**
+   * If its expired that means its status will directly go to OVERDUE,
+   * so we can cancel everything and don't schedule any more events
+   */
+  if (isExpired) {
+    return db.booking.findUniqueOrThrow({
+      where: { id: bookingFound.id },
+      include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
+    });
+  }
+
+  // For any checkout (early or not), what matters is time until check-in
+  /**
+   * If less than 1 hour until check-in time, then
+   * send checkin reminder immediately.
+   * We also schedule the overdue handler for the booking
+   */
+  if (lessThanOneHourToCheckin) {
+    await sendCheckinReminder(
+      effectiveBooking,
+      bookingFound._count.bookingAssets,
+      hints,
+      organizationId
+    );
+
+    if (effectiveTo) {
+      const when = new Date(effectiveTo);
+      await scheduleNextBookingJob({
+        data: {
+          id: bookingFound.id,
+          hints,
+          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+        },
+        when,
+      });
+    }
+  } else {
+    /**
+     * If the checkout is performed more than 1 hour before booking.to
+     * the checkout reminder has not been sent yet
+     * So we need to cancel it and manually schedule check-in reminder
+     */
+    const when = new Date(effectiveTo!);
+    when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
+    await scheduleNextBookingJob({
+      data: {
+        id: bookingFound.id,
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+      },
+      when,
+    });
+  }
+
+  /** Hydrate the full booking with relations for the return payload only. */
+  return db.booking.findUniqueOrThrow({
+    where: { id: bookingFound.id },
+    include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
+  });
 }
 
 export async function checkoutBooking({
@@ -1336,124 +1668,16 @@ export async function checkoutBooking({
     );
 
     await db.$transaction(
-      async (tx) => {
-        /**
-         * Phase 3d (Book-by-Model) — checkout guard for unfulfilled
-         * `BookingModelRequest` rows. Model requests represent units that
-         * were reserved at the model level but haven't been assigned to
-         * a concrete asset yet (the usual recovery path is to scan
-         * matching assets, which decrements the request). If any remain
-         * at checkout we refuse the RESERVED → ONGOING transition and
-         * surface the outstanding counts so the operator can either:
-         *   1. scan matching assets to drain the request, or
-         *   2. edit the requests from manage-assets (allowed while the
-         *      booking is still RESERVED — see the model-request service).
-         * This is a hard block — there is no force-partial escape hatch
-         * because ONGOING implies "assets are physically out", which
-         * unfulfilled requests directly contradict.
-         */
-        const outstandingRequests = await tx.bookingModelRequest.findMany({
-          where: { bookingId: id, quantity: { gt: 0 } },
-          include: { assetModel: { select: { name: true } } },
-        });
-
-        if (outstandingRequests.length > 0) {
-          const outstanding = outstandingRequests.map((req) => ({
-            assetModelName: req.assetModel.name,
-            remaining: req.quantity,
-          }));
-
-          const summary = outstanding
-            .map((row) => `${row.remaining} × ${row.assetModelName}`)
-            .join(", ");
-
-          throw new ShelfError({
-            cause: null,
-            label,
-            status: 400,
-            shouldBeCaptured: false,
-            message: `Cannot check out — ${summary} still unassigned. Scan matching assets to fulfil the reservation.`,
-            additionalData: { outstanding },
-          });
-        }
-
-        /**
-         * Validate quantity availability for QUANTITY_TRACKED assets.
-         * Between when a booking was created and checkout, other
-         * operations (custody assignments, other booking checkouts) may
-         * have consumed some units. We check here — under the row lock —
-         * so the user gets a clear error listing which assets need
-         * their quantities adjusted before proceeding, and no two
-         * concurrent writers can both pass this guard against the same
-         * snapshot.
-         *
-         * `computeBookingAvailableQuantity` doesn't take a `tx`, but
-         * read-committed isolation combined with the row lock acquired
-         * above guarantees that once any competing writer has committed
-         * its change it is visible here; any still-open writer is
-         * blocked on the same row lock until we commit or roll back.
-         */
-        if (uniqueQtyTrackedAssetIds.length > 0) {
-          const insufficientQtyWarnings: string[] = [];
-
-          for (const assetId of uniqueQtyTrackedAssetIds) {
-            await lockAssetForQuantityUpdate(tx, assetId);
-
-            const { available } = await computeBookingAvailableQuantity(
-              assetId,
-              id
-            );
-
-            // Sum the requested units for this asset on this booking.
-            // (Typically there's one BookingAsset per asset, but we sum
-            // defensively in case the invariant ever changes.)
-            const requested = qtyTrackedBookingAssets
-              .filter((ba) => ba.asset.id === assetId)
-              .reduce((sum, ba) => sum + ba.quantity, 0);
-
-            if (requested > available) {
-              const title =
-                qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)
-                  ?.asset.title ?? "";
-              insufficientQtyWarnings.push(
-                `"${title}": requested ${requested}, only ${available} available`
-              );
-            }
-          }
-
-          if (insufficientQtyWarnings.length > 0) {
-            throw new ShelfError({
-              cause: null,
-              label,
-              message: `Some quantity-tracked assets have insufficient availability:\n${insufficientQtyWarnings.join(
-                "\n"
-              )}\nPlease adjust quantities in the booking before checkout.`,
-              shouldBeCaptured: false,
-              status: 400,
-            });
-          }
-        }
-
-        await tx.asset.updateMany({
-          where: {
-            id: { in: bookingFound.bookingAssets.map((ba) => ba.asset.id) },
-          },
-          data: { status: AssetStatus.CHECKED_OUT },
-        });
-
-        await tx.booking.update({
-          where: { id: bookingFound.id },
-          data: dataToUpdate,
-          select: { id: true },
-        });
-
-        if (hasKits) {
-          await tx.kit.updateMany({
-            where: { id: { in: kitIds } },
-            data: { status: KitStatus.CHECKED_OUT },
-          });
-        }
-      },
+      async (tx) =>
+        checkoutBookingWritesWithinTx(tx, {
+          bookingId: bookingFound.id,
+          bookingAssetIds: bookingFound.bookingAssets.map((ba) => ba.asset.id),
+          qtyTrackedBookingAssets,
+          uniqueQtyTrackedAssetIds,
+          dataToUpdate,
+          kitIds,
+          hasKits,
+        }),
       { timeout: 15000 }
     );
 
@@ -1474,82 +1698,15 @@ export async function checkoutBooking({
       status: effectiveStatus,
     };
 
-    // Create status transition note
-    if (userId) {
-      await createStatusTransitionNote({
-        bookingId: bookingFound.id,
-        fromStatus: bookingFound.status,
-        toStatus: effectiveStatus,
-        userId,
-        custodianUserId: bookingFound.custodianUserId || undefined,
-      });
-    }
-
-    /** Calculate the time difference between the booking.to and the current time */
-    const { hours } = calcTimeDifference(effectiveTo!, new Date());
-    const lessThanOneHourToCheckin = hours < 1;
-
-    /** We cancel just in case there is something pending */
-    await cancelScheduler(bookingFound);
-
-    /**
-     * If its expired that means its status will directly go to OVERDUE,
-     * so we can cancel everything and don't schedule any more events
-     * */
-    if (isExpired) {
-      return await db.booking.findUniqueOrThrow({
-        where: { id: bookingFound.id },
-        include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
-      });
-    }
-
-    // For any checkout (early or not), what matters is time until check-in
-    /**
-     * If less than 1 hour until check-in time, then
-     * send checkin reminder immediately.
-     * We also schedule the overdue handler for the booking
-     */
-    if (lessThanOneHourToCheckin) {
-      await sendCheckinReminder(
-        effectiveBooking,
-        bookingFound._count.bookingAssets,
-        hints,
-        organizationId
-      );
-
-      if (effectiveTo) {
-        const when = new Date(effectiveTo);
-        await scheduleNextBookingJob({
-          data: {
-            id: bookingFound.id,
-            hints,
-            eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-          },
-          when,
-        });
-      }
-    } else {
-      /**
-       * If the checkout is performed more than 1 hour before booking.to
-       * the checkout reminder has not been sent yet
-       * So we need to cancel it and manually schedule check-in reminder
-       */
-      const when = new Date(effectiveTo!);
-      when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
-      await scheduleNextBookingJob({
-        data: {
-          id: bookingFound.id,
-          hints,
-          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-        },
-        when,
-      });
-    }
-
-    /** Hydrate the full booking with relations for the return payload only. */
-    return await db.booking.findUniqueOrThrow({
-      where: { id: bookingFound.id },
-      include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
+    return await runCheckoutSideEffects({
+      bookingFound,
+      userId,
+      effectiveStatus,
+      effectiveBooking,
+      effectiveTo,
+      hints,
+      organizationId,
+      isExpired,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1558,6 +1715,336 @@ export async function checkoutBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while checking out booking.",
+    });
+  }
+}
+
+/**
+ * Combined service that fulfils outstanding `BookingModelRequest` rows via
+ * scanned assets AND transitions the booking from RESERVED to
+ * ONGOING/OVERDUE in a single atomic transaction.
+ *
+ * Used by the fulfil-and-checkout drawer (Phase 3d-Polish) — the operator
+ * scans the assets that satisfy their model-level reservations, optionally
+ * adds off-model scans that get checked out along with everything else,
+ * and clicks Check Out. The route action then delegates here instead of
+ * calling `addScannedAssetsToBooking` + `checkoutBooking` sequentially,
+ * because a sequential call pattern would leak half-materialised state if
+ * availability validation failed AFTER requests had already been drained.
+ *
+ * Atomicity guarantees (all-or-nothing):
+ *   - `BookingModelRequest` decrements (via `materializeModelRequestForAsset`)
+ *   - `BookingAsset` row creation for the scanned assets
+ *   - Booking `from`/`originalFrom` adjustment for early checkout
+ *   - Booking status transition + kit/asset CHECKED_OUT flags
+ *   - Outstanding-request guard (defence in depth — the drawer also
+ *     blocks submit while any `remaining > 0`, but the server enforces
+ *     independently in case the payload is tampered with)
+ *   - QUANTITY_TRACKED availability guard (with row locks against
+ *     concurrent checkouts)
+ *
+ * Post-commit side-effects (fired only after the tx succeeds) mirror
+ * `checkoutBooking` + `addScannedAssetsToBooking`:
+ *   - Activity notes for each scanned asset/kit
+ *   - Status transition note
+ *   - Scheduler cancellation + rescheduling (checkin-reminder / overdue)
+ *   - Hydrated booking payload returned
+ *
+ * NOTE: this function reuses the same tx-body helpers that
+ * {@link addScannedAssetsToBooking} and {@link checkoutBooking} use
+ * (`addScannedAssetsToBookingWithinTx` and `checkoutBookingWritesWithinTx`)
+ * so behaviour never drifts between the two code paths.
+ *
+ * @param args.bookingId - Booking to fulfil + check out
+ * @param args.organizationId - Organisation scope for all reads/writes
+ * @param args.userId - User performing the scan + checkout (attribution for notes + materialised logs)
+ * @param args.assetIds - Scanned asset IDs (QRs resolved to assets). May include off-model scans; those bypass the model-request drain and land as direct BookingAssets.
+ * @param args.kitIds - Optional scanned kit IDs. Kits don't participate in model requests (out of scope for Phase 3d), so this is forwarded purely for note attribution + kit status sync.
+ * @param args.checkoutIntentChoice - If `"with-adjusted-date"` and the booking is an early checkout, `booking.from` is rewritten to "now" and the original value preserved on `booking.originalFrom`. Same semantics as `checkoutBooking`'s `intentChoice`.
+ * @param args.hints - Client hints used for scheduler timestamps + check-in reminder emails post-commit.
+ * @param args.from - Optional booking.from for conflict detection (mirrors `checkoutBooking`'s pre-tx conflict guard).
+ * @param args.to - Optional booking.to for conflict detection.
+ * @returns The hydrated booking with reservation-email includes (same shape as `checkoutBooking`).
+ * @throws {ShelfError} 400 if any model request remains unfulfilled after scanning (drawer also guards, server enforces).
+ * @throws {ShelfError} 400 if any QUANTITY_TRACKED asset lacks pool availability.
+ * @throws {ShelfError} If any asset is in custody / conflicted with another booking window.
+ */
+export async function fulfilModelRequestsAndCheckout({
+  bookingId,
+  organizationId,
+  userId,
+  assetIds,
+  kitIds = [],
+  checkoutIntentChoice,
+  hints,
+  from,
+  to,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userId: string;
+  assetIds: Asset["id"][];
+  kitIds?: string[];
+  checkoutIntentChoice?: CheckoutIntentEnum;
+  hints: ClientHint;
+  from?: Date | null;
+  to?: Date | null;
+}) {
+  try {
+    /**
+     * Pre-tx: hydrate the booking with the same include shape
+     * `checkoutBooking` uses so we can run the conflict + custody guards
+     * against the pre-existing asset set. The newly scanned assets are
+     * validated inside the tx via the availability + outstanding-request
+     * guards (TOCTOU-safe).
+     */
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        include: {
+          bookingAssets: {
+            include: {
+              asset: {
+                include: {
+                  bookingAssets: {
+                    ...createBookingConflictConditions({
+                      currentBookingId: bookingId,
+                      fromDate: from,
+                      toDate: to,
+                    }),
+                    select: {
+                      id: true,
+                      quantity: true,
+                      booking: {
+                        select: { id: true, status: true, name: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace?",
+        });
+      });
+
+    /** Server-side conflict validation on pre-existing assets */
+    if (from && to && bookingFound.bookingAssets) {
+      const conflictedAssets = bookingFound.bookingAssets
+        .map((ba) => ba.asset)
+        .filter((asset) => hasAssetBookingConflicts(asset, bookingId));
+
+      if (conflictedAssets.length > 0) {
+        const conflictedAssetNames = conflictedAssets
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflictedAssets.length > 3 ? conflictedAssets.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+        });
+      }
+    }
+
+    /** Server-side validation: Block checkout if any assets are in custody */
+    const assetsInCustody = bookingFound.bookingAssets
+      .map((ba) => ba.asset)
+      .filter((asset) => asset.status === AssetStatus.IN_CUSTODY);
+
+    if (assetsInCustody.length > 0) {
+      const assetNames = assetsInCustody
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount =
+        assetsInCustody.length > 3 ? assetsInCustody.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Assets in custody",
+        message: `Cannot check out booking. Some assets are currently in custody: ${assetNames}${additionalText}. Please release custody first or remove these assets from the booking.`,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const isExpired = isBookingExpired({ to: bookingFound.to! });
+    const isEarlyCheckout = isBookingEarlyCheckout(bookingFound.from!);
+
+    /**
+     * Build the booking update payload (status + optional early-date
+     * adjustment). We intentionally match `checkoutBooking`'s existing
+     * timezone-aware date rewrite so the two code paths produce
+     * byte-identical `from`/`originalFrom` values when the operator
+     * chooses `"with-adjusted-date"`.
+     */
+    const dataToUpdate: Prisma.BookingUpdateInput = {
+      status: isExpired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+    };
+
+    if (
+      isEarlyCheckout &&
+      checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
+    ) {
+      // Update originalFrom to old `from` date of booking
+      dataToUpdate.originalFrom = bookingFound.from;
+
+      // Update `from` date to current date (timezone-aware, matching
+      // `checkoutBooking`)
+      const fromDateStr = DateTime.fromJSDate(new Date(), {
+        zone: hints.timeZone,
+      }).toFormat(DATE_TIME_FORMAT);
+
+      dataToUpdate.from = DateTime.fromFormat(fromDateStr, DATE_TIME_FORMAT, {
+        zone: hints.timeZone,
+      }).toJSDate();
+    }
+
+    /**
+     * Pre-compute the kit IDs that the scanned kits belong to so we can
+     * flip their status inside the tx. We also union the pre-existing
+     * kits on the booking so kit status reflects reality after commit
+     * (matches `checkoutBooking`'s behaviour).
+     */
+    const preExistingKitIds = getKitIdsByAssets(
+      bookingFound.bookingAssets.map((ba) => ba.asset)
+    );
+
+    /**
+     * Single atomic transaction:
+     *   1. Materialise scanned assets against outstanding model requests
+     *      + create `BookingAsset` rows (shared helper).
+     *   2. Re-read bookingAssets inside the tx so the checkout writes
+     *      operate on the post-scan snapshot (includes the scanned rows).
+     *   3. Run the checkout writes (outstanding guard, qty availability,
+     *      status flips) via the shared helper.
+     *
+     * If any guard throws — unfulfilled requests, insufficient pool,
+     * unique constraint on an already-added asset — the whole tx rolls
+     * back: the scanned materialisations, the BookingAsset rows, the
+     * early-date adjustment, and the status transition are all reverted
+     * together.
+     */
+    await db.$transaction(
+      async (tx) => {
+        await addScannedAssetsToBookingWithinTx(tx, {
+          assetIds,
+          kitIds,
+          bookingId,
+          organizationId,
+          userId,
+        });
+
+        /**
+         * Post-scan snapshot of every booking asset that needs
+         * CHECKED_OUT status + quantity validation. Read inside tx so
+         * newly created rows are visible.
+         */
+        const postScanBookingAssets = await tx.bookingAsset.findMany({
+          where: { bookingId },
+          select: {
+            quantity: true,
+            asset: {
+              select: { id: true, title: true, type: true },
+            },
+          },
+        });
+
+        const qtyTrackedBookingAssets = postScanBookingAssets.filter((ba) =>
+          isQuantityTracked(ba.asset)
+        );
+        const uniqueQtyTrackedAssetIds = Array.from(
+          new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
+        );
+        const allBookingAssetIds = postScanBookingAssets.map(
+          (ba) => ba.asset.id
+        );
+
+        // Union pre-existing kit ids with scanned kit ids so the
+        // CHECKED_OUT flip covers both. (Dedup via Set.)
+        const unionKitIds = Array.from(
+          new Set([...preExistingKitIds, ...kitIds])
+        );
+        const hasKits = unionKitIds.length > 0;
+
+        await checkoutBookingWritesWithinTx(tx, {
+          bookingId,
+          bookingAssetIds: allBookingAssetIds,
+          qtyTrackedBookingAssets,
+          uniqueQtyTrackedAssetIds,
+          dataToUpdate,
+          kitIds: unionKitIds,
+          hasKits,
+        });
+      },
+      { timeout: 15000 }
+    );
+
+    /** Post-commit: activity notes for the scanned assets + kits */
+    await createNotesForScannedAssetsAndKits({
+      booking: { id: bookingFound.id, name: bookingFound.name },
+      assetIds,
+      kitIds,
+      organizationId,
+      userId,
+    });
+
+    /** Build an effective snapshot so the status-transition note + email
+     * scheduler see the post-checkout truth without re-reading the row. */
+    const effectiveFrom =
+      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    const effectiveTo =
+      (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
+    const effectiveStatus =
+      (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
+    const effectiveBooking = {
+      ...bookingFound,
+      from: effectiveFrom,
+      to: effectiveTo,
+      status: effectiveStatus,
+    };
+
+    /** Post-commit checkout side-effects shared with `checkoutBooking` */
+    return await runCheckoutSideEffects({
+      bookingFound,
+      userId,
+      effectiveStatus,
+      effectiveBooking,
+      effectiveTo,
+      hints,
+      organizationId,
+      isExpired,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while fulfilling reservations and checking out.",
+      additionalData: {
+        bookingId,
+        organizationId,
+        userId,
+        assetIds,
+        kitIds,
+      },
     });
   }
 }
@@ -4341,9 +4828,78 @@ export async function removeAssets({
   try {
     const { assetIds, id } = booking;
 
-    // Remove the pivot rows for the assets being removed
-    await db.bookingAsset.deleteMany({
-      where: { bookingId: id, assetId: { in: assetIds } },
+    /**
+     * Phase 3d-Polish (audit trail): removing an asset that was
+     * materialised from a `BookingModelRequest` must re-open that
+     * request by decrementing its `fulfilledQuantity`. Otherwise the
+     * operator ends up with `fulfilledQuantity > actualBookingAssets`
+     * state — the Reserved Models card stays hidden (because
+     * `fulfilledAt` is stamped) even though the booking is short by
+     * the removed unit.
+     *
+     * Strategy:
+     *   1. Look up `assetModelId` for each asset being removed.
+     *   2. Group by `assetModelId` → how many units to "return".
+     *   3. For each model with an open (or fulfilled) request on this
+     *      booking, decrement `fulfilledQuantity` by that count (capped
+     *      at 0) and clear `fulfilledAt` if it drops below `quantity`.
+     *
+     * Wrapped in a single transaction with the `bookingAsset.deleteMany`
+     * so we don't end up with half-reverted state on failure.
+     */
+    await db.$transaction(async (tx) => {
+      const removedAssets = await tx.asset.findMany({
+        where: { id: { in: assetIds }, organizationId },
+        select: { id: true, assetModelId: true },
+      });
+
+      await tx.bookingAsset.deleteMany({
+        where: { bookingId: id, assetId: { in: assetIds } },
+      });
+
+      // Count removals per assetModelId so we decrement each request
+      // in one update rather than N.
+      const removalsByModel = new Map<string, number>();
+      for (const asset of removedAssets) {
+        if (!asset.assetModelId) continue;
+        removalsByModel.set(
+          asset.assetModelId,
+          (removalsByModel.get(asset.assetModelId) ?? 0) + 1
+        );
+      }
+
+      for (const [assetModelId, decrementBy] of removalsByModel) {
+        const request = await tx.bookingModelRequest.findUnique({
+          where: {
+            bookingId_assetModelId: { bookingId: id, assetModelId },
+          },
+          select: { quantity: true, fulfilledQuantity: true },
+        });
+        if (!request || request.fulfilledQuantity === 0) continue;
+
+        // Cap at 0 — if the operator removes more than what was
+        // materialised (they scanned direct + via request, now removing
+        // some), we only decrement the fulfilled share.
+        const nextFulfilled = Math.max(
+          0,
+          request.fulfilledQuantity - decrementBy
+        );
+        // If we're dropping below the reserved `quantity`, the request
+        // has outstanding units again — clear the completion stamp so
+        // the Reserved Models card + CTAs surface again.
+        const nextFulfilledAt =
+          nextFulfilled < request.quantity ? null : undefined;
+
+        await tx.bookingModelRequest.update({
+          where: {
+            bookingId_assetModelId: { bookingId: id, assetModelId },
+          },
+          data: {
+            fulfilledQuantity: nextFulfilled,
+            ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
+          },
+        });
+      }
     });
 
     const b = await db.booking.findUniqueOrThrow({
@@ -5586,6 +6142,133 @@ async function createNotesForScannedAssetsAndKits({
 }
 
 /**
+ * Transaction-body helper shared by {@link addScannedAssetsToBooking} and
+ * {@link fulfilModelRequestsAndCheckout}.
+ *
+ * Performs the pure write-side of "add scanned assets":
+ *   1. For every scanned asset, calls `materializeModelRequestForAsset` so
+ *      that any outstanding `BookingModelRequest` for the asset's model is
+ *      decremented (or deleted when it hits zero). Failures here roll the
+ *      whole transaction back — the caller never ends up with concrete
+ *      `BookingAsset` rows alongside a stale request count.
+ *   2. Creates the `BookingAsset` rows on the booking.
+ *   3. If the booking is already ONGOING/OVERDUE, syncs the newly added
+ *      asset + kit rows to CHECKED_OUT status so they reflect reality.
+ *
+ * This extraction exists so `fulfilModelRequestsAndCheckout` can run this
+ * logic inside the SAME transaction as the subsequent checkout body,
+ * guaranteeing atomicity: if availability validation fails after
+ * materialisation, all the scanned writes roll back together. The
+ * externally-exported `addScannedAssetsToBooking` wraps this helper in its
+ * own `$transaction` and adds post-commit activity notes, preserving its
+ * contract byte-for-byte.
+ *
+ * @param tx - Prisma transaction client (must be a real `$transaction` tx)
+ * @param args.assetIds - IDs of scanned assets to add
+ * @param args.kitIds - Optional kit IDs (only used to propagate kit status sync when booking is active)
+ * @param args.bookingId - Booking being modified
+ * @param args.organizationId - Organization scope for the booking + assets
+ * @param args.userId - User performing the scan (attributed on materialized logs)
+ * @returns `{ id, name, status }` of the updated booking
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function addScannedAssetsToBookingWithinTx(
+  tx: any,
+  {
+    assetIds,
+    kitIds,
+    bookingId,
+    organizationId,
+    userId,
+  }: {
+    assetIds: Asset["id"][];
+    kitIds: string[];
+    bookingId: Booking["id"];
+    organizationId: Booking["organizationId"];
+    userId: string;
+  }
+) {
+  /**
+   * Pre-fetch metadata for the scanned assets so we can run the
+   * Phase 3d model-request materialization loop — each scanned
+   * asset that matches an outstanding `BookingModelRequest` for
+   * its model decrements that request. Assets without a matching
+   * request (or with no model at all) fall through to the
+   * "direct BookingAsset create" path below.
+   *
+   * Uses the tx client so the read participates in the same
+   * snapshot as the writes that follow.
+   */
+  // Shape pinned explicitly because `tx` is typed `any` (extended Prisma
+  // client tx type is incompatible with `Prisma.TransactionClient`).
+  type ScannedAssetMeta = Pick<Asset, "id" | "title" | "type" | "assetModelId">;
+  const scannedAssetsMeta: ScannedAssetMeta[] =
+    assetIds.length > 0
+      ? await tx.asset.findMany({
+          where: { id: { in: assetIds }, organizationId },
+          select: {
+            id: true,
+            title: true,
+            type: true,
+            assetModelId: true,
+          },
+        })
+      : [];
+  const scannedAssetsMetaById = new Map<string, ScannedAssetMeta>(
+    scannedAssetsMeta.map((a) => [a.id, a])
+  );
+
+  for (const assetId of assetIds) {
+    const meta = scannedAssetsMetaById.get(assetId);
+    if (!meta) continue; // asset not found in org — caught later by FK
+    await materializeModelRequestForAsset({
+      bookingId,
+      asset: meta,
+      organizationId,
+      userId,
+      tx,
+    });
+  }
+
+  const booking = await tx.booking.update({
+    where: { id: bookingId, organizationId },
+    data: {
+      bookingAssets: {
+        create: assetIds.map((id) => ({ assetId: id })),
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+    },
+  });
+
+  /** When booking is active, newly added items must be flagged checked out */
+  const isActiveBooking =
+    booking.status === BookingStatus.ONGOING ||
+    booking.status === BookingStatus.OVERDUE;
+
+  if (isActiveBooking) {
+    if (assetIds.length > 0) {
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds }, organizationId },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+    }
+
+    if (kitIds.length > 0) {
+      await tx.kit.updateMany({
+        where: { id: { in: kitIds }, organizationId },
+        data: { status: KitStatus.CHECKED_OUT },
+      });
+    }
+  }
+
+  return booking;
+}
+
+/**
  * Adds scanned assets (and optionally kits) to a booking.
  *
  * @param {Object} params - The parameters for the function.
@@ -5610,88 +6293,20 @@ export async function addScannedAssetsToBooking({
 }) {
   try {
     /**
-     * Pre-fetch metadata for the scanned assets so we can run the
-     * Phase 3d model-request materialization loop — each scanned
-     * asset that matches an outstanding `BookingModelRequest` for
-     * its model decrements that request. Assets without a matching
-     * request (or with no model at all) fall through to the
-     * existing "direct BookingAsset create" path below.
-     */
-    const scannedAssetsMeta =
-      assetIds.length > 0
-        ? await db.asset.findMany({
-            where: { id: { in: assetIds }, organizationId },
-            select: {
-              id: true,
-              title: true,
-              type: true,
-              assetModelId: true,
-            },
-          })
-        : [];
-    const scannedAssetsMetaById = new Map(
-      scannedAssetsMeta.map((a) => [a.id, a])
-    );
-
-    /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
-     * status-sync behaviour used in manage-assets.
+     * status-sync behaviour used in manage-assets. The pure-tx body lives in
+     * {@link addScannedAssetsToBookingWithinTx} so the fulfil-and-checkout
+     * flow can reuse the same writes under a shared transaction.
      */
-    const updatedBooking = await db.$transaction(async (tx) => {
-      // Phase 3d: for each scanned asset, decrement a matching
-      // `BookingModelRequest` (if any). Runs before the BookingAsset
-      // create so a failure in the materialize path rolls the whole
-      // tx back — we never end up with concrete rows and a stale
-      // request count.
-      for (const assetId of assetIds) {
-        const meta = scannedAssetsMetaById.get(assetId);
-        if (!meta) continue; // asset not found in org — caught later by FK
-        await materializeModelRequestForAsset({
-          bookingId,
-          asset: meta,
-          organizationId,
-          userId,
-          tx,
-        });
-      }
-
-      const booking = await tx.booking.update({
-        where: { id: bookingId, organizationId },
-        data: {
-          bookingAssets: {
-            create: assetIds.map((id) => ({ assetId: id })),
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          status: true,
-        },
-      });
-
-      /** When booking is active, newly added items must be flagged checked out */
-      const isActiveBooking =
-        booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE;
-
-      if (isActiveBooking) {
-        if (assetIds.length > 0) {
-          await tx.asset.updateMany({
-            where: { id: { in: assetIds }, organizationId },
-            data: { status: AssetStatus.CHECKED_OUT },
-          });
-        }
-
-        if (kitIds.length > 0) {
-          await tx.kit.updateMany({
-            where: { id: { in: kitIds }, organizationId },
-            data: { status: KitStatus.CHECKED_OUT },
-          });
-        }
-      }
-
-      return booking;
-    });
+    const updatedBooking = await db.$transaction(async (tx) =>
+      addScannedAssetsToBookingWithinTx(tx, {
+        assetIds,
+        kitIds,
+        bookingId,
+        organizationId,
+        userId,
+      })
+    );
 
     /** Step 2: Create activity notes */
     await createNotesForScannedAssetsAndKits({

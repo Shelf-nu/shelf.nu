@@ -268,7 +268,10 @@ describe("upsertBookingModelRequest", () => {
         assetModelId: MODEL_ID,
         quantity: 3,
       },
-      update: { quantity: 3 },
+      // Post-audit-trail schema: update also nulls `fulfilledAt` when
+      // quantity rises above fulfilledQuantity (which is 0 for a fresh
+      // row — existing is undefined, so existingFulfilled defaults to 0).
+      update: { quantity: 3, fulfilledAt: null },
     });
   });
 
@@ -453,7 +456,7 @@ describe("materializeModelRequestForAsset", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tx = db as any;
 
-  it("decrements quantity on a happy-path scan", async () => {
+  it("increments fulfilledQuantity on a happy-path scan", async () => {
     expect.assertions(3);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
@@ -461,6 +464,8 @@ describe("materializeModelRequestForAsset", () => {
       bookingId: BOOKING_ID,
       assetModelId: MODEL_ID,
       quantity: 3,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
       assetModel: { name: "Dell Latitude 5550" },
     });
 
@@ -482,6 +487,9 @@ describe("materializeModelRequestForAsset", () => {
       remaining: 2,
       modelName: "Dell Latitude 5550",
     });
+    // Update writes fulfilledQuantity: 1 (one unit scanned). fulfilledAt
+    // stays absent from the payload because we haven't caught up to
+    // quantity yet — the row is still outstanding.
     expect(db.bookingModelRequest.update).toHaveBeenCalledWith({
       where: {
         bookingId_assetModelId: {
@@ -489,19 +497,22 @@ describe("materializeModelRequestForAsset", () => {
           assetModelId: MODEL_ID,
         },
       },
-      data: { quantity: 2 },
+      data: { fulfilledQuantity: 1 },
     });
+    // Row is NEVER deleted under the audit-trail schema.
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
   });
 
-  it("deletes the row when the last unit is assigned", async () => {
-    expect.assertions(2);
+  it("stamps fulfilledAt when the last unit is assigned (never deletes)", async () => {
+    expect.assertions(3);
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       id: "req-1",
       bookingId: BOOKING_ID,
       assetModelId: MODEL_ID,
       quantity: 1,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
       assetModel: { name: "Dell Latitude 5550" },
     });
 
@@ -523,14 +534,14 @@ describe("materializeModelRequestForAsset", () => {
       remaining: 0,
       modelName: "Dell Latitude 5550",
     });
-    expect(db.bookingModelRequest.delete).toHaveBeenCalledWith({
-      where: {
-        bookingId_assetModelId: {
-          bookingId: BOOKING_ID,
-          assetModelId: MODEL_ID,
-        },
-      },
-    });
+    // Update payload must include BOTH the incremented fulfilledQuantity
+    // AND a fulfilledAt timestamp — this is the scan that completes the
+    // reservation, so the row becomes historical.
+    const updateCall = (
+      db.bookingModelRequest.update as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(updateCall?.data?.fulfilledQuantity).toBe(1);
+    expect(updateCall?.data?.fulfilledAt).toBeInstanceOf(Date);
   });
 
   it("returns matched:false when the asset has no model", async () => {

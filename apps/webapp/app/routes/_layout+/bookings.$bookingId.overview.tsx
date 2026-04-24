@@ -1389,6 +1389,7 @@ export default function BookingPage() {
   const shouldRenderOutlet = [
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
+    "booking.overview.fulfil-and-checkout",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

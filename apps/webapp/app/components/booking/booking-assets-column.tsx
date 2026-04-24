@@ -153,14 +153,15 @@ export function BookingAssetsColumn() {
   }
 
   // Phase 3d: surface any outstanding model-level reservations in a
-  // dedicated section above the asset filters. Rows with `quantity: 0`
-  // (fully materialised into concrete BookingAssets) are filtered out
-  // so the section disappears once every unit has been scanned to a
-  // specific asset.
+  // dedicated section above the asset filters. Rows where every unit
+  // has been materialised into a concrete BookingAsset carry a
+  // `fulfilledAt` timestamp and are hidden here — they're history,
+  // not active work. The Models tab in manage-assets shows both
+  // active and fulfilled rows for audit.
   const outstandingModelRequests = useMemo(
     () =>
       (booking.modelRequests ?? []).filter(
-        (req: { quantity: number }) => req.quantity > 0
+        (req: { fulfilledAt: Date | string | null }) => req.fulfilledAt === null
       ),
     [booking.modelRequests]
   );
@@ -425,13 +426,19 @@ function ReservedModelsSection({
     id: string;
     assetModelId: string;
     quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: Date | string | null;
     assetModel: { id: string; name: string };
   }>;
   manageAssetsUrl: string;
   manageAssetsButtonDisabled: BookingAssetsHeaderProps["manageAssetsButtonDisabled"];
 }) {
   const totalUnits = useMemo(
-    () => modelRequests.reduce((sum, req) => sum + req.quantity, 0),
+    () =>
+      modelRequests.reduce(
+        (sum, req) => sum + (req.quantity - req.fulfilledQuantity),
+        0
+      ),
     [modelRequests]
   );
 
@@ -444,19 +451,32 @@ function ReservedModelsSection({
           </h5>
           <p className="text-sm text-gray-500">
             {modelRequests.length}{" "}
-            {modelRequests.length === 1 ? "model" : "models"} reserved — units
-            are materialised onto specific assets via scan-to-assign.
+            {modelRequests.length === 1 ? "model" : "models"} reserved — use
+            Scan to assign to attach specific assets now, or click Check out on
+            the booking to fulfil and check out in one flow.
           </p>
         </div>
-        <Button
-          to={`${manageAssetsUrl}&tab=models`}
-          variant="secondary"
-          size="sm"
-          disabled={manageAssetsButtonDisabled}
-          className="whitespace-nowrap"
-        >
-          Manage
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            to={`${manageAssetsUrl}&tab=models`}
+            variant="secondary"
+            size="sm"
+            disabled={manageAssetsButtonDisabled}
+            className="whitespace-nowrap"
+          >
+            Manage
+          </Button>
+          <Button
+            to="scan-assets"
+            icon="scan"
+            variant="primary"
+            size="sm"
+            disabled={manageAssetsButtonDisabled}
+            className="whitespace-nowrap"
+          >
+            Scan to assign
+          </Button>
+        </div>
       </div>
       <div className="-mx-4 overflow-x-auto border border-gray-200 bg-white md:mx-0 md:rounded-b">
         <table className="w-full border-collapse">
@@ -470,7 +490,7 @@ function ReservedModelsSection({
                   {req.assetModel.name}
                 </td>
                 <td className="px-6 py-3 text-right text-sm tabular-nums text-gray-700">
-                  × {req.quantity}
+                  × {req.quantity - req.fulfilledQuantity}
                 </td>
               </tr>
             ))}

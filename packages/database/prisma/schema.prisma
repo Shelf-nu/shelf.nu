@@ -417,10 +417,26 @@ model BookingModelRequest {
   assetModel   AssetModel @relation(fields: [assetModelId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetModelId String
 
-  /// Units still needing assignment. Mutated by
-  /// `materializeModelRequestForAsset` on each successful scan; the
-  /// row is deleted when this hits zero.
+  /// Total units originally reserved. Mutated only by explicit
+  /// operator edits (upsert) — never decremented on materialisation.
+  /// This preserves the audit trail of "how many were planned".
   quantity Int
+
+  /// Units already assigned to concrete `BookingAsset` rows via
+  /// `materializeModelRequestForAsset`. Monotonically increases as
+  /// scans match the request. Never decreases on its own — to undo
+  /// a scan the operator removes the corresponding `BookingAsset`,
+  /// which does NOT roll this back (by design; the scan happened,
+  /// that's a historical fact).
+  fulfilledQuantity Int @default(0)
+
+  /// Timestamp of the scan that fulfilled the final unit — set when
+  /// `fulfilledQuantity` catches up to `quantity`. Cleared back to
+  /// null if the operator later edits `quantity` upwards (re-opens
+  /// outstanding units). Used as the primary "is this outstanding?"
+  /// filter: `fulfilledAt IS NULL` means there are still units to
+  /// materialise.
+  fulfilledAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

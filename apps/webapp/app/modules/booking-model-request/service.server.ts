@@ -147,23 +147,32 @@ export async function getAssetModelAvailability({
           _sum: { quantity: true },
         }),
         // Other bookings' model-level requests for this same model.
+        // We only count units that are STILL OUTSTANDING (fulfilledAt
+        // IS NULL); fulfilled units have been materialised into
+        // concrete `BookingAsset` rows and are already counted in
+        // `reservedConcrete` above. Summing both `quantity` and
+        // `fulfilledQuantity` lets us compute outstanding-only as
+        // `SUM(quantity) - SUM(fulfilledQuantity)` in a single query.
         db.bookingModelRequest.aggregate({
           where: {
             assetModelId,
             bookingId: { not: bookingId },
+            fulfilledAt: null,
             booking: {
               organizationId,
               status: { in: [...ACTIVE_BOOKING_STATUSES] },
               ...dateOverlap,
             },
           },
-          _sum: { quantity: true },
+          _sum: { quantity: true, fulfilledQuantity: true },
         }),
       ]);
 
     const inCustody = custodyAgg._sum.quantity ?? 0;
     const reservedConcrete = bookingAssetAgg._sum.quantity ?? 0;
-    const reservedViaRequest = modelRequestAgg._sum.quantity ?? 0;
+    const reservedViaRequest =
+      (modelRequestAgg._sum.quantity ?? 0) -
+      (modelRequestAgg._sum.fulfilledQuantity ?? 0);
     const reserved = reservedConcrete + reservedViaRequest;
     const available = Math.max(0, total - inCustody - reserved);
 
@@ -274,6 +283,29 @@ export async function upsertBookingModelRequest({
         });
       }
 
+      // Peek at the existing row first — we need its `fulfilledQuantity`
+      // both for the "can't shrink below already-fulfilled" guard and
+      // for the availability delta calculation ("only claim the still-
+      // outstanding share against the pool").
+      const existing = await tx.bookingModelRequest.findUnique({
+        where: {
+          bookingId_assetModelId: { bookingId, assetModelId },
+        },
+        select: { quantity: true, fulfilledQuantity: true },
+      });
+      const previousQuantity = existing?.quantity ?? null;
+      const existingFulfilled = existing?.fulfilledQuantity ?? 0;
+
+      if (quantity < existingFulfilled) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          message: `Cannot shrink reservation below ${existingFulfilled} — that many units have already been assigned via scan. Remove the assigned assets from the booking first, or raise the quantity to match.`,
+          shouldBeCaptured: false,
+        });
+      }
+
       const availability = await getAssetModelAvailability({
         assetModelId,
         organizationId,
@@ -282,27 +314,29 @@ export async function upsertBookingModelRequest({
         to: booking.to,
       });
 
-      if (quantity > availability.available) {
+      // We only need fresh pool availability for the NEW outstanding
+      // units this upsert will claim. Fulfilled units are already
+      // reflected as concrete `BookingAsset` rows (not double-counted
+      // against our own request since `availability` excludes this
+      // booking), so the delta against the pool is `newOutstanding`.
+      const newOutstanding = quantity - existingFulfilled;
+      if (newOutstanding > availability.available) {
         throw new ShelfError({
           cause: null,
           label,
           status: 400,
-          message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${availability.available} available in this window.`,
+          message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${availability.available} more available in this window.`,
           shouldBeCaptured: false,
         });
       }
 
-      // Peek at the existing row so we can write a note that
-      // distinguishes create / increase / decrease / no-op. Without
-      // this, every upsert produced an identical "reserved N × Model"
-      // line which was indistinguishable from the next update.
-      const existing = await tx.bookingModelRequest.findUnique({
-        where: {
-          bookingId_assetModelId: { bookingId, assetModelId },
-        },
-        select: { quantity: true },
-      });
-      const previousQuantity = existing?.quantity ?? null;
+      // `fulfilledAt` transitions:
+      //   - create: always null (nothing fulfilled yet)
+      //   - update with newQuantity === fulfilledQuantity: mark complete
+      //   - update with newQuantity > fulfilledQuantity: re-open (null)
+      //   - update with newQuantity < fulfilledQuantity: rejected above
+      const justCompleted = quantity === existingFulfilled && quantity > 0;
+      const fulfilledAt = justCompleted ? new Date() : null;
 
       const request = await tx.bookingModelRequest.upsert({
         where: {
@@ -313,7 +347,10 @@ export async function upsertBookingModelRequest({
           assetModelId,
           quantity,
         },
-        update: { quantity },
+        update: {
+          quantity,
+          fulfilledAt,
+        },
       });
 
       return { request, booking, assetModel, previousQuantity };
@@ -420,6 +457,24 @@ export async function removeBookingModelRequest({
         return null;
       }
 
+      // If any units have been fulfilled, the corresponding
+      // `BookingAsset` rows exist on the booking. Deleting the
+      // request here would orphan those rows from their "how they
+      // got here" context and silently destroy the audit trail. Ask
+      // the operator to unassign the concrete assets first (which
+      // doesn't currently decrement `fulfilledQuantity` — intentional,
+      // a scan is a historical fact). Or they can edit the quantity
+      // down to match `fulfilledQuantity` to close out the request.
+      if (existing.fulfilledQuantity > 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          message: `Cannot cancel — ${existing.fulfilledQuantity} unit(s) have already been assigned. Edit the quantity down to ${existing.fulfilledQuantity} to close out, or remove the assigned assets from the booking first.`,
+          shouldBeCaptured: false,
+        });
+      }
+
       await tx.bookingModelRequest.delete({
         where: { bookingId_assetModelId: { bookingId, assetModelId } },
       });
@@ -475,18 +530,23 @@ type MaterializeArgs = {
 
 /**
  * Called from the scan-to-assign flow when a scanned asset matches an
- * outstanding model request. Decrements the request's quantity by 1
- * and deletes the row when it hits zero.
+ * outstanding model request. Increments the request's `fulfilledQuantity`
+ * by 1 and — when fulfilment catches up to the reserved `quantity` —
+ * stamps `fulfilledAt`. The row is **never deleted**: keeping it
+ * preserves the audit trail ("this booking originally reserved 3 ×
+ * Dell, now shows as fulfilled") and lets the Models tab on ONGOING
+ * bookings render a historical readout instead of an empty state.
  *
  * Returns:
  *   - `{ matched: true, remaining }` — the scan consumed a request unit
  *   - `{ matched: false }` — no outstanding request matches this asset's
- *     model; the caller should fall through to its existing "add as
- *     direct BookingAsset" path
+ *     model (no row exists, or the row is already fully fulfilled);
+ *     the caller should fall through to its existing "add as direct
+ *     BookingAsset" path.
  *
- * Throws `ShelfError` only on internal errors (asset has no model, tx
- * failure). Missing-request is NOT an error — it's a normal case for
- * model-free bookings.
+ * Throws `ShelfError` only on internal errors (tx failure). Missing /
+ * fully-fulfilled request is NOT an error — it's a normal case for
+ * model-free bookings or scans beyond the reserved count.
  */
 export async function materializeModelRequestForAsset({
   bookingId,
@@ -513,51 +573,54 @@ export async function materializeModelRequestForAsset({
       include: { assetModel: { select: { name: true } } },
     });
 
-    if (!existing || existing.quantity < 1) {
+    if (!existing) {
       return { matched: false };
     }
 
-    const nextQuantity = existing.quantity - 1;
-    if (nextQuantity === 0) {
-      // Last unit — delete the row so `booking.modelRequests` doesn't
-      // carry a zero-quantity ghost.
-      await tx.bookingModelRequest.delete({
-        where: {
-          bookingId_assetModelId: {
-            bookingId,
-            assetModelId: asset.assetModelId,
-          },
-        },
-      });
-    } else {
-      await tx.bookingModelRequest.update({
-        where: {
-          bookingId_assetModelId: {
-            bookingId,
-            assetModelId: asset.assetModelId,
-          },
-        },
-        data: { quantity: nextQuantity },
-      });
+    const alreadyFulfilled = existing.fulfilledQuantity >= existing.quantity;
+    if (alreadyFulfilled) {
+      // Request exists but is fully fulfilled — the scan is "over the
+      // count" and should land as a regular BookingAsset. Caller's
+      // direct-booking path handles that.
+      return { matched: false };
     }
+
+    const nextFulfilledQuantity = existing.fulfilledQuantity + 1;
+    const justCompleted = nextFulfilledQuantity === existing.quantity;
+
+    await tx.bookingModelRequest.update({
+      where: {
+        bookingId_assetModelId: {
+          bookingId,
+          assetModelId: asset.assetModelId,
+        },
+      },
+      data: {
+        fulfilledQuantity: nextFulfilledQuantity,
+        // Stamp completion on the very scan that tipped us over. If
+        // the operator later edits `quantity` upward, the upsert will
+        // null this out again and re-open the request.
+        ...(justCompleted ? { fulfilledAt: new Date() } : {}),
+      },
+    });
+
+    const remaining = existing.quantity - nextFulfilledQuantity;
 
     // Activity note — IN the tx so the note rolls back with the
     // materialization if anything later in the scan pipeline fails.
-    // Written directly via the tx client because
-    // `createSystemBookingNote` uses the default `db` export.
     const actor = await loadActor(userId);
     const assetLink = wrapLinkForNote(`/assets/${asset.id}`, asset.title);
     await tx.bookingNote.create({
       data: {
         type: "UPDATE",
-        content: `${actor} assigned ${assetLink} (${existing.assetModel.name}) to this booking — ${nextQuantity} × ${existing.assetModel.name} remaining.`,
+        content: `${actor} assigned ${assetLink} (${existing.assetModel.name}) to this booking — ${remaining} × ${existing.assetModel.name} remaining.`,
         booking: { connect: { id: bookingId } },
       },
     });
 
     return {
       matched: true,
-      remaining: nextQuantity,
+      remaining,
       modelName: existing.assetModel.name,
     };
   } catch (cause) {
