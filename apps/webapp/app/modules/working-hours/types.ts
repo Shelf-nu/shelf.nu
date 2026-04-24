@@ -3,8 +3,8 @@ import type { Prisma, WorkingHoursOverride } from "@prisma/client";
 // TypeScript types for JSON schedule
 export interface DaySchedule {
   isOpen: boolean;
-  openTime?: string; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string; // "HH:MM" format (24-hour) in UTC
+  openTime?: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+  closeTime?: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
 }
 
 export interface WeeklyScheduleJson {
@@ -25,8 +25,8 @@ export enum DayOfWeek {
   SATURDAY = 6,
 }
 export interface TimeSlot {
-  openTime: string | null; // Format: "HH:MM" (24-hour) in UTC
-  closeTime: string | null; // Format: "HH:MM" (24-hour) in UTC
+  openTime: string | null; // Format: "HH:MM" wall-clock (24-hour). See DaySchedule for the wall-clock rationale.
+  closeTime: string | null; // Format: "HH:MM" wall-clock (24-hour). See DaySchedule for the wall-clock rationale.
 }
 
 export interface WorkingHoursConfig {
@@ -66,8 +66,8 @@ export interface CreateWorkingHoursRequest {
   schedules: Array<{
     dayOfWeek: DayOfWeek;
     isOpen: boolean;
-    openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-    closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+    openTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+    closeTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
   }>;
 }
 
@@ -75,23 +75,23 @@ export interface CreateOverrideRequest {
   workingHoursId: string;
   date: string; // ISO date string
   isOpen: boolean;
-  openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+  openTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+  closeTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
   reason?: string;
 }
 
 export interface UpdateScheduleRequest {
   scheduleId: string;
   isOpen: boolean;
-  openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+  openTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+  closeTime?: string | null; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
 }
 
 // Utility types for business logic
 export interface BusinessHoursCheck {
   isOpen: boolean;
-  openTime?: string; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string; // "HH:MM" format (24-hour) in UTC
+  openTime?: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+  closeTime?: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
   source: "schedule" | "override";
   reason?: string; // Only present if from override
 }
@@ -102,8 +102,8 @@ export interface BookingTimeValidation {
     type: "outside_hours" | "closed_day" | "override_closure";
     message: string;
     suggestedTime?: {
-      start: string; // "HH:MM" format (24-hour) in UTC
-      end: string; // "HH:MM" format (24-hour) in UTC
+      start: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
+      end: string; // "HH:MM" wall-clock time (24-hour). Not a UTC instant — working hours describe when a physical location is open, so they are interpreted as local wall-clock times with no timezone conversion.
     };
   }>;
 }

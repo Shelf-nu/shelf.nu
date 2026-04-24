@@ -7,6 +7,26 @@ import type {
 } from "./types";
 
 /**
+ * Returns the YYYY-MM-DD key that identifies an override's calendar date.
+ *
+ * Working hours overrides represent an absolute calendar date with no time
+ * component — the DB column is `@db.Date`, which Prisma hydrates as a Date at
+ * UTC midnight. That Date is only a transport artifact: formatting it in the
+ * runtime's local timezone shifts it one day back for users west of UTC, which
+ * used to make an override for day D match bookings on day D-1. Reading the
+ * date from UTC (or treating an already-YYYY-MM-DD string as-is) preserves the
+ * absolute-date meaning.
+ */
+export function getOverrideDateKey(date: string | Date): string {
+  if (typeof date === "string") {
+    // Handles both date-only ("2026-04-24") and datetime ISO ("2026-04-24T00:00:00.000Z")
+    // inputs — the first 10 characters are the absolute calendar date in both.
+    return date.slice(0, 10);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/**
  * Parses form data into WeeklyScheduleJson format
  * Handles the conversion from FormData entries to properly typed schedule object
  */
@@ -67,10 +87,11 @@ export function normalizeWorkingHoursForValidation(
       weeklySchedule: rawWorkingHours.weeklySchedule as WeeklyScheduleJson,
       overrides: (rawWorkingHours.overrides || []).map((override: any) => ({
         id: String(override.id),
-        date:
-          override.date instanceof Date
-            ? override.date.toISOString()
-            : String(override.date),
+        // Overrides represent an absolute calendar date with no time component
+        // (the DB column is `@db.Date`). Normalise to "YYYY-MM-DD" so downstream
+        // comparisons never have to re-interpret a UTC-midnight Date in the
+        // runtime's local timezone.
+        date: getOverrideDateKey(override.date),
         isOpen: Boolean(override.isOpen),
         openTime: override.openTime || null,
         closeTime: override.closeTime || null,
@@ -122,14 +143,13 @@ function findNextWorkingDay(
     const checkDate = new Date(searchDate);
     checkDate.setDate(searchDate.getDate() + i);
 
-    const dateString = checkDate.toISOString().split("T")[0]; // YYYY-MM-DD format
+    const dateString = format(checkDate, "yyyy-MM-dd"); // local calendar date
     const dayOfWeek = checkDate.getDay().toString();
 
     // Check for date-specific override first
-    const override = workingHours.overrides.find((override) => {
-      const overrideDate = new Date(override.date).toISOString().split("T")[0];
-      return overrideDate === dateString;
-    });
+    const override = workingHours.overrides.find(
+      (override) => getOverrideDateKey(override.date) === dateString
+    );
 
     let daySchedule: DaySchedule | null = null;
 
@@ -167,16 +187,13 @@ function findNextWorkingDay(
       let endTime = workingDayEnd;
       if (startTime >= workingDayEnd) {
         // Find working hours for the start time's date
-        const startDateString = startTime.toISOString().split("T")[0];
+        const startDateString = format(startTime, "yyyy-MM-dd");
         const startDayOfWeek = startTime.getDay().toString();
 
         // Check for override on start date
-        const startDayOverride = workingHours.overrides.find((override) => {
-          const overrideDate = new Date(override.date)
-            .toISOString()
-            .split("T")[0];
-          return overrideDate === startDateString;
-        });
+        const startDayOverride = workingHours.overrides.find(
+          (override) => getOverrideDateKey(override.date) === startDateString
+        );
 
         let startDaySchedule: DaySchedule | null = null;
         if (startDayOverride) {
@@ -262,15 +279,15 @@ export function getBookingDefaultStartEndTimes(
     return getOriginalDefaultTimes(now, effectiveBufferStartTime);
   }
 
-  // Get today's date and schedule
-  const todayDateString = now.toISOString().split("T")[0]; // YYYY-MM-DD format
+  // Get today's date and schedule using the runtime's local calendar day so
+  // the match aligns with how the user picks times in the booking form.
+  const todayDateString = format(now, "yyyy-MM-dd");
   const todayDayOfWeek = now.getDay().toString();
 
   // Check for date-specific override first
-  const todayOverride = workingHoursData.overrides.find((override) => {
-    const overrideDate = new Date(override.date).toISOString().split("T")[0];
-    return overrideDate === todayDateString;
-  });
+  const todayOverride = workingHoursData.overrides.find(
+    (override) => getOverrideDateKey(override.date) === todayDateString
+  );
 
   let todaySchedule: DaySchedule | null = null;
 
@@ -430,10 +447,9 @@ export function calculateEffectiveEndDate(
     const dayOfWeek = currentDate.getDay().toString();
 
     // Check for date-specific override first
-    const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(override.date, "yyyy-MM-dd");
-      return overrideDate === dateString;
-    });
+    const override = workingHoursData.overrides.find(
+      (override) => getOverrideDateKey(override.date) === dateString
+    );
 
     let isOpen: boolean;
 
@@ -495,10 +511,9 @@ export function calculateBusinessHoursDuration(
     const dayOfWeek = windowStart.getDay().toString();
 
     // Check for date-specific override first
-    const override = workingHoursData.overrides.find((override) => {
-      const overrideDate = format(override.date, "yyyy-MM-dd");
-      return overrideDate === dateString;
-    });
+    const override = workingHoursData.overrides.find(
+      (override) => getOverrideDateKey(override.date) === dateString
+    );
 
     let isOpen: boolean;
     if (override) {
