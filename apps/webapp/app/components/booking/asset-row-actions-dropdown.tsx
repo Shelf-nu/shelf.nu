@@ -251,7 +251,19 @@ export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => {
   }
 
   return (
-    <div className={tw("actions-dropdown flex", fullWidth ? "w-full" : "")}>
+    <div
+      className={tw(
+        // `justify-end` pins the kebab to the right of its cell so it
+        // aligns vertically with the kit row's chevron+kebab cluster
+        // (which uses `justify-end gap-5`) and with other row types
+        // that right-align their action triggers. Without it, the
+        // kebab sits at the left of a 68px-wide action cell (sized by
+        // the kit row's wider content), creating a visible column-
+        // alignment misalignment between asset and kit rows.
+        "actions-dropdown flex justify-end",
+        fullWidth ? "w-full" : ""
+      )}
+    >
       <ConditionalActionsDropdown asset={asset} fullWidth={fullWidth} />
     </div>
   );

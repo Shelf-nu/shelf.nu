@@ -597,7 +597,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelName,
         items: enrichedPaginatedItems,
         page,
-        totalItems: totalPaginationItems,
+        // `totalItems` drives the `ListTitle` header count. We include
+        // outstanding `BookingModelRequest` rows on top of the
+        // paginated asset/kit items because the Assets & Kits list now
+        // renders a model-request row per outstanding request (Phase
+        // 3d-Polish). `totalPaginationItems` stays
+        // `paginationItems.length` so pagination arithmetic over the
+        // concrete asset/kit list is unaffected.
+        totalItems:
+          totalPaginationItems +
+          (booking.modelRequests ?? []).filter(
+            (req) => req.fulfilledAt === null
+          ).length,
         totalPaginationItems,
         perPage,
         totalPages,
