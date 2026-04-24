@@ -706,8 +706,10 @@ const SidebarMenuSkeleton = forwardRef<
     showIcon?: boolean;
   }
 >(({ className, showIcon = false, ...props }, ref) => {
-  // Random width between 50 to 90%.
-  const width = `${Math.floor(Math.random() * 40) + 50}%`;
+  // why: generate the random width once per mount via lazy initializer —
+  // computing at render time (or strict-mode double-render) makes the
+  // skeleton width jitter while it's displayed.
+  const [width] = useState(() => `${Math.floor(Math.random() * 40) + 50}%`);
 
   return (
     <div

@@ -121,12 +121,20 @@ export function DefectedHeadersTable({
         </tr>
       </thead>
       <tbody>
-        {data.map((row) => (
-          <tr key={row.incorrectHeader}>
-            <td className="px-2 py-1">{row.incorrectHeader}</td>
-            <td className="px-2 py-1">{row.errorMessage}</td>
-          </tr>
-        ))}
+        {data.map((row, i, arr) => {
+          // why: the server builds defectedHeaders by iterating the raw CSV
+          // headers, so the same incorrectHeader can appear more than once.
+          // Disambiguate with an occurrence counter so keys stay unique.
+          const occurrence = arr
+            .slice(0, i)
+            .filter((r) => r.incorrectHeader === row.incorrectHeader).length;
+          return (
+            <tr key={`${row.incorrectHeader}#${occurrence}`}>
+              <td className="px-2 py-1">{row.incorrectHeader}</td>
+              <td className="px-2 py-1">{row.errorMessage}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

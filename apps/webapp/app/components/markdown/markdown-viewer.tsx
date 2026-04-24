@@ -1,5 +1,5 @@
 import React from "react";
-import type { ComponentType } from "react";
+import type { ComponentProps, ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
 import { markdocConfig } from "~/utils/markdoc.config";
@@ -64,9 +64,9 @@ const EMPTY_COMPONENTS: Record<string, ComponentType> = {};
  * Module-scope wrapper that injects `disablePortal` into AuditImagesComponent.
  * Hoisted out of MarkdownViewer to avoid `no-nested-component-definition`.
  */
-const AuditImagesComponentNoPortal = (props: any) => (
-  <AuditImagesComponent {...props} disablePortal={true} />
-);
+const AuditImagesComponentNoPortal = (
+  props: ComponentProps<typeof AuditImagesComponent>
+) => <AuditImagesComponent {...props} disablePortal={true} />;
 AuditImagesComponentNoPortal.displayName = "AuditImagesComponentNoPortal";
 
 export const MarkdownViewer = ({

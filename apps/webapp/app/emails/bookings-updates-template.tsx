@@ -244,13 +244,23 @@ export function BookingUpdatesEmailTemplate({
               What changed:
             </p>
             <ul style={{ margin: "0", paddingLeft: "20px" }}>
-              {changes.map((change) => (
-                // Each change string is a unique human-readable line, so the
-                // string itself is a stable key (avoids array-index-as-key).
-                <li key={change} style={{ ...styles.li, marginBottom: "4px" }}>
-                  {change}
-                </li>
-              ))}
+              {changes.map((change, i, arr) => {
+                // why: duplicate change strings would collide on `key={change}`,
+                // so disambiguate with an occurrence counter. Keeps the key
+                // content-derived (no array-index-as-key) while handling the
+                // rare case where the server reports the same change twice.
+                const occurrence = arr
+                  .slice(0, i)
+                  .filter((c) => c === change).length;
+                return (
+                  <li
+                    key={`${change}#${occurrence}`}
+                    style={{ ...styles.li, marginBottom: "4px" }}
+                  >
+                    {change}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}

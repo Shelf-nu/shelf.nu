@@ -44,13 +44,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       action: PermissionAction.import,
     });
 
-    // Subscription assertion and form data read are independent — run in parallel
-    const [, clonedFormData] = await Promise.all([
-      assertUserCanImportAssets({ organizationId, organizations }),
-      // Clone the request so we can read formData here for intent/validation
-      // while preserving the original body for csvDataFromRequest() below
-      request.clone().formData(),
-    ]);
+    // why: subscription assertion must short-circuit BEFORE parsing the
+    // multipart body, otherwise non-entitled users can force CSV body
+    // parsing of large uploads. Keep sequential — do not Promise.all here.
+    await assertUserCanImportAssets({ organizationId, organizations });
+    // Clone the request so we can read formData here for intent/validation
+    // while preserving the original body for csvDataFromRequest() below
+    const clonedFormData = await request.clone().formData();
     const { intent } = parseData(
       clonedFormData,
       z.object({
