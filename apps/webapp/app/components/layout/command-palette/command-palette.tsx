@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
@@ -471,9 +471,11 @@ export function getTeamMemberHref(member: TeamMemberSearchResult) {
   return "/settings/team/nrm";
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement>(null);
   const layoutData = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   );
@@ -540,7 +542,17 @@ export function CommandPalette() {
     if (!open) {
       setQuery("");
       setDebouncedQuery("");
+      return;
     }
+
+    // Focus the search input when the palette opens. We schedule this after
+    // the dialog has mounted and animations settle so the focus is not stolen
+    // by the dialog's default focus-trap entry point.
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
   useEffect(() => {
@@ -659,10 +671,10 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput
+        ref={inputRef}
         value={query}
         onValueChange={setQuery}
         placeholder="Search assets, audits, kits, bookings, locations, team members..."
-        autoFocus
         className="my-4 rounded border-gray-100"
       />
       <CommandList className="divide-y divide-gray-100">

@@ -38,6 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 /**
  * Bulk actions dropdown for the audits index page.
@@ -173,18 +174,7 @@ function ConditionalDropdown() {
           <span className="flex items-center gap-2">Actions</span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }}
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           asChild

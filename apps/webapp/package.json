@@ -6,6 +6,7 @@
   "scripts": {
     "build": "prisma generate && NODE_ENV=production react-router build",
     "dev": "vite --host",
+    "doctor": "react-doctor .",
     "production:dev": "dotenv -e ../../.env.production -- vite --host",
     "staging:dev": "dotenv -e ../../.env.staging -- vite --host",
     "format": "prettier --write --ignore-path ../../.prettierignore .",
@@ -173,6 +174,7 @@
     "prettier": "3.0.3",
     "prettier-plugin-tailwindcss": "^0.5.14",
     "prisma": "^6.19.3",
+    "react-doctor": "0.0.39",
     "remix-flat-routes": "^0.8.5",
     "tailwind-scrollbar": "^3.1.0",
     "tailwindcss": "^3.4.19",

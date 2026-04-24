@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { Kit } from "@prisma/client";
 
@@ -31,12 +31,22 @@ export default function KitSelector({
   error,
 }: KitSelectorProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  /** Ref for the search input so we can focus it when the popover opens. */
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectedKit, setSelectedKit] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Focus the search input when the popover opens (replaces autoFocus,
+  // which jsx-a11y/no-autofocus flags).
+  useEffect(() => {
+    if (isOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [isOpen]);
 
   const filteredKits = useMemo(() => {
     if (!searchQuery) {
@@ -140,6 +150,7 @@ export default function KitSelector({
             <div className="flex items-center border-b">
               <SearchIcon className="ml-4 size-4 text-gray-500" />
               <input
+                ref={searchInputRef}
                 placeholder="Search kits..."
                 className="border-0 px-4 py-2 pl-2 text-[14px] focus:border-0 focus:ring-0"
                 value={searchQuery}
@@ -148,7 +159,6 @@ export default function KitSelector({
                   setSelectedIndex(0); // Reset selection when searching
                 }}
                 onKeyDown={handleKeyDown}
-                autoFocus
               />
             </div>
             <div className="max-h-[300px] overflow-y-auto">

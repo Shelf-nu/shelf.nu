@@ -1,4 +1,4 @@
-import { type ChangeEvent } from "react";
+import { type ChangeEvent, useEffect, useRef } from "react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
 
@@ -44,6 +44,15 @@ export function CreatePresetDialog({
 }) {
   const zo = useZorm("create-preset", CreatePresetFormSchema);
 
+  /** Ref for the preset-name input so we can focus it on open without autoFocus. */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      nameInputRef.current?.focus();
+    }
+  }, [open]);
+
   // Get formatted preview component from hook
   const { preview } = useFilterPreview({ query, columns });
 
@@ -71,13 +80,13 @@ export function CreatePresetDialog({
             <input type="hidden" name="intent" value="create-preset" />
             <input type="hidden" name="query" value={query} />
             <Input
+              ref={nameInputRef}
               label="Preset name"
               name="name"
               value={name}
               onChange={onNameChange}
               placeholder="e.g., Available laptops"
               maxLength={60}
-              autoFocus
               error={nameError}
             />
 

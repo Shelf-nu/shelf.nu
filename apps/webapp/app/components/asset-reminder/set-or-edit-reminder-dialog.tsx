@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Form, useNavigation, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -60,6 +60,18 @@ export default function SetOrEditReminderDialog({
 
   const isEdit = !!reminder;
 
+  /** Ref for the first field so we can focus it on open without autoFocus. */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(
+    function focusNameFieldOnOpen() {
+      if (open) {
+        nameInputRef.current?.focus();
+      }
+    },
+    [open]
+  );
+
   useEffect(
     function handleOnSuccess() {
       if (searchParams.get("success") === "true") {
@@ -111,6 +123,7 @@ export default function SetOrEditReminderDialog({
             )}
 
             <Input
+              ref={nameInputRef}
               defaultValue={reminder?.name ?? ""}
               name={zo.fields.name()}
               error={
@@ -118,7 +131,6 @@ export default function SetOrEditReminderDialog({
               }
               label="Name"
               disabled={disabled}
-              autoFocus
               required
               placeholder="Enter name of reminder"
               className="mb-4"
@@ -134,7 +146,6 @@ export default function SetOrEditReminderDialog({
                 }
                 label="Message"
                 disabled={disabled}
-                autoFocus
                 required
                 placeholder="Enter description..."
                 inputType="textarea"
@@ -171,7 +182,6 @@ export default function SetOrEditReminderDialog({
                 }
                 label="Reminder Date"
                 disabled={disabled}
-                autoFocus
                 required
                 placeholder="Enter description..."
                 className="mb-2"

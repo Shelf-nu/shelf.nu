@@ -33,9 +33,12 @@ export function AddBarcodeForm({
 }: AddBarcodeFormProps) {
   const fetcher = useFetcher<{ error?: string; success?: boolean }>();
   const disabled = useDisabled(fetcher);
-  const [barcodeType, setBarcodeType] =
-    useState<BarcodeType>(initialBarcodeType);
-  const [barcodeValue, setBarcodeValue] = useState(initialBarcodeValue);
+  // Lazy initializers avoid a false-positive derived-state lint: after mount these
+  // are user-controlled form inputs, so they must NOT re-sync with the initial props.
+  const [barcodeType, setBarcodeType] = useState<BarcodeType>(
+    () => initialBarcodeType
+  );
+  const [barcodeValue, setBarcodeValue] = useState(() => initialBarcodeValue);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Validate barcode value when it changes

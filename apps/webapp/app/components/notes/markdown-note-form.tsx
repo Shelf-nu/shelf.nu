@@ -147,15 +147,18 @@ export function MarkdownNoteForm({
   /**
    * Ensure editor is closed when form submission completes successfully.
    *
-   * This acts as a backup to the optimistic close in handleSubmit.
-   * isDone is true when fetcher returns to idle state with data,
-   * indicating the note was created successfully.
+   * Acts as a backup to the optimistic close in handleSubmit: we watch the
+   * fetcher's idle+data transition and collapse the editor then. Implemented
+   * with a ref-tracked previous value (instead of a useEffect) so the close
+   * is applied during render without an extra commit phase.
    */
-  useEffect(() => {
-    if (isDone) {
-      setIsEditing(false);
-    }
-  }, [isDone, setIsEditing]);
+  const prevIsDone = useRef(isDone);
+  if (isDone && !prevIsDone.current) {
+    prevIsDone.current = true;
+    setIsEditing(false);
+  } else if (!isDone && prevIsDone.current) {
+    prevIsDone.current = false;
+  }
 
   /**
    * Re-enable form controls when fetcher completes.

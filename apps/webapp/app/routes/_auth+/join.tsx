@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
@@ -149,17 +150,23 @@ export default function Join() {
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
 
+  /** Focus the email field on mount (intentional first-field focus on auth pages). */
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    emailInputRef.current?.focus();
+  }, []);
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
             <Input
+              ref={emailInputRef}
               data-test-id="email"
               label="Email address"
               placeholder="zaans@huisje.com"
               required
-              autoFocus={true}
               name={zo.fields.email()}
               type="email"
               autoComplete="email"

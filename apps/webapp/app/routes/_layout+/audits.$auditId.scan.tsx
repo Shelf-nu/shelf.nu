@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useSetAtom, useAtomValue } from "jotai";
+import { useSetAtom, useAtomValue, useStore } from "jotai";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
@@ -169,39 +169,48 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
 
         // Keep audit asset state aligned with removal before recalculating counts.
+        // These operations target different tables and are independent, so run in parallel.
         if (existingScan.auditAsset?.expected) {
-          await tx.auditAsset.update({
-            where: { id: existingScan.auditAsset.id },
-            data: {
-              status: "MISSING",
-              scannedAt: null,
-              scannedById: null,
-            },
-          });
-
-          await tx.auditSession.update({
-            where: { id: auditId },
-            data: {
-              foundAssetCount: { decrement: 1 },
-              missingAssetCount: { increment: 1 },
-            },
-          });
+          await Promise.all([
+            tx.auditAsset.update({
+              where: { id: existingScan.auditAsset.id },
+              data: {
+                status: "MISSING",
+                scannedAt: null,
+                scannedById: null,
+              },
+            }),
+            tx.auditSession.update({
+              where: { id: auditId },
+              data: {
+                foundAssetCount: { decrement: 1 },
+                missingAssetCount: { increment: 1 },
+              },
+            }),
+            tx.auditScan.delete({
+              where: { id: existingScan.id },
+            }),
+          ]);
         } else if (existingScan.auditAsset?.id) {
-          await tx.auditAsset.delete({
-            where: { id: existingScan.auditAsset.id },
-          });
-
-          await tx.auditSession.update({
-            where: { id: auditId },
-            data: {
-              unexpectedAssetCount: { decrement: 1 },
-            },
+          await Promise.all([
+            tx.auditAsset.delete({
+              where: { id: existingScan.auditAsset.id },
+            }),
+            tx.auditSession.update({
+              where: { id: auditId },
+              data: {
+                unexpectedAssetCount: { decrement: 1 },
+              },
+            }),
+            tx.auditScan.delete({
+              where: { id: existingScan.id },
+            }),
+          ]);
+        } else {
+          await tx.auditScan.delete({
+            where: { id: existingScan.id },
           });
         }
-
-        await tx.auditScan.delete({
-          where: { id: existingScan.id },
-        });
 
         // Recalculate counts to ensure overview stats reflect current state.
         const [foundCount, missingCount, unexpectedCount] = await Promise.all([
@@ -228,21 +237,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }),
         ]);
 
-        await tx.auditSession.update({
-          where: { id: auditId },
-          data: {
-            foundAssetCount: foundCount,
-            missingAssetCount: missingCount,
-            unexpectedAssetCount: unexpectedCount,
-          },
-        });
-
-        await createAssetScanRemovedNote({
-          auditSessionId: auditId,
-          assetId,
-          userId,
-          tx,
-        });
+        // Update aggregate counts and append the note in parallel — these touch
+        // different tables and are independent of each other.
+        await Promise.all([
+          tx.auditSession.update({
+            where: { id: auditId },
+            data: {
+              foundAssetCount: foundCount,
+              missingAssetCount: missingCount,
+              unexpectedAssetCount: unexpectedCount,
+            },
+          }),
+          createAssetScanRemovedNote({
+            auditSessionId: auditId,
+            assetId,
+            userId,
+            tx,
+          }),
+        ]);
       });
 
       return payload({ success: true });
@@ -332,20 +344,11 @@ export default function AuditSessionRoute() {
   const addItem = useSetAtom(addScannedItemAtom);
   const auditSession = useAtomValue(auditSessionAtom);
   const scannedItems = useAtomValue(scannedItemsAtom);
-  const duplicateScan = useAtomValue(lastDuplicateScanAtom);
   const showNotification = useSetAtom(showNotificationAtom);
-
-  // Show toast when a duplicate scan is detected
-  useEffect(() => {
-    if (duplicateScan) {
-      showNotification({
-        title: "Already scanned",
-        message: `Asset "${duplicateScan.assetTitle}" has already been scanned`,
-        icon: { name: "scan", variant: "gray" },
-        senderId: null,
-      });
-    }
-  }, [duplicateScan, showNotification]);
+  const store = useStore();
+  // Track the last handled duplicate timestamp so the handler only fires a toast
+  // for each newly-detected duplicate (not for repeated reads of the same event).
+  const lastHandledDuplicateTimestampRef = useRef<number | null>(null);
 
   // Track which items have been persisted to avoid duplicate API calls
   const persistedItemsRef = useRef<Set<string>>(new Set());
@@ -447,6 +450,23 @@ export default function AuditSessionRoute() {
     type,
   }: OnCodeDetectionSuccessProps) {
     addItem(qrId, error, type);
+
+    // After adding, inspect the duplicate-scan atom directly. If the most recent
+    // duplicate event is new (timestamp not yet handled), surface a toast. Handled
+    // here instead of in a useEffect so the side effect is triggered by user input.
+    const duplicate = store.get(lastDuplicateScanAtom);
+    if (
+      duplicate &&
+      duplicate.timestamp !== lastHandledDuplicateTimestampRef.current
+    ) {
+      lastHandledDuplicateTimestampRef.current = duplicate.timestamp;
+      showNotification({
+        title: "Already scanned",
+        message: `Asset "${duplicate.assetTitle}" has already been scanned`,
+        icon: { name: "scan", variant: "gray" },
+        senderId: null,
+      });
+    }
   }
 
   return (

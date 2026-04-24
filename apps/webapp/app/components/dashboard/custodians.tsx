@@ -16,6 +16,18 @@ import { Button } from "../shared/button";
 
 import { Table, Td, Tr } from "../table";
 
+/**
+ * Stable keys for empty placeholder rows rendered when there are fewer than 5
+ * custodians. Used instead of array index to satisfy React's stable-key rule.
+ */
+const PLACEHOLDER_ROW_KEYS = [
+  "placeholder-0",
+  "placeholder-1",
+  "placeholder-2",
+  "placeholder-3",
+  "placeholder-4",
+] as const;
+
 export default function CustodiansList() {
   const { custodiansData } = useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
@@ -82,13 +94,13 @@ export default function CustodiansList() {
               );
             })}
             {custodiansData.length < 5 &&
-              Array(5 - custodiansData.length)
-                .fill(null)
-                .map((_d, i) => (
-                  <Tr key={i} className="h-[72px]">
+              PLACEHOLDER_ROW_KEYS.slice(0, 5 - custodiansData.length).map(
+                (placeholderKey) => (
+                  <Tr key={placeholderKey} className="h-[72px]">
                     {""}
                   </Tr>
-                ))}
+                )
+              )}
           </tbody>
         </Table>
       ) : (

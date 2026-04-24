@@ -1,9 +1,18 @@
 import type { ReactNode } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Button } from "~/components/shared/button";
 
 // Generic blocker configuration type
 export type BlockerConfig = {
+  /**
+   * Optional stable identifier for this blocker. When provided it is used as
+   * the React `key` so the rendered `<li>` preserves identity across filter
+   * changes. When omitted we fall back to the blocker's position in the
+   * original (pre-filter) `blockerConfigs` array, which is stable as long as
+   * callers don't reorder that array at runtime. Prefer providing an explicit
+   * `id` when adding new call sites (e.g. "already-added", "has-custody").
+   */
+  id?: string;
   // Checks if this blocker should be shown
   condition: boolean;
   // Count of items that match this blocker condition
@@ -31,13 +40,18 @@ export function createBlockers({
   blockerConfigs,
   onResolveAll,
 }: CreateBlockersArgs) {
-  // Filter out configs where the condition is false
-  const activeBlockers = blockerConfigs.filter((blocker) => blocker.condition);
+  // Tag each config with its position in the original array before filtering
+  // so we can use that position as a stable React `key` fallback — callers
+  // that don't provide an explicit `id` still get a non-index key that
+  // survives condition changes (unlike the filtered-array index).
+  const activeBlockers = blockerConfigs
+    .map((blocker, originalIndex) => ({ blocker, originalIndex }))
+    .filter(({ blocker }) => blocker.condition);
   const hasBlockers = activeBlockers.length > 0;
 
   // Calculate total unresolved conflicts
   const totalUnresolvedConflicts = activeBlockers.reduce(
-    (sum, blocker) => sum + blocker.count,
+    (sum, { blocker }) => sum + blocker.count,
     0
   );
 
@@ -46,7 +60,7 @@ export function createBlockers({
     if (!hasBlockers) return null;
 
     return (
-      <motion.div
+      <m.div
         className="bg-gray-25 p-4 text-[12px]"
         transition={{ duration: 0.2 }}
         exit={{ opacity: 0 }}
@@ -76,8 +90,12 @@ export function createBlockers({
 
         <hr className="my-2" />
         <ul className="list-inside list-disc text-[12px] text-gray-500">
-          {activeBlockers.map((blocker, index) => (
-            <li key={index}>
+          {activeBlockers.map(({ blocker, originalIndex }) => (
+            // Prefer an explicit `id` when provided; otherwise fall back to
+            // the blocker's position in the original (unfiltered) config
+            // array — stable because callers declare the array once per
+            // render with a fixed order.
+            <li key={blocker.id ?? `blocker-${originalIndex}`}>
               {blocker.message(blocker.count)}{" "}
               <Button
                 variant="link"
@@ -93,7 +111,7 @@ export function createBlockers({
             </li>
           ))}
         </ul>
-      </motion.div>
+      </m.div>
     );
   }
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -103,6 +104,12 @@ export default function EditNrm() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the name field when the modal route mounts (replaces autoFocus). */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    nameInputRef.current?.focus();
+  }, []);
+
   return (
     <div className="modal-content-wrapper">
       <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
@@ -113,6 +120,7 @@ export default function EditNrm() {
 
       <Form method="post" ref={zo.ref}>
         <Input
+          ref={nameInputRef}
           defaultValue={teamMember.name}
           name={zo.fields.name()}
           type="text"
@@ -120,7 +128,6 @@ export default function EditNrm() {
           className="mb-8"
           placeholder="Enter team member’s name"
           required
-          autoFocus
           error={zo.errors.name()?.message}
           disabled={disabled}
         />

@@ -42,12 +42,28 @@ const SelectContent = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, ...props }, _ref) {
+  /**
+   * Stable ref callback that attaches a non-passive `touchend` listener to
+   * stop the iOS Safari synthetic-click that Radix Select otherwise fires,
+   * and cleans it up when the element unmounts. The callback is memoised so
+   * React doesn't detach + reattach (leaking handlers) on every render.
+   *
+   * why passive:false — the handler needs preventDefault() to work; with
+   * passive:true the call would be a no-op.
+   */
+  const attachTouchendGuard = React.useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const handler = (event: TouchEvent) => event.preventDefault();
+    el.addEventListener("touchend", handler, { passive: false });
+    return () => {
+      el.removeEventListener("touchend", handler);
+    };
+  }, []);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
-        }
+        ref={attachTouchendGuard}
         className={tw(
           " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className

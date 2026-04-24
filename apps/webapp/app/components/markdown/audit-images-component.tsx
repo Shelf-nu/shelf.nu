@@ -32,8 +32,8 @@ export const AuditImagesComponent = React.memo(
     ids,
     disablePortal,
   }: AuditImagesComponentProps) {
-    // Memoize the API URL to prevent unnecessary refetches
-    const apiUrl = React.useMemo(() => `/api/audit-images?ids=${ids}`, [ids]);
+    // Cheap string interpolation — safe to inline (recomputed each render)
+    const apiUrl = `/api/audit-images?ids=${ids}`;
 
     const { data, isLoading, error } = useApiQuery<{ images: AuditImage[] }>({
       api: apiUrl,

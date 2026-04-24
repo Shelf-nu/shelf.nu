@@ -1,3 +1,20 @@
+/**
+ * Respect user's prefers-reduced-motion system setting (WCAG 2.3.3).
+ * Near-removes CSS animations and transitions when the user has opted in.
+ * Individual motion components should also check `useReducedMotion()` from
+ * `~/hooks/use-reduced-motion` for JS-driven animations.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 :root {
   --tw-ring-color: #eaf2ff;
   --sidebar-background: theme(colors.white);

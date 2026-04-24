@@ -64,6 +64,14 @@ interface Props {
   categories?: string[];
 }
 
+/**
+ * Stable empty array used as the default for the `categories` prop. Keeping
+ * this at module scope (instead of inlining `categories = []` in the
+ * destructure) avoids creating a new array reference on every render, which
+ * would otherwise invalidate downstream memoization / reducer identity.
+ */
+const EMPTY_CATEGORIES: string[] = [];
+
 const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
   OPTION: "A dropdown list of predefined options.",
@@ -84,7 +92,7 @@ export const CustomFieldForm = ({
   type,
   active,
   isEdit = false,
-  categories = [],
+  categories = EMPTY_CATEGORIES,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -126,7 +134,6 @@ export const CustomFieldForm = ({
             name={zo.fields.name()}
             disabled={disabled}
             error={validationErrors?.name?.message || zo.errors.name()?.message}
-            autoFocus
             onChange={updateTitle}
             className="w-full"
             defaultValue={name || ""}
@@ -189,8 +196,11 @@ export const CustomFieldForm = ({
                   onAdd={(o: string) => setOptions([...options, o])}
                 />
                 {options.map((op, i) => (
+                  // Option values are the stable identity here — the
+                  // OptionBuilder above disallows duplicates, so each
+                  // option string is unique within this list.
                   <input
-                    key={i}
+                    key={op}
                     type="hidden"
                     name={zo.fields.options(i)()}
                     value={op}

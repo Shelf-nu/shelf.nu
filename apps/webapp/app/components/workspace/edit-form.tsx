@@ -131,7 +131,6 @@ const WorkspaceGeneralEditForms = ({
             name={zo.fields.name()}
             disabled={isPersonalWorkspace || disabled}
             error={zo.errors.name()?.message}
-            autoFocus
             onChange={updateTitle}
             className="w-full"
             defaultValue={name || undefined}
