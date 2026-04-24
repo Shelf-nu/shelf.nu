@@ -99,6 +99,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
@@ -256,6 +257,20 @@ export async function createStatusTransitionNote({
     bookingId,
     organizationId,
     content,
+  });
+
+  // Activity event — records the canonical status transition for reports.
+  // One per call regardless of user/system origin.
+  await recordEvent({
+    organizationId,
+    actorUserId: userId ?? null,
+    action: "BOOKING_STATUS_CHANGED",
+    entityType: "BOOKING",
+    entityId: bookingId,
+    bookingId,
+    field: "status",
+    fromValue: fromStatus,
+    toValue: toStatus,
   });
 }
 
@@ -456,10 +471,37 @@ export async function createBooking({
       };
     }
 
-    return await db.booking.create({
+    const createdBooking = await db.booking.create({
       data: dataToCreate,
       include: { ...BOOKING_COMMON_INCLUDE, organization: true },
     });
+
+    await recordEvent({
+      organizationId: booking.organizationId,
+      actorUserId: booking.creatorId,
+      action: "BOOKING_CREATED",
+      entityType: "BOOKING",
+      entityId: createdBooking.id,
+      bookingId: createdBooking.id,
+      meta: { assetCount: assetIds.length },
+    });
+
+    // One BOOKING_ASSETS_ADDED event per asset attached at creation.
+    if (assetIds.length > 0) {
+      await recordEvents(
+        assetIds.map((assetId) => ({
+          organizationId: booking.organizationId,
+          actorUserId: booking.creatorId,
+          action: "BOOKING_ASSETS_ADDED",
+          entityType: "BOOKING",
+          entityId: createdBooking.id,
+          bookingId: createdBooking.id,
+          assetId,
+        }))
+      );
+    }
+
+    return createdBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1316,6 +1358,22 @@ export async function checkoutBooking({
       });
     }
 
+    // Activity events — one BOOKING_CHECKED_OUT per asset in the booking.
+    // Complements the BOOKING_STATUS_CHANGED emitted by createStatusTransitionNote.
+    if (bookingFound.assets.length > 0) {
+      await recordEvents(
+        bookingFound.assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_CHECKED_OUT",
+          entityType: "BOOKING",
+          entityId: bookingFound.id,
+          bookingId: bookingFound.id,
+          assetId: asset.id,
+        }))
+      );
+    }
+
     /** Calculate the time difference between the booking.to and the current time */
     const { hours } = calcTimeDifference(effectiveTo!, new Date());
     const lessThanOneHourToCheckin = hours < 1;
@@ -1707,6 +1765,22 @@ export async function checkinBooking({
       }
     }
 
+    // Activity events — one BOOKING_CHECKED_IN per asset checked in.
+    // Complements the BOOKING_STATUS_CHANGED event emitted above.
+    if (bookingFound.assets.length > 0) {
+      await recordEvents(
+        bookingFound.assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_CHECKED_IN",
+          entityType: "BOOKING",
+          entityId: bookingFound.id,
+          bookingId: bookingFound.id,
+          assetId: asset.id,
+        }))
+      );
+    }
+
     /**
      * At this point when user is checking in the booking,
      * we just have to cancel all active scheduler (if there is any).
@@ -1958,6 +2032,20 @@ export async function partialCheckinBooking({
         userId,
         assetIds,
       });
+
+      // Activity events — one BOOKING_PARTIAL_CHECKIN per asset, inside the tx.
+      await recordEvents(
+        assetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_PARTIAL_CHECKIN",
+          entityType: "BOOKING",
+          entityId: id,
+          bookingId: id,
+          assetId,
+        })),
+        tx
+      );
 
       // BOOKING ACTIVITY LOG: Log partial check-in activity
       // Get the kit and standalone asset data for consistent formatting
@@ -2244,6 +2332,23 @@ export async function updateBookingAssets({
       }
     }
 
+    // Activity events — one BOOKING_ASSETS_ADDED per asset added.
+    // This path only ADDS assets (there is a separate removeAssetsFromBooking
+    // path for removals).
+    if (assetIds.length > 0) {
+      await recordEvents(
+        assetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_ASSETS_ADDED",
+          entityType: "BOOKING",
+          entityId: booking.id,
+          bookingId: booking.id,
+          assetId,
+        }))
+      );
+    }
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -2350,6 +2455,16 @@ export async function archiveBooking({
       toStatus: BookingStatus.ARCHIVED,
       userId,
       custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_ARCHIVED",
+      entityType: "BOOKING",
+      entityId: updatedBooking.id,
+      bookingId: updatedBooking.id,
     });
 
     return updatedBooking;
@@ -2488,6 +2603,17 @@ export async function cancelBooking({
       toStatus: BookingStatus.CANCELLED,
       userId,
       custodianUserId: booking.custodianUserId || undefined,
+    });
+
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_CANCELLED",
+      entityType: "BOOKING",
+      entityId: booking.id,
+      bookingId: booking.id,
+      meta: cancellationReason ? { cancellationReason } : undefined,
     });
 
     return booking;
@@ -3284,6 +3410,21 @@ export async function removeAssets({
       userId,
       assetIds,
     });
+
+    // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
+    if (assetIds.length > 0) {
+      await recordEvents(
+        assetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_ASSETS_REMOVED",
+          entityType: "BOOKING",
+          entityId: booking.id,
+          bookingId: booking.id,
+          assetId,
+        }))
+      );
+    }
 
     // BOOKING ACTIVITY LOG: Log removal activity
     // Creates system note when assets/kits are removed from a booking

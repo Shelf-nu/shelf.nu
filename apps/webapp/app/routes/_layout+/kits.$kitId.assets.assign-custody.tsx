@@ -24,6 +24,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvents } from "~/modules/activity-event/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -281,6 +282,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       assetIds: kit.assets.map((asset) => asset.id),
     });
+
+    await recordEvents(
+      kit.assets.map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "CUSTODY_ASSIGNED",
+        entityType: "ASSET",
+        entityId: asset.id,
+        assetId: asset.id,
+        kitId: kit.id,
+        teamMemberId: custodianId,
+        targetUserId: custodianTeamMember.user?.id ?? undefined,
+        meta: { viaKit: true },
+      }))
+    );
 
     sendNotification({
       title: `‘${kit.name}’ is now in custody of ${custodianName}`,

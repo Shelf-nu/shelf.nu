@@ -6,6 +6,7 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -205,6 +206,17 @@ export const action = async ({
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
+      });
+
+      await recordEvent({
+        organizationId,
+        actorUserId: userId,
+        action: "CUSTODY_RELEASED",
+        entityType: "ASSET",
+        entityId: asset.id,
+        assetId: asset.id,
+        teamMemberId: custodyRecord?.custodian?.id ?? undefined,
+        targetUserId: custodyRecord?.custodian?.user?.id ?? undefined,
       });
 
       sendNotification({

@@ -42,6 +42,7 @@ import {
   buildAssetListMarkup,
   buildKitListMarkup,
 } from "./utils";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -606,7 +607,7 @@ export async function createLocation({
       parentId,
     });
 
-    return await db.location.create({
+    const created = await db.location.create({
       data: {
         name: name.trim(),
         description,
@@ -632,6 +633,17 @@ export async function createLocation({
         }),
       },
     });
+
+    await recordEvent({
+      organizationId,
+      actorUserId: userId,
+      action: "LOCATION_CREATED",
+      entityType: "LOCATION",
+      entityId: created.id,
+      locationId: created.id,
+    });
+
+    return created;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -751,6 +763,15 @@ export async function updateLocation(payload: {
         address,
         parentId: validatedParentId,
       },
+    });
+
+    await recordEvent({
+      organizationId,
+      actorUserId: userId,
+      action: "LOCATION_UPDATED",
+      entityType: "LOCATION",
+      entityId: id,
+      locationId: id,
     });
 
     return updatedLocation;
@@ -1654,6 +1675,36 @@ export async function updateLocationAssets({
       userId,
       location,
     });
+
+    // Activity events — one ASSET_LOCATION_CHANGED per affected asset.
+    const locEvents: Parameters<typeof recordEvents>[0] = [
+      ...actuallyNewAssetIds.map((assetId) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_LOCATION_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: assetId,
+        assetId,
+        locationId,
+        field: "locationId",
+        fromValue: null,
+        toValue: locationId,
+      })),
+      ...removedAssetIds.map((assetId) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_LOCATION_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: assetId,
+        assetId,
+        field: "locationId",
+        fromValue: locationId,
+        toValue: null,
+      })),
+    ];
+    if (locEvents.length > 0) {
+      await recordEvents(locEvents);
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
