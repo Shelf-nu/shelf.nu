@@ -609,4 +609,12 @@ describe("getOverrideDateKey", () => {
     // override still refers to the 24th.
     expect(getOverrideDateKey(new Date("2026-04-24"))).toBe("2026-04-24");
   });
+
+  it("reads the UTC calendar day for a Date not at UTC midnight", () => {
+    // Pins down the "read the UTC day, not the local day" semantic. This Date
+    // is 4/24 23:30 in CDT, which is 4/25 04:30 UTC — we expect the UTC day.
+    expect(getOverrideDateKey(new Date("2026-04-24T23:30:00-05:00"))).toBe(
+      "2026-04-25"
+    );
+  });
 });

@@ -16,11 +16,17 @@ import type {
  * used to make an override for day D match bookings on day D-1. Reading the
  * date from UTC (or treating an already-YYYY-MM-DD string as-is) preserves the
  * absolute-date meaning.
+ *
+ * Contract: string inputs must be either date-only ("YYYY-MM-DD") or a UTC ISO
+ * timestamp ("YYYY-MM-DD…Z"). Offset-style strings like
+ * "2026-04-24T23:00:00-05:00" are not supported — producers in this codebase
+ * (the API route and `normalizeWorkingHoursForValidation`) uphold this
+ * invariant.
  */
 export function getOverrideDateKey(date: string | Date): string {
   if (typeof date === "string") {
-    // Handles both date-only ("2026-04-24") and datetime ISO ("2026-04-24T00:00:00.000Z")
-    // inputs — the first 10 characters are the absolute calendar date in both.
+    // The first 10 characters are the absolute calendar date for both
+    // date-only and UTC-ISO forms.
     return date.slice(0, 10);
   }
   return date.toISOString().slice(0, 10);
