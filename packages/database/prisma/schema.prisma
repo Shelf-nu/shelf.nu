@@ -1375,7 +1375,9 @@ model WorkingHours {
   // Weekly schedule stored as JSON for better performance
   // Format: { "0": { "isOpen": true, "openTime": "09:00", "closeTime": "17:00" }, ... }
   // Keys are day numbers (0=Sunday, 1=Monday, etc.)
-  // Times are stored in "HH:MM" format (24-hour) in UTC
+  // Times are wall-clock "HH:MM" (24-hour) — no timezone conversion. These
+  // describe when the physical location is open, so they are interpreted as
+  // local wall time, not UTC.
   weeklySchedule Json @default("{\"0\":{\"isOpen\":false},\"1\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"2\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"3\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"4\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"5\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"6\":{\"isOpen\":false}}")
 
   // Relationships
@@ -1400,7 +1402,7 @@ model WorkingHoursOverride {
   date   DateTime @db.Date
   isOpen Boolean  @default(false)
 
-  // Times stored in "HH:MM" format (24-hour) in UTC
+  // Wall-clock "HH:MM" (24-hour) — no timezone conversion (see WorkingHours).
   openTime  String? // Format: "09:00"
   closeTime String? // Format: "17:00"
   reason    String?

@@ -46,7 +46,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           ...workingHours,
           overrides: workingHours.overrides.map((override) => ({
             ...override,
-            date: override.date.toISOString(),
+            // Overrides represent an absolute calendar date (no time, no TZ).
+            // Prisma returns `@db.Date` as a UTC-midnight Date; emit just the
+            // YYYY-MM-DD portion so the client never has to re-interpret it.
+            date: override.date.toISOString().slice(0, 10),
           })),
         },
       })
