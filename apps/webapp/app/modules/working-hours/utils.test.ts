@@ -3,6 +3,7 @@ import {
   calculateBusinessHoursDuration,
   calculateEffectiveEndDate,
   getBookingDefaultStartEndTimes,
+  getOverrideDateKey,
   normalizeWorkingHoursForValidation,
 } from "./utils";
 
@@ -587,5 +588,33 @@ describe("getBookingDefaultStartEndTimes", () => {
       true
     );
     expect(adminUserResult.startDate).toBe("2025-07-25T14:10"); // Current time + 10 minutes (buffer bypassed)
+  });
+});
+
+describe("getOverrideDateKey", () => {
+  // Overrides are stored as UTC-midnight Date values that represent an absolute
+  // calendar date. Formatting them in the runtime's local timezone would shift
+  // the date backwards for users west of UTC (e.g. Central Time), which caused
+  // overrides for day D to match bookings on day D-1.
+  it("returns the YYYY-MM-DD portion of an ISO string", () => {
+    expect(getOverrideDateKey("2026-04-24T00:00:00.000Z")).toBe("2026-04-24");
+  });
+
+  it("returns the stored date for a date-only string", () => {
+    expect(getOverrideDateKey("2026-04-24")).toBe("2026-04-24");
+  });
+
+  it("returns the UTC calendar date for a Date object", () => {
+    // new Date("2026-04-24") stores UTC midnight; in any runtime timezone the
+    // override still refers to the 24th.
+    expect(getOverrideDateKey(new Date("2026-04-24"))).toBe("2026-04-24");
+  });
+
+  it("reads the UTC calendar day for a Date not at UTC midnight", () => {
+    // Pins down the "read the UTC day, not the local day" semantic. This Date
+    // is 4/24 23:30 in CDT, which is 4/25 04:30 UTC — we expect the UTC day.
+    expect(getOverrideDateKey(new Date("2026-04-24T23:30:00-05:00"))).toBe(
+      "2026-04-25"
+    );
   });
 });

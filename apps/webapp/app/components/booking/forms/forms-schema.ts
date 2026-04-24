@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import {
   calculateBusinessHoursDuration,
+  getOverrideDateKey,
   normalizeWorkingHoursForValidation,
 } from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
@@ -29,11 +30,14 @@ function validateWorkingHours(
   const timeString = format(dateTime, "HH:mm");
   const dateString = format(dateTime, "yyyy-MM-dd");
 
-  // Check for date-specific overrides first
-  const override = workingHours.overrides.find((override) => {
-    const overrideDate = format(override.date, "yyyy-MM-dd");
-    return overrideDate === dateString;
-  });
+  // Check for date-specific overrides first. Overrides are stored as
+  // UTC-midnight timestamps that represent an absolute calendar date, so we
+  // read their date key from UTC instead of formatting in the runtime's local
+  // timezone — otherwise a "4/24 closed" override ends up matching a 4/23
+  // booking for any user west of UTC (America/* timezones).
+  const override = workingHours.overrides.find(
+    (override) => getOverrideDateKey(override.date) === dateString
+  );
 
   if (override) {
     if (!override.isOpen) {
