@@ -13,9 +13,13 @@ const dbMocks = vi.hoisted(() => ({
   },
   asset: {
     findMany: vi.fn(),
+    // why: org-scope assertion in updateLocationAssets calls db.asset.count
+    count: vi.fn(),
   },
   kit: {
     findMany: vi.fn(),
+    // why: org-scope assertion in updateLocationKits calls db.kit.count
+    count: vi.fn(),
   },
   user: {
     findFirstOrThrow: vi.fn(),
@@ -67,23 +71,29 @@ vi.mock("~/utils/list", async () => {
   return { ...actual, ALL_SELECTED_KEY: "__ALL__" };
 });
 
-vi.mock("~/utils/error", () => ({
-  ShelfError: class ShelfError extends Error {
+vi.mock("~/utils/error", () => {
+  class ShelfError extends Error {
     constructor(config: any) {
       super(config.message || "ShelfError");
       Object.assign(this, config);
     }
-  },
-  isLikeShelfError: () => false,
-  isNotFoundError: () => false,
-  maybeUniqueConstraintViolation: (
-    _cause: unknown,
-    _label: string,
-    _meta?: any
-  ) => {
-    throw _cause;
-  },
-}));
+  }
+  return {
+    ShelfError,
+    // why: production behavior re-throws known ShelfErrors so callers see the
+    // original status (e.g. 403 from the org-scope guard) instead of a
+    // generic 500 wrap from the outer catch
+    isLikeShelfError: (cause: unknown) => cause instanceof ShelfError,
+    isNotFoundError: () => false,
+    maybeUniqueConstraintViolation: (
+      _cause: unknown,
+      _label: string,
+      _meta?: any
+    ) => {
+      throw _cause;
+    },
+  };
+});
 
 const {
   updateLocation,
@@ -118,6 +128,14 @@ describe("location service activity logging", () => {
       lastName: "Doe",
     });
     dbMocks.kit.findMany.mockResolvedValue([]);
+    // why: assertion helpers count submitted IDs; default to "all authorized"
+    // so happy-path tests don't have to wire it up explicitly
+    dbMocks.asset.count.mockImplementation(({ where }: any) =>
+      Promise.resolve(where?.id?.in?.length ?? 0)
+    );
+    dbMocks.kit.count.mockImplementation(({ where }: any) =>
+      Promise.resolve(where?.id?.in?.length ?? 0)
+    );
     locationNoteMocks.createSystemLocationNote.mockResolvedValue(undefined);
     locationNoteMocks.createLocationNote.mockResolvedValue(undefined);
     createNoteMock.mockResolvedValue(undefined);
@@ -204,6 +222,77 @@ describe("location service activity logging", () => {
     });
   });
 
+  describe("updateLocationAssets cross-organization guard", () => {
+    it("rejects when an assetId does not belong to the caller's organization", async () => {
+      // Caller submitted two IDs but only one belongs to the org
+      dbMocks.asset.count.mockResolvedValueOnce(1);
+
+      await expect(
+        updateLocationAssets({
+          assetIds: ["asset-mine", "asset-foreign"],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: [],
+        })
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects when a removedAssetId does not belong to the caller's organization", async () => {
+      dbMocks.asset.count.mockResolvedValueOnce(0);
+
+      await expect(
+        updateLocationAssets({
+          assetIds: [],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: ["asset-foreign"],
+        })
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects when ALL_SELECTED expansion is paired with a foreign removedAssetId", async () => {
+      // ALL_SELECTED expansion still funnels through the assertion which
+      // checks both arrays. The foreign ID in removedAssetIds must trip 403.
+      dbMocks.asset.findMany.mockResolvedValueOnce([{ id: "asset-mine" }]);
+      // count over { asset-mine, asset-foreign } returns 1 (foreign missing)
+      dbMocks.asset.count.mockResolvedValueOnce(1);
+
+      await expect(
+        updateLocationAssets({
+          assetIds: ["__ALL__"],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: ["asset-foreign"],
+        })
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
+    });
+
+    it("skips the count query when no IDs are submitted", async () => {
+      await updateLocationAssets({
+        assetIds: [],
+        organizationId: "org-1",
+        locationId: "loc-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+        removedAssetIds: [],
+      });
+
+      expect(dbMocks.asset.count).not.toHaveBeenCalled();
+    });
+  });
+
   describe("updateLocationKits", () => {
     it("records notes when kits are assigned", async () => {
       dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
@@ -245,6 +334,55 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("Shoot Kit"),
         })
       );
+    });
+  });
+
+  describe("updateLocationKits cross-organization guard", () => {
+    it("rejects when a kitId does not belong to the caller's organization", async () => {
+      dbMocks.kit.count.mockResolvedValueOnce(1);
+
+      await expect(
+        updateLocationKits({
+          locationId: "loc-1",
+          kitIds: ["kit-mine", "kit-foreign"],
+          removedKitIds: [],
+          organizationId: "org-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects when a removedKitId does not belong to the caller's organization", async () => {
+      dbMocks.kit.count.mockResolvedValueOnce(0);
+
+      await expect(
+        updateLocationKits({
+          locationId: "loc-1",
+          kitIds: [],
+          removedKitIds: ["kit-foreign"],
+          organizationId: "org-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
+    });
+
+    it("skips the count query when no kit IDs are submitted", async () => {
+      await updateLocationKits({
+        locationId: "loc-1",
+        kitIds: [],
+        removedKitIds: [],
+        organizationId: "org-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+      });
+
+      expect(dbMocks.kit.count).not.toHaveBeenCalled();
     });
   });
 });
