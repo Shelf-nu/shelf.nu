@@ -278,6 +278,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
       PermissionAction.delete,
+      PermissionAction.archive,
     ],
     [PermissionEntity.teamMemberNote]: [
       PermissionAction.read,
@@ -424,6 +425,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
       PermissionAction.delete,
+      PermissionAction.archive,
     ],
     [PermissionEntity.teamMemberNote]: [
       PermissionAction.read,

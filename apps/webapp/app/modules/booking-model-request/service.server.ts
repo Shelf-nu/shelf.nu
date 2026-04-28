@@ -378,6 +378,7 @@ export async function upsertBookingModelRequest({
         const actor = await loadActor(userId);
         await createSystemBookingNote({
           bookingId,
+          organizationId,
           content: content.replace("{actor}", actor),
         });
       } catch {
@@ -487,6 +488,7 @@ export async function removeBookingModelRequest({
         const actor = await loadActor(userId);
         await createSystemBookingNote({
           bookingId,
+          organizationId,
           content: `${actor} cancelled the model-level reservation for **${assetModelName}**.`,
         });
       } catch {

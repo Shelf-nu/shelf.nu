@@ -174,8 +174,8 @@ importers:
         specifier: ^7.3.0
         version: 7.3.0
       hono:
-        specifier: ^4.12.12
-        version: 4.12.12
+        specifier: ^4.12.14
+        version: 4.12.14
       html-to-image:
         specifier: 1.11.11
         version: 1.11.11
@@ -295,7 +295,7 @@ importers:
         version: 7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
       react-router-hono-server:
         specifier: ^2.25.2
-        version: 2.25.2(@hono/node-server@1.19.13(hono@4.12.12))(@react-router/dev@7.14.0(@react-router/serve@7.14.0(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.2))(@types/node@22.19.17)(jiti@1.21.7)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(tsx@4.21.0)(typescript@6.0.2)(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)))(@types/react@19.2.14)(hono@4.12.12)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0))
+        version: 2.25.2(@hono/node-server@1.19.13(hono@4.12.14))(@react-router/dev@7.14.0(@react-router/serve@7.14.0(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.2))(@types/node@22.19.17)(jiti@1.21.7)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(tsx@4.21.0)(typescript@6.0.2)(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)))(@types/react@19.2.14)(hono@4.12.14)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0))
       react-tag-autocomplete:
         specifier: ^7.5.1
         version: 7.5.1(react@19.2.1)
@@ -310,7 +310,7 @@ importers:
         version: 0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@3.25.76)
       remix-hono:
         specifier: ^0.0.18
-        version: 0.0.18(hono@4.12.12)(pretty-cache-header@1.0.0)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76)
+        version: 0.0.18(hono@4.12.14)(pretty-cache-header@1.0.0)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76)
       remix-utils:
         specifier: ^9.3.1
         version: 9.3.1(@standard-schema/spec@1.1.0)(intl-parse-accept-language@1.0.0)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(react@19.2.1)
@@ -1211,6 +1211,7 @@ packages:
 
   '@evilmartians/lefthook@2.1.5':
     resolution: {integrity: sha512-svJSugMv1M0g7JeD1EqGcVQtF4pk1HkFZ8h7hfygXDyMNmo2UyQteqr6b9ljkS936SvH61IJOBjllt/EH3c7gw==}
+    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -4865,8 +4866,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.12.12:
-    resolution: {integrity: sha512-p1JfQMKaceuCbpJKAPKVqyqviZdS0eUxH9v82oWo1kb9xjQ5wA6iP3FNVAPDFlz5/p7d45lO+BpSk1tuSZMF4Q==}
+  hono@4.12.14:
+    resolution: {integrity: sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w==}
     engines: {node: '>=16.9.0'}
 
   hookable@5.5.3:
@@ -8031,23 +8032,23 @@ snapshots:
       react: 19.2.1
       react-dom: 19.2.1(react@19.2.1)
 
-  '@hono/node-server@1.19.13(hono@4.12.12)':
+  '@hono/node-server@1.19.13(hono@4.12.14)':
     dependencies:
-      hono: 4.12.12
+      hono: 4.12.14
 
-  '@hono/node-ws@1.3.0(@hono/node-server@1.19.13(hono@4.12.12))(hono@4.12.12)':
+  '@hono/node-ws@1.3.0(@hono/node-server@1.19.13(hono@4.12.14))(hono@4.12.14)':
     dependencies:
-      '@hono/node-server': 1.19.13(hono@4.12.12)
-      hono: 4.12.12
+      '@hono/node-server': 1.19.13(hono@4.12.14)
+      hono: 4.12.14
       ws: 8.20.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@hono/vite-dev-server@0.25.1(hono@4.12.12)':
+  '@hono/vite-dev-server@0.25.1(hono@4.12.14)':
     dependencies:
-      '@hono/node-server': 1.19.13(hono@4.12.12)
-      hono: 4.12.12
+      '@hono/node-server': 1.19.13(hono@4.12.14)
+      hono: 4.12.14
       minimatch: 9.0.9
 
   '@humanwhocodes/config-array@0.13.0':
@@ -11831,7 +11832,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.12.12: {}
+  hono@4.12.14: {}
 
   hookable@5.5.3: {}
 
@@ -13100,15 +13101,15 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.14
 
-  react-router-hono-server@2.25.2(@hono/node-server@1.19.13(hono@4.12.12))(@react-router/dev@7.14.0(@react-router/serve@7.14.0(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.2))(@types/node@22.19.17)(jiti@1.21.7)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(tsx@4.21.0)(typescript@6.0.2)(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)))(@types/react@19.2.14)(hono@4.12.12)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)):
+  react-router-hono-server@2.25.2(@hono/node-server@1.19.13(hono@4.12.14))(@react-router/dev@7.14.0(@react-router/serve@7.14.0(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.2))(@types/node@22.19.17)(jiti@1.21.7)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(tsx@4.21.0)(typescript@6.0.2)(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)))(@types/react@19.2.14)(hono@4.12.14)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)):
     dependencies:
       '@drizzle-team/brocli': 0.11.0
-      '@hono/node-server': 1.19.13(hono@4.12.12)
-      '@hono/node-ws': 1.3.0(@hono/node-server@1.19.13(hono@4.12.12))(hono@4.12.12)
-      '@hono/vite-dev-server': 0.25.1(hono@4.12.12)
+      '@hono/node-server': 1.19.13(hono@4.12.14)
+      '@hono/node-ws': 1.3.0(@hono/node-server@1.19.13(hono@4.12.14))(hono@4.12.14)
+      '@hono/vite-dev-server': 0.25.1(hono@4.12.14)
       '@react-router/dev': 7.14.0(@react-router/serve@7.14.0(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@6.0.2))(@types/node@22.19.17)(jiti@1.21.7)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(tsx@4.21.0)(typescript@6.0.2)(vite@7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0))
       '@types/react': 19.2.14
-      hono: 4.12.12
+      hono: 4.12.14
       react-router: 7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
       vite: 7.3.2(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)
     transitivePeerDependencies:
@@ -13259,9 +13260,9 @@ snapshots:
       fs-extra: 11.3.4
       minimatch: 10.2.5
 
-  remix-hono@0.0.18(hono@4.12.12)(pretty-cache-header@1.0.0)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76):
+  remix-hono@0.0.18(hono@4.12.14)(pretty-cache-header@1.0.0)(react-router@7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(zod@3.25.76):
     dependencies:
-      hono: 4.12.12
+      hono: 4.12.14
       pretty-cache-header: 1.0.0
     optionalDependencies:
       react-router: 7.14.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)

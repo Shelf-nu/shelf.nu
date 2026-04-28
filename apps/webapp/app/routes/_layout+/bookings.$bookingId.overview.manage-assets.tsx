@@ -797,6 +797,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         await createSystemBookingNote({
           bookingId,
+          organizationId,
           content: `${actor} added ${assetListContent} to the booking${qtySuffix}.`,
         });
       } catch (noteError) {
@@ -930,6 +931,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           .join(", ");
         await createSystemBookingNote({
           bookingId,
+          organizationId,
           content: `${actor} adjusted booked quantity for ${bookingAdjustSummary}.`,
         });
       } catch (noteError) {

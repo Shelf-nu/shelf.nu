@@ -168,6 +168,7 @@ export async function fetchAllAuditPdfRelatedData(
           message: "You don't have permission to view this audit",
           status: 403,
           label: "Audit",
+          shouldBeCaptured: false,
         });
       }
     }

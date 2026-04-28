@@ -119,6 +119,7 @@ export type IconType =
   | "deactivate"
   | "start-audit"
   | "add-to-audit"
+  | "delete-audit"
   | "scan"
   | "tool"
   | "rows"
@@ -212,6 +213,7 @@ export const iconsMap: IconsMap = {
   "adjust-quantity": <SlidersHorizontal />,
   "start-audit": <ClipboardList />,
   "add-to-audit": <ClipboardList />,
+  "delete-audit": <TrashIcon />,
 };
 
 export default iconsMap;

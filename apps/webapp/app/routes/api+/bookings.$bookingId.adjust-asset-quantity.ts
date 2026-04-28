@@ -205,6 +205,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }),
           createSystemBookingNote({
             bookingId,
+            organizationId,
             content: `${actor} adjusted booked quantity for **${bookingAsset.asset.title}** from **${previousQuantity}** to **${quantity}**.`,
           }),
         ]);

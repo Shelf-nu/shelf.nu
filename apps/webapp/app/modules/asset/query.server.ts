@@ -2,6 +2,9 @@ import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
+import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import type { CustomFieldSorting } from "./types";
@@ -1377,12 +1380,17 @@ const directAssetFields: Record<DirectAssetField, string> = {
  * Generates a PostgreSQL expression for natural sorting of text values
  * Handles case-insensitive comparison and natural number ordering.
  * What is natural sorting? https://en.wikipedia.org/wiki/Natural_sort_order
- * - Ignore case (treat uppercase and lowercase the same) 
- * - Sort numbers as whole values rather than character-by-character 
+ * - Ignore case (treat uppercase and lowercase the same)
+ * - Sort numbers as whole values rather than character-by-character
  * - Place purely alphabetic entries before alphanumeric ones
- 
- * @param columnRef - The column or expression to sort
- * @param direction - Sort direction ('asc' or 'desc')
+ *
+ * SECURITY: `columnRef` and `direction` are interpolated into raw SQL.
+ * Callers MUST pass either a hardcoded literal or a value validated against
+ * `SAFE_SQL_IDENTIFIER` (and an allowlisted direction). Never pass raw user
+ * input here.
+ *
+ * @param columnRef - The column or expression to sort. Caller-validated.
+ * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
  * @returns SQL string with normalized sorting expression
  */
 function getNormalizedSortExpression(
@@ -1390,24 +1398,35 @@ function getNormalizedSortExpression(
   direction: string
 ): string {
   return `
-    LOWER(regexp_replace(${columnRef}, '([0-9]+)', 
+    LOWER(regexp_replace(${columnRef}, '([0-9]+)',
       lpad(regexp_replace(regexp_replace('\\1', '^0+', ''), '^$', '0'), 12, '0')
     )) ${direction},
     ${columnRef} ${direction}
   `.trim();
 }
 
+/**
+ * Generates a PostgreSQL expression for sorting sequential asset IDs
+ * (e.g. "SAM-1", "SAM-2", "SAM-10") in numeric order.
+ *
+ * SECURITY: `columnRef` and `direction` are interpolated into raw SQL.
+ * Same caller contract as {@link getNormalizedSortExpression}.
+ *
+ * @param columnRef - The column or expression to sort. Caller-validated.
+ * @param direction - Sort direction ('asc' or 'desc'). Caller-validated.
+ * @returns SQL string with sequential-ID sorting expression
+ */
 function getSequentialIdSortExpression(
   columnRef: string,
   direction: string
 ): string {
   return `
-    CASE 
+    CASE
       WHEN ${columnRef} IS NULL THEN 1
       ELSE 0
     END ASC,
-    CASE 
-      WHEN ${columnRef} ~ '^[A-Z]+-[0-9]+$' 
+    CASE
+      WHEN ${columnRef} ~ '^[A-Z]+-[0-9]+$'
       THEN LPAD(SPLIT_PART(${columnRef}, '-', 2), 12, '0')
       ELSE ${columnRef}
     END ${direction},
@@ -1416,8 +1435,59 @@ function getSequentialIdSortExpression(
 }
 
 /**
- * Enhanced sorting options parser with natural sort support
- * Handles case-insensitive sorting with natural number ordering
+ * Allowlist of permitted sort directions.
+ *
+ * The user-supplied direction is normalized to lowercase and compared against
+ * this set before being interpolated into raw SQL. Anything outside this set
+ * defaults to "asc" — never reaches the database verbatim.
+ */
+const VALID_DIRECTIONS = new Set<"asc" | "desc">(["asc", "desc"]);
+
+/**
+ * Normalizes a user-supplied sort direction to "asc" or "desc".
+ *
+ * Behavior:
+ * - Missing or empty direction → defaults to "asc" (legacy URL pattern:
+ *   `?sortBy=name`).
+ * - Recognized direction (any case) → normalized to lowercase.
+ * - Anything else → throws `ShelfError` (HTTP 400). Surfacing the bad
+ *   input is preferred over silently sorting ascending, both for UX
+ *   clarity and because invalid direction is the primary signal that
+ *   someone is poking at the sort param.
+ *
+ * @param raw - The raw direction string from the URL.
+ * @returns A safe lowercase direction.
+ * @throws {ShelfError} When `raw` is non-empty and not a recognized direction.
+ */
+function normalizeDirection(raw: string | undefined): "asc" | "desc" {
+  if (raw === undefined || raw === "") return "asc";
+  const lowered = raw.toLowerCase();
+  if (VALID_DIRECTIONS.has(lowered as "asc" | "desc")) {
+    return lowered as "asc" | "desc";
+  }
+  throw new ShelfError({
+    cause: null,
+    message: `Invalid sort direction: "${raw}". Must be "asc" or "desc".`,
+    title: "Invalid sort direction",
+    additionalData: { direction: raw },
+    label: "Assets",
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Enhanced sorting options parser with natural sort support.
+ * Handles case-insensitive sorting with natural number ordering.
+ *
+ * SECURITY: builds a raw SQL `ORDER BY` clause that is later passed to
+ * `Prisma.raw(...)` inside `getAdvancedPaginatedAndFilterableAssets`. Every
+ * value interpolated into the clause must be either a hardcoded literal or
+ * validated against {@link isSafeSqlIdentifier}. Direction is normalized via
+ * {@link normalizeDirection}. Field names that don't match a known branch
+ * (or whose dynamic suffix fails identifier validation) are dropped with a
+ * warning — the caller falls back to the default sort. See GHSA-69xv-wmgg-3qp3.
+ *
  * @param sortBy - Array of sort specifications in format: field:direction[:fieldType]
  * @returns Object containing SQL order by clause and custom field sorting info
  */
@@ -1427,10 +1497,10 @@ export function parseSortingOptions(sortBy: string[]): {
 } {
   const fields = sortBy.map((s) => {
     const [name, direction, fieldType] = s.split(":");
-    return { name, direction, fieldType } as {
-      name: string;
-      direction: "asc" | "desc";
-      fieldType: CustomFieldType;
+    return {
+      name: name ?? "",
+      direction: normalizeDirection(direction),
+      fieldType: fieldType as CustomFieldType,
     };
   });
 
@@ -1438,7 +1508,11 @@ export function parseSortingOptions(sortBy: string[]): {
   const customFieldSortings: CustomFieldSorting[] = [];
 
   for (const field of fields) {
-    if (field.name in directAssetFields) {
+    // Use Object.hasOwn to avoid prototype-chain matches like "toString" or
+    // "constructor", which would otherwise resolve via Object.prototype and
+    // produce broken SQL. Bypassing the unknown-field fallback this way is not
+    // exploitable but creates a DoS / 500 path — keep the allowlist strict.
+    if (Object.hasOwn(directAssetFields, field.name)) {
       const columnName = directAssetFields[field.name as DirectAssetField];
 
       // Special handling for sequential ID sorting
@@ -1478,14 +1552,43 @@ export function parseSortingOptions(sortBy: string[]): {
         getNormalizedSortExpression(`custody->>'name'`, field.direction)
       );
     } else if (field.name.startsWith("barcode_")) {
-      // Handle barcode column sorting
-      const barcodeType = field.name.replace("barcode_", "");
+      // The suffix is interpolated into a SQL identifier (`barcode_<suffix>`),
+      // so it must contain only safe identifier characters. Anything else is
+      // dropped — see GHSA-69xv-wmgg-3qp3.
+      const barcodeType = field.name.slice("barcode_".length);
+      if (!isSafeSqlIdentifier(barcodeType)) {
+        Logger.warn(
+          new ShelfError({
+            cause: null,
+            message: "Skipping sort term: unsafe barcode field name",
+            additionalData: { fieldName: field.name },
+            label: "Assets",
+            shouldBeCaptured: false,
+          })
+        );
+        continue;
+      }
       orderByParts.push(
         getNormalizedSortExpression(`barcode_${barcodeType}`, field.direction)
       );
     } else if (field.name.startsWith("cf_")) {
       const customFieldName = field.name.slice(3);
       const alias = `cf_${customFieldName.replace(/\s+/g, "_")}`;
+      // The alias is interpolated into raw SQL both here (ORDER BY) and in
+      // generateCustomFieldSelect (SELECT ... AS <alias>). Reject any alias
+      // that isn't a safe identifier.
+      if (!isSafeSqlIdentifier(alias)) {
+        Logger.warn(
+          new ShelfError({
+            cause: null,
+            message: "Skipping sort term: unsafe custom field name",
+            additionalData: { fieldName: field.name, alias },
+            label: "Assets",
+            shouldBeCaptured: false,
+          })
+        );
+        continue;
+      }
       customFieldSortings.push({
         name: customFieldName,
         valueKey: "raw",
@@ -1504,8 +1607,15 @@ export function parseSortingOptions(sortBy: string[]): {
         orderByParts.push(getNormalizedSortExpression(alias, field.direction));
       }
     } else {
-      // eslint-disable-next-line no-console
-      console.warn(`Unknown sort field: ${field.name}`);
+      Logger.warn(
+        new ShelfError({
+          cause: null,
+          message: "Skipping sort term: unknown field",
+          additionalData: { fieldName: field.name },
+          label: "Assets",
+          shouldBeCaptured: false,
+        })
+      );
     }
   }
   if (orderByParts.length === 0) {
@@ -1537,20 +1647,43 @@ function isTextColumn(fieldName: string): boolean {
   return textColumns.includes(fieldName as DirectAssetField);
 }
 
+/**
+ * Builds the SELECT-side custom-field subqueries that match the aliases
+ * produced by {@link parseSortingOptions}.
+ *
+ * SECURITY: each alias is interpolated as a raw SQL identifier
+ * (`AS ${Prisma.raw(cf.alias)}`). This is a defense-in-depth guard: the
+ * parser already validates aliases via {@link isSafeSqlIdentifier}, so this
+ * check should never throw in practice. It exists to keep the function
+ * safe under future refactors or alternate callers.
+ *
+ * @throws {ShelfError} If any alias fails identifier validation.
+ */
 export function generateCustomFieldSelect(
   customFieldSortings: CustomFieldSorting[]
 ): Prisma.Sql {
   if (customFieldSortings.length === 0) return Prisma.empty;
 
+  for (const cf of customFieldSortings) {
+    if (!isSafeSqlIdentifier(cf.alias)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid custom field alias for SQL select",
+        additionalData: { alias: cf.alias },
+        label: "Assets",
+      });
+    }
+  }
+
   return Prisma.sql`, ${Prisma.join(
     customFieldSortings.map(
       (cf) =>
         Prisma.sql`(
-      SELECT 
+      SELECT
         CASE ${cf.fieldType}
-          WHEN 'DATE' THEN 
+          WHEN 'DATE' THEN
             (acfv.value->>'valueDate')::timestamp::text
-          WHEN 'BOOLEAN' THEN 
+          WHEN 'BOOLEAN' THEN
             (acfv.value->>'valueBoolean')::boolean::text
           WHEN 'MULTILINE_TEXT' THEN
             (acfv.value->>'valueMultiLineText')::text

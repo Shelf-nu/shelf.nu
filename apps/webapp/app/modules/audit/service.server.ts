@@ -1,7 +1,11 @@
 import { AuditAssetStatus } from "@prisma/client";
 import { AuditStatus } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import type { AuditAssignment, AuditSession } from "@prisma/client";
+import type {
+  AuditAssignment,
+  AuditSession,
+  Organization,
+} from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import { z } from "zod";
 
@@ -15,9 +19,11 @@ import type { ClientHint } from "~/utils/client-hints";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { removePublicFile } from "~/utils/storage.server";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -1748,6 +1754,7 @@ export function requireAuditAssigneeForBaseSelfService({
         additionalData: { auditId, userId },
         status: 403,
         label,
+        shouldBeCaptured: false,
       });
     }
   }
@@ -2337,6 +2344,626 @@ export async function archiveAuditSession({
       cause,
       message: "Failed to archive audit session",
       additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Builds a Prisma WHERE clause for audits based on the current URL search
+ * params. Used by bulk operations when the user selects "all" items across
+ * pages so the operation respects any active filters.
+ *
+ * @param organizationId - The organization ID for scoping
+ * @param currentSearchParams - Serialized URL search params from the index page
+ * @param userId - The current user (used for assignment-scoped filters)
+ * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
+ *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
+ */
+export function getAuditWhereInput({
+  organizationId,
+  currentSearchParams,
+  userId,
+  isSelfServiceOrBase,
+}: {
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  userId?: string;
+  isSelfServiceOrBase?: boolean;
+}): Prisma.AuditSessionWhereInput {
+  const where: Prisma.AuditSessionWhereInput = { organizationId };
+
+  // Filter by assignee for BASE/SELF_SERVICE users so select-all
+  // never pulls in audits outside the user's visible scope
+  if (isSelfServiceOrBase && userId) {
+    where.assignments = {
+      some: {
+        userId,
+      },
+    };
+  }
+
+  // Always parse params — even when empty/null, we need to apply
+  // default filters (e.g. exclude ARCHIVED) to mirror the index loader
+  const searchParams = new URLSearchParams(currentSearchParams ?? "");
+
+  // Normalize + validate the status param against the AuditStatus enum.
+  // "ALL" and any unknown value fall through to the default branch so we
+  // always exclude ARCHIVED unless a specific valid status is selected.
+  const rawStatus = searchParams.get("status");
+  const normalized = rawStatus ? rawStatus.toUpperCase() : null;
+  const status =
+    normalized &&
+    normalized !== "ALL" &&
+    (Object.values(AuditStatus) as string[]).includes(normalized)
+      ? (normalized as AuditStatus)
+      : null;
+
+  if (status) {
+    where.status = status;
+  } else {
+    // Mirror the index loader: exclude ARCHIVED by default when no
+    // explicit status filter is set, so select-all never pulls in
+    // audits the user didn't see in the list
+    where.status = { notIn: [AuditStatus.ARCHIVED] };
+  }
+
+  // Respect the active search term so select-all only targets the
+  // filtered subset the user sees, not every audit in the org
+  const search = searchParams.get("s");
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+/**
+ * Archives multiple audit sessions in a single transaction.
+ * Only audits in a terminal state (COMPLETED or CANCELLED) will be archived.
+ * Creates an activity note on each archived audit.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ *
+ * @param params.auditIds - Array of audit IDs (or containing ALL_SELECTED_KEY)
+ * @param params.organizationId - Scoping organization
+ * @param params.userId - The user performing the archive (for activity notes)
+ * @param params.currentSearchParams - Serialized URL params for select-all filtering
+ * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
+ *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @throws {ShelfError} If the selection is empty or any selected audit is not
+ *   in a terminal state
+ */
+export async function bulkArchiveAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+  isSelfServiceOrBase,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+  isSelfServiceOrBase?: boolean;
+}) {
+  try {
+    /** When all items are selected, resolve from filters instead of IDs */
+    const where: Prisma.AuditSessionWhereInput = auditIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+          userId,
+          isSelfServiceOrBase,
+        })
+      : { id: { in: auditIds }, organizationId };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No archivable audits were found for your selection.",
+        label,
+        additionalData: { auditIds, organizationId },
+        status: 400,
+      });
+    }
+
+    const someNotTerminal = audits.some(
+      (a) =>
+        a.status !== AuditStatus.COMPLETED && a.status !== AuditStatus.CANCELLED
+    );
+
+    if (someNotTerminal) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some audits are not in a completed or cancelled state. Only completed or cancelled audits can be archived.",
+        label,
+        additionalData: { auditIds, organizationId },
+      });
+    }
+
+    // Fetch user info once up-front for activity notes. Hoisted out of the
+    // transaction to keep the write-only work inside $transaction small and
+    // avoid holding a DB connection while reading unrelated data.
+    const user = await db.user.findFirst({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+
+    await db.$transaction(async (tx) => {
+      // Keep terminal-state predicate on the write to guard against
+      // concurrent status changes between the read and this update,
+      // mirroring the single-item archiveAuditSession() pattern
+      const result = await tx.auditSession.updateMany({
+        where: {
+          id: { in: audits.map((a) => a.id) },
+          status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
+        },
+        data: { status: AuditStatus.ARCHIVED },
+      });
+
+      if (result.count !== audits.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some audits could not be archived because their status changed. Please refresh and try again.",
+          label,
+          additionalData: {
+            expected: audits.length,
+            actual: result.count,
+            organizationId,
+          },
+          status: 409,
+        });
+      }
+
+      // Create an activity note on each archived audit
+      await tx.auditNote.createMany({
+        data: audits.map((a) => ({
+          content: `${wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          })} archived the audit`,
+          type: "UPDATE" as const,
+          userId,
+          auditSessionId: a.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk archive audits",
+      additionalData: { auditIds, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Removes an audit image's underlying files from Supabase storage.
+ * Swallows per-file failures and logs them: a stale storage object is
+ * a lesser evil than aborting the DB delete and leaving an orphaned
+ * AuditSession row behind. Caller is responsible for deleting the DB
+ * record afterwards (cascades from AuditSession handle that for us).
+ *
+ * @param image - The image record with public URLs to clean up
+ */
+async function safeRemoveAuditImageFiles(image: {
+  id: string;
+  imageUrl: string;
+  thumbnailUrl: string | null;
+}): Promise<void> {
+  try {
+    await removePublicFile({ publicUrl: image.imageUrl });
+  } catch (cause) {
+    // Intentionally omit the raw URL from additionalData — public
+    // Supabase URLs contain storage object keys and a trailing token;
+    // `imageId` is enough to trace the record if we need to.
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: "Failed to remove audit image from storage during delete",
+        additionalData: {
+          imageId: image.id,
+          storageError:
+            cause instanceof Error ? cause.message : "Unknown storage error",
+        },
+        label,
+      })
+    );
+  }
+
+  if (image.thumbnailUrl) {
+    try {
+      await removePublicFile({ publicUrl: image.thumbnailUrl });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message:
+            "Failed to remove audit thumbnail from storage during delete",
+          additionalData: {
+            imageId: image.id,
+            storageError:
+              cause instanceof Error ? cause.message : "Unknown storage error",
+          },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
+ * Normalize audit-name confirmation strings for comparison.
+ * Trims whitespace, applies Unicode NFC, and lower-cases. NFC matters
+ * because macOS keyboards can emit decomposed characters (NFD) while
+ * the DB stores the composed form, so `"Résumé" !== "Résumé"` without
+ * normalization even when a user types the name exactly.
+ */
+const normalizeAuditName = (s: string): string =>
+  s.trim().normalize("NFC").toLowerCase();
+
+/**
+ * Permanently deletes an archived audit session and all related data.
+ *
+ * Prerequisites:
+ * - Audit must be in status `ARCHIVED` (enforced here and at the route).
+ *   Delete is the intentional escape hatch past the archive-first contract,
+ *   so `assertAuditNotArchived` is deliberately NOT called.
+ * - Caller supplies the user's typed confirmation via `expectedName`. The
+ *   compare is server-side and case-insensitive after NFC normalization,
+ *   so a tampered client value can't bypass the name check.
+ *
+ * Cascade behavior (via Prisma `onDelete: Cascade`):
+ * - AuditAsset, AuditScan, AuditNote, AuditImage, AuditAssignment all
+ *   removed by the database when the parent AuditSession row is deleted.
+ *
+ * Storage cleanup:
+ * - Image URLs are captured BEFORE the DB delete (the AuditImage rows
+ *   cascade-delete with the session, so we'd lose them afterwards).
+ * - Supabase storage removal runs AFTER the DB commit succeeds. A DB
+ *   rollback or ARCHIVED-guard miss must never leave a zombie audit row
+ *   pointing at already-deleted storage objects.
+ * - Per-file failures on cleanup are logged and swallowed — see
+ *   {@link safeRemoveAuditImageFiles}.
+ *
+ * @param auditSessionId - ID of the audit to delete
+ * @param organizationId - Scoping organization (enforces tenant isolation)
+ * @param userId - User performing the delete (for error context + log trail)
+ * @param expectedName - Confirmation string the user typed in the dialog
+ * @throws {ShelfError} 400 if confirmation doesn't match the stored name;
+ *   404 if not found; 409 if not ARCHIVED; 500 on DB failure
+ */
+export async function deleteAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+  expectedName,
+}: {
+  auditSessionId: AuditSession["id"];
+  organizationId: Organization["id"];
+  userId: string;
+  expectedName: string;
+}): Promise<void> {
+  try {
+    // Pre-read to validate existence, org scoping, name, and ARCHIVED
+    // status — also the only chance to collect image URLs before cascade
+    // wipes AuditImage rows.
+    const audit = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { id: true, status: true, name: true },
+    });
+
+    if (!audit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found.",
+        additionalData: { auditSessionId, organizationId, userId },
+        label,
+        status: 404,
+      });
+    }
+
+    if (normalizeAuditName(expectedName) !== normalizeAuditName(audit.name)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Confirmation did not match the audit name.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (audit.status !== AuditStatus.ARCHIVED) {
+      throw new ShelfError({
+        cause: null,
+        message: "Only archived audits can be deleted. Archive it first.",
+        additionalData: {
+          auditSessionId,
+          organizationId,
+          status: audit.status,
+        },
+        label,
+        status: 409,
+      });
+    }
+
+    // Capture image URLs for post-commit cleanup. Don't touch storage yet —
+    // if the guarded deleteMany finds 0 rows due to a concurrent status
+    // change, we must leave both the DB row AND its files intact.
+    const images = await db.auditImage.findMany({
+      where: { auditSessionId, organizationId },
+      select: { id: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    // Final guard on the write: re-check ARCHIVED status atomically so a
+    // concurrent status change between the pre-read and here can't sneak
+    // a non-archived delete through.
+    const result = await db.auditSession.deleteMany({
+      where: {
+        id: auditSessionId,
+        organizationId,
+        status: AuditStatus.ARCHIVED,
+      },
+    });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Audit could not be deleted. Its status may have changed, or it was removed by another process — please refresh and try again.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 409,
+      });
+    }
+
+    // Permanent deletion leaves no AuditNote trail (cascade wipes them).
+    // Emit a server-side info log so we retain a trace of who deleted what.
+    Logger.info(
+      `Permanently deleted audit ${auditSessionId} (org=${organizationId}, user=${userId})`
+    );
+
+    // DB commit succeeded — now best-effort storage cleanup. Failures are
+    // logged; stale storage objects are recoverable, a zombie DB row
+    // wouldn't be. Sequential is fine here: a single audit has at most a
+    // handful of images.
+    for (const image of images) {
+      await safeRemoveAuditImageFiles(image);
+    }
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete audit session",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Permanently deletes multiple archived audit sessions in a single operation.
+ *
+ * Supports the "select all across pages" pattern via {@link ALL_SELECTED_KEY}.
+ * When all items are selected, resolution goes through
+ * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
+ * so non-archived audits in the filtered view can never be pulled in.
+ *
+ * Note: `isSelfServiceOrBase` is intentionally not a parameter here.
+ * `PermissionAction.delete` on the audit entity is ADMIN/OWNER-only
+ * (see `permission.data.ts`), so by the time we reach this function the
+ * caller is already guaranteed not to be self-service/base. Wiring the
+ * flag through would be dead plumbing that implies a policy choice
+ * (delete-your-assigned-archives) no one has actually made.
+ *
+ * Ordering is all-or-nothing:
+ * 1. Pre-read the target audits (ARCHIVED only).
+ * 2. Capture image URLs for every target — needed BEFORE the cascade wipes
+ *    the AuditImage rows.
+ * 3. Run the guarded `deleteMany` inside a transaction. If the final count
+ *    doesn't match the pre-read count (concurrent status change), the
+ *    transaction throws and rolls back — no DB rows deleted.
+ * 4. After commit, best-effort Supabase storage cleanup using the
+ *    captured URLs. Per-file failures are logged and swallowed.
+ *
+ * Storage cleanup runs AFTER commit on purpose: a rolled-back transaction
+ * must never leave zombie DB rows pointing at already-deleted files. We
+ * don't wrap storage in the transaction because holding a DB connection
+ * across N external Supabase HTTP calls invites pool starvation.
+ *
+ * @param auditIds - Array of audit IDs, or `[ALL_SELECTED_KEY]` for select-all
+ * @param organizationId - Scoping organization
+ * @param userId - User performing the bulk delete (for error context + log trail)
+ * @param currentSearchParams - Serialized URL params, used when ALL_SELECTED_KEY
+ * @returns Object with the count of audits actually deleted
+ * @throws {ShelfError} If selection is empty, any audit is not ARCHIVED, or
+ *   if a concurrent status change makes the bulk delete non-atomic
+ */
+export async function bulkDeleteAudits({
+  auditIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+}: {
+  auditIds: AuditSession["id"][];
+  organizationId: Organization["id"];
+  userId: string;
+  currentSearchParams?: string | null;
+}): Promise<{ count: number }> {
+  try {
+    const selectAll = auditIds.includes(ALL_SELECTED_KEY);
+
+    // Defense-in-depth for select-all: if the caller's active status
+    // filter isn't ARCHIVED, refuse to force-narrow and delete only the
+    // archived subset behind the user's back. The UI already gates this
+    // (`audit-index-bulk-actions-dropdown.tsx`), but a direct POST to
+    // this endpoint would otherwise bypass that check. Fail closed on an
+    // irreversible operation.
+    if (selectAll) {
+      const paramStatus = new URLSearchParams(currentSearchParams ?? "")
+        .get("status")
+        ?.toUpperCase();
+      if (paramStatus !== AuditStatus.ARCHIVED) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Select-all delete requires the status filter to be set to Archived.",
+          additionalData: { paramStatus, organizationId },
+          label,
+          status: 400,
+        });
+      }
+    }
+
+    // Rebuild the where clause from the current filters for select-all,
+    // then narrow to ARCHIVED regardless — belt-and-suspenders for the
+    // status guard above.
+    const baseWhere: Prisma.AuditSessionWhereInput = selectAll
+      ? getAuditWhereInput({
+          currentSearchParams,
+          organizationId,
+        })
+      : { id: { in: auditIds }, organizationId };
+
+    const where: Prisma.AuditSessionWhereInput = {
+      ...baseWhere,
+      status: AuditStatus.ARCHIVED,
+    };
+
+    const audits = await db.auditSession.findMany({
+      where,
+      select: { id: true, status: true },
+    });
+
+    if (audits.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No deletable audits were found for your selection.",
+        additionalData: { auditIds, organizationId },
+        label,
+        status: 400,
+      });
+    }
+
+    // For explicit id-list (not select-all), make sure the user hadn't
+    // selected any non-archived rows. Silent filtering would be confusing
+    // ("I selected 10 but only 6 got deleted"). Better to block and tell
+    // them.
+    if (!selectAll) {
+      const foundIds = new Set(audits.map((a) => a.id));
+      const missing = auditIds.filter(
+        (id) => id !== ALL_SELECTED_KEY && !foundIds.has(id)
+      );
+      if (missing.length > 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some selected audits are not archived. Only archived audits can be deleted.",
+          additionalData: { missing, organizationId },
+          label,
+          status: 409,
+        });
+      }
+    }
+
+    const targetIds = audits.map((a) => a.id);
+
+    // Capture every image URL BEFORE the delete so post-commit cleanup has
+    // something to work with (the AuditImage rows cascade away with the
+    // session). No storage side-effect yet — if the transaction rolls back
+    // we must not have touched any file.
+    const images = await db.auditImage.findMany({
+      where: {
+        auditSessionId: { in: targetIds },
+        organizationId,
+      },
+      select: { id: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    // All-or-nothing: either every pre-read audit deletes, or the whole
+    // thing rolls back. A mid-flight status change that shifts an audit
+    // out of ARCHIVED must not produce a partial result.
+    const { count } = await db.$transaction(async (tx) => {
+      const deleted = await tx.auditSession.deleteMany({
+        where: {
+          id: { in: targetIds },
+          organizationId,
+          status: AuditStatus.ARCHIVED,
+        },
+      });
+
+      if (deleted.count !== targetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          // The pre-read already confirmed every id was ARCHIVED + in-org,
+          // so a mismatch here means a concurrent process either changed
+          // an audit's status OR deleted an audit outright between the
+          // pre-read and this write. Cover both causes in the message.
+          message:
+            "Some audits could not be deleted because their status changed or they were removed by another process. Please refresh and try again.",
+          additionalData: {
+            expected: targetIds.length,
+            actual: deleted.count,
+            organizationId,
+          },
+          label,
+          status: 409,
+        });
+      }
+
+      return deleted;
+    });
+
+    // Permanent deletion leaves no AuditNote trail for any of these rows
+    // (cascade wipes them). Structured info log retains a trace.
+    Logger.info(
+      `Permanently deleted ${count} audits (org=${organizationId}, user=${userId}, ids=${targetIds.join(
+        ","
+      )})`
+    );
+
+    // Transaction committed — safe to remove storage objects now.
+    // safeRemoveAuditImageFiles already logs + swallows per-file failures,
+    // so parallelism is strictly a latency win. A select-all delete for a
+    // large org could fan out thousands of concurrent Supabase requests
+    // (throttling + event-loop pressure), so cap concurrency with a small
+    // batch size.
+    const STORAGE_CLEANUP_BATCH_SIZE = 10;
+    for (let i = 0; i < images.length; i += STORAGE_CLEANUP_BATCH_SIZE) {
+      await Promise.allSettled(
+        images
+          .slice(i, i + STORAGE_CLEANUP_BATCH_SIZE)
+          .map((image) => safeRemoveAuditImageFiles(image))
+      );
+    }
+
+    return { count };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to bulk delete audits",
+      additionalData: { auditIds, organizationId, userId },
       label,
       status: 500,
     });

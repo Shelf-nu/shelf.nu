@@ -6,7 +6,13 @@ import type {
   MetaFunction,
   LinksFunction,
 } from "react-router";
-import { data, useLoaderData, Outlet, useMatches } from "react-router";
+import {
+  data,
+  redirect,
+  useLoaderData,
+  Outlet,
+  useMatches,
+} from "react-router";
 import { z } from "zod";
 import { ActionsDropdown } from "~/components/audit/actions-dropdown";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
@@ -22,6 +28,7 @@ import {
   updateAuditSession,
   cancelAuditSession,
   archiveAuditSession,
+  deleteAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -51,15 +58,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    const formData = await request.clone().formData();
+    const intent = formData.get("intent");
+
+    // Parse the intent first and derive the initial permission from it so
+    // delete-only callers aren't blocked by an `update` gate that isn't
+    // relevant to their action. (Today every delete-capable role also has
+    // update, but that alignment is not a guarantee we should lean on.)
+    const initialAction =
+      intent === "delete-audit"
+        ? PermissionAction.delete
+        : PermissionAction.update;
+
     const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
-      action: PermissionAction.update,
+      action: initialAction,
     });
-
-    const formData = await request.clone().formData();
-    const intent = formData.get("intent");
 
     if (intent === "edit-audit") {
       const parsedData = parseData(formData, EditAuditSchema);
@@ -133,6 +149,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "archive-audit") {
+      // Archiving requires the explicit "archive" permission.
+      // ADMIN/OWNER have it; BASE/SELF_SERVICE do not.
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.archive,
+      });
+
       // Only admin/owner can archive — UI gates this, but enforce server-side
       // to prevent direct POST bypass by self-service/base roles
       if (isSelfServiceOrBase) {
@@ -152,6 +177,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
       return payload({ success: true });
+    }
+
+    if (intent === "delete-audit") {
+      // Outer requirePermission already gated on PermissionAction.delete
+      // for this intent — no redundant inner re-check.
+
+      // UI hides the button for self-service/base, but enforce server-side
+      // to prevent direct POST bypass.
+      if (isSelfServiceOrBase) {
+        throw new ShelfError({
+          cause: null,
+          message: "You do not have permission to delete audits.",
+          additionalData: { userId, auditId },
+          label,
+          status: 403,
+        });
+      }
+
+      const { confirmation } = parseData(
+        formData,
+        z.object({ confirmation: z.string().min(1) })
+      );
+
+      // Name-match verification lives inside deleteAuditSession — it
+      // re-reads the audit for existence/status anyway, so folding the
+      // compare into the same query avoids a second round-trip and keeps
+      // the "never trust client-supplied names" guarantee in one place.
+      await deleteAuditSession({
+        auditSessionId: auditId,
+        organizationId,
+        userId,
+        expectedName: confirmation,
+      });
+
+      // Audit no longer exists — return the redirect so React Router
+      // navigates. `throw redirect(...)` here would be caught by the
+      // surrounding try/catch and turned into an error JSON response.
+      return redirect("/audits");
     }
 
     throw new ShelfError({

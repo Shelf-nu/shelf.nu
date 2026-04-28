@@ -3,6 +3,7 @@ import type {
   Filter,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
+import { isSafeSqlIdentifier } from "~/utils/sql";
 import { getQueryFieldType } from "./field-type-mapping";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -13,15 +14,6 @@ import type { Column } from "../asset-index-settings/helpers";
 const API_TO_DB_FIELD_MAP: Record<string, string> = {
   valuation: "value",
 };
-
-/**
- * Validates that a filter name is safe for use in raw SQL identifiers.
- * Custom field names (cf_*) are excluded because they're used as
- * parameterized values, not raw SQL identifiers.
- * Non-custom-field names get injected via Prisma.raw() as column names,
- * so they must only contain safe identifier characters.
- */
-const SAFE_SQL_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
  * Parses a filter query string into an array of Filter objects.
@@ -49,7 +41,7 @@ export function parseFilters(
 
       // Non-custom-field names are used in Prisma.raw() as SQL identifiers,
       // so reject names with unsafe characters to prevent SQL syntax errors
-      if (!key.startsWith("cf_") && !SAFE_SQL_IDENTIFIER.test(dbKey)) {
+      if (!key.startsWith("cf_") && !isSafeSqlIdentifier(dbKey)) {
         return;
       }
 

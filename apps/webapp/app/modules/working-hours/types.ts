@@ -1,10 +1,18 @@
 import type { Prisma, WorkingHoursOverride } from "@prisma/client";
 
+/**
+ * Working-hours times are wall-clock "HH:MM" strings (24-hour). They describe
+ * when a physical location is open, so they are always interpreted as local
+ * wall-clock time — there is no timezone conversion at any point. Every time
+ * field on the types below (`openTime`, `closeTime`, `start`, `end`, …)
+ * follows this contract.
+ */
+
 // TypeScript types for JSON schedule
 export interface DaySchedule {
   isOpen: boolean;
-  openTime?: string; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string; // "HH:MM" format (24-hour) in UTC
+  openTime?: string;
+  closeTime?: string;
 }
 
 export interface WeeklyScheduleJson {
@@ -25,8 +33,8 @@ export enum DayOfWeek {
   SATURDAY = 6,
 }
 export interface TimeSlot {
-  openTime: string | null; // Format: "HH:MM" (24-hour) in UTC
-  closeTime: string | null; // Format: "HH:MM" (24-hour) in UTC
+  openTime: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
+  closeTime: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
 }
 
 export interface WorkingHoursConfig {
@@ -37,10 +45,28 @@ export interface WorkingHoursConfig {
   updatedAt: Date;
 }
 
+/**
+ * Override shape after passing through the normalize/serialize boundary
+ * (`normalizeWorkingHoursForValidation` or the working-hours API route).
+ * `date` is collapsed from Prisma's UTC-midnight Date to an absolute
+ * "YYYY-MM-DD" string so downstream comparisons cannot re-interpret it in a
+ * local timezone.
+ */
+export type NormalizedWorkingHoursOverride = Omit<
+  WorkingHoursOverride,
+  "date"
+> & {
+  date: string;
+};
+
 export interface WorkingHoursData {
   enabled: boolean;
   weeklySchedule: WeeklyScheduleJson;
-  overrides: WorkingHoursOverride[];
+  // At runtime, `date` may arrive as a Prisma `Date` (server-side raw Prisma
+  // payload) or as a normalized YYYY-MM-DD string (post-normalize, post-API);
+  // both forms are accepted because every comparison site funnels through
+  // `getOverrideDateKey`.
+  overrides: Array<WorkingHoursOverride | NormalizedWorkingHoursOverride>;
 }
 
 export interface WorkingHoursSchedule extends TimeSlot {
@@ -66,8 +92,8 @@ export interface CreateWorkingHoursRequest {
   schedules: Array<{
     dayOfWeek: DayOfWeek;
     isOpen: boolean;
-    openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-    closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+    openTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
+    closeTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
   }>;
 }
 
@@ -75,23 +101,23 @@ export interface CreateOverrideRequest {
   workingHoursId: string;
   date: string; // ISO date string
   isOpen: boolean;
-  openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+  openTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
+  closeTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
   reason?: string;
 }
 
 export interface UpdateScheduleRequest {
   scheduleId: string;
   isOpen: boolean;
-  openTime?: string | null; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string | null; // "HH:MM" format (24-hour) in UTC
+  openTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
+  closeTime?: string | null; // wall-clock "HH:MM" — see docblock above DaySchedule.
 }
 
 // Utility types for business logic
 export interface BusinessHoursCheck {
   isOpen: boolean;
-  openTime?: string; // "HH:MM" format (24-hour) in UTC
-  closeTime?: string; // "HH:MM" format (24-hour) in UTC
+  openTime?: string; // wall-clock "HH:MM" — see docblock above DaySchedule.
+  closeTime?: string; // wall-clock "HH:MM" — see docblock above DaySchedule.
   source: "schedule" | "override";
   reason?: string; // Only present if from override
 }
@@ -102,8 +128,8 @@ export interface BookingTimeValidation {
     type: "outside_hours" | "closed_day" | "override_closure";
     message: string;
     suggestedTime?: {
-      start: string; // "HH:MM" format (24-hour) in UTC
-      end: string; // "HH:MM" format (24-hour) in UTC
+      start: string; // wall-clock "HH:MM" — see docblock above DaySchedule.
+      end: string; // wall-clock "HH:MM" — see docblock above DaySchedule.
     };
   }>;
 }

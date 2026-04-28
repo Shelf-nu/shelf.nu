@@ -321,6 +321,7 @@ export async function resolveUserAction(
           cause: null,
           message: "User is not a member of this organization",
           label: "Team",
+          shouldBeCaptured: false,
         });
       }
 

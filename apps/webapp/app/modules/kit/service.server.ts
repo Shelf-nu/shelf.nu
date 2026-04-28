@@ -1507,6 +1507,7 @@ export async function relinkKitQrCode({
       message: "Kit not found.",
       label,
       additionalData: { kitId, organizationId, qrId },
+      shouldBeCaptured: false,
     });
   }
 
@@ -1621,6 +1622,7 @@ export async function updateKitLocation({
         cause: null,
         message: "Kit not found",
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2069,6 +2071,7 @@ export async function updateKitAssets({
           additionalData: { kitId, userId, organizationId },
           status: 404,
           label: "Kit",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
