@@ -166,7 +166,8 @@ export async function auditCompletionStats({
 /** One custody window — assigned at `heldFrom`, released at `heldTo` (null if still held). */
 export type CustodyWindow = {
   assetId: string;
-  actorUserId: string | null;
+  /** The team member who held custody (custodian), not who performed the action. */
+  teamMemberId: string | null;
   heldFrom: Date;
   heldTo: Date | null;
   durationSeconds: number | null;
@@ -175,6 +176,9 @@ export type CustodyWindow = {
 /**
  * Pair `CUSTODY_ASSIGNED` with the next `CUSTODY_RELEASED` per asset using a
  * window function, so consumers can compute "who held what for how long."
+ *
+ * Uses `teamMemberId` (the custodian who received custody) rather than
+ * `actorUserId` (who performed the assignment action).
  *
  * Raw SQL because Prisma has no native LEAD/LAG. Works against the
  * `(assetId, occurredAt)` index.
@@ -187,7 +191,7 @@ export async function custodyDurationsByAsset({
   try {
     type Row = {
       asset_id: string;
-      actor_user_id: string | null;
+      team_member_id: string | null;
       held_from: Date;
       held_to: Date | null;
     };
@@ -195,7 +199,7 @@ export async function custodyDurationsByAsset({
       WITH paired AS (
         SELECT
           "assetId" AS asset_id,
-          "actorUserId" AS actor_user_id,
+          "teamMemberId" AS team_member_id,
           "occurredAt" AS held_from,
           LEAD("occurredAt") OVER (
             PARTITION BY "assetId"
@@ -215,7 +219,7 @@ export async function custodyDurationsByAsset({
       )
       SELECT
         asset_id,
-        actor_user_id,
+        team_member_id,
         held_from,
         CASE WHEN next_action = 'CUSTODY_RELEASED' THEN next_at ELSE NULL END AS held_to
       FROM paired
@@ -224,7 +228,7 @@ export async function custodyDurationsByAsset({
     `;
     return rows.map((r) => ({
       assetId: r.asset_id,
-      actorUserId: r.actor_user_id,
+      teamMemberId: r.team_member_id,
       heldFrom: r.held_from,
       heldTo: r.held_to,
       durationSeconds: r.held_to

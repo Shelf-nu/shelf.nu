@@ -169,15 +169,24 @@ export async function createKit({
       data.location = { connect: { id: locationId } };
     }
 
-    const kit = await db.kit.create({ data });
+    // Use transaction to ensure kit creation and activity event are atomic
+    const kit = await db.$transaction(async (tx) => {
+      const created = await tx.kit.create({ data });
 
-    await recordEvent({
-      organizationId,
-      actorUserId: createdById,
-      action: "KIT_CREATED",
-      entityType: "KIT",
-      entityId: kit.id,
-      kitId: kit.id,
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: createdById,
+          action: "KIT_CREATED",
+          entityType: "KIT",
+          entityId: created.id,
+          kitId: created.id,
+        },
+        tx
+      );
+
+      return created;
     });
 
     return kit;
@@ -812,6 +821,7 @@ export async function releaseCustody({
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
     // Use transaction for atomicity - prevents orphaned custody records on partial failure
+    // Activity events must be inside to ensure audit trail consistency
     await db.$transaction(async (tx) => {
       // Delete kit custody and update kit status
       await tx.kit.update({
@@ -833,6 +843,24 @@ export async function releaseCustody({
         where: { id: { in: assetIds }, organizationId },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      // Activity events — one CUSTODY_RELEASED per asset in the kit.
+      // Must be inside transaction to ensure atomicity with custody release
+      await recordEvents(
+        kit.assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: kit.id,
+          teamMemberId: kit.custody?.custodian?.id ?? undefined,
+          targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
 
     // Notes can be created outside transaction (not critical for consistency)
@@ -842,22 +870,6 @@ export async function releaseCustody({
       userId,
       assetIds: kit.assets.map((asset) => asset.id),
     });
-
-    // Activity events — one CUSTODY_RELEASED per asset in the kit.
-    await recordEvents(
-      kit.assets.map((asset) => ({
-        organizationId,
-        actorUserId: userId,
-        action: "CUSTODY_RELEASED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
-        kitId: kit.id,
-        teamMemberId: kit.custody?.custodian?.id ?? undefined,
-        targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
-        meta: { viaKit: true },
-      }))
-    );
 
     return kit;
   } catch (cause) {

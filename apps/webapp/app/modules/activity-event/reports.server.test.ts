@@ -140,13 +140,13 @@ describe("activity event reports", () => {
       queryRawMock.mockResolvedValueOnce([
         {
           asset_id: "asset-1",
-          actor_user_id: "user-1",
+          team_member_id: "tm-1",
           held_from: heldFrom,
           held_to: heldTo,
         },
         {
           asset_id: "asset-2",
-          actor_user_id: null,
+          team_member_id: null,
           held_from: heldFrom,
           held_to: null, // still held
         },
@@ -161,14 +161,14 @@ describe("activity event reports", () => {
       expect(result).toEqual([
         {
           assetId: "asset-1",
-          actorUserId: "user-1",
+          teamMemberId: "tm-1",
           heldFrom,
           heldTo,
           durationSeconds: 8 * 3600,
         },
         {
           assetId: "asset-2",
-          actorUserId: null,
+          teamMemberId: null,
           heldFrom,
           heldTo: null,
           durationSeconds: null,

@@ -6,7 +6,6 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -161,7 +160,16 @@ export const action = async ({
       }
     }
 
-    const asset = await releaseCustody({ assetId, organizationId });
+    // Pass activity event data to releaseCustody for atomic recording
+    const asset = await releaseCustody({
+      assetId,
+      organizationId,
+      activityEvent: {
+        actorUserId: userId,
+        teamMemberId: custodyRecord?.custodian?.id,
+        targetUserId: custodyRecord?.custodian?.user?.id,
+      },
+    });
 
     if (!asset.custody) {
       const formData = await request.formData();
@@ -208,19 +216,8 @@ export const action = async ({
         assetId: asset.id,
       });
 
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "CUSTODY_RELEASED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
-        teamMemberId: custodyRecord?.custodian?.id ?? undefined,
-        targetUserId: custodyRecord?.custodian?.user?.id ?? undefined,
-      });
-
       sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianDisplayName}’`,
+        title: `'${asset.title}' is no longer in custody of '${custodianDisplayName}'`,
         message: "This asset is available again.",
         icon: { name: "success", variant: "success" },
         senderId: userId,

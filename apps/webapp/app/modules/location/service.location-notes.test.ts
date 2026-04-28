@@ -10,17 +10,31 @@ const dbMocks = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
     findFirstOrThrow: vi.fn(),
+    create: vi.fn(),
   },
   asset: {
     findMany: vi.fn(),
+    updateMany: vi.fn(),
   },
   kit: {
     findMany: vi.fn(),
   },
   user: {
+    findUniqueOrThrow: vi.fn(),
     findFirstOrThrow: vi.fn(),
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
   },
+  $transaction: vi.fn().mockImplementation((cb: any) => {
+    // Create a proxy that redirects db calls to the mocks
+    const txClient = {
+      location: dbMocks.location,
+      asset: dbMocks.asset,
+      kit: dbMocks.kit,
+      user: dbMocks.user,
+    };
+    return cb(txClient);
+  }),
 }));
 
 const geolocateMock = vi.hoisted(() => vi.fn());
@@ -46,6 +60,12 @@ vi.mock("~/modules/note/service.server", () => ({
 
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: getUserByIDMock,
+}));
+
+// why: testing location service without executing actual activity event recording
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/modules/asset/utils.server", () => ({

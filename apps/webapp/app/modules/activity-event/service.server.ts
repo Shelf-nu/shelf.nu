@@ -14,7 +14,7 @@
  * @see {@link file://./reports.server.ts}
  */
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -194,7 +194,11 @@ function toPrismaData(
     organizationId: input.organizationId,
     occurredAt: input.occurredAt,
     actorUserId: input.actorUserId ?? null,
-    actorSnapshot: actorSnapshot as Prisma.InputJsonValue | undefined,
+    // Use Prisma.DbNull for null values in JSON columns (Prisma requires this for explicit null)
+    actorSnapshot:
+      actorSnapshot === null
+        ? Prisma.DbNull
+        : (actorSnapshot as Prisma.InputJsonValue),
     action: input.action,
     entityType: input.entityType,
     entityId: input.entityId,

@@ -1154,22 +1154,31 @@ export async function createAsset({
         }
       }
 
-      const asset = await db.asset.create({
-        data,
-        include: {
-          location: true,
-          user: true,
-          custody: true,
-        },
-      });
+      // Use transaction to ensure asset creation and activity event are atomic
+      const asset = await db.$transaction(async (tx) => {
+        const created = await tx.asset.create({
+          data,
+          include: {
+            location: true,
+            user: true,
+            custody: true,
+          },
+        });
 
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "ASSET_CREATED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
+        // Activity event must be inside transaction for atomicity
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_CREATED",
+            entityType: "ASSET",
+            entityId: created.id,
+            assetId: created.id,
+          },
+          tx
+        );
+
+        return created;
       });
 
       // Successfully created asset, exit the retry loop
@@ -1765,25 +1774,35 @@ export async function deleteAsset({
   actorUserId?: string;
 }) {
   try {
-    const deletedAsset = await db.asset.delete({
-      where: { id, organizationId },
-      select: {
-        reminders: {
-          select: { alertDateTime: true, activeSchedulerReference: true },
+    // Use transaction to ensure delete and activity event are atomic
+    const deletedAsset = await db.$transaction(async (tx) => {
+      const deleted = await tx.asset.delete({
+        where: { id, organizationId },
+        select: {
+          reminders: {
+            select: { alertDateTime: true, activeSchedulerReference: true },
+          },
         },
-      },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_DELETED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+
+      return deleted;
     });
 
+    // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
-
-    await recordEvent({
-      organizationId,
-      actorUserId: actorUserId ?? null,
-      action: "ASSET_DELETED",
-      entityType: "ASSET",
-      entityId: id,
-      assetId: id,
-    });
   } catch (cause) {
     throw new ShelfError({
       cause,

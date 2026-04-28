@@ -471,35 +471,45 @@ export async function createBooking({
       };
     }
 
-    const createdBooking = await db.booking.create({
-      data: dataToCreate,
-      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
-    });
+    // Use transaction to ensure booking creation and activity events are atomic
+    const createdBooking = await db.$transaction(async (tx) => {
+      const created = await tx.booking.create({
+        data: dataToCreate,
+        include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+      });
 
-    await recordEvent({
-      organizationId: booking.organizationId,
-      actorUserId: booking.creatorId,
-      action: "BOOKING_CREATED",
-      entityType: "BOOKING",
-      entityId: createdBooking.id,
-      bookingId: createdBooking.id,
-      meta: { assetCount: assetIds.length },
-    });
-
-    // One BOOKING_ASSETS_ADDED event per asset attached at creation.
-    if (assetIds.length > 0) {
-      await recordEvents(
-        assetIds.map((assetId) => ({
+      // Activity event for booking creation - must be inside transaction
+      await recordEvent(
+        {
           organizationId: booking.organizationId,
           actorUserId: booking.creatorId,
-          action: "BOOKING_ASSETS_ADDED",
+          action: "BOOKING_CREATED",
           entityType: "BOOKING",
-          entityId: createdBooking.id,
-          bookingId: createdBooking.id,
-          assetId,
-        }))
+          entityId: created.id,
+          bookingId: created.id,
+          meta: { assetCount: assetIds.length },
+        },
+        tx
       );
-    }
+
+      // One BOOKING_ASSETS_ADDED event per asset attached at creation.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: created.id,
+            bookingId: created.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
+      return created;
+    });
 
     return createdBooking;
   } catch (cause) {
@@ -1301,31 +1311,43 @@ export async function checkoutBooking({
      * timeout. The heavy read for the return payload is done after commit.
      * This prevents P2028 timeouts on bookings with many assets.
      *
-     * Prisma's array-form $transaction executes queries sequentially
-     * within a single DB transaction — it doesn't parallelize, but keeps
-     * the transaction fast by avoiding heavy includes/reads. */
-    const txOps = [
-      db.asset.updateMany({
+     * Using callback-form transaction to include activity events atomically. */
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
         where: { id: { in: bookingFound.assets.map((a) => a.id) } },
         data: { status: AssetStatus.CHECKED_OUT },
-      }),
-      db.booking.update({
+      });
+
+      await tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
         select: { id: true },
-      }),
-    ];
+      });
 
-    if (hasKits) {
-      txOps.push(
-        db.kit.updateMany({
+      if (hasKits) {
+        await tx.kit.updateMany({
           where: { id: { in: kitIds } },
           data: { status: KitStatus.CHECKED_OUT },
-        })
-      );
-    }
+        });
+      }
 
-    await db.$transaction(txOps);
+      // Activity events — one BOOKING_CHECKED_OUT per asset, inside the tx.
+      // Must be atomic with checkout for audit trail consistency.
+      if (bookingFound.assets.length > 0) {
+        await recordEvents(
+          bookingFound.assets.map((asset) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "BOOKING_CHECKED_OUT",
+            entityType: "BOOKING",
+            entityId: bookingFound.id,
+            bookingId: bookingFound.id,
+            assetId: asset.id,
+          })),
+          tx
+        );
+      }
+    });
 
     /** Build an effective snapshot by merging bookingFound with any fields
      * modified by dataToUpdate (adjusted dates, status). This avoids
@@ -1354,22 +1376,6 @@ export async function checkoutBooking({
         userId,
         custodianUserId: bookingFound.custodianUserId || undefined,
       });
-    }
-
-    // Activity events — one BOOKING_CHECKED_OUT per asset in the booking.
-    // Complements the BOOKING_STATUS_CHANGED emitted by createStatusTransitionNote.
-    if (bookingFound.assets.length > 0) {
-      await recordEvents(
-        bookingFound.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId ?? null,
-          action: "BOOKING_CHECKED_OUT",
-          entityType: "BOOKING",
-          entityId: bookingFound.id,
-          bookingId: bookingFound.id,
-          assetId: asset.id,
-        }))
-      );
     }
 
     /** Calculate the time difference between the booking.to and the current time */
@@ -1646,6 +1652,23 @@ export async function checkinBooking({
           }
         }
 
+        // Activity events — one BOOKING_CHECKED_IN per asset, inside the tx.
+        // Must be atomic with booking status update for audit trail consistency.
+        if (bookingFound.assets.length > 0) {
+          await recordEvents(
+            bookingFound.assets.map((asset) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_CHECKED_IN",
+              entityType: "BOOKING",
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              assetId: asset.id,
+            })),
+            tx
+          );
+        }
+
         /** Finally update the booking */
         return tx.booking.update({
           where: { id: bookingFound.id },
@@ -1760,22 +1783,6 @@ export async function checkinBooking({
           custodianUserId: updatedBooking.custodianUserId || undefined,
         });
       }
-    }
-
-    // Activity events — one BOOKING_CHECKED_IN per asset checked in.
-    // Complements the BOOKING_STATUS_CHANGED event emitted above.
-    if (bookingFound.assets.length > 0) {
-      await recordEvents(
-        bookingFound.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId ?? null,
-          action: "BOOKING_CHECKED_IN",
-          entityType: "BOOKING",
-          entityId: bookingFound.id,
-          bookingId: bookingFound.id,
-          assetId: asset.id,
-        }))
-      );
     }
 
     /**
@@ -2276,6 +2283,24 @@ export async function updateBookingAssets({
           });
         }
       }
+
+      // Activity events — one BOOKING_ASSETS_ADDED per asset added, inside the tx.
+      // Must be atomic with asset addition for audit trail consistency.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: b.id,
+            bookingId: b.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
       return b;
     });
 
@@ -2326,23 +2351,6 @@ export async function updateBookingAssets({
           })
         );
       }
-    }
-
-    // Activity events — one BOOKING_ASSETS_ADDED per asset added.
-    // This path only ADDS assets (there is a separate removeAssetsFromBooking
-    // path for removals).
-    if (assetIds.length > 0) {
-      await recordEvents(
-        assetIds.map((assetId) => ({
-          organizationId,
-          actorUserId: userId ?? null,
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: booking.id,
-          bookingId: booking.id,
-          assetId,
-        }))
-      );
     }
 
     return booking;

@@ -70,12 +70,62 @@ export type FieldChangeEventInput = BaseEventInput & {
   toValue: Prisma.InputJsonValue | null;
 };
 
-/** Event for custody assign / release. Entity is the asset. */
+/** Event for custody assign / release. Entity is the asset. Requires at least custodian info. */
 export type CustodyEventInput = BaseEventInput & {
   action: "CUSTODY_ASSIGNED" | "CUSTODY_RELEASED";
   entityType: "ASSET";
   entityId: string;
   assetId: string;
+  /** The custodian receiving/releasing custody. At least one of teamMemberId or targetUserId should be set. */
+  teamMemberId?: string;
+  targetUserId?: string;
+};
+
+/**
+ * Asset lifecycle events — require `assetId`. Entity is the asset.
+ * These are distinct from field changes (CREATED/ARCHIVED/DELETED vs NAME_CHANGED).
+ */
+export type AssetLifecycleAction =
+  | "ASSET_CREATED"
+  | "ASSET_ARCHIVED"
+  | "ASSET_DELETED";
+
+export type AssetLifecycleEventInput = BaseEventInput & {
+  action: AssetLifecycleAction;
+  entityType: "ASSET";
+  entityId: string;
+  assetId: string;
+};
+
+/**
+ * Audit lifecycle events — require `auditSessionId`. Entity is AUDIT.
+ */
+export type AuditEventAction = "AUDIT_STARTED" | "AUDIT_COMPLETED";
+
+export type AuditEventInput = BaseEventInput & {
+  action: AuditEventAction;
+  entityType: "AUDIT";
+  entityId: string;
+  auditSessionId: string;
+};
+
+/**
+ * Booking lifecycle events — require `bookingId`. Entity is the booking.
+ * Distinct from asset-level booking events (BOOKING_ASSETS_ADDED/REMOVED).
+ */
+export type BookingLifecycleAction =
+  | "BOOKING_CREATED"
+  | "BOOKING_CHECKED_OUT"
+  | "BOOKING_CHECKED_IN"
+  | "BOOKING_PARTIAL_CHECKIN"
+  | "BOOKING_CANCELLED"
+  | "BOOKING_ARCHIVED";
+
+export type BookingLifecycleEventInput = BaseEventInput & {
+  action: BookingLifecycleAction;
+  entityType: "BOOKING";
+  entityId: string;
+  bookingId: string;
 };
 
 /** Events for booking asset-list changes (one per item). */
@@ -87,13 +137,19 @@ export type BookingAssetItemEventInput = BaseEventInput & {
   assetId: string;
 };
 
-/** All remaining actions — the base shape is sufficient. */
+/**
+ * All remaining actions — the base shape is sufficient.
+ * These are actions without specific cross-ref requirements beyond the base fields.
+ */
 export type GenericEventInput = BaseEventInput & {
   action: Exclude<
     ActivityAction,
     | FieldChangeAction
     | "CUSTODY_ASSIGNED"
     | "CUSTODY_RELEASED"
+    | AssetLifecycleAction
+    | AuditEventAction
+    | BookingLifecycleAction
     | "BOOKING_ASSETS_ADDED"
     | "BOOKING_ASSETS_REMOVED"
   >;
@@ -104,9 +160,14 @@ export type GenericEventInput = BaseEventInput & {
 /**
  * Union of all valid inputs to `recordEvent`. The TS compiler enforces which
  * fields are required per action — catch mistakes at call site, not in prod.
+ *
+ * Order matters for type narrowing: more specific types should come before GenericEventInput.
  */
 export type ActivityEventInput =
   | FieldChangeEventInput
   | CustodyEventInput
+  | AssetLifecycleEventInput
+  | AuditEventInput
+  | BookingLifecycleEventInput
   | BookingAssetItemEventInput
   | GenericEventInput;

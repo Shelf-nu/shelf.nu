@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordEvent, recordEvents } from "./service.server";
@@ -75,6 +76,7 @@ describe("activity event service", () => {
         action: "ASSET_CREATED",
         entityType: "ASSET",
         entityId: "asset-1",
+        assetId: "asset-1",
       });
 
       expect(userFindUniqueMock).not.toHaveBeenCalled();
@@ -83,17 +85,19 @@ describe("activity event service", () => {
       });
     });
 
-    it("writes a null actorSnapshot for system events with no actor", async () => {
+    it("writes Prisma.DbNull actorSnapshot for system events with no actor", async () => {
       await recordEvent({
         organizationId: "org-1",
         action: "ASSET_CREATED",
         entityType: "ASSET",
         entityId: "asset-1",
+        assetId: "asset-1",
       });
 
       expect(userFindUniqueMock).not.toHaveBeenCalled();
+      // Prisma.DbNull is used for explicit null in JSON columns
       expect(activityEventCreateMock.mock.calls[0][0].data.actorSnapshot).toBe(
-        null
+        Prisma.DbNull
       );
     });
 
@@ -136,6 +140,7 @@ describe("activity event service", () => {
           action: "ASSET_CREATED",
           entityType: "ASSET",
           entityId: "asset-1",
+          assetId: "asset-1",
         },
         tx
       );
@@ -157,6 +162,7 @@ describe("activity event service", () => {
           action: "ASSET_CREATED",
           entityType: "ASSET",
           entityId: "asset-1",
+          assetId: "asset-1",
         })
       ).rejects.toMatchObject({
         label: "Activity",
