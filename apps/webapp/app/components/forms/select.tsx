@@ -43,27 +43,30 @@ const SelectContent = React.forwardRef<
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, ...props }, _ref) {
   /**
-   * Stable ref callback that attaches a non-passive `touchend` listener to
-   * stop the iOS Safari synthetic-click that Radix Select otherwise fires,
-   * and cleans it up when the element unmounts. The callback is memoised so
-   * React doesn't detach + reattach (leaking handlers) on every render.
+   * Track the rendered Radix Content element in state so the touchend listener
+   * can be attached and cleaned up via a real `useEffect`. Using a callback
+   * ref's return value for cleanup is fragile — handle the lifecycle
+   * explicitly instead.
    *
-   * why passive:false — the handler needs preventDefault() to work; with
-   * passive:true the call would be a no-op.
+   * why passive:false — the handler needs preventDefault() to stop the iOS
+   * Safari synthetic-click that Radix Select otherwise fires; passive:true
+   * would make preventDefault a no-op.
    */
-  const attachTouchendGuard = React.useCallback((el: HTMLDivElement | null) => {
-    if (!el) return;
+  const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!contentEl) return;
     const handler = (event: TouchEvent) => event.preventDefault();
-    el.addEventListener("touchend", handler, { passive: false });
+    contentEl.addEventListener("touchend", handler, { passive: false });
     return () => {
-      el.removeEventListener("touchend", handler);
+      contentEl.removeEventListener("touchend", handler);
     };
-  }, []);
+  }, [contentEl]);
 
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={attachTouchendGuard}
+        ref={setContentEl}
         className={tw(
           " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
