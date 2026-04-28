@@ -6,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
@@ -64,6 +65,10 @@ export default function KitsForm({
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
+  // Focus the Name field on mount so create/edit pages start the user
+  // typing immediately instead of relying on a removed autoFocus prop.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
+
   const actionData = useActionData<
     typeof createKitAction | typeof editKitAction
   >();
@@ -118,6 +123,7 @@ export default function KitsForm({
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}

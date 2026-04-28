@@ -7,8 +7,9 @@ import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
 import MultiSelect from "~/components/multi-select/multi-select";
-
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
+
 import { useDisabled } from "~/hooks/use-disabled";
 
 import { createTag } from "~/modules/tag/service.server";
@@ -116,6 +117,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 }
 
 export default function NewTag() {
+  // Focus the Name input on mount of the new-tag page.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
   const zo = useZorm("NewQuestionWizardScreen", NewTagFormSchema);
   const { tagUseFor, colorFromServer } = useLoaderData<typeof loader>();
 
@@ -132,6 +135,7 @@ export default function NewTag() {
         <div className="lg:flex lg:items-end lg:justify-between lg:gap-3">
           <div className="gap-3 lg:flex lg:items-end">
             <Input
+              ref={nameInputRef}
               label="Name"
               placeholder="Tag name"
               className="mb-4 lg:mb-0 lg:max-w-[180px]"

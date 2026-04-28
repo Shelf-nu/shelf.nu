@@ -11,8 +11,8 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
-
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 
 import { getCategory, updateCategory } from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -124,6 +124,9 @@ export default function EditCategory() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+
+  // Focus the Name input on mount of the edit page.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
   const { colorFromServer, category } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
@@ -137,6 +140,7 @@ export default function EditCategory() {
       <div className="lg:flex lg:items-end lg:justify-between lg:gap-3">
         <div className="gap-3 lg:flex lg:items-end">
           <Input
+            ref={nameInputRef}
             label="Name"
             placeholder="Category name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
