@@ -260,18 +260,29 @@ export async function createStatusTransitionNote({
   });
 
   // Activity event — records the canonical status transition for reports.
-  // One per call regardless of user/system origin.
-  await recordEvent({
-    organizationId,
-    actorUserId: userId ?? null,
-    action: "BOOKING_STATUS_CHANGED",
-    entityType: "BOOKING",
-    entityId: bookingId,
-    bookingId,
-    field: "status",
-    fromValue: fromStatus,
-    toValue: toStatus,
-  });
+  // Best-effort: don't fail the note creation if event recording fails.
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
 }
 
 /**
@@ -3412,18 +3423,30 @@ export async function removeAssets({
     });
 
     // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
+    // Best-effort: don't fail the removal if event recording fails.
     if (assetIds.length > 0) {
-      await recordEvents(
-        assetIds.map((assetId) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "BOOKING_ASSETS_REMOVED",
-          entityType: "BOOKING",
-          entityId: booking.id,
-          bookingId: booking.id,
-          assetId,
-        }))
-      );
+      try {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_ASSETS_REMOVED",
+            entityType: "BOOKING",
+            entityId: booking.id,
+            bookingId: booking.id,
+            assetId,
+          }))
+        );
+      } catch (err) {
+        Logger.error(
+          new ShelfError({
+            cause: err,
+            message: "Failed to record BOOKING_ASSETS_REMOVED events",
+            additionalData: { bookingId: booking.id, assetIds },
+            label,
+          })
+        );
+      }
     }
 
     // BOOKING ACTIVITY LOG: Log removal activity

@@ -1,32 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// why: stub location note creation to isolate location service tests from note side effects
 const locationNoteMocks = vi.hoisted(() => ({
   createSystemLocationNote: vi.fn(),
   createLocationNote: vi.fn(),
 }));
 
+// why: mock database client to test location service without real DB operations
 const dbMocks = vi.hoisted(() => ({
+  // why: location model stubs for CRUD operations tested in location service
   location: {
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
     findFirstOrThrow: vi.fn(),
     create: vi.fn(),
   },
+  // why: asset model stubs for bulk location changes (moveAssetsToNewLocation)
   asset: {
     findMany: vi.fn(),
     updateMany: vi.fn(),
   },
+  // why: kit model stubs for fetching kits affected by location changes
   kit: {
     findMany: vi.fn(),
   },
+  // why: user model stubs for resolving actor info in activity events
   user: {
     findUniqueOrThrow: vi.fn(),
     findFirstOrThrow: vi.fn(),
     findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
+  // why: transaction proxy to route calls to mocked clients for atomic operations
   $transaction: vi.fn().mockImplementation((cb: any) => {
-    // Create a proxy that redirects db calls to the mocks
     const txClient = {
       location: dbMocks.location,
       asset: dbMocks.asset,
