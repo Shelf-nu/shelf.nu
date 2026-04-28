@@ -1,8 +1,8 @@
 /**
  * Respect user's prefers-reduced-motion system setting (WCAG 2.3.3).
  * Near-removes CSS animations and transitions when the user has opted in.
- * Individual motion components should also check `useReducedMotion()` from
- * `~/hooks/use-reduced-motion` for JS-driven animations.
+ * For JS-driven animations, components should call `useReducedMotion()`
+ * directly from `framer-motion`.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
