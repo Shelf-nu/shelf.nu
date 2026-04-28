@@ -1,10 +1,11 @@
-import { type ChangeEvent, useEffect, useRef } from "react";
+import { type ChangeEvent } from "react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
 
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { RenamePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
 
 /**
@@ -37,14 +38,8 @@ export function RenamePresetDialog({
 }) {
   const zo = useZorm("rename-preset", RenamePresetFormSchema);
 
-  /** Ref for the rename input so we can focus it on open without autoFocus. */
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      nameInputRef.current?.focus();
-    }
-  }, [open]);
+  /** Ref for the rename input — focuses the field whenever the dialog opens. */
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   // Combine client-side and server-side validation errors
   const nameError =

@@ -7,8 +7,8 @@
  * @see {@link file://./form.tsx} Parent orchestration component
  * @see {@link file://./../../../utils/import-update.server.ts} Server-side preview logic
  */
-import { useEffect, useRef } from "react";
 import type React from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import type { UpdatePreview } from "~/utils/import-update.server";
@@ -476,9 +476,9 @@ export function PreviewDisplay({
  * Confirmation input for the "I AGREE" apply dialog.
  *
  * Extracted into its own component so we can focus the input on mount via
- * `useEffect` instead of the `autoFocus` attribute (flagged by
+ * `useAutoFocus` instead of the `autoFocus` attribute (flagged by
  * `jsx-a11y/no-autofocus` — autofocus hurts screen-reader and keyboard users).
- * The component is only mounted when the AlertDialog opens, so the effect
+ * The component is only mounted when the AlertDialog opens, so the focus
  * fires exactly when the user actually needs the input focused.
  */
 function ConfirmationInput({
@@ -492,14 +492,10 @@ function ConfirmationInput({
   isApplyLoading: boolean;
   submitApply: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    // Focus once when the dialog opens so the user can start typing "I AGREE"
-    // immediately. Safe because this component only mounts inside the open
-    // AlertDialog, never ambiently.
-    inputRef.current?.focus();
-  }, []);
+  // Focus once when the dialog opens so the user can start typing "I AGREE"
+  // immediately. Safe because this component only mounts inside the open
+  // AlertDialog, never ambiently.
+  const inputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <Input

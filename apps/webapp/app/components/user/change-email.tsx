@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Form, useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import type { action } from "~/routes/_layout+/account-details.general";
@@ -122,27 +123,14 @@ export const ChangeEmailForm = ({ currentEmail }: { currentEmail: string }) => {
     }
   }, [isOtpInvalidError, otpZo.form]);
 
-  // Refs + effects replace `autoFocus` on dialog fields to satisfy
-  // jsx-a11y/no-autofocus. We focus when the dialog opens (email form)
-  // or when switching to the OTP step.
-  const emailInputRef = useRef<HTMLInputElement>(null);
-  const otpInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open || formState.isAwaitingOtp) return;
-    const frame = window.requestAnimationFrame(() => {
-      emailInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [open, formState.isAwaitingOtp]);
-
-  useEffect(() => {
-    if (!open || !formState.isAwaitingOtp) return;
-    const frame = window.requestAnimationFrame(() => {
-      otpInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [open, formState.isAwaitingOtp]);
+  // Auto-focus dialog fields without using `autoFocus` (which trips
+  // jsx-a11y/no-autofocus). The hook covers Radix portal mount timing.
+  const emailInputRef = useAutoFocus<HTMLInputElement>({
+    when: open && !formState.isAwaitingOtp,
+  });
+  const otpInputRef = useAutoFocus<HTMLInputElement>({
+    when: open && formState.isAwaitingOtp,
+  });
 
   return !user?.sso ? (
     <div className="absolute right-1 top-3">

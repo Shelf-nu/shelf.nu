@@ -19,6 +19,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSequentialId } from "~/utils/sequential-id";
 import { tw } from "~/utils/tw";
@@ -427,14 +428,10 @@ function ScannerMode({
 }) {
   const [inputIsFocused, setInputIsFocused] = useState(false);
   const [inputValue, setInputValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
   // Focus the scanner input on mount so users can start scanning immediately.
   // Implemented via ref + effect (instead of autoFocus) to satisfy
   // jsx-a11y/no-autofocus while preserving the same UX.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  const inputRef = useAutoFocus<HTMLInputElement>();
 
   const handleInputSubmit = useCallback(
     async (input: HTMLInputElement) => {

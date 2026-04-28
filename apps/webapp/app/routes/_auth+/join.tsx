@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
@@ -15,6 +14,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
@@ -151,10 +151,7 @@ export default function Join() {
   const data = useActionData<typeof action>();
 
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
-  const emailInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    emailInputRef.current?.focus();
-  }, []);
+  const emailInputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <div className="flex min-h-full flex-col justify-center">

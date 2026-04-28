@@ -8,6 +8,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 
 export const MarkdownNoteSchema = z.object({
   content: z.string().min(3, "Content is required"),
@@ -52,7 +53,11 @@ export function MarkdownNoteForm({
   const zo = useZorm(formId, MarkdownNoteSchema);
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(editingAtom);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Auto-focus the editor when entering edit mode for better UX.
+   * Defers focus to the next animation frame so the textarea is mounted.
+   */
+  const editorRef = useAutoFocus<HTMLTextAreaElement>({ when: isEditing });
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
   const isDone = fetcher.state === "idle" && fetcher.data != null;
 
@@ -127,22 +132,6 @@ export function MarkdownNoteForm({
     },
     [fetcher, formElement, setIsEditing]
   );
-
-  /**
-   * Auto-focus the editor when entering edit mode for better UX.
-   *
-   * Uses requestAnimationFrame to ensure the DOM has been updated
-   * before attempting to focus (prevents race conditions).
-   */
-  useEffect(() => {
-    if (!isEditing) {
-      return;
-    }
-    const frame = requestAnimationFrame(() => {
-      editorRef.current?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [isEditing]);
 
   /**
    * Ensure editor is closed when form submission completes successfully.

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { Location } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData } from "react-router";
@@ -6,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
@@ -103,13 +104,7 @@ export const LocationForm = ({
   // jsx-a11y/no-autofocus. When the form is rendered inside a dialog,
   // the dialog's `data-dialog-initial-focus` handler typically wins;
   // otherwise this provides the intentional initial focus.
-  const nameInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      nameInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
 
   useEffect(() => {
     if (!hasOnSuccessFunc) return;

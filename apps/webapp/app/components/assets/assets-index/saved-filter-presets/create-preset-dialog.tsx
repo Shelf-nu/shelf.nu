@@ -1,10 +1,11 @@
-import { type ChangeEvent, useEffect, useRef } from "react";
+import { type ChangeEvent } from "react";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
 
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useFilterPreview } from "~/hooks/use-filter-preview";
 import { CreatePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
 import type { Column } from "~/modules/asset-index-settings/helpers";
@@ -45,13 +46,7 @@ export function CreatePresetDialog({
   const zo = useZorm("create-preset", CreatePresetFormSchema);
 
   /** Ref for the preset-name input so we can focus it on open without autoFocus. */
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      nameInputRef.current?.focus();
-    }
-  }, [open]);
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   // Get formatted preview component from hook
   const { preview } = useFilterPreview({ query, columns });

@@ -6,7 +6,8 @@
  * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
  */
 import type { ChangeEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
@@ -282,9 +283,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
-  // Ref to the "I AGREE" confirmation input so we can programmatically
-  // focus it when the confirmation dialog opens (replaces `autoFocus`).
-  const agreeInputRef = useRef<HTMLInputElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcherWithReset<typeof action>();
 
@@ -293,6 +291,13 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
   //
+
+  // Focus the "I AGREE" confirmation input when the dialog opens (replaces
+  // `autoFocus`). Re-focuses each time the dialog re-opens; skipped while
+  // the success state is showing.
+  const agreeInputRef = useAutoFocus<HTMLInputElement>({
+    when: isDialogOpen && !isSuccessful,
+  });
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -304,19 +309,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       setSelectedFile(selectedFile);
     }
   };
-
-  // Focus the confirmation input when the dialog opens, and only then.
-  // This replaces the prior `autoFocus` prop which fires too eagerly.
-  useEffect(() => {
-    if (isDialogOpen && !isSuccessful) {
-      // Radix mounts the dialog content on the next tick; defer focus so
-      // the input exists in the DOM before we call focus().
-      const id = window.setTimeout(() => {
-        agreeInputRef.current?.focus();
-      }, 0);
-      return () => window.clearTimeout(id);
-    }
-  }, [isDialogOpen, isSuccessful]);
 
   return (
     <fetcher.Form

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "react-router";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,
@@ -130,7 +131,16 @@ export default function DynamicSelect({
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * Focus the search input when the popover opens — replaces a bare
+   * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
+   * sighted and non-sighted users. Since the focus here is gated on a
+   * user-initiated "open" action it's acceptable UX. The hook defers to the
+   * next animation frame so Radix's portal mount completes first.
+   */
+  const searchInputRef = useAutoFocus<HTMLInputElement>({
+    when: isPopoverOpen && showSearch,
+  });
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -152,23 +162,6 @@ export default function DynamicSelect({
     lastDefaultValueRef.current = defaultValue;
     setSelectedValue(defaultValue);
   }
-
-  /**
-   * Focus the search input when the popover opens — replaces a bare
-   * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
-   * sighted and non-sighted users. Since the focus here is gated on a
-   * user-initiated "open" action it's acceptable UX.
-   */
-  useEffect(() => {
-    if (isPopoverOpen && showSearch) {
-      // Radix animates the popover in on the next frame — focus after the
-      // element is in the DOM.
-      const frame = requestAnimationFrame(() => {
-        searchInputRef.current?.focus();
-      });
-      return () => cancelAnimationFrame(frame);
-    }
-  }, [isPopoverOpen, showSearch]);
 
   const {
     searchQuery,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { Kit } from "@prisma/client";
 
@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import When from "../when/when";
@@ -31,8 +32,6 @@ export default function KitSelector({
   error,
 }: KitSelectorProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
-  /** Ref for the search input so we can focus it when the popover opens. */
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectedKit, setSelectedKit] = useState<string>("");
@@ -40,13 +39,11 @@ export default function KitSelector({
 
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Focus the search input when the popover opens (replaces autoFocus,
-  // which jsx-a11y/no-autofocus flags).
-  useEffect(() => {
-    if (isOpen) {
-      searchInputRef.current?.focus();
-    }
-  }, [isOpen]);
+  /**
+   * Focus the search input when the popover opens (replaces autoFocus,
+   * which jsx-a11y/no-autofocus flags).
+   */
+  const searchInputRef = useAutoFocus<HTMLInputElement>({ when: isOpen });
 
   const filteredKits = useMemo(() => {
     if (!searchQuery) {

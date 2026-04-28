@@ -1,4 +1,4 @@
-import { cloneElement, useCallback, useEffect, useRef, useState } from "react";
+import { cloneElement, useCallback, useState } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "react-router";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,
@@ -103,19 +104,12 @@ export default function DynamicDropdown({
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Focus the search input when the popover opens (replaces autoFocus to
   // satisfy jsx-a11y/no-autofocus while preserving the intentional focus).
-  useEffect(() => {
-    if (!isPopoverOpen || !showSearch) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      searchInputRef.current?.focus();
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [isPopoverOpen, showSearch]);
+  const searchInputRef = useAutoFocus<HTMLInputElement>({
+    when: isPopoverOpen && showSearch,
+  });
 
   const {
     selectedItems,

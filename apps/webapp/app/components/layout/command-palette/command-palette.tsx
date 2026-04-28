@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import {
   CalendarIcon,
@@ -28,6 +28,7 @@ import {
 } from "~/components/shared/command";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -475,7 +476,7 @@ export function getTeamMemberHref(member: TeamMemberSearchResult) {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const layoutData = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   );
@@ -542,17 +543,7 @@ export function CommandPalette() {
     if (!open) {
       setQuery("");
       setDebouncedQuery("");
-      return;
     }
-
-    // Focus the search input when the palette opens. We schedule this after
-    // the dialog has mounted and animations settle so the focus is not stolen
-    // by the dialog's default focus-trap entry point.
-    const frame = window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
-
-    return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
   useEffect(() => {

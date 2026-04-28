@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -21,6 +20,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -180,10 +180,7 @@ export default function IndexLoginForm() {
   const disabled = isFormProcessing(navigation.state);
 
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
-  const emailInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    emailInputRef.current?.focus();
-  }, []);
+  const emailInputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <div className="w-full max-w-md">

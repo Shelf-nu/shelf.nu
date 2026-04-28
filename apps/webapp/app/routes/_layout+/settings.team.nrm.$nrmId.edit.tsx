@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -15,6 +14,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -105,10 +105,7 @@ export default function EditNrm() {
   const disabled = isFormProcessing(navigation.state);
 
   /** Focus the name field when the modal route mounts (replaces autoFocus). */
-  const nameInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    nameInputRef.current?.focus();
-  }, []);
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <div className="modal-content-wrapper">

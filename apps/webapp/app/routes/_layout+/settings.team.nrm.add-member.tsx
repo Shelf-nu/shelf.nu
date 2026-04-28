@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
@@ -8,6 +7,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -96,10 +96,7 @@ export default function AddMember() {
   const disabled = isFormProcessing(navigation.state);
 
   /** Focus the name field when the modal route mounts (replaces autoFocus). */
-  const nameInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    nameInputRef.current?.focus();
-  }, []);
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <>

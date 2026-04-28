@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Form, useNavigation, useLocation, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -61,16 +62,7 @@ export default function SetOrEditReminderDialog({
   const isEdit = !!reminder;
 
   /** Ref for the first field so we can focus it on open without autoFocus. */
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(
-    function focusNameFieldOnOpen() {
-      if (open) {
-        nameInputRef.current?.focus();
-      }
-    },
-    [open]
-  );
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   useEffect(
     function handleOnSuccess() {

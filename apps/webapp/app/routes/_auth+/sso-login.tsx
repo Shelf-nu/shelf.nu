@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -16,6 +15,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -102,10 +102,7 @@ export default function SSOLogin() {
   const data = useActionData<typeof action>();
 
   /** Focus the domain field on mount (intentional first-field focus on auth pages). */
-  const domainInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    domainInputRef.current?.focus();
-  }, []);
+  const domainInputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <>
