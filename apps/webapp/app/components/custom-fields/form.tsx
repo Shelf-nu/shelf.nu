@@ -5,6 +5,7 @@ import { Link, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useOrganizationId } from "~/hooks/use-organization-id";
 import type { action as editCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.$fieldId_.edit";
 import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.new";
@@ -106,6 +107,10 @@ export const CustomFieldForm = ({
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
+  // Focus the Name field on mount — the form is the entry point for both
+  // create and edit pages, so initial focus belongs on the first field.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
+
   // keeping text field type by default selected
   const organizationId = useOrganizationId();
   const actionData = useActionData<
@@ -129,6 +134,7 @@ export const CustomFieldForm = ({
           required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.name)}
         >
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}

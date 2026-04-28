@@ -128,7 +128,7 @@ export function PresetListItem({
                 e.preventDefault();
               }
             }}
-            className="rounded p-1 text-red-600 hover:bg-red-50 hover:text-red-500"
+            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
             title="Delete"
           >
             <Trash2 className="size-3.5" />

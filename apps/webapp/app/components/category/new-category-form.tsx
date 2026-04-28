@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/categories.new";
@@ -47,6 +48,12 @@ export default function NewCategoryForm({
 
   const color = useMemo(() => getRandomColor(), []);
 
+  // Focus the Name field on mount. When this form is rendered inside a
+  // dialog the dialog's `data-dialog-initial-focus` handler typically wins;
+  // otherwise (standalone /categories/new route) this provides intentional
+  // initial focus.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
+
   useEffect(() => {
     if (typeof onSuccess !== "function") {
       return;
@@ -88,6 +95,7 @@ export default function NewCategoryForm({
     >
       <div className={tw("gap-4 md:flex md:items-center", className)}>
         <Input
+          ref={nameInputRef}
           label="Name"
           placeholder="Category name"
           className={tw("mb-4 lg:mb-0 lg:max-w-[180px]", inputClassName)}
