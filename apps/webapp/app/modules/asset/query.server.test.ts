@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { locationDescendantsMock } from "@mocks/location-descendants";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
+import { ShelfError } from "~/utils/error";
 import {
   assetQueryFragment,
+  generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
 } from "./query.server";
@@ -10,11 +12,239 @@ import {
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
 
+const DEFAULT_FALLBACK_ORDER_BY =
+  'ORDER BY "assetCreatedAt" DESC, "assetId" ASC';
+
 describe("parseSortingOptions", () => {
   it("allows sorting by updatedAt", () => {
     const { orderByClause } = parseSortingOptions(["updatedAt:desc"]);
 
     expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+  });
+
+  describe("direction validation", () => {
+    it("normalizes uppercase DESC to desc", () => {
+      const { orderByClause } = parseSortingOptions(["updatedAt:DESC"]);
+      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+    });
+
+    it("normalizes mixed-case Desc to desc", () => {
+      const { orderByClause } = parseSortingOptions(["updatedAt:Desc"]);
+      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" desc');
+    });
+
+    // Regression test for GHSA-69xv-wmgg-3qp3: SQL injection via direction.
+    // Invalid directions must throw a 400 — the malicious SQL never reaches
+    // the database and the user gets an explicit error instead of silently
+    // sorting ascending.
+    it("rejects SQL injection payloads in the direction", () => {
+      expect(() =>
+        parseSortingOptions(["updatedAt:asc; DROP TABLE Asset; --"])
+      ).toThrow(ShelfError);
+    });
+
+    // Regression test using the exact PoC shape from the GHSA-69xv-wmgg-3qp3
+    // report. The split(":") only takes the first colon, so the entire
+    // "asc,(SELECT ...)" string lands in `direction` and must be rejected.
+    it("rejects the reporter's exact PoC subquery payload", () => {
+      expect(() =>
+        parseSortingOptions([
+          "createdAt:asc,(SELECT CASE WHEN 1=2 THEN 1 ELSE 1/0 END)",
+        ])
+      ).toThrow(ShelfError);
+    });
+
+    it("throws on an unrecognized direction string", () => {
+      expect(() => parseSortingOptions(["updatedAt:foobar"])).toThrow(
+        ShelfError
+      );
+    });
+
+    it("throws with HTTP 400 status on invalid direction", () => {
+      try {
+        parseSortingOptions(["updatedAt:nope"]);
+        throw new Error("expected parseSortingOptions to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ShelfError);
+        expect((err as ShelfError).status).toBe(400);
+      }
+    });
+
+    it("defaults missing direction to asc", () => {
+      const { orderByClause } = parseSortingOptions(["updatedAt"]);
+      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+    });
+
+    it("defaults empty direction to asc", () => {
+      const { orderByClause } = parseSortingOptions(["updatedAt:"]);
+      expect(orderByClause).toBe('ORDER BY "assetUpdatedAt" asc');
+    });
+  });
+
+  describe("barcode field validation", () => {
+    it("permits a known-good barcode column", () => {
+      const { orderByClause } = parseSortingOptions(["barcode_Code128:asc"]);
+      expect(orderByClause).toContain("barcode_Code128");
+      expect(orderByClause).toContain("asc");
+    });
+
+    it("drops a barcode field whose suffix contains injection chars", () => {
+      const { orderByClause } = parseSortingOptions([
+        'barcode_Code128";DROP--:asc',
+      ]);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+      expect(orderByClause).not.toContain("DROP");
+    });
+
+    it("drops a barcode field with empty suffix", () => {
+      const { orderByClause } = parseSortingOptions(["barcode_:asc"]);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+    });
+
+    it("drops a barcode field with whitespace in the suffix", () => {
+      const { orderByClause } = parseSortingOptions(["barcode_Code 128:asc"]);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+    });
+  });
+
+  describe("custom field (cf_*) validation", () => {
+    it("permits a simple custom field name", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "cf_Manufacturer:asc:TEXT",
+      ]);
+      expect(customFieldSortings).toHaveLength(1);
+      expect(customFieldSortings[0].alias).toBe("cf_Manufacturer");
+      expect(orderByClause).toContain("cf_Manufacturer");
+    });
+
+    it("normalizes whitespace in custom field name to underscores", () => {
+      const { customFieldSortings } = parseSortingOptions([
+        "cf_legit name:asc:TEXT",
+      ]);
+      expect(customFieldSortings).toHaveLength(1);
+      expect(customFieldSortings[0].alias).toBe("cf_legit_name");
+    });
+
+    it("drops a custom field name containing injection chars", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "cf_x;DROP TABLE:asc:TEXT",
+      ]);
+      expect(customFieldSortings).toHaveLength(0);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+      expect(orderByClause).not.toContain("DROP");
+    });
+
+    it("drops a custom field name containing parentheses", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "cf_Cost (USD):asc:AMOUNT",
+      ]);
+      expect(customFieldSortings).toHaveLength(0);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+    });
+
+    it("uses direct sort for DATE fields", () => {
+      const { orderByClause } = parseSortingOptions(["cf_x:asc:DATE"]);
+      expect(orderByClause).toBe("ORDER BY cf_x asc");
+    });
+
+    it("uses ::numeric cast for AMOUNT fields", () => {
+      const { orderByClause } = parseSortingOptions(["cf_x:asc:AMOUNT"]);
+      expect(orderByClause).toBe("ORDER BY cf_x::numeric asc");
+    });
+
+    it("falls through to natural sort for unknown fieldType", () => {
+      const { orderByClause } = parseSortingOptions(["cf_x:asc:bogusType"]);
+      expect(orderByClause).toContain("LOWER(regexp_replace(cf_x");
+    });
+  });
+
+  describe("mixed and edge cases", () => {
+    it("emits valid terms while skipping invalid ones in the same array", () => {
+      const { orderByClause, customFieldSortings } = parseSortingOptions([
+        "updatedAt:desc",
+        "cf_x;DROP:asc:TEXT",
+        "name:asc",
+      ]);
+      expect(customFieldSortings).toHaveLength(0);
+      expect(orderByClause).toContain('"assetUpdatedAt" desc');
+      expect(orderByClause).toContain('"assetTitle"');
+      expect(orderByClause).not.toContain("DROP");
+    });
+
+    it("falls back to default sort when every term is invalid", () => {
+      const { orderByClause } = parseSortingOptions([
+        "evil:asc",
+        "alsoEvil:desc",
+      ]);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+    });
+
+    it("falls back to default sort for an empty input array", () => {
+      const { orderByClause } = parseSortingOptions([]);
+      expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+    });
+
+    it("uses sequential-id sort expression for sequentialId", () => {
+      const { orderByClause } = parseSortingOptions(["sequentialId:asc"]);
+      expect(orderByClause).toContain('"assetSequentialId"');
+      expect(orderByClause).toContain("LPAD(SPLIT_PART");
+    });
+
+    it("uses custody jsonb path for custody", () => {
+      const { orderByClause } = parseSortingOptions(["custody:desc"]);
+      expect(orderByClause).toContain("custody->>'name'");
+      expect(orderByClause).toContain("desc");
+    });
+
+    // Regression test: `in` walks the prototype chain, so without
+    // Object.hasOwn() field names like "toString" or "constructor" would
+    // resolve to inherited methods and produce broken SQL. Must fall through
+    // to the unknown-field branch instead.
+    it("does not match inherited Object.prototype keys via 'in'", () => {
+      const inheritedKeys = [
+        "toString",
+        "constructor",
+        "hasOwnProperty",
+        "valueOf",
+      ];
+      for (const key of inheritedKeys) {
+        const { orderByClause } = parseSortingOptions([`${key}:asc`]);
+        expect(orderByClause).toBe(DEFAULT_FALLBACK_ORDER_BY);
+      }
+    });
+  });
+});
+
+describe("generateCustomFieldSelect", () => {
+  it("returns Prisma.empty for an empty input", () => {
+    const result = generateCustomFieldSelect([]);
+    // Prisma.empty has no strings/values to interpolate
+    expect(result.strings.join("")).toBe("");
+  });
+
+  it("emits a SELECT subquery for a safe alias", () => {
+    const result = generateCustomFieldSelect([
+      { name: "Manufacturer", valueKey: "raw", alias: "cf_Manufacturer" },
+    ]);
+    expect(result.strings.join("?")).toContain("AS ");
+    expect(result.strings.join("?")).toContain("cf_Manufacturer");
+  });
+
+  // Defense-in-depth: even though parseSortingOptions already validates
+  // aliases, generateCustomFieldSelect must not trust its input. A future
+  // refactor or alternate caller must not be able to inject SQL via cf.alias.
+  it("throws ShelfError when an alias contains unsafe characters", () => {
+    expect(() =>
+      generateCustomFieldSelect([
+        { name: "x", valueKey: "raw", alias: "cf_x; DROP--" },
+      ])
+    ).toThrow(ShelfError);
+  });
+
+  it("throws ShelfError when an alias is empty", () => {
+    expect(() =>
+      generateCustomFieldSelect([{ name: "x", valueKey: "raw", alias: "" }])
+    ).toThrow(ShelfError);
   });
 });
 
