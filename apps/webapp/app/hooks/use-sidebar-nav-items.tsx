@@ -7,6 +7,7 @@ import {
   CalendarRangeIcon,
   ChartLineIcon,
   ClipboardCheckIcon,
+  FileBarChartIcon,
   HomeIcon,
   MapPinIcon,
   MessageCircleIcon,
@@ -175,6 +176,13 @@ export function useSidebarNavItems() {
       Icon: AlarmClockIcon,
       hidden: isBaseOrSelfService,
       to: "/reminders",
+    },
+    {
+      type: "child",
+      title: "Reports",
+      Icon: FileBarChartIcon,
+      hidden: isBaseOrSelfService,
+      to: "/reports",
     },
     {
       type: "label",
