@@ -359,15 +359,19 @@ export default function AuditDetailsPage() {
   ];
 
   const matches = useMatches();
-  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
   /**
-   * When we are on the audit.scan route, we render just the outlet without header/tabs.U
-   * On other routes, we render the full layout with header and tabs.
+   * When we are on the audit.scan route OR any descendant of it (e.g. the
+   * /scan/:auditAssetId/details overlay), we want a bare <Outlet /> without
+   * the parent header/tabs. Walking ALL matches — not just the leaf — keeps
+   * the suppression in place for nested routes the leaf may sit beneath.
    */
-  const shouldRenderFullOutlet = currentRoute?.handle?.name === "audit.scan";
+  const isInAuditScanRoute = matches.some(
+    (match): match is typeof match & { handle: { name: string } } =>
+      (match as RouteHandleWithName)?.handle?.name === "audit.scan"
+  );
 
-  return shouldRenderFullOutlet ? (
+  return isInAuditScanRoute ? (
     <Outlet />
   ) : (
     <div className="relative">

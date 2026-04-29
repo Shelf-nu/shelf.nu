@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useReducer } from "react";
 import { type FetcherWithComponents } from "react-router";
 import type {
   AuditSessionInfo,
@@ -55,6 +55,12 @@ export function useAuditScanPersistence({
   pendingPersistsRef,
   isRestoringRef,
 }: UseAuditScanPersistenceProps) {
+  // Bumped after we mutate `persistedItemsRef` so the consuming component
+  // re-renders and any derived value (e.g. pendingScanCount that reads
+  // `persistedItemsRef.current.has(...)` during render) reflects the new
+  // membership. Refs alone don't trigger renders, which previously left the
+  // "Saving scans: N remaining" indicator stuck after the fetcher resolved.
+  const [, bumpPersistedVersion] = useReducer((n: number) => n + 1, 0);
   /**
    * Monitor scanned items and persist new ones to the database.
    *
@@ -134,11 +140,15 @@ export function useAuditScanPersistence({
           persistedItemsRef.current.add(assetId);
         });
         pendingPersistsRef.current.clear();
+        // Force a re-render so consumers reading `persistedItemsRef.current`
+        // during render (e.g. pendingScanCount) recompute.
+        bumpPersistedVersion();
       } else if ("error" in data && data.error) {
         // eslint-disable-next-line no-console
         console.error("Failed to persist scan:", data.error);
         // Clear pending so it can be retried
         pendingPersistsRef.current.clear();
+        bumpPersistedVersion();
       }
     }
   }, [

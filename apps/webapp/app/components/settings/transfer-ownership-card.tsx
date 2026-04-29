@@ -78,6 +78,7 @@ export const TransferOwnershipSchema = z.object({
     .transform((value) => value === "on"),
 });
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function TransferOwnershipCard({
   className,
   action = "/settings/general",

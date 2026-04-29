@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import _ from "lodash";
+import omit from "lodash/omit";
 import { InfoIcon } from "lucide-react";
 import { ReactTags } from "react-tag-autocomplete";
 import type { Tag } from "react-tag-autocomplete";
@@ -129,7 +129,7 @@ export default function MultiSelect<T>({
           )}
           renderInput={({ ...props }) => (
             <input
-              {..._.omit(props, ["inputWidth", "classNames"])}
+              {...omit(props, ["inputWidth", "classNames"])}
               className="border-none bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 disabled:placeholder:text-gray-300"
               disabled={disabled}
             />

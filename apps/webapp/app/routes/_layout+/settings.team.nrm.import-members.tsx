@@ -67,10 +67,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    await assertUserCanImportNRM({ organizationId, organizations });
-
-    // Files are automatically stored in memory with parseFormData
-    const formData = await parseFormData(request);
+    // Subscription assertion and form data parsing are independent — run in parallel
+    const [, formData] = await Promise.all([
+      assertUserCanImportNRM({ organizationId, organizations }),
+      // Files are automatically stored in memory with parseFormData
+      parseFormData(request),
+    ]);
 
     const csvFile = formData.get("file") as File;
     const text = await csvFile.text();

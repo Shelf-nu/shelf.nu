@@ -1,5 +1,5 @@
 import type { ChangeEvent } from "react";
-import { useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import { darkenColor } from "~/utils/color-contrast";
 import { getRandomColor } from "~/utils/get-random-color";
 import Input from "./input";
@@ -13,11 +13,16 @@ export const ColorInput = ({
   colorFromServer?: string;
   [key: string]: any;
 }) => {
-  const [color, setColor] = useState<string>("");
-
-  useEffect(() => {
-    setColor(() => colorFromServer || "");
-  }, [colorFromServer]);
+  // Re-sync with server-provided color when it changes (e.g. on save revalidation).
+  // Uses the "store previous prop in a ref" pattern instead of useEffect to avoid a
+  // render flash. See
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [color, setColor] = useState<string>(() => colorFromServer || "");
+  const prevColorFromServer = useRef(colorFromServer);
+  if (colorFromServer !== prevColorFromServer.current) {
+    prevColorFromServer.current = colorFromServer;
+    setColor(colorFromServer || "");
+  }
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {
     setColor(() => `${e.target.value}`);

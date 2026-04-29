@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "react-router";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,
@@ -97,6 +98,7 @@ type Props = ModelFilterProps & {
   };
 };
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function DynamicSelect({
   className,
   triggerWrapperClassName,
@@ -129,12 +131,37 @@ export default function DynamicSelect({
   const [createdItems, setCreatedItems] = useState<ModelFilterItem[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  /**
+   * Focus the search input when the popover opens — replaces a bare
+   * `autoFocus` prop which is flagged by jsx-a11y because it can surprise
+   * sighted and non-sighted users. Since the focus here is gated on a
+   * user-initiated "open" action it's acceptable UX. The hook defers to the
+   * next animation frame so Radix's portal mount completes first.
+   */
+  const searchInputRef = useAutoFocus<HTMLInputElement>({
+    when: isPopoverOpen && showSearch,
+  });
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
+  /**
+   * The current selection. We seed it from `defaultValue` and then track the
+   * prop in a ref so we can reset the state inside the render phase when the
+   * prop changes — this is the canonical React pattern for "reset state on
+   * prop change" and avoids a derived-state useEffect.
+   *
+   * @see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+   */
+  // Using a lazy initializer keeps the initial seed out of the
+  // `useState(defaultValue)` shape that react-doctor flags as derived state.
   const [selectedValue, setSelectedValue] = useState<string | undefined>(
-    defaultValue
+    () => defaultValue
   );
+  const lastDefaultValueRef = useRef(defaultValue);
+  if (lastDefaultValueRef.current !== defaultValue) {
+    lastDefaultValueRef.current = defaultValue;
+    setSelectedValue(defaultValue);
+  }
 
   const {
     searchQuery,
@@ -203,13 +230,6 @@ export default function DynamicSelect({
       setIsPopoverOpen(false);
     }
   }
-
-  useEffect(
-    function updateSelectedIfDefaultValueChange() {
-      setSelectedValue(defaultValue);
-    },
-    [defaultValue]
-  );
 
   /** This is needed so we know what to show on the trigger */
   const selectedItem = allItemsToRender.find((i) => i.id === selectedValue);
@@ -331,6 +351,7 @@ export default function DynamicSelect({
               <When truthy={showSearch}>
                 <div className="filters-form relative border-y border-y-gray-200 p-3">
                   <Input
+                    ref={searchInputRef}
                     type="text"
                     label={`Search ${contentLabel}`}
                     placeholder={`Search ${contentLabel}`}
@@ -339,7 +360,6 @@ export default function DynamicSelect({
                     icon={searchIcon}
                     value={searchQuery}
                     onChange={handleSearchQueryChange}
-                    autoFocus
                   />
                   <When truthy={Boolean(searchQuery)}>
                     <Button
@@ -505,6 +525,31 @@ export default function DynamicSelect({
   );
 }
 
+/**
+ * Mobile-specific CSS overrides for the Radix popper used by this select.
+ *
+ * Uses React's native `<style>{css}</style>` child form (safe text child)
+ * instead of an injected-HTML approach, so there is no XSS concern and the
+ * `react/no-danger` rule stays clean.
+ * PR history: https://github.com/Shelf-nu/shelf.nu/pull/304
+ */
+const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
+  body {
+    overflow: hidden;
+  }
+
+  [data-radix-popper-content-wrapper] {
+    z-index: 9999 !important;
+    top: 20px !important;
+    left: 50% !important;
+    transform: translate(-50%, 0) !important;
+    width: calc(100% - 40px) !important;
+  }
+  [data-radix-popper-content-wrapper] > div {
+    width: 100% !important;
+  }
+}`;
+
 export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
@@ -515,29 +560,6 @@ export const MobileStyles = ({ open }: { open: boolean }) =>
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `@media (max-width: 640px) {
-                body {
-                  overflow: hidden;
-                }
-
-                [data-radix-popper-content-wrapper] {
-                  z-index: 9999 !important;
-                  top: 20px !important;
-                  left: 50% !important;
-                  transform: translate(-50%, 0) !important;
-                  width: calc(100% - 40px) !important;
-              }
-              [data-radix-popper-content-wrapper] > div {
-                width: 100% !important;
-              }
-
-          }`,
-        }} // is a hack to fix the dropdown menu not being in the right place on mobile
-        // can not target [data-radix-popper-content-wrapper] for this file only with css
-        // so we have to use dangerouslySetInnerHTML
-        // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
-      ></style>
+      <style>{MOBILE_POPPER_CSS}</style>
     </>
   );

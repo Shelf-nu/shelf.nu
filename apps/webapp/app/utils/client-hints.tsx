@@ -95,6 +95,11 @@ export function useHints() {
  * inaccurate value.
  */
 export function ClientHintCheck({ nonce }: { nonce: string }) {
+  // why: client hints detection script must execute in the browser;
+  // `<script>{text}</script>` in React renders the source as a text node and
+  // the browser will not run it, so injecting HTML is the only viable option
+  // here. The script body is built from our own clientHints map (no user
+  // input), so there is no XSS surface.
   return (
     <script
       nonce={nonce}

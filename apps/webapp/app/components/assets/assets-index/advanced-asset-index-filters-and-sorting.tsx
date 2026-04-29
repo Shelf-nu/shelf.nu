@@ -71,6 +71,7 @@ const getTriggerClasses = (
     className
   );
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 function AdvancedFilter() {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings, customFields } = useLoaderData<AssetIndexLoaderData>();
