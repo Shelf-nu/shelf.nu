@@ -145,7 +145,7 @@ export async function bookingComplianceReport(
     timeframe,
     statusFilter,
     custodianId,
-    locationId,
+    locationId: _locationId, // TODO: Location filter requires join through assets
     page = 1,
     pageSize = 50,
     sortBy = "scheduledEnd",
@@ -179,8 +179,7 @@ export async function bookingComplianceReport(
       where.custodianUserId = custodianId;
     }
 
-    // TODO: Location filter requires join through assets
-    // if (locationId) { ... }
+    // TODO: Location filter requires join through assets (see _locationId)
 
     // Fetch all data in parallel
     const [
@@ -1033,7 +1032,7 @@ async function fetchOverdueRows(
 }
 
 async function computeOverdueKpis(
-  organizationId: string,
+  _organizationId: string,
   baseWhere: Prisma.BookingWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
@@ -1282,7 +1281,7 @@ export async function idleAssetsReport(
  * that was checked out since the cutoff date.
  */
 async function fetchIdleAssetRows(
-  organizationId: string,
+  _organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   page: number,
@@ -1373,7 +1372,7 @@ async function fetchIdleAssetRows(
  * Count total idle assets matching the criteria.
  */
 async function countIdleAssets(
-  organizationId: string,
+  _organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date
 ): Promise<number> {
@@ -1695,7 +1694,7 @@ async function fetchCustodyRows(
 }
 
 async function computeCustodyKpis(
-  organizationId: string,
+  _organizationId: string,
   baseWhere: Prisma.CustodyWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
@@ -2124,7 +2123,7 @@ export async function assetDistributionReport(
 
   try {
     // Fetch all distribution data in parallel
-    const [totalAssets, byCategory, byLocation, byStatus, kpis] =
+    const [_totalAssets, byCategory, byLocation, byStatus, kpis] =
       await Promise.all([
         db.asset.count({ where: { organizationId } }),
         computeDistributionByCategory(organizationId),
@@ -2486,7 +2485,7 @@ async function fetchInventoryRows(
 }
 
 async function computeInventoryKpis(
-  organizationId: string,
+  _organizationId: string,
   where: Prisma.AssetWhereInput
 ): Promise<ReportKpi[]> {
   const [totalAssets, totalValue, statusCounts] = await Promise.all([

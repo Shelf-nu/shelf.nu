@@ -364,8 +364,7 @@ export function BooleanCell({
  * Asset name cell with thumbnail image.
  * Provides consistent asset display across all reports.
  *
- * When `assetId` is provided, uses the full `AssetImage` component which
- * automatically refreshes expired Supabase tokens.
+ * Uses AssetImage for automatic Supabase token refresh and placeholder handling.
  */
 export function AssetCell({
   name,
@@ -374,32 +373,16 @@ export function AssetCell({
 }: {
   name: string;
   thumbnailImage: string | null;
-  /** When provided, enables automatic image token refresh via AssetImage */
-  assetId?: string;
+  assetId: string;
 }) {
-  // If we have an assetId, use AssetImage for automatic token refresh
-  if (assetId) {
-    return (
-      <div className="flex items-center gap-3">
-        <AssetImage
-          asset={{
-            id: assetId,
-            thumbnailImage,
-          }}
-          alt="" // Decorative - asset name is displayed in adjacent text
-          className="size-8 shrink-0 rounded object-cover"
-        />
-        <span className="font-medium">{name}</span>
-      </div>
-    );
-  }
-
-  // Fallback: simple img without refresh capability
   return (
     <div className="flex items-center gap-3">
-      <img
-        src={thumbnailImage || "/static/images/asset-placeholder.jpg"}
-        alt=""
+      <AssetImage
+        asset={{
+          id: assetId,
+          thumbnailImage,
+        }}
+        alt="" // Decorative - asset name is displayed in adjacent text
         className="size-8 shrink-0 rounded object-cover"
       />
       <span className="font-medium">{name}</span>
