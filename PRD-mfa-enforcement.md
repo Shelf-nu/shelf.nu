@@ -26,7 +26,7 @@ SSO-bound users (`User.sso = true`) are exempt — MFA is delegated to the IdP. 
 
 The mobile companion app **pivots to web-delegated authentication** before TestFlight. Mobile opens the system browser to authenticate on shelf.nu (which handles password + MFA + SSO) and receives a session via `shelf://` deeplink with state-token validation. Net mobile code change: **−110 LOC**, zero new dependencies. The pivot is feasible because the companion app is at 35% completion, pre-TestFlight, with no users to migrate.
 
-**Estimated effort:** 20 days single engineer (sequential), ~13 days two engineers (parallelized — webapp + mobile tracks).
+**Estimated effort:** ~22 days single engineer (sequential), ~13 days two engineers (parallelized — webapp + mobile tracks). See §8 estimate summary table for the per-phase breakdown.
 
 ---
 
@@ -215,7 +215,7 @@ export function mapAuthSession(s: SupabaseSession): AuthSession {
 
 New middleware between `protect()` and the route handlers in [server/index.ts](apps/webapp/server/index.ts):
 
-```
+```text
 session() → refreshSession() → protect() → enforceMfa() [NEW] → routes
 ```
 
@@ -309,7 +309,7 @@ export function enforceMfa(): MiddlewareHandler {
 
 **Backup-code flow** (the case Supabase doesn't support natively — see A.D):
 
-```
+```text
 /mfa/challenge → user clicks "use backup code"
   → enters 12-char code (format AAAA-BBBB-CCCC)
   → server validates against MfaBackupCode rows (argon2id verify across user's codes)
@@ -329,7 +329,7 @@ This is also the more secure pattern (forces re-arming) and matches 1Password/Au
 
 **Flow:**
 
-```
+```text
 Mobile app launches
   → user taps "Sign in with Shelf"
   → mobile generates state token via expo-crypto
@@ -619,7 +619,7 @@ For a workspace with 100 members and one with no factor, total reminder job runt
 | Backup-code phishing | Single-use; consumed on use; user notified by email immediately; forced re-enrollment limits damage to one re-arm window. |
 | Reset-token phishing | Short expiry (1h), single-use, hashed, requires owner intent. |
 | TOTP code replay | Supabase rejects already-used codes; ±30s skew window. |
-| Owner self-lockout | Self-prerequisite gate; backup codes; admin-disable still works at aal1 + OWNER if everything is lost (audit-logged). |
+| Owner self-lockout | Self-prerequisite gate at enable-time prevents the most common foot-gun (enabling without own factor). Recovery for "lost device + still has backup codes": use a backup code → forced re-enrollment (§4.4). Recovery for "lost device + no backup codes" via owner-initiated reset (§6.5) — but if the locked-out user IS the sole owner, no other admin can reset them, so this collapses to the support-runbook process documented in §11.4. Note: disabling enforcement requires fresh aal2 (§4.8), so a fully-locked-out sole owner cannot self-recover by disabling — this is the trade-off for "no aal1 admin-disable bypass." |
 | SSO bypass | If `User.sso === true`, MFA delegated to IdP. Workspace owner's responsibility (documented). Optional Phase 5+ enhancement: warn owner if SSO is on and they want to also enroll Shelf-side MFA. |
 | Mass-enrollment DoS | Supabase has rate limits; we add per-user-per-hour cap of 10 enroll calls. |
 | Audit-log tampering | `MfaEnforcementEvent` is write-only via service; no admin delete API. |
