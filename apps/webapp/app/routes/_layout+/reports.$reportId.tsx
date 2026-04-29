@@ -87,6 +87,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.report?.title || "Report") },
 ];
 
+/**
+ * Adds the report-specific name to the breadcrumb trail (e.g.
+ * "Reports > Top Booked Assets"). The parent `reports.tsx` layout supplies
+ * the leading "Reports" crumb.
+ */
+export const handle = {
+  breadcrumb: (match: { data?: { report?: { title?: string } } }) =>
+    match?.data?.report?.title || "Report",
+};
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -602,8 +612,17 @@ export default function ReportPage() {
         </div>
       </Header>
 
-      {/* Content area matching app patterns */}
-      <div className="flex flex-1 flex-col gap-2 px-4 pb-4 md:mt-4 md:px-0">
+      {/* Content area matching app patterns.
+          `flex-1` cascades from the parent `<main>` (SidebarInset), which is a
+          `flex flex-col h-dvh` container. That makes this column exactly the
+          remaining viewport height under the app Header. Combined with the
+          `flex-1 min-h-0` main content area below, the table card fills the
+          available space and the footer (pagination + computed-in) stays
+          pinned at the bottom of the viewport. */}
+      {/* `-mb-8` cancels most of the SidebarInset's `pb-10`, keeping the
+          pagination footer close to the viewport bottom on report pages
+          without changing the global main padding. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-2 md:-mb-8 md:mt-4 md:px-0">
         {/* Filter bar - varies by report type */}
         {showTimeframePicker(reportId) && (
           <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
@@ -649,8 +668,15 @@ export default function ReportPage() {
           </div>
         )}
 
-        {/* Main content area */}
-        <div className={tw("transition-opacity", isLoading && "opacity-60")}>
+        {/* Main content area — `flex-1 min-h-0` lets it grow within the route's
+            flex column and lets children using `flex-1` (e.g. the data table)
+            shrink past their content height to enable internal scrolling. */}
+        <div
+          className={tw(
+            "flex min-h-0 flex-1 flex-col transition-opacity",
+            isLoading && "opacity-60"
+          )}
+        >
           {hasData ? (
             renderReportContent()
           ) : (
@@ -905,7 +931,7 @@ function BookingComplianceContent({
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* The Answer */}
       <ComplianceHero
         rate={complianceData?.rate ?? 0}
@@ -916,7 +942,7 @@ function BookingComplianceContent({
       />
 
       {/* Booking details table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Booking Details
@@ -928,7 +954,7 @@ function BookingComplianceContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="400px"
+          fillParent
           onRowClick={onRowClick}
           manualSorting
           initialSorting={[
@@ -1433,7 +1459,7 @@ function IdleAssetsContent({
     (kpis.find((k) => k.id === "total_idle_value")?.rawValue as number) || 0;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1478,7 +1504,7 @@ function IdleAssetsContent({
       </div>
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Unused Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1488,7 +1514,7 @@ function IdleAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1603,7 +1629,7 @@ function CustodySnapshotContent({
     (kpis.find((k) => k.id === "avg_days_in_custody")?.rawValue as number) || 0;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1648,7 +1674,7 @@ function CustodySnapshotContent({
       </div>
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Current Assignments
@@ -1660,7 +1686,7 @@ function CustodySnapshotContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1808,7 +1834,7 @@ function TopBookedAssetsContent({
   const topAsset = topBookedAsset || null;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1890,8 +1916,9 @@ function TopBookedAssetsContent({
         </div>
       </div>
 
-      {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      {/* Data table — fills remaining vertical space inside the route's flex column
+          and scrolls internally when row count exceeds the visible area. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Top Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1901,7 +1928,7 @@ function TopBookedAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2148,7 +2175,7 @@ function AssetInventoryContent({
     (kpis.find((k) => k.id === "in_custody_count")?.rawValue as number) || 0;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2191,7 +2218,7 @@ function AssetInventoryContent({
       </div>
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -2201,7 +2228,7 @@ function AssetInventoryContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2291,7 +2318,7 @@ function MonthlyBookingTrendsContent({
   const trendDescription = trendKpi?.description;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2386,7 +2413,7 @@ function MonthlyBookingTrendsContent({
       )}
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Monthly Breakdown
@@ -2398,7 +2425,7 @@ function MonthlyBookingTrendsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="400px"
+          fillParent
           emptyContent={
             <ReportEmptyState
               reason="no_data"
@@ -2505,7 +2532,7 @@ function AssetUtilizationContent({
     (kpis.find((k) => k.id === "total_booking_days")?.rawValue as number) || 0;
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2560,7 +2587,7 @@ function AssetUtilizationContent({
       </div>
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Asset Usage Rates
@@ -2572,7 +2599,7 @@ function AssetUtilizationContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2681,7 +2708,7 @@ function AssetActivityContent({
     kpis.find((k) => k.id === "most_active_asset")?.value || "—";
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2751,7 +2778,7 @@ function AssetActivityContent({
       </div>
 
       {/* Data table */}
-      <div className="rounded border border-gray-200 bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Recent Activity
@@ -2763,7 +2790,7 @@ function AssetActivityContent({
         <ReportTable
           data={rows}
           columns={columns}
-          maxHeight="500px"
+          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState

@@ -37,8 +37,15 @@ export interface ReportTableProps<TData> {
   initialSorting?: SortingState;
   /** Whether to show the header row */
   showHeader?: boolean;
-  /** Maximum height before scrolling (CSS value) */
+  /** Maximum height before scrolling (CSS value). Ignored when `fillParent` is true. */
   maxHeight?: string;
+  /**
+   * When true, the table fills its parent flex container instead of using a
+   * fixed `maxHeight`. The parent must establish a height (e.g. `flex flex-col`
+   * with a sized ancestor); the table becomes `flex-1 min-h-0 overflow-auto`
+   * so the body scrolls and the sticky header stays in place.
+   */
+  fillParent?: boolean;
   /** Empty state content */
   emptyContent?: React.ReactNode;
   /** Additional CSS classes */
@@ -71,6 +78,7 @@ export function ReportTable<TData>({
   initialSorting = [],
   showHeader = true,
   maxHeight = "calc(100vh - 400px)",
+  fillParent = false,
   emptyContent,
   className,
   onRowClick,
@@ -126,7 +134,10 @@ export function ReportTable<TData>({
   const hasData = data.length > 0;
 
   return (
-    <div className={tw("overflow-auto", className)} style={{ maxHeight }}>
+    <div
+      className={tw("overflow-auto", fillParent && "min-h-0 flex-1", className)}
+      style={fillParent ? undefined : { maxHeight }}
+    >
       <table className="w-full border-collapse">
         {showHeader && (
           <thead className="sticky top-0 z-10 bg-white">
