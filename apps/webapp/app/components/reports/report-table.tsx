@@ -26,6 +26,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
+import { AssetImage } from "~/components/assets/asset-image";
 import { tw } from "~/utils/tw";
 
 export interface ReportTableProps<TData> {
@@ -362,14 +363,38 @@ export function BooleanCell({
 /**
  * Asset name cell with thumbnail image.
  * Provides consistent asset display across all reports.
+ *
+ * When `assetId` is provided, uses the full `AssetImage` component which
+ * automatically refreshes expired Supabase tokens.
  */
 export function AssetCell({
   name,
   thumbnailImage,
+  assetId,
 }: {
   name: string;
   thumbnailImage: string | null;
+  /** When provided, enables automatic image token refresh via AssetImage */
+  assetId?: string;
 }) {
+  // If we have an assetId, use AssetImage for automatic token refresh
+  if (assetId) {
+    return (
+      <div className="flex items-center gap-3">
+        <AssetImage
+          asset={{
+            id: assetId,
+            thumbnailImage,
+          }}
+          alt={`Image of ${name}`}
+          className="size-8 shrink-0 rounded object-cover"
+        />
+        <span className="font-medium">{name}</span>
+      </div>
+    );
+  }
+
+  // Fallback: simple img without refresh capability
   return (
     <div className="flex items-center gap-3">
       <img

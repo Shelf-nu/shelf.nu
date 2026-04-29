@@ -270,6 +270,10 @@ export interface OverdueItemRow {
   custodian: string | null;
   custodianId: string | null;
   assetCount: number;
+  /** Number of assets already checked in (partial returns) */
+  checkedInCount: number;
+  /** Number of assets still outstanding (not yet returned) */
+  uncheckedCount: number;
   scheduledEnd: Date;
   daysOverdue: number;
   /** Total value of assets in this booking (if available) */
