@@ -25,7 +25,7 @@ import {
   Legend,
 } from "recharts";
 
-import type { ChartDataPoint, ChartSeries } from "~/modules/reports/types";
+import type { ChartSeries } from "~/modules/reports/types";
 
 /** Shelf's color palette for charts */
 const CHART_COLORS = {
