@@ -134,9 +134,9 @@
 - Added `normalizeBookingAssets()` adapter helper
 - Updated all tests
 
-### Sub-phase 3b: Quantity-Tracked Bookings (IN PROGRESS)
+### Sub-phase 3b: Quantity-Tracked Bookings (COMPLETED)
 
-**Completed:**
+Shipped in commit `13eed847f`.
 
 - `computeBookingAvailableQuantity()` — `Available = Total - InCustody - Reserved`
 - `updateBookingAssets()` accepts per-asset `quantities` map
@@ -150,14 +150,33 @@
 - PDF: added "Qty" column
 - Manage-assets polish: quantities initialized from existing booking, unsaved-changes detection
 - Constants: `type: true` added to asset selects in booking includes
+- TOCTOU hardening (`9f7642b84`): row-locked availability re-checks in
+  `checkoutBooking` and `adjust-asset-quantity` API; input validation on
+  the JSON `quantities` map and the merged_bug_001 cross-tenant IDOR
+  in `adjustQuantity`.
 
-**Needs testing/polish:**
+### Sub-phase 3c: Quantity-aware Check-in (COMPLETED)
 
-- Full end-to-end booking flow with qty-tracked assets (create → reserve → checkout → checkin)
-- Quantity display consistency across all views
-- Edge cases: fully-allocated assets, concurrent bookings on same qty asset
+Shipped across `60bfebe35` (core), `1fd4ad5bb` (test scaffold + qty
+unit coverage), `e92dfd52e` (audit-style expected-list UX in the
+partial-checkin drawer).
 
-### Sub-phase 3c: Quantity-aware Check-in (NOT STARTED)
+- Drawer ledger UI: per-asset disposition split (Returned / Consumed /
+  Lost / Damaged) with cumulative totals across check-in sessions
+  (qty-tracked partials persist via `ConsumptionLog` rows).
+- Service: `partialCheckinBooking` + `checkinBooking` accept a
+  `dispositions` map and write `ConsumptionLog` rows transactionally
+  per asset. `checkinAssets` wrapper rebuilt around the new shape.
+- Route: `bookings.$bookingId.overview.checkin-assets.tsx` action
+  parses the new schema; loader ships partial-checkin progress for
+  the drawer + sidebar overlays.
+- Audit-style "expected list" pattern ported into the drawer — items
+  pre-rendered as pending rows, flip to scanned on QR; ledger UI
+  redesigned per Phase 3c follow-up.
+- 22 unit tests (14 booking, 3 asset checkOutQuantity, 5 pure
+  booking-asset utils).
+
+**Original gap doc kept below for historical reference:**
 
 **Goal:** Make check-in respect `BookingAsset.quantity` and `Asset.consumptionType`.
 Today both the quick and explicit check-in paths treat every asset as binary
@@ -305,6 +324,38 @@ quantity}` with `@@unique([bookingId, assetModelId])`). Intent
 - +17 unit tests (15 service + 2 checkout guard); full
   `webapp:validate` green (130 files, 1742 tests).
 
+### Sub-phase 3d-Polish: Fulfil-and-Checkout Flow (COMPLETED)
+
+Shipped in commits `c1596f239` (core) + `1a5a12ffe` (table-integrated
+row refactor).
+
+- New `/bookings/:id/overview/fulfil-and-checkout` route + dedicated
+  scanner drawer (`fulfil-reservations-drawer.tsx`) with audit-style
+  expected-list preview, per-model progress strips, and matched /
+  unmatched / duplicate / already-included buckets. Inline
+  `CheckoutDialog` surfaces the early-checkout alert without leaving
+  the scanner.
+- `fulfilModelRequestsAndCheckout` service composes scan-materialise +
+  checkout writes in a single `$transaction` via shared helpers
+  (`addScannedAssetsToBookingWithinTx`, `checkoutBookingWritesWithinTx`,
+  `runCheckoutSideEffects`) — same callback also records the activity
+  events main brought in.
+- **Audit-trail schema refactor:** `BookingModelRequest` rows are no
+  longer deleted on fulfilment. New columns
+  `fulfilledQuantity Int @default(0)` + `fulfilledAt DateTime?`.
+  Outstanding filter is `fulfilledAt IS NULL`. Manage-assets **Models**
+  tab splits into "Active" + "Fulfilled (read-only)" sections.
+  Migration `20260423120457_track_fulfilled_quantity_on_booking_model_request`.
+- `removeAssets` decrements `fulfilledQuantity` so scan → remove →
+  rescan self-heals without orphaning the request.
+- `reserveBooking` rejects non-`DRAFT` to suppress spurious
+  Reserved → Reserved transition notes when a fulfil flow re-enters
+  the route.
+- Model-request rows render inline in the **Assets & Kits** list (not a
+  separate Card) with a Popover-based actions kebab matching
+  `AssetRowActionsDropdown`.
+- 5 contract tests added for `fulfilModelRequestsAndCheckout`.
+
 ### Sub-phase 3d follow-ups (NOT STARTED)
 
 Found during manual testing of 3d — worth a dedicated sub-phase
@@ -387,6 +438,9 @@ kits), then index grouping (last because it's the most UX-heavy).
 3. `20260403135852_add_quantity_based_custody_fields` — Custody quantity + composite unique
 4. `20260403140000_add_custody_individual_unique_trigger` — DB trigger for individual asset single custody
 5. `20260409100000_rename_asset_to_booking_to_booking_asset` — Phase 3a: rename implicit M2M to explicit BookingAsset
+6. `20260421125426_add_booking_model_request` — Phase 3d: model-request pivot table
+7. `20260423120457_track_fulfilled_quantity_on_booking_model_request` — Phase 3d-Polish: audit-trail columns (`fulfilledQuantity`, `fulfilledAt`)
+8. `20260421123609_add_activity_events_model` — main (PR #2495): structured `ActivityEvent` table for reports
 
 ---
 
@@ -406,6 +460,30 @@ All review threads resolved on the PR.
 
 ---
 
+## Last sync with main
+
+| When                 | Merge commit | What main brought                                                                                                              | Pre-merge HEAD |
+| -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------- |
+| 2026-04-29 (earlier) | `a613f4231`  | Misc churn pre-PR-2495                                                                                                         | `1a5a12ffe`    |
+| 2026-04-29 (later)   | `a64d8c22e`  | **PR #2495 — Activity Events / Reports system** + React Doctor integration + audit bulk-actions + 4 new `.claude/rules/` files | `a613f4231`    |
+
+Conflicted files in the `a64d8c22e` merge: `utils/error.ts`,
+`assets/form.tsx`, `booking/availability-label.tsx`,
+`booking/service.server.test.ts`, `booking/service.server.ts`,
+`custody/service.server.ts`,
+`scanner/drawer/uses/partial-checkin-drawer.tsx`. Resolutions
+documented in the commit body of `a64d8c22e`.
+
+**Open follow-up from this sync:** main's `reports/helpers.server.ts`
+(~1500 lines) and `scripts/seed-reporting-demo/*` came in unconflicted
+but reference pre-Phase-3a `asset.bookings` / `booking.assets` and
+pre-Phase-2 `custody.custodian` (singular). ~60 typecheck errors. The
+ActivityEvent migration + service + types compile fine and are wired
+into checkout / checkin / partialCheckin. The report _renderers_ and
+seed scripts won't run until ported; tracking under "Reports port".
+
+---
+
 ## Files created in this feature
 
 ### New modules:
@@ -415,6 +493,7 @@ All review threads resolved on the PR.
 - `app/modules/consumption-log/quantity-lock.server.ts`
 - `app/modules/consumption-log/low-stock.server.ts`
 - `app/modules/custody/utils.ts`
+- `app/modules/booking-model-request/service.server.ts` (+ `.test.ts`) — Phase 3d
 
 ### New components:
 
@@ -423,6 +502,9 @@ All review threads resolved on the PR.
 - `app/components/assets/quantity-custody-dialog.tsx`
 - `app/components/assets/quantity-custody-list.tsx`
 - `app/components/assets/quick-adjust-dialog.tsx`
+- `app/components/booking/manage-model-requests.tsx` — Phase 3d Models tab
+- `app/components/booking/model-request-row-actions-dropdown.tsx` — Phase 3d-Polish
+- `app/components/scanner/drawer/uses/fulfil-reservations-drawer.tsx` — Phase 3d-Polish
 
 ### New routes:
 
@@ -430,6 +512,13 @@ All review threads resolved on the PR.
 - `api+/assets.adjust-quantity.ts`
 - `api+/assets.assign-quantity-custody.ts`
 - `api+/assets.release-quantity-custody.ts`
+- `api+/bookings.$bookingId.model-requests.ts` — Phase 3d
+- `_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx` — Phase 3d-Polish
+
+### New hooks:
+
+- `app/hooks/use-booking-checkin-session-initialization.ts` — Phase 3c (audit-style expected list)
+- `app/hooks/use-booking-fulfil-session-initialization.ts` — Phase 3d-Polish
 
 ### New emails:
 
@@ -445,6 +534,17 @@ All review threads resolved on the PR.
 ---
 
 ## Current testing status
+
+**Pre-merge baseline at `a613f4231`:** full `pnpm webapp:validate` green
+— **1865 / 1865** tests across 133 files (up from 1747 before
+Phase 3c/3d/3d-Polish unit-test additions). `TESTING-PHASE-3D.md`
+manual checklist is current.
+
+**Post-merge at `a64d8c22e` (pending):** typecheck has ~60 errors in
+main's reports + seed scripts (Phase-3a/Phase-2 incompatibility — see
+"Last sync with main"). Custody / booking / drawer / activity-event
+paths are clean. Test count and validate status will be re-baselined
+once the reports port lands.
 
 Phase 2 was browser-tested and verified working:
 
