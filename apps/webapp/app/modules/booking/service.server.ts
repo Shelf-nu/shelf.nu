@@ -986,6 +986,7 @@ export async function reserveBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1227,6 +1228,7 @@ export async function checkoutBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1508,6 +1510,7 @@ export async function checkinBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1912,6 +1915,7 @@ export async function partialCheckinBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2441,6 +2445,7 @@ export async function archiveBooking({
           title: "Not found",
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2520,6 +2525,7 @@ export async function cancelBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2660,6 +2666,7 @@ export async function revertBookingToDraft({
           label,
           message:
             "Booking not found, are you sure the booking exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2748,6 +2755,7 @@ export async function extendBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in the current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 

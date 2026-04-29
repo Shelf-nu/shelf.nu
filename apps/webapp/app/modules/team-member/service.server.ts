@@ -4,7 +4,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -634,6 +634,9 @@ export async function getTeamMember({
       additionalData: { id, organizationId },
       label,
       status: 404,
+      // Suppress only true Prisma not-found (P2025); let DB / connectivity
+      // failures bubble up to Sentry.
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

@@ -57,6 +57,86 @@ import { getUserByID } from "../user/service.server";
 const label: ErrorLabel = "Location";
 const MAX_LOCATION_DEPTH = 12;
 
+/**
+ * SECURITY: Asserts that every supplied asset ID belongs to `organizationId`.
+ *
+ * Service-layer defense-in-depth guard for the location ↔ asset mutation
+ * helpers (`updateLocationAssets`). Without this check, Prisma's 1:N
+ * `connect`/`disconnect` on `Location.assets` happily accepts cross-org
+ * `assetId`s supplied via the form payload — silently reparenting a victim's
+ * asset out of their workspace (CWE-862 / IDOR).
+ *
+ * @throws {ShelfError} 403 if any of `ids` does not belong to `organizationId`
+ */
+async function assertAssetsInOrganization({
+  ids,
+  organizationId,
+  additionalData,
+}: {
+  ids: Asset["id"][];
+  organizationId: Organization["id"];
+  additionalData?: Record<string, unknown>;
+}): Promise<void> {
+  if (ids.length === 0) return;
+
+  const authorizedCount = await db.asset.count({
+    where: { id: { in: ids }, organizationId },
+  });
+
+  if (authorizedCount !== ids.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Unauthorized",
+      message:
+        "You are not authorized to modify one or more of the selected assets.",
+      additionalData: { ...additionalData, organizationId, ids },
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * SECURITY: Asserts that every supplied kit ID belongs to `organizationId`.
+ *
+ * Service-layer defense-in-depth guard for the location ↔ kit mutation
+ * helpers (`updateLocationKits`). Without this check, Prisma's 1:N
+ * `connect`/`disconnect` on `Location.kits` happily accepts cross-org
+ * `kitId`s supplied via the form payload — silently reparenting a victim's
+ * kit (and its cascading assets) out of their workspace (CWE-862 / IDOR).
+ *
+ * @throws {ShelfError} 403 if any of `ids` does not belong to `organizationId`
+ */
+async function assertKitsInOrganization({
+  ids,
+  organizationId,
+  additionalData,
+}: {
+  ids: Kit["id"][];
+  organizationId: Organization["id"];
+  additionalData?: Record<string, unknown>;
+}): Promise<void> {
+  if (ids.length === 0) return;
+
+  const authorizedCount = await db.kit.count({
+    where: { id: { in: ids }, organizationId },
+  });
+
+  if (authorizedCount !== ids.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Unauthorized",
+      message:
+        "You are not authorized to modify one or more of the selected kits.",
+      additionalData: { ...additionalData, organizationId, ids },
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 export async function getLocation(
   params: Pick<Location, "id"> & {
     organizationId: Organization["id"];
@@ -1534,13 +1614,20 @@ export async function updateLocationAssets({
         },
       })
       .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
+        // Only the genuine "record not found" path should become a
+        // user-facing 404. Re-throw anything else so the outer try/catch
+        // (or `makeShelfError`) can wrap it as a 5xx with capture enabled.
+        if (isNotFoundError(cause)) {
+          throw new ShelfError({
+            cause,
+            message: "Location not found",
+            additionalData: { locationId, userId, organizationId },
+            status: 404,
+            label: "Location",
+            shouldBeCaptured: false,
+          });
+        }
+        throw cause;
       });
 
     /**
@@ -1573,6 +1660,18 @@ export async function updateLocationAssets({
         ]),
       ];
     }
+
+    /**
+     * SECURITY: every submitted asset ID (add or remove) must belong to the
+     * caller's organization. Without this guard, Prisma's `connect`/`disconnect`
+     * on `Location.assets` accepts cross-org IDs, silently reparenting another
+     * workspace's asset to the caller's location (CWE-862).
+     */
+    await assertAssetsInOrganization({
+      ids: Array.from(new Set([...assetIds, ...removedAssetIds])),
+      organizationId,
+      additionalData: { userId, locationId },
+    });
 
     /**
      * Filter out assets already at this location - they don't need notes
@@ -1700,6 +1799,9 @@ export async function updateLocationAssets({
       location,
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while updating the location assets.",
@@ -1738,13 +1840,20 @@ export async function updateLocationKits({
         },
       })
       .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Location not found",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
+        // Only the genuine "record not found" path should become a
+        // user-facing 404. Re-throw anything else so the outer try/catch
+        // (or `makeShelfError`) can wrap it as a 5xx with capture enabled.
+        if (isNotFoundError(cause)) {
+          throw new ShelfError({
+            cause,
+            message: "Location not found",
+            additionalData: { locationId, userId, organizationId },
+            status: 404,
+            label: "Location",
+            shouldBeCaptured: false,
+          });
+        }
+        throw cause;
       });
 
     /**
@@ -1780,6 +1889,19 @@ export async function updateLocationKits({
         ]),
       ];
     }
+
+    /**
+     * SECURITY: every submitted kit ID (add or remove) must belong to the
+     * caller's organization. Without this guard, Prisma's `connect`/`disconnect`
+     * on `Location.kits` accepts cross-org IDs, silently reparenting another
+     * workspace's kit (and its cascading assets) to the caller's location
+     * (CWE-862).
+     */
+    await assertKitsInOrganization({
+      ids: Array.from(new Set([...kitIds, ...removedKitIds])),
+      organizationId,
+      additionalData: { userId, locationId },
+    });
 
     /**
      * Filter out kits already at this location - they don't need notes
@@ -2063,6 +2185,9 @@ export async function updateLocationKits({
       }
     }
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while updating the location kits.",

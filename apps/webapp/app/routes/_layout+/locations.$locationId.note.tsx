@@ -141,6 +141,7 @@ async function assertLocationBelongsToOrganization({
       status: 404,
       additionalData: { locationId, organizationId },
       label: "Location",
+      shouldBeCaptured: false,
     });
   }
 }

@@ -505,32 +505,30 @@ export default function AddAssetsToNewBooking() {
 
   const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
-  const manageKitsUrl = useMemo(
-    () =>
-      `/bookings/${booking.id}/overview/manage-kits?${new URLSearchParams({
-        // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: new Date(booking.from).toISOString(),
-        bookingTo: new Date(booking.to).toISOString(),
-        hideUnavailable: "true",
-        unhideAssetsBookigIds: booking.id,
-      })}`,
-    [booking]
-  );
+  const manageKitsUrl = `/bookings/${
+    booking.id
+  }/overview/manage-kits?${new URLSearchParams({
+    // This button wouldnt be available at all if there is no booking.from and booking.to
+    bookingFrom: new Date(booking.from).toISOString(),
+    bookingTo: new Date(booking.to).toISOString(),
+    hideUnavailable: "true",
+    unhideAssetsBookigIds: booking.id,
+  })}`;
 
   /**
-   * Set selected items for kit based on the route data
+   * Set selected items for kit based on the route data.
+   *
+   * We initialize the shared Jotai atom synchronously during the first render
+   * (guarded by a ref) instead of running the set inside a mount effect. This
+   * avoids the empty-first-frame hydration flicker flagged by
+   * `rendering-hydration-no-flicker` (useEffect(setState, []) → useSyncExternalStore
+   * or synchronous initialization).
    */
-  useEffect(
-    function updateDefaultSelectedItems() {
-      /**
-       * We are setting the default items here from the server data. This runs only once on mount
-       */
-      setSelectedBulkItems(bookingAssets);
-    },
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+  const didInitializeSelectedItemsRef = useRef(false);
+  if (!didInitializeSelectedItemsRef.current) {
+    didInitializeSelectedItemsRef.current = true;
+    setSelectedBulkItems(bookingAssets);
+  }
 
   /**
    * Set disabled items for assets

@@ -258,15 +258,9 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
-  const bookings = kit.assets
-    .map((asset) => {
-      if (asset?.bookings.length) {
-        return asset.bookings;
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .flat();
+  const bookings = kit.assets.flatMap((asset) =>
+    asset?.bookings.length ? asset.bookings : []
+  );
 
   /** Checks whether this is checked out in another not overlapping booking */
   const isCheckedOutInANonConflictingBooking =

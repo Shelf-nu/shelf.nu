@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
@@ -61,6 +62,7 @@ export default function BulkActionsDropdown() {
   );
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -216,21 +218,7 @@ function ConditionalDropdown() {
           <span className="flex items-center gap-2">Actions</span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }} // is a hack to fix the dropdown menu not being in the right place on mobile
-            // can not target [data-radix-popper-content-wrapper] for this file only with css
-            // so we have to use dangerouslySetInnerHTML
-            // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           asChild

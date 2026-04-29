@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import Input from "../forms/input";
 
 export const FilterInput = ({
@@ -9,11 +9,7 @@ export const FilterInput = ({
   filter: string;
   handleFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef?.current?.focus();
-  }, []);
+  const inputRef = useAutoFocus<HTMLInputElement>();
 
   return (
     <Input
@@ -26,7 +22,6 @@ export const FilterInput = ({
       value={filter}
       onChange={handleFilter}
       ref={inputRef}
-      autoFocus
     />
   );
 };

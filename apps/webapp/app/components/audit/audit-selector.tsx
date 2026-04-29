@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import type { FunctionComponent } from "react";
 import {
@@ -51,21 +51,32 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
   error,
   isLoading = false,
 }) => {
+  // `selectedAudit` is initialized from `defaultValue` at mount using a lazy
+  // initializer. Downstream callers don't currently change `defaultValue`
+  // after mount, and the local selection is owned by this component once the
+  // user interacts with it, so we intentionally do NOT sync via an effect
+  // (that would re-introduce react-doctor/no-derived-state-effect).
+  // Consumers needing to reset the selection can remount by passing a
+  // changing `key`.
   const [selectedAudit, setSelectedAudit] = useState<string | undefined>(
-    defaultValue
+    () => defaultValue
   );
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [isOpen, setIsOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setSelectedAudit(defaultValue);
-  }, [defaultValue]);
-
-  // Auto-focus search input when popover opens
-  useEffect(() => {
-    if (isOpen) {
+  /**
+   * Handles popover open/close transitions. Moved out of a `useEffect`
+   * (previously watched `isOpen`) so the search-reset side effects fire
+   * only on the actual state-changing user interaction, satisfying
+   * react-doctor/no-effect-event-handler and keeping the two related
+   * setState calls grouped in a single handler.
+   */
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (open) {
+      // Focus the search input once the popover has mounted it.
       setTimeout(() => {
         searchInputRef.current?.focus();
       }, 0);
@@ -73,7 +84,7 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
       setSearchQuery("");
       setSelectedIndex(0);
     }
-  }, [isOpen]);
+  };
 
   const filteredAudits = useMemo(() => {
     if (!searchQuery) return audits;
@@ -139,7 +150,7 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
     <div className={className}>
       <input type="hidden" name={name} value={selectedAudit || ""} />
 
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <Popover open={isOpen} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
             type="button"

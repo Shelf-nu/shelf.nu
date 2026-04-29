@@ -44,8 +44,7 @@ vi.mock("../assets/assets-index/list-item-tags-column", () => ({
 // why: avoiding button component complexity during unit tests
 vi.mock("../shared/button", () => ({
   Button: ({ children }: { children: ReactNode }) => (
-    // eslint-disable-next-line jsx-a11y/anchor-is-valid
-    <a href="#">{children}</a>
+    <a href="/test">{children}</a>
   ),
 }));
 

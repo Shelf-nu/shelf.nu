@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "react-router";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useModelFilters } from "~/hooks/use-model-filters";
 import type {
   ModelFilterItem,
@@ -15,6 +16,7 @@ import type {
 } from "~/hooks/use-model-filters";
 
 import { isFormProcessing } from "~/utils/form";
+import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 
 import { EmptyState } from "./empty-state";
@@ -78,6 +80,7 @@ type Props = ModelFilterProps & {
   ) => string[];
 };
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function DynamicDropdown({
   name,
   className,
@@ -101,6 +104,12 @@ export default function DynamicDropdown({
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+
+  // Focus the search input when the popover opens (replaces autoFocus to
+  // satisfy jsx-a11y/no-autofocus while preserving the intentional focus).
+  const searchInputRef = useAutoFocus<HTMLInputElement>({
+    when: isPopoverOpen && showSearch,
+  });
 
   const {
     selectedItems,
@@ -206,6 +215,7 @@ export default function DynamicDropdown({
             <When truthy={showSearch}>
               <div className="filters-form relative border-y border-y-gray-200 p-3">
                 <Input
+                  ref={searchInputRef}
                   type="text"
                   label={label}
                   placeholder={
@@ -214,7 +224,6 @@ export default function DynamicDropdown({
                   hideLabel
                   className="text-gray-500"
                   icon={searchIcon}
-                  autoFocus
                   value={searchQuery}
                   onChange={handleSearchQueryChange}
                 />
@@ -255,6 +264,7 @@ export default function DynamicDropdown({
                   tabIndex={0}
                   className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
                   onClick={handleSelectAll}
+                  onKeyDown={handleActivationKeyPress(handleSelectAll)}
                 >
                   <span className="pr-2">Select all</span>
                 </div>

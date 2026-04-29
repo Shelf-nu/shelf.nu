@@ -56,6 +56,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         additionalData: { userId, assetId },
         label: "Assets",
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 

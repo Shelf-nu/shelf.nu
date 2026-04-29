@@ -16,6 +16,16 @@ export type SelectedImage = {
   previewUrl: string;
 };
 
+/**
+ * Module-scope default for `existingImages` so memoized consumers don't
+ * see a new array identity on every render.
+ */
+const EMPTY_EXISTING_IMAGES: Array<{
+  id: string;
+  imageUrl: string;
+  thumbnailUrl?: string | null;
+}> = [];
+
 type AuditImageUploadBoxProps = {
   /** Callback when an image is selected */
   onImageSelect: (file: File, previewUrl: string) => void;
@@ -101,13 +111,14 @@ export function AuditImageUploadBox({
     }
   };
 
-  // Expose file picker trigger to parent
+  // Expose file picker trigger to parent on mount only. Parent callback
+  // identity is read from a ref so we don't re-expose on every parent
+  // re-render (the exposure is a one-way imperative handle hand-off).
+  const onExposeFilePickerRef = useRef(onExposeFilePicker);
+  onExposeFilePickerRef.current = onExposeFilePicker;
   useEffect(() => {
-    if (onExposeFilePicker) {
-      // Pass a stable function that calls the current ref
-      onExposeFilePicker((count) => triggerRef.current(count));
-    }
-  }, [onExposeFilePicker]);
+    onExposeFilePickerRef.current?.((count) => triggerRef.current(count));
+  }, []);
 
   const handleClick = () => {
     if (!disabled && canAddMore) {
@@ -233,7 +244,7 @@ export function AuditImageUploadSection({
   maxCount = 5,
   disabled = false,
   inputNamePrefix = "auditImage",
-  existingImages = [],
+  existingImages = EMPTY_EXISTING_IMAGES,
   onExistingImageRemove,
   onImagesSelected,
   isUploading = false,
@@ -318,12 +329,17 @@ export function AuditImageUploadSection({
     });
   };
 
-  // Expose image removal function to parent
+  // Expose image removal function to parent on mount only. We use a ref
+  // for the parent callback so changes to its identity don't re-expose,
+  // and a ref for the latest `handleImageRemove` so the parent always
+  // invokes the current version without stale closures.
+  const onExposeImageRemovalRef = useRef(onExposeImageRemoval);
+  onExposeImageRemovalRef.current = onExposeImageRemoval;
+  const handleImageRemoveRef = useRef(handleImageRemove);
+  handleImageRemoveRef.current = handleImageRemove;
   useEffect(() => {
-    if (onExposeImageRemoval) {
-      onExposeImageRemoval(handleImageRemove);
-    }
-  }, [onExposeImageRemoval]);
+    onExposeImageRemovalRef.current?.((id) => handleImageRemoveRef.current(id));
+  }, []);
 
   const setFileInputRef = useCallback(
     (id: string, file: File) => (el: HTMLInputElement | null) => {

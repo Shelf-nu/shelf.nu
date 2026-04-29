@@ -129,8 +129,8 @@ export function ResultsDisplay({
                 </Tr>
               </thead>
               <tbody>
-                {result.skipped.map((asset, i) => (
-                  <Tr key={i}>
+                {result.skipped.map((asset) => (
+                  <Tr key={asset.id}>
                     <Td>{asset.title}</Td>
                     <Td className="text-gray-500">{asset.reason}</Td>
                   </Tr>
@@ -158,8 +158,8 @@ export function ResultsDisplay({
                 </Tr>
               </thead>
               <tbody>
-                {result.failed.map((row, i) => (
-                  <Tr key={i}>
+                {result.failed.map((row) => (
+                  <Tr key={`${row.rowNumber}-${row.id}`}>
                     <Td>{row.rowNumber}</Td>
                     <Td>{row.title || row.id || "(unknown)"}</Td>
                     <Td className="text-red-600">{row.error}</Td>

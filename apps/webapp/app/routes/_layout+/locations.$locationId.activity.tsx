@@ -35,22 +35,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { location } = await getLocation({
-      organizationId,
-      id: locationId,
-      userOrganizations,
-      request,
-      include: {
-        notes: {
-          select: { id: true },
+    const [{ location }, notes] = await Promise.all([
+      getLocation({
+        organizationId,
+        id: locationId,
+        userOrganizations,
+        request,
+        include: {
+          notes: {
+            select: { id: true },
+          },
         },
-      },
-    });
-
-    const notes = await getLocationNotes({
-      locationId,
-      organizationId,
-    });
+      }),
+      getLocationNotes({
+        locationId,
+        organizationId,
+      }),
+    ]);
 
     const header: HeaderData = {
       title: `${location.name}'s activity`,

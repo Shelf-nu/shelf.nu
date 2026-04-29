@@ -4,15 +4,21 @@
  * Handles bulk operations on audit sessions from the audits index page.
  * Currently supports:
  * - `bulk-archive` — Archive multiple COMPLETED/CANCELLED audits at once
+ * - `bulk-delete` — Permanently delete multiple ARCHIVED audits at once
  *
- * @see {@link file://../../components/audit/bulk-archive-audits-dialog.tsx} - Dialog component
- * @see {@link file://../../modules/audit/service.server.ts} - Service function
+ * @see {@link file://../../components/audit/bulk-archive-audits-dialog.tsx}
+ * @see {@link file://../../components/audit/bulk-delete-audits-dialog.tsx}
+ * @see {@link file://../../modules/audit/service.server.ts} - Service functions
  */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkArchiveAuditsSchema } from "~/components/audit/bulk-archive-audits-dialog";
+import { BulkDeleteAuditsSchema } from "~/components/audit/bulk-delete-audits-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { bulkArchiveAudits } from "~/modules/audit/service.server";
+import {
+  bulkArchiveAudits,
+  bulkDeleteAudits,
+} from "~/modules/audit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -36,13 +42,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       z
         .object({
-          intent: z.enum(["bulk-archive"]),
+          intent: z.enum(["bulk-archive", "bulk-delete"]),
         })
         .and(CurrentSearchParamsSchema)
     );
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-archive": PermissionAction.archive,
+      "bulk-delete": PermissionAction.delete,
     };
 
     const { organizationId, isSelfServiceOrBase } = await requirePermission({
@@ -72,6 +79,29 @@ export async function action({ request, context }: ActionFunctionArgs) {
         });
 
         return data(payload({ success: true }));
+      }
+
+      case "bulk-delete": {
+        const { auditIds } = parseData(formData, BulkDeleteAuditsSchema);
+
+        const { count } = await bulkDeleteAudits({
+          auditIds,
+          organizationId,
+          userId,
+          currentSearchParams,
+        });
+
+        const isSingle = count === 1;
+        sendNotification({
+          title: isSingle ? "Audit deleted" : "Audits deleted",
+          message: `Permanently deleted ${count} ${
+            isSingle ? "audit" : "audits"
+          }.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true, count }));
       }
 
       default: {

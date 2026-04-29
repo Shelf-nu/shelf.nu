@@ -22,6 +22,10 @@ tsconfig.tsbuildinfo
 # Claude Code development notes (local only)
 .claude-notes/
 
+# Claude Code — personal settings (project-shared settings and skills are committed)
+.claude/settings.local.json
+.claude/.credentials*
+
 **/coverage
 
 # Supabase

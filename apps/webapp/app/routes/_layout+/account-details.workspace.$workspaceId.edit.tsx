@@ -34,7 +34,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { isNotFoundError, makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
   payload,
@@ -98,6 +98,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
           label: "Organization",
           status: 403,
+          // Suppress only the genuine "not owner / not found" case (Prisma
+          // P2025); let DB / connectivity failures bubble up to Sentry as
+          // 5xx so we can detect real incidents.
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -216,6 +220,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           },
           label: "Organization",
           status: 403,
+          // Suppress only the genuine "not owner / not found" case (Prisma
+          // P2025); let DB / connectivity failures bubble up to Sentry as
+          // 5xx so we can detect real incidents.
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 

@@ -20,6 +20,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -178,6 +179,9 @@ export default function IndexLoginForm() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the email field on mount (intentional first-field focus on auth pages). */
+  const emailInputRef = useAutoFocus<HTMLInputElement>();
+
   return (
     <div className="w-full max-w-md">
       {acceptedInvite ? (
@@ -196,11 +200,11 @@ export default function IndexLoginForm() {
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
         <div>
           <Input
+            ref={emailInputRef}
             data-test-id="email"
             label="Email address"
             placeholder="zaans@huisje.com"
             required
-            autoFocus={true}
             name={zo.fields.email()}
             type="email"
             autoComplete="username"

@@ -14,6 +14,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -103,6 +104,9 @@ export default function EditNrm() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the name field when the modal route mounts (replaces autoFocus). */
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
+
   return (
     <div className="modal-content-wrapper">
       <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
@@ -113,6 +117,7 @@ export default function EditNrm() {
 
       <Form method="post" ref={zo.ref}>
         <Input
+          ref={nameInputRef}
           defaultValue={teamMember.name}
           name={zo.fields.name()}
           type="text"
@@ -120,7 +125,6 @@ export default function EditNrm() {
           className="mb-8"
           placeholder="Enter team member’s name"
           required
-          autoFocus
           error={zo.errors.name()?.message}
           disabled={disabled}
         />
