@@ -61,7 +61,6 @@ import type {
   IdleAssetRow,
   CustodySnapshotRow,
   TopBookedAssetRow,
-  AssetDistributionRow,
   AssetInventoryRow,
   MonthlyBookingTrendRow,
   AssetUtilizationRow,
@@ -305,10 +304,8 @@ export default function ReportPage() {
 
   const {
     reportId,
-    report,
     kpis,
     rows,
-    chartSeries,
     filters,
     computedMs,
     totalRows,
@@ -495,9 +492,7 @@ export default function ReportPage() {
       case "distribution":
         return (
           <AssetDistributionContent
-            rows={rows as unknown as AssetDistributionRow[]}
             kpis={kpis}
-            totalRows={totalRows}
             distributionBreakdown={
               (
                 loaderData as typeof loaderData & {
@@ -524,7 +519,6 @@ export default function ReportPage() {
             rows={rows as unknown as MonthlyBookingTrendRow[]}
             kpis={kpis}
             totalRows={totalRows}
-            timeframeLabel={filters.timeframe.label}
             chartSeries={
               (
                 loaderData as typeof loaderData & {
@@ -541,7 +535,6 @@ export default function ReportPage() {
             rows={rows as unknown as AssetUtilizationRow[]}
             kpis={kpis}
             totalRows={totalRows}
-            timeframeLabel={filters.timeframe.label}
             onRowClick={handleUtilizationRowClick}
           />
         );
@@ -552,7 +545,6 @@ export default function ReportPage() {
             rows={rows as unknown as AssetActivityRow[]}
             kpis={kpis}
             totalRows={totalRows}
-            timeframeLabel={filters.timeframe.label}
             onRowClick={handleActivityRowClick}
           />
         );
@@ -1278,8 +1270,6 @@ function OverdueItemsContent({
     0;
   const valueAtRisk =
     (kpis.find((k) => k.id === "total_value_at_risk")?.rawValue as number) || 0;
-  const avgDaysOverdue =
-    (kpis.find((k) => k.id === "avg_days_overdue")?.rawValue as number) || 0;
   const longestOverdue =
     (kpis.find((k) => k.id === "longest_overdue")?.rawValue as number) || 0;
 
@@ -1948,14 +1938,10 @@ function TopBookedAssetsContent({
 // -----------------------------------------------------------------------------
 
 function AssetDistributionContent({
-  rows,
   kpis,
-  totalRows,
   distributionBreakdown,
 }: {
-  rows: AssetDistributionRow[];
   kpis: ReportKpi[];
-  totalRows: number;
   distributionBreakdown?: DistributionBreakdown;
 }) {
   const navigate = useNavigate();
@@ -1973,50 +1959,6 @@ function AssetDistributionContent({
   const handleStatusClick = (item: { id: string }) => {
     void navigate(`/assets?status=${encodeURIComponent(item.id)}`);
   };
-
-  // Column definitions for distribution table
-  const columns: ColumnDef<AssetDistributionRow>[] = [
-    {
-      accessorKey: "groupName",
-      header: "Group",
-      cell: ({ row }) => (
-        <span className="font-medium">{row.original.groupName}</span>
-      ),
-    },
-    {
-      accessorKey: "assetCount",
-      header: "Assets",
-      cell: ({ row }) => <NumberCell value={row.original.assetCount} />,
-    },
-    {
-      accessorKey: "percentage",
-      header: "% of Total",
-      cell: ({ row }) => {
-        const pct = row.original.percentage;
-        return (
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-16 overflow-hidden rounded-full bg-gray-100">
-              <div
-                className="h-full rounded-full bg-blue-500"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <span className="text-xs text-gray-600">{pct.toFixed(1)}%</span>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "totalValue",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.totalValue ? (
-          `$${row.original.totalValue.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-  ];
 
   // Extract KPI values
   const totalAssets =
@@ -2251,13 +2193,11 @@ function MonthlyBookingTrendsContent({
   rows,
   kpis,
   totalRows,
-  timeframeLabel,
   chartSeries,
 }: {
   rows: MonthlyBookingTrendRow[];
   kpis: ReportKpi[];
   totalRows: number;
-  timeframeLabel?: string;
   chartSeries?: ChartSeries[];
 }) {
   // Column definitions for trends table
@@ -2447,13 +2387,11 @@ function AssetUtilizationContent({
   rows,
   kpis,
   totalRows,
-  timeframeLabel,
   onRowClick,
 }: {
   rows: AssetUtilizationRow[];
   kpis: ReportKpi[];
   totalRows: number;
-  timeframeLabel?: string;
   onRowClick?: (row: AssetUtilizationRow) => void;
 }) {
   // Column definitions for utilization table
@@ -2523,13 +2461,6 @@ function AssetUtilizationContent({
   // Extract KPI values
   const avgUtilization =
     (kpis.find((k) => k.id === "avg_utilization")?.rawValue as number) || 0;
-  const highlyUtilized =
-    (kpis.find((k) => k.id === "highly_utilized_count")?.rawValue as number) ||
-    0;
-  const underutilized =
-    (kpis.find((k) => k.id === "underutilized_count")?.rawValue as number) || 0;
-  const totalBookingDays =
-    (kpis.find((k) => k.id === "total_booking_days")?.rawValue as number) || 0;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -2622,13 +2553,11 @@ function AssetActivityContent({
   rows,
   kpis,
   totalRows,
-  timeframeLabel,
   onRowClick,
 }: {
   rows: AssetActivityRow[];
   kpis: ReportKpi[];
   totalRows: number;
-  timeframeLabel?: string;
   onRowClick?: (row: AssetActivityRow) => void;
 }) {
   // Column definitions for activity table
