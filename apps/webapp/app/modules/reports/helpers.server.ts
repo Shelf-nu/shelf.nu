@@ -970,6 +970,7 @@ async function fetchOverdueRows(
       },
       assets: {
         select: {
+          id: true,
           valuation: true,
         },
       },
@@ -995,18 +996,17 @@ async function fetchOverdueRows(
       Math.ceil(msOverdue / (1000 * 60 * 60 * 24))
     );
 
-    // Sum up asset valuations
-    const valueAtRisk = b.assets.reduce(
-      (sum, asset) => sum + (asset.valuation || 0),
-      0
-    );
-
     // Calculate check-in progress from partial check-ins (dedupe in case of duplicates)
     const checkedInAssetIds = new Set(
       b.partialCheckins.flatMap((pc) => pc.assetIds)
     );
     const checkedInCount = checkedInAssetIds.size;
     const uncheckedCount = Math.max(0, b._count.assets - checkedInCount);
+
+    // Sum valuations only for assets still outstanding (not yet checked in)
+    const valueAtRisk = b.assets
+      .filter((asset) => !checkedInAssetIds.has(asset.id))
+      .reduce((sum, asset) => sum + (asset.valuation || 0), 0);
 
     return {
       id: b.id,
@@ -1045,6 +1045,7 @@ async function computeOverdueKpis(
       to: true,
       assets: {
         select: {
+          id: true,
           valuation: true,
         },
       },
@@ -1077,16 +1078,16 @@ async function computeOverdueKpis(
     0
   );
 
-  // Calculate value at risk
-  const totalValueAtRisk = overdueBookings.reduce(
-    (sum, b) =>
-      sum +
-      b.assets.reduce(
-        (assetSum, asset) => assetSum + (asset.valuation || 0),
-        0
-      ),
-    0
-  );
+  // Calculate value at risk - only for assets still outstanding
+  const totalValueAtRisk = overdueBookings.reduce((sum, b) => {
+    const checkedInAssetIds = new Set(
+      b.partialCheckins.flatMap((pc) => pc.assetIds)
+    );
+    const outstandingValuation = b.assets
+      .filter((asset) => !checkedInAssetIds.has(asset.id))
+      .reduce((assetSum, asset) => assetSum + (asset.valuation || 0), 0);
+    return sum + outstandingValuation;
+  }, 0);
 
   // Calculate days overdue
   const daysOverdueList = overdueBookings.map((b) => {
