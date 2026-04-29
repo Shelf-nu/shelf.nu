@@ -41,6 +41,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
           fetch-depth: 0
 
+      - name: 🪢 Re-attach HEAD to a named branch
+        # actions/checkout leaves us on a DETACHED HEAD when given a sha.
+        # react-doctor's --diff path calls `git rev-parse --abbrev-ref HEAD`
+        # to find the current branch; in detached state that returns the
+        # literal "HEAD", which the CLI interprets as "no branch" and silently
+        # falls back to scanning the FULL codebase. Re-attaching HEAD to a
+        # named ref restores the diff path.
+        run: git switch -C react-doctor-pr-head
+
       - name: 📦 Setup pnpm
         uses: pnpm/action-setup@v4
 
