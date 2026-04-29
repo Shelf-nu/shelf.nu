@@ -111,6 +111,18 @@ export default function KitImage({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
+          onKeyDown={
+            withPreview
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleOpenDialog();
+                  }
+                }
+              : undefined
+          }
+          role={withPreview ? "button" : undefined}
+          tabIndex={withPreview ? 0 : undefined}
           src={url}
           className={tw(
             "size-full object-cover",

@@ -5,6 +5,7 @@ import { useZorm } from "react-zorm";
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useFilterPreview } from "~/hooks/use-filter-preview";
 import { CreatePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
 import type { Column } from "~/modules/asset-index-settings/helpers";
@@ -44,6 +45,9 @@ export function CreatePresetDialog({
 }) {
   const zo = useZorm("create-preset", CreatePresetFormSchema);
 
+  /** Ref for the preset-name input so we can focus it on open without autoFocus. */
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
+
   // Get formatted preview component from hook
   const { preview } = useFilterPreview({ query, columns });
 
@@ -71,13 +75,13 @@ export function CreatePresetDialog({
             <input type="hidden" name="intent" value="create-preset" />
             <input type="hidden" name="query" value={query} />
             <Input
+              ref={nameInputRef}
               label="Preset name"
               name="name"
               value={name}
               onChange={onNameChange}
               placeholder="e.g., Available laptops"
               maxLength={60}
-              autoFocus
               error={nameError}
             />
 

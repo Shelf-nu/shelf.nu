@@ -41,6 +41,35 @@ import type { Filter } from "./schema";
 import { userFriendlyAssetStatus } from "../../asset-status-badge";
 
 /**
+ * Presentational helper used by several case branches below. Hoisted to
+ * module scope (instead of being declared inside ValueField) so each
+ * ValueField render doesn't create a brand-new component identity, which
+ * would remount the error text on every keystroke.
+ */
+function ErrorDisplay({ error }: { error?: string }) {
+  return error ? (
+    <div className="mt-1 text-sm text-red-500">{error}</div>
+  ) : null;
+}
+
+/**
+ * Generates a stable unique ID for a MultiDateInput row so React can use
+ * it as a map key. `crypto.randomUUID` is preferred when available (modern
+ * browsers and node), with a fallback to avoid SSR crashes.
+ */
+let dateEntryCounter = 0;
+function createDateEntryId(): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  dateEntryCounter += 1;
+  return `date-entry-${dateEntryCounter}-${Date.now()}`;
+}
+
+/**
  * Helper to filter out conflicting special values in multi-select.
  * When user selects a positive option (e.g., "in-custody"), automatically
  * removes the negative option (e.g., "without-custody") and vice versa.
@@ -78,6 +107,7 @@ function filterConflictingSelections(
   }
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function ValueField({
   filter,
   setFilter,
@@ -231,9 +261,6 @@ export function ValueField({
       : "Enter value";
   }
 
-  // Add error display for components that don't support error prop
-  const ErrorDisplay = ({ error }: { error?: string }) =>
-    error ? <div className="mt-1 text-sm text-red-500">{error}</div> : null;
   switch (filter.type) {
     case "string":
     case "text":
@@ -529,13 +556,19 @@ function BooleanField({
 
   const boolValue = value === "" ? true : value === "true" || value === true;
 
-  // Reset selected index when popover opens
-  useEffect(() => {
-    if (isPopoverOpen) {
-      // Set to "Yes" (0) if true, "No" (1) if false
+  /**
+   * Popover open/close handler. We also reset `selectedIndex` here rather
+   * than in a useEffect, because the reset is purely reactive to this user
+   * event (not to external state changes).
+   */
+  function handleOpenChange(open: boolean) {
+    if (disabled) return;
+    setIsPopoverOpen(open);
+    if (open) {
+      // Seed highlight on the current value — "Yes" (0) or "No" (1).
       setSelectedIndex(boolValue ? 0 : 1);
     }
-  }, [isPopoverOpen, boolValue]);
+  }
 
   const handleSelect = (value: "true" | "false") => {
     handleBooleanChange(value);
@@ -569,7 +602,7 @@ function BooleanField({
       <input type="hidden" value={String(boolValue)} name={name} />
       <Popover
         open={isPopoverOpen && !disabled}
-        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+        onOpenChange={handleOpenChange}
       >
         <PopoverTrigger asChild>
           <Button
@@ -654,10 +687,16 @@ function EnumField({
   // Convert the value into an array for multi-select mode
   const selectedValues = multiSelect ? value.split(", ") : [value];
 
-  // Reset selected index when popover opens
-  useEffect(() => {
-    if (isPopoverOpen) {
-      // For single-select, find the currently selected option
+  /**
+   * Popover open/close handler. Seeds the keyboard highlight on open as
+   * part of the user event itself — react-doctor flags a useEffect that
+   * only runs in response to `isPopoverOpen` flipping (no external-state
+   * dependency), so we inline the reset here.
+   */
+  function handleOpenChange(open: boolean) {
+    if (disabled) return;
+    setIsPopoverOpen(open);
+    if (open) {
       if (!multiSelect) {
         const currentIndex = options.findIndex((opt) => opt.id === value);
         setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
@@ -665,7 +704,7 @@ function EnumField({
         setSelectedIndex(0);
       }
     }
-  }, [isPopoverOpen, value, options, multiSelect]);
+  }
 
   const displayValue = disabled
     ? "Select a column first"
@@ -694,18 +733,35 @@ function EnumField({
     }
   }
 
+  /**
+   * Scrolls the option identified by `index` into view. Called from the
+   * keyboard handler itself (no useEffect) so the scroll is tied to the
+   * user action rather than a state-change listener.
+   */
+  function scrollOptionIntoView(index: number) {
+    const selectedElement = document.getElementById(`enum-option-${index}`);
+    selectedElement?.scrollIntoView({ block: "nearest" });
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {
-      case "ArrowDown":
+      case "ArrowDown": {
         event.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < options.length - 1 ? prev + 1 : prev
-        );
+        const next =
+          selectedIndex < options.length - 1
+            ? selectedIndex + 1
+            : selectedIndex;
+        setSelectedIndex(next);
+        scrollOptionIntoView(next);
         break;
-      case "ArrowUp":
+      }
+      case "ArrowUp": {
         event.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        const next = selectedIndex > 0 ? selectedIndex - 1 : selectedIndex;
+        setSelectedIndex(next);
+        scrollOptionIntoView(next);
         break;
+      }
       case "Enter":
       case " ": // Space key
         event.preventDefault();
@@ -720,18 +776,6 @@ function EnumField({
     }
   };
 
-  // Scroll selected item into view
-  useEffect(() => {
-    if (isPopoverOpen) {
-      const selectedElement = document.getElementById(
-        `enum-option-${selectedIndex}`
-      );
-      if (selectedElement) {
-        selectedElement.scrollIntoView({ block: "nearest" });
-      }
-    }
-  }, [selectedIndex, isPopoverOpen]);
-
   return (
     <>
       <input
@@ -741,7 +785,7 @@ function EnumField({
       />
       <Popover
         open={isPopoverOpen && !disabled}
-        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+        onOpenChange={handleOpenChange}
       >
         <PopoverTrigger asChild>
           <Button
@@ -2199,23 +2243,34 @@ function MultiDateInput({
   name?: string;
   error?: string;
 }) {
-  // Parse initial dates from comma-separated string
-  const [dates, setDates] = useState<string[]>(() => {
-    if (!value) return [""];
-    return value.split(",").map((d) => d.trim());
+  /**
+   * Each row has a stable `id` so we can key the list by it. Using array
+   * index as the key would cause React to reuse DOM nodes across reorders
+   * (e.g. after removing a middle row), which in turn breaks focus and
+   * input state.
+   */
+  type DateEntry = { id: string; value: string };
+
+  const [dates, setDates] = useState<DateEntry[]>(() => {
+    if (!value) return [{ id: createDateEntryId(), value: "" }];
+    return value.split(",").map((d) => ({
+      id: createDateEntryId(),
+      value: d.trim(),
+    }));
   });
 
   // Handle date change at specific index
   const handleDateChange =
     (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
-      const newDates = [...dates];
-      newDates[index] = event.target.value;
+      const newDates = dates.map((entry, i) =>
+        i === index ? { ...entry, value: event.target.value } : entry
+      );
       setDates(newDates);
 
       // Filter out empty dates and convert to UTC
       const validDates = newDates
-        .filter((date) => date)
-        .map((date) => adjustDateToUTC(date, timeZone));
+        .filter((entry) => entry.value)
+        .map((entry) => adjustDateToUTC(entry.value, timeZone));
 
       // Update parent with comma-separated string
       setValue(validDates.join(","));
@@ -2223,7 +2278,7 @@ function MultiDateInput({
 
   // Add new date field
   const addDateField = () => {
-    setDates([...dates, ""]);
+    setDates([...dates, { id: createDateEntryId(), value: "" }]);
   };
   // Remove date field at index
   const removeDateField = (indexToRemove: number) => {
@@ -2232,19 +2287,19 @@ function MultiDateInput({
 
     // Update parent with remaining dates
     const validDates = newDates
-      .filter((date) => date)
-      .map((date) => adjustDateToUTC(date, timeZone));
+      .filter((entry) => entry.value)
+      .map((entry) => adjustDateToUTC(entry.value, timeZone));
     setValue(validDates.join(","));
   };
 
   return (
     <div className="space-y-1">
-      {dates.map((date, index) => (
-        <div key={index} className="relative flex items-center gap-2">
+      {dates.map((entry, index) => (
+        <div key={entry.id} className="relative flex items-center gap-2">
           <Input
             {...commonInputProps}
             type="date"
-            value={date}
+            value={entry.value}
             onChange={handleDateChange(index)}
             className="flex-1"
             name={`${name}_${index}`}

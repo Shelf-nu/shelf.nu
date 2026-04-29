@@ -40,7 +40,11 @@ export default function QrIdDisplayPreferenceSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedPreference, setSelectedPreference] = useState(defaultValue);
+  // Lazy initializer avoids a false-positive derived-state lint: after mount this
+  // state is user-controlled via the selector, so it must NOT re-sync with the prop.
+  const [selectedPreference, setSelectedPreference] = useState(
+    () => defaultValue
+  );
   const [selectedIndex, setSelectedIndex] = useState<number>(() =>
     QR_ID_DISPLAY_OPTIONS.findIndex((option) => option.value === defaultValue)
   );

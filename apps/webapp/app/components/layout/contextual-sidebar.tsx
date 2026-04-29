@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { Outlet, useMatches, useNavigate } from "react-router";
 import { tw } from "~/utils/tw";
 import Header from "./header";
@@ -30,35 +30,28 @@ export default function ContextualSidebar({
   };
   const showSidebar = data?.showSidebar || false;
 
-  const [open, setOpen] = useState(false);
-
+  // Open state is fully derived from the route (`showSidebar`). Closing triggers a
+  // navigation back to the previous route, which then toggles `showSidebar` off.
   const handleOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        setOpen(true);
-      } else {
-        // Check if there's a nested dialog open before closing
-        const dialogBackdrops = document.querySelectorAll(".dialog-backdrop");
-        // Check for Radix AlertDialog overlays that are actually visible
-        const radixOverlays = document.querySelectorAll(
-          '[data-radix-alert-dialog-overlay][data-state="open"]'
-        );
+    (nextOpen: boolean) => {
+      if (nextOpen) return;
+      // Check if there's a nested dialog open before closing
+      const dialogBackdrops = document.querySelectorAll(".dialog-backdrop");
+      // Check for Radix AlertDialog overlays that are actually visible
+      const radixOverlays = document.querySelectorAll(
+        '[data-radix-alert-dialog-overlay][data-state="open"]'
+      );
 
-        // Only navigate away if there's no nested dialog open
-        if (dialogBackdrops.length === 0 && radixOverlays.length === 0) {
-          void navigate(prevRoute.pathname);
-        }
+      // Only navigate away if there's no nested dialog open
+      if (dialogBackdrops.length === 0 && radixOverlays.length === 0) {
+        void navigate(prevRoute.pathname);
       }
     },
     [navigate, prevRoute.pathname]
   );
 
-  useEffect(() => {
-    setOpen(showSidebar);
-  }, [showSidebar]);
-
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={showSidebar} onOpenChange={handleOpenChange}>
       <SheetContent
         className={tw(
           "flex w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]",

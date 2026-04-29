@@ -37,6 +37,13 @@ vi.mock("~/database/db.server", () => ({
     note: {
       createMany: dbMocks.note.createMany,
     },
+    // why: action wraps all operations in a transaction
+    $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
+      cb({
+        kit: { update: dbMocks.kit.update },
+        asset: { update: dbMocks.asset.update },
+      })
+    ),
   },
 }));
 
@@ -55,6 +62,12 @@ vi.mock("~/modules/team-member/service.server", () => ({
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
   createNotes: vi.fn(),
+}));
+
+// why: testing custody assignment without executing actual activity event recording
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/utils/emitter/send-notification.server", () => ({

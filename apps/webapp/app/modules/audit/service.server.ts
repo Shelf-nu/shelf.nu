@@ -44,6 +44,7 @@ import {
   createAssetsRemovedFromAuditNote,
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
@@ -325,6 +326,20 @@ export async function createAuditSession(
       expectedAssetCount: assets.length,
       tx,
     });
+
+    // Activity event — AUDIT_CREATED.
+    await recordEvent(
+      {
+        organizationId,
+        actorUserId: createdById,
+        action: "AUDIT_CREATED",
+        entityType: "AUDIT",
+        entityId: session.id,
+        auditSessionId: session.id,
+        meta: { expectedAssetCount: assets.length },
+      },
+      tx
+    );
 
     // Fetch the created audit assets to get their IDs
     const createdAuditAssets = await tx.auditAsset.findMany({
@@ -1103,6 +1118,19 @@ export async function recordAuditScan(
             tx,
             prefetchedUser: scannerUser,
           });
+
+          // Activity event — AUDIT_STARTED.
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "AUDIT_STARTED",
+              entityType: "AUDIT",
+              entityId: auditSessionId,
+              auditSessionId,
+            },
+            tx
+          );
         }
 
         // Create the scan record
@@ -1194,6 +1222,22 @@ export async function recordAuditScan(
           prefetchedUser: scannerUser,
           prefetchedAsset: scannedAsset,
         });
+
+        // Activity event — AUDIT_ASSET_SCANNED.
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "AUDIT_ASSET_SCANNED",
+            entityType: "AUDIT",
+            entityId: auditSessionId,
+            auditSessionId,
+            auditAssetId: auditAssetId ?? undefined,
+            assetId,
+            meta: { isExpected },
+          },
+          tx
+        );
 
         return {
           scanId: scan.id,
@@ -1479,6 +1523,26 @@ export async function completeAuditSession({
         completionNote,
         tx,
       });
+
+      // Activity event — AUDIT_COMPLETED. Counters go in meta so reports
+      // can aggregate without re-running audit queries.
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_COMPLETED",
+          entityType: "AUDIT",
+          entityId: sessionId,
+          auditSessionId: sessionId,
+          meta: {
+            expectedCount,
+            foundCount,
+            missingCount,
+            unexpectedCount,
+          },
+        },
+        tx
+      );
     });
 
     // Fetch full audit details for email notification
@@ -1884,6 +1948,16 @@ export async function cancelAuditSession({
       },
     });
 
+    // Activity event — AUDIT_CANCELLED.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId,
+      action: "AUDIT_CANCELLED",
+      entityType: "AUDIT",
+      entityId: auditSessionId,
+      auditSessionId,
+    });
+
     // Send cancellation email to assignees (excluding creator)
     const assigneesToNotify = auditSession.assignments.filter(
       (assignment) => assignment.userId !== userId && assignment.user.email
@@ -2056,6 +2130,20 @@ export async function addAssetsToAudit({
           skippedCount,
           tx,
         });
+
+        // Activity events — one AUDIT_ASSETS_ADDED per asset, inside the tx.
+        await recordEvents(
+          newAssetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "AUDIT_ASSETS_ADDED",
+            entityType: "AUDIT",
+            entityId: auditId,
+            auditSessionId: auditId,
+            assetId,
+          })),
+          tx
+        );
       }
 
       return { addedCount, skippedCount, newAssetIds, audit };
@@ -2163,6 +2251,21 @@ export async function removeAssetFromAudit({
         tx,
       });
 
+      // Activity event — AUDIT_ASSETS_REMOVED (single asset).
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_ASSETS_REMOVED",
+          entityType: "AUDIT",
+          entityId: auditId,
+          auditSessionId: auditId,
+          auditAssetId,
+          assetId: auditAsset.assetId,
+        },
+        tx
+      );
+
       return { assetId: auditAsset.assetId, audit };
     })
     .then(async (result) => {
@@ -2257,6 +2360,21 @@ export async function removeAssetsFromAudit({
         tx,
       });
 
+      // Activity events — one AUDIT_ASSETS_REMOVED per asset, inside the tx.
+      await recordEvents(
+        auditAssets.map((aa) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_ASSETS_REMOVED",
+          entityType: "AUDIT",
+          entityId: auditId,
+          auditSessionId: auditId,
+          auditAssetId: aa.id,
+          assetId: aa.assetId,
+        })),
+        tx
+      );
+
       return { removedCount: auditAssets.length, assetIds, audit };
     })
     .then(async (result) => {
@@ -2337,6 +2455,19 @@ export async function archiveAuditSession({
           auditSessionId,
         },
       });
+
+      // Activity event — AUDIT_ARCHIVED.
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_ARCHIVED",
+          entityType: "AUDIT",
+          entityId: auditSessionId,
+          auditSessionId,
+        },
+        tx
+      );
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;
@@ -2542,6 +2673,20 @@ export async function bulkArchiveAudits({
           auditSessionId: a.id,
         })),
       });
+
+      // Activity events — one AUDIT_ARCHIVED per audit, inside the tx.
+      await recordEvents(
+        audits.map((a) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "AUDIT_ARCHIVED",
+          entityType: "AUDIT",
+          entityId: a.id,
+          auditSessionId: a.id,
+          meta: { bulk: true },
+        })),
+        tx
+      );
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;

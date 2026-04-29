@@ -263,9 +263,69 @@ function assetIdForScannedKey(
   return item?.data?.id;
 }
 
+/** Props required to render the booking header row at the top of the drawer. */
+type BookingHeaderBooking = Pick<
+  Booking,
+  "id" | "name" | "status" | "custodianUserId" | "from" | "to"
+>;
+
+/**
+ * Renders the booking summary strip at the top of the partial check-in drawer.
+ * Hoisted to module scope (instead of being a nested component) to avoid
+ * remounting the header on every render of the parent drawer.
+ */
+function BookingHeader({ booking }: { booking: BookingHeaderBooking }) {
+  return (
+    <div className="border border-b-0 bg-gray-50 p-4">
+      <div className="flex items-center justify-between">
+        {/* Left side: Booking name and status */}
+        <div className="flex items-center gap-3">
+          <div className="min-w-[130px]">
+            <span className="word-break mb-1 block font-medium">
+              <Button
+                to={`/bookings/${booking.id}`}
+                variant="link"
+                className="text-left font-medium text-gray-900 hover:text-gray-700"
+              >
+                {booking.name}
+              </Button>
+            </span>
+            <div>
+              <BookingStatusBadge
+                status={booking.status}
+                custodianUserId={booking.custodianUserId || undefined}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Right side: Dates and progress */}
+        <div className="flex items-center gap-6 text-sm">
+          {/* From date */}
+          <div className="text-right">
+            <span className="block text-gray-600">From</span>
+            <span className="block font-medium text-gray-900">
+              <DateS date={booking.from} includeTime />
+            </span>
+          </div>
+
+          {/* To date */}
+          <div className="text-right">
+            <span className="block text-gray-600">To</span>
+            <span className="block font-medium text-gray-900">
+              <DateS date={booking.to} includeTime />
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Drawer component for managing scanned assets to be checked in from bookings
  */
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function PartialCheckinDrawer({
   className,
   style,
@@ -1241,7 +1301,7 @@ export default function PartialCheckinDrawer({
           className
         )}
         style={style}
-        headerContent={<BookingHeader />}
+        headerContent={<BookingHeader booking={booking} />}
       />
     </DispositionContext.Provider>
   );
@@ -2144,7 +2204,7 @@ const CustomForm = ({
         {/* Hidden form fields */}
         {assetIdsForCheckin.map((assetId, index) => (
           <input
-            key={`assetIds-${index}`}
+            key={`assetIds-${assetId}`}
             type="hidden"
             name={`assetIds[${index}]`}
             value={assetId}

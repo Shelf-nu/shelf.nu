@@ -1,19 +1,66 @@
-import type { RefObject, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, RefObject, ReactNode } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import ReactDOM from "react-dom";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
+/** Shape of the sticky-header positioning data tracked by the reducer. */
+type StickyState = {
+  isSticky: boolean;
+  top: number;
+  left: number;
+  width: string;
+  columnCoords: { left: number; width: number }[];
+};
+
+/**
+ * Actions that can update the sticky-header state. Coalescing these
+ * transitions into a reducer avoids cascading setState calls, which would
+ * otherwise each trigger a separate commit.
+ */
+type StickyAction =
+  | {
+      type: "SET_STICKY";
+      payload: {
+        top: number;
+        left: number;
+        width: string;
+        columnCoords: StickyState["columnCoords"];
+      };
+    }
+  | { type: "SET_UNSTICKY" }
+  | { type: "SET_COLUMN_COORDS"; payload: StickyState["columnCoords"] };
+
+const initialStickyState: StickyState = {
+  isSticky: false,
+  top: 0,
+  left: 0,
+  width: "100%",
+  columnCoords: [],
+};
+
+function stickyReducer(state: StickyState, action: StickyAction): StickyState {
+  switch (action.type) {
+    case "SET_STICKY":
+      return {
+        isSticky: true,
+        ...action.payload,
+      };
+    case "SET_UNSTICKY":
+      // Keep positioning coords; toggling only the flag avoids a second
+      // re-render from clearing them separately.
+      return { ...state, isSticky: false };
+    case "SET_COLUMN_COORDS":
+      return { ...state, columnCoords: action.payload };
+    default:
+      return state;
+  }
+}
+
 export function useStickyHeaderPortal() {
-  const [isSticky, setIsSticky] = useState(false);
   const originalHeaderRef = useRef<HTMLTableSectionElement>(null);
   const stickyHeaderRef = useRef<HTMLDivElement>(null);
-  const [coords, setCoords] = useState({
-    top: 0,
-    left: 0,
-    width: "100%",
-    columnCoords: [] as { left: number; width: number }[],
-  });
+  const [state, dispatch] = useReducer(stickyReducer, initialStickyState);
 
   useEffect(() => {
     const headerRefCurrent = originalHeaderRef.current;
@@ -29,28 +76,36 @@ export function useStickyHeaderPortal() {
         width: column.offsetWidth,
         left: column.getBoundingClientRect().left,
       }));
-      setCoords((prev) => ({ ...prev, columnCoords: newColumnCoords }));
+      dispatch({ type: "SET_COLUMN_COORDS", payload: newColumnCoords });
     }
 
     const tableParent = tableElement.parentElement;
 
-    tableParent?.addEventListener("scroll", handleTableHorizontalScroll);
+    // Use `{ passive: true }` so the listener never blocks the main thread's
+    // scroll pipeline — we only read coords, we never call preventDefault.
+    tableParent?.addEventListener("scroll", handleTableHorizontalScroll, {
+      passive: true,
+    });
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         const newIsSticky = !entry.isIntersecting;
-        setIsSticky(newIsSticky);
 
         if (newIsSticky) {
-          setCoords({
-            top: 0,
-            left: tableElement.getBoundingClientRect().left,
-            width: `${tableElement.getBoundingClientRect().width}px`,
-            columnCoords: Array.from(columns).map((column) => ({
-              width: column.offsetWidth,
-              left: column.getBoundingClientRect().left,
-            })),
+          dispatch({
+            type: "SET_STICKY",
+            payload: {
+              top: 0,
+              left: tableElement.getBoundingClientRect().left,
+              width: `${tableElement.getBoundingClientRect().width}px`,
+              columnCoords: Array.from(columns).map((column) => ({
+                width: column.offsetWidth,
+                left: column.getBoundingClientRect().left,
+              })),
+            },
           });
+        } else {
+          dispatch({ type: "SET_UNSTICKY" });
         }
       },
       {
@@ -64,13 +119,42 @@ export function useStickyHeaderPortal() {
     }
 
     return () => {
+      tableParent?.removeEventListener("scroll", handleTableHorizontalScroll);
       if (headerRefCurrent) {
         observer.unobserve(headerRefCurrent);
       }
     };
   }, []);
 
-  return { originalHeaderRef, isSticky, stickyHeaderRef, coords };
+  const { isSticky, top, left, width, columnCoords } = state;
+  return {
+    originalHeaderRef,
+    isSticky,
+    stickyHeaderRef,
+    coords: { top, left, width, columnCoords },
+  };
+}
+
+/**
+ * Style object for the positional (dynamic) bits of the sticky header.
+ * We only keep `top`, `left`, and `width` inline because they are computed
+ * from live DOM measurements — everything else lives in Tailwind classes
+ * to keep the inline style object small and cacheable.
+ */
+function stickyHeaderStyle({
+  top,
+  left,
+  width,
+}: {
+  top: number;
+  left: number;
+  width: string;
+}): CSSProperties {
+  return {
+    top: `${top}px`,
+    left: `${left}px`,
+    width: width.at(-1) === "x" ? width : `${width}px`,
+  };
 }
 
 export const StickyHeader = ({
@@ -134,16 +218,11 @@ export const StickyHeader = ({
   return ReactDOM.createPortal(
     <div
       ref={stickyHeaderRef}
-      style={{
-        position: "fixed",
-        top: `${top}px`,
-        left: `${left}px`,
-        width: width.at(-1) === "x" ? width : `${width}px`,
-        height: 53,
-        backgroundColor: "white",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-        zIndex: 1000,
-      }}
+      // `isolate` creates a new stacking context so we can use a modest
+      // z-index (z-30) instead of escalating values — avoids the
+      // z-index:1000+ smell while still floating above table rows.
+      className="fixed isolate z-30 h-[53px] bg-white shadow-[0_2px_4px_rgba(0,0,0,0.1)]"
+      style={stickyHeaderStyle({ top, left, width })}
     >
       {children}
     </div>,

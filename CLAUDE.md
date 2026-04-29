@@ -32,6 +32,7 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm turbo typecheck` - TypeScript type checking (all packages)
 - `pnpm run format` - Prettier code formatting (root-level)
 - `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
+- `pnpm webapp:doctor` - Run [react-doctor](https://www.react.doctor/) against the webapp (React health diagnostics: hook misuse, perf, a11y, architecture). Advisory only — not wired into `validate` or CI gates.
 
 ### Database
 
@@ -204,6 +205,26 @@ const disabled = useDisabled(fetcher);
 ### Deprecated Components
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
+
+### Silencing react-doctor findings
+
+`pnpm webapp:doctor` is advisory, not a CI gate, but we aim to keep it clean.
+
+**Important:** `react-doctor` does **not** respect `// eslint-disable-next-line` comments. The only way to silence a finding is to refactor the code so the pattern no longer matches. Standard ESLint disable comments still work for `pnpm webapp:lint` — they just don't help with `pnpm webapp:doctor`.
+
+**Refactor strategies for common findings:**
+
+- **`react/no-danger` for static CSS injection** — use React's native `<style>{cssString}</style>` form (safe text child). See `apps/webapp/app/components/shared/mobile-dropdown-styles.tsx` for the reusable mobile-dropdown helper.
+- **`jsx-a11y/no-autofocus`** — remove the `autoFocus` prop, then focus imperatively with `ref.current?.focus()` inside a `useEffect` when intentional modal/form focus is needed. This satisfies the rule and keeps the UX.
+- **`react/no-danger` for scripts (e.g., `<script>` injecting `window.env`)** — if no refactor is possible, the finding will remain. Leave a short `// why:` comment above the call site so maintainers understand why it's there, and treat it as an accepted residual.
+
+**When you must leave a finding in place** (e.g., SSR script injection, third-party API that only returns HTML), add a `// why:` comment above the code even though the finding will still appear in scans. The comment is for humans reviewing the diff later, not for the tool.
+
+```tsx
+// why: <explanation>
+// react-doctor flags this but refactoring would regress <X>
+<script ... />
+```
 
 ### Form Validation Pattern (Required)
 

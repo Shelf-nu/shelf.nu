@@ -5,6 +5,9 @@ import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 
+/** Stable module-scoped default to avoid new array identity on each render */
+const EMPTY_TARGET_ROLES: OrganizationRoles[] = [];
+
 interface UpdateFormProps {
   id?: string;
   title?: string;
@@ -24,7 +27,7 @@ export function UpdateForm({
   imageUrl = null,
   publishDate,
   status = UpdateStatus.DRAFT,
-  targetRoles = [],
+  targetRoles = EMPTY_TARGET_ROLES,
 }: UpdateFormProps) {
   // Default publish date to now if not provided
   const defaultPublishDate = publishDate

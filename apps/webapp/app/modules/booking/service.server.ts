@@ -114,6 +114,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
@@ -273,6 +274,31 @@ export async function createStatusTransitionNote({
     organizationId,
     content,
   });
+
+  // Activity event — records the canonical status transition for reports.
+  // Best-effort: don't fail the note creation if event recording fails.
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
 }
 
 /**
@@ -474,10 +500,47 @@ export async function createBooking({
       };
     }
 
-    return await db.booking.create({
-      data: dataToCreate,
-      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+    // Use transaction to ensure booking creation and activity events are atomic
+    const createdBooking = await db.$transaction(async (tx) => {
+      const created = await tx.booking.create({
+        data: dataToCreate,
+        include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+      });
+
+      // Activity event for booking creation - must be inside transaction
+      await recordEvent(
+        {
+          organizationId: booking.organizationId,
+          actorUserId: booking.creatorId,
+          action: "BOOKING_CREATED",
+          entityType: "BOOKING",
+          entityId: created.id,
+          bookingId: created.id,
+          meta: { assetCount: assetIds.length },
+        },
+        tx
+      );
+
+      // One BOOKING_ASSETS_ADDED event per asset attached at creation.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: created.id,
+            bookingId: created.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
+      return created;
     });
+
+    return createdBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1679,14 +1742,16 @@ export async function checkoutBooking({
      * (other booking checkouts, direct custody assignments, quantity
      * adjustments) on the same asset, closing a TOCTOU window where two
      * checkouts could otherwise pass the guard against the same stale
-     * snapshot and both commit. */
+     * snapshot and both commit. The same callback also records activity
+     * events from main's audit-trail integration — atomic with the
+     * checkout writes so a partial failure doesn't leave orphaned events. */
     const uniqueQtyTrackedAssetIds = Array.from(
       new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
     );
 
     await db.$transaction(
-      async (tx) =>
-        checkoutBookingWritesWithinTx(tx, {
+      async (tx) => {
+        await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           bookingAssetIds: bookingFound.bookingAssets.map((ba) => ba.asset.id),
           qtyTrackedBookingAssets,
@@ -1694,7 +1759,26 @@ export async function checkoutBooking({
           dataToUpdate,
           kitIds,
           hasKits,
-        }),
+        });
+
+        // Activity events — one BOOKING_CHECKED_OUT per asset on the
+        // booking. Phase 3a renamed `bookingFound.assets` → the
+        // `bookingAssets` pivot, so we map through `ba.asset.id`.
+        if (bookingFound.bookingAssets.length > 0) {
+          await recordEvents(
+            bookingFound.bookingAssets.map((ba) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_CHECKED_OUT",
+              entityType: "BOOKING",
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              assetId: ba.asset.id,
+            })),
+            tx
+          );
+        }
+      },
       { timeout: 15000 }
     );
 
@@ -2659,6 +2743,25 @@ export async function checkinBooking({
           }
         }
 
+        // Activity events — one BOOKING_CHECKED_IN per asset, inside the tx.
+        // Must be atomic with booking status update for audit trail consistency.
+        // Phase 3a renamed `bookingFound.assets` → walk the `bookingAssets`
+        // pivot.
+        if (bookingFound.bookingAssets.length > 0) {
+          await recordEvents(
+            bookingFound.bookingAssets.map((ba) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_CHECKED_IN",
+              entityType: "BOOKING",
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              assetId: ba.asset.id,
+            })),
+            tx
+          );
+        }
+
         /** Finally update the booking */
         return tx.booking.update({
           where: { id: bookingFound.id },
@@ -3453,6 +3556,31 @@ export async function partialCheckinBooking({
         },
       });
 
+      // Activity events — one BOOKING_PARTIAL_CHECKIN per asset that had
+      // activity in this session (qty disposition or individual flip).
+      // Inside the tx so audit-trail recording is atomic with the writes
+      // (matches `checkoutBooking` + the project's `use-record-event` rule;
+      // diverges from main's `assetIds.map(...)` only because Phase 3c
+      // filters out qty assets with 0/0/0/0 dispositions).
+      const assetIdsTouchedInTx = [
+        ...individualAssetIds,
+        ...qtySummaries.map((s) => s.assetId),
+      ];
+      if (assetIdsTouchedInTx.length > 0) {
+        await recordEvents(
+          assetIdsTouchedInTx.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_PARTIAL_CHECKIN",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
       // Determine completion uniformly via the shared helper — keeps
       // individual + qty-tracked semantics in one place.
       const bookingIsComplete = await isBookingFullyCheckedIn(tx, id);
@@ -3562,6 +3690,8 @@ export async function partialCheckinBooking({
       }
 
       // Booking-side summary note (one per session).
+      // (Activity events were already recorded INSIDE the tx — see
+      //  `assetIdsTouchedInTx` block.)
       const assetIdsTouched = [
         ...txResult.individualAssetIds,
         ...txResult.qtySummaries.map((s) => s.assetId),
@@ -3811,6 +3941,24 @@ export async function updateBookingAssets({
           });
         }
       }
+
+      // Activity events — one BOOKING_ASSETS_ADDED per asset added, inside the tx.
+      // Must be atomic with asset addition for audit trail consistency.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: b.id,
+            bookingId: b.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
       return b;
     });
 
@@ -3971,6 +4119,16 @@ export async function archiveBooking({
       custodianUserId: updatedBooking.custodianUserId || undefined,
     });
 
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_ARCHIVED",
+      entityType: "BOOKING",
+      entityId: updatedBooking.id,
+      bookingId: updatedBooking.id,
+    });
+
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
@@ -4114,6 +4272,17 @@ export async function cancelBooking({
       toStatus: BookingStatus.CANCELLED,
       userId,
       custodianUserId: booking.custodianUserId || undefined,
+    });
+
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_CANCELLED",
+      entityType: "BOOKING",
+      entityId: booking.id,
+      bookingId: booking.id,
+      meta: cancellationReason ? { cancellationReason } : undefined,
     });
 
     return booking;
@@ -5002,6 +5171,33 @@ export async function removeAssets({
       userId,
       assetIds,
     });
+
+    // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
+    // Best-effort: don't fail the removal if event recording fails.
+    if (assetIds.length > 0) {
+      try {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_ASSETS_REMOVED",
+            entityType: "BOOKING",
+            entityId: booking.id,
+            bookingId: booking.id,
+            assetId,
+          }))
+        );
+      } catch (err) {
+        Logger.error(
+          new ShelfError({
+            cause: err,
+            message: "Failed to record BOOKING_ASSETS_REMOVED events",
+            additionalData: { bookingId: booking.id, assetIds },
+            label,
+          })
+        );
+      }
+    }
 
     // BOOKING ACTIVITY LOG: Log removal activity
     // Creates system note when assets/kits are removed from a booking

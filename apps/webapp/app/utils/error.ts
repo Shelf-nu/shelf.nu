@@ -103,6 +103,7 @@ export type FailureReason = {
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
     | "Audit"
+    | "Activity"
     | "Consumption Log"
     | "Update";
   /**

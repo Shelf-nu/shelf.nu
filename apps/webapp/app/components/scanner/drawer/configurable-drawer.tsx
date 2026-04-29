@@ -184,8 +184,12 @@ export default function ConfigurableDrawer<T>({
                   {Object.entries(formData).map(([key, value]) => {
                     if (Array.isArray(value)) {
                       return value.map((val, index) => (
+                        // Key uses the value itself (e.g. the scanned qrId),
+                        // which is unique per array — the `index` still drives
+                        // the submitted field name so form semantics are
+                        // preserved.
                         <input
-                          key={`${key}-${index}`}
+                          key={`${key}-${String(val)}`}
                           type="hidden"
                           name={`${key}[${index}]`}
                           value={val}

@@ -277,6 +277,25 @@ export default function EmailSettingsPage() {
   );
 }
 
+/**
+ * Hoisted preview-button styles. Extracted from the JSX to avoid an
+ * inline `style={{ ... }}` object that allocates on every render and
+ * trips react-doctor's `no-inline-exhaustive-style` check.
+ *
+ * Kept as CSS-in-JS (not Tailwind) because the preview intentionally
+ * mirrors the transactional email template, which uses raw hex colours.
+ */
+const EMAIL_PREVIEW_VIEW_BUTTON_STYLE = {
+  display: "inline-block",
+  backgroundColor: "#EF6820",
+  color: "white",
+  fontSize: "14px",
+  fontWeight: "700",
+  padding: "10px 18px",
+  borderRadius: "4px",
+  marginBottom: "32px",
+} as const;
+
 /** Static email preview mimicking the booking email template */
 function EmailPreview({
   footerText,
@@ -397,18 +416,7 @@ function EmailPreview({
             </div>
 
             {/* View button */}
-            <div
-              style={{
-                display: "inline-block",
-                backgroundColor: "#EF6820",
-                color: "white",
-                fontSize: "14px",
-                fontWeight: "700",
-                padding: "10px 18px",
-                borderRadius: "4px",
-                marginBottom: "32px",
-              }}
-            >
+            <div style={EMAIL_PREVIEW_VIEW_BUTTON_STYLE}>
               View booking in app
             </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -70,14 +70,14 @@ export default function CreateBookingForSelectedAssetsDialog() {
     currentUserId: user?.id,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (defaultEndDate) {
-        setEndDate(defaultEndDate);
-      }
-    },
-    [defaultEndDate]
-  );
+  // Re-sync endDate when the computed default changes (e.g. when working hours or
+  // buffer settings load). Uses the React "store previous value in a ref" pattern
+  // so we mirror the prop during render instead of via a useEffect.
+  const prevDefaultEndDate = useRef(defaultEndDate);
+  if (defaultEndDate && defaultEndDate !== prevDefaultEndDate.current) {
+    prevDefaultEndDate.current = defaultEndDate;
+    setEndDate(defaultEndDate);
+  }
 
   return (
     <BulkUpdateDialogContent

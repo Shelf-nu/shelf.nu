@@ -40,6 +40,17 @@ type BarcodeInput = {
   value: string;
 };
 
+/**
+ * Internal barcode shape that carries a stable client-side key for React
+ * reconciliation. Existing barcodes reuse their persisted `id`; new rows get
+ * a freshly generated UUID so keys stay stable across reorders/removals.
+ */
+type BarcodeInputWithKey = BarcodeInput & { clientKey: string };
+
+/** Generate a stable key for a barcode row (persisted id or fresh UUID). */
+const makeBarcodeKey = (existingId?: string): string =>
+  existingId ?? crypto.randomUUID();
+
 type BarcodesInputProps = {
   className?: string;
   style?: CSSProperties;
@@ -97,7 +108,9 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
     },
     ref
   ) {
-    const [barcodes, setBarcodes] = useState<BarcodeInput[]>(incomingBarcodes);
+    const [barcodes, setBarcodes] = useState<BarcodeInputWithKey[]>(() =>
+      incomingBarcodes.map((b) => ({ ...b, clientKey: makeBarcodeKey(b.id) }))
+    );
     const [touchedFields, setTouchedFields] = useState<Set<number>>(new Set());
     const [clearedServerErrors, setClearedServerErrors] = useState<Set<number>>(
       new Set()
@@ -222,7 +235,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
           const valueErrorMessage = serverError || clientError;
 
           return (
-            <div key={i} className="mb-3">
+            <div key={barcode.clientKey} className="mb-3">
               <div className="flex flex-col items-start gap-2 md:flex-row">
                 {/* Barcode Type Select */}
                 <div className=" flex w-full items-end gap-2 md:w-auto md:flex-1 md:items-start">
@@ -349,7 +362,11 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
           onClick={() => {
             setBarcodes((prev) => [
               ...prev,
-              { type: BarcodeType.Code128, value: "" },
+              {
+                type: BarcodeType.Code128,
+                value: "",
+                clientKey: makeBarcodeKey(),
+              },
             ]);
           }}
         >

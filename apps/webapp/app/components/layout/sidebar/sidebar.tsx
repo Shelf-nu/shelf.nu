@@ -397,7 +397,10 @@ const SidebarInset = forwardRef<HTMLDivElement, ComponentProps<"main">>(
       <main
         ref={ref}
         className={tw(
-          "h-dvh w-full overflow-auto bg-gray-25 px-4",
+          // `flex flex-col` lets pages opt into a viewport-bounded layout
+          // (e.g. reports) by adding `flex-1` to a child. Pages without
+          // `flex-1` children continue to render at natural height.
+          "flex h-dvh w-full flex-col overflow-auto bg-gray-25 px-4",
           isAvailabilityView ? (isKitIndex ? "pb-0" : "pb-[46px]") : "pb-10",
           className
         )}
@@ -706,8 +709,10 @@ const SidebarMenuSkeleton = forwardRef<
     showIcon?: boolean;
   }
 >(({ className, showIcon = false, ...props }, ref) => {
-  // Random width between 50 to 90%.
-  const width = useMemo(() => `${Math.floor(Math.random() * 40) + 50}%`, []);
+  // why: generate the random width once per mount via lazy initializer —
+  // computing at render time (or strict-mode double-render) makes the
+  // skeleton width jitter while it's displayed.
+  const [width] = useState(() => `${Math.floor(Math.random() * 40) + 50}%`);
 
   return (
     <div

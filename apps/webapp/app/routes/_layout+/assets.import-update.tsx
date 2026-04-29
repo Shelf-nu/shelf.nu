@@ -44,8 +44,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       action: PermissionAction.import,
     });
 
+    // why: subscription assertion must short-circuit BEFORE parsing the
+    // multipart body, otherwise non-entitled users can force CSV body
+    // parsing of large uploads. Keep sequential — do not Promise.all here.
     await assertUserCanImportAssets({ organizationId, organizations });
-
     // Clone the request so we can read formData here for intent/validation
     // while preserving the original body for csvDataFromRequest() below
     const clonedFormData = await request.clone().formData();

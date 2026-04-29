@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
@@ -117,7 +117,7 @@ export const AssetsList = ({
       )}
     >
       <When truthy={!!isSwappingMode}>
-        <motion.div
+        <m.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -126,7 +126,7 @@ export const AssetsList = ({
         >
           <Spinner />
           <p className="mt-2">Changing mode...</p>
-        </motion.div>
+        </m.div>
       </When>
 
       {!isMd && !modeIsSimple ? (

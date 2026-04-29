@@ -28,6 +28,7 @@ import {
 } from "~/components/shared/command";
 import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -471,9 +472,11 @@ export function getTeamMemberHref(member: TeamMemberSearchResult) {
   return "/settings/team/nrm";
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
+  const inputRef = useAutoFocus<HTMLInputElement>({ when: open });
   const layoutData = useRouteLoaderData<LayoutLoaderResponse>(
     "routes/_layout+/_layout"
   );
@@ -659,10 +662,10 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput
+        ref={inputRef}
         value={query}
         onValueChange={setQuery}
         placeholder="Search assets, audits, kits, bookings, locations, team members..."
-        autoFocus
         className="my-4 rounded border-gray-100"
       />
       <CommandList className="divide-y divide-gray-100">

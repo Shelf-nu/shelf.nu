@@ -83,30 +83,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const location = await db.location
-      .findUniqueOrThrow({
-        where: {
-          id: locationId,
-          organizationId,
-        },
-        include: {
-          kits: { select: { id: true } },
-          assets: {
-            select: { id: true },
+    // Location lookup and paginated assets query are independent — run in parallel
+    const [location, paginatedAssets] = await Promise.all([
+      db.location
+        .findUniqueOrThrow({
+          where: {
+            id: locationId,
+            organizationId,
           },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Location not found",
-          message:
-            "The location you are trying to access does not exist or you do not have permission to access it.",
-          additionalData: { locationId, userId, organizationId },
-          status: 404,
-          label: "Location",
-        });
-      });
+          include: {
+            kits: { select: { id: true } },
+            assets: {
+              select: { id: true },
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            title: "Location not found",
+            message:
+              "The location you are trying to access does not exist or you do not have permission to access it.",
+            additionalData: { locationId, userId, organizationId },
+            status: 404,
+            label: "Location",
+          });
+        }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+      }),
+    ]);
 
     const {
       search,
@@ -121,10 +128,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalTags,
       locations,
       totalLocations,
-    } = await getPaginatedAndFilterableAssets({
-      request,
-      organizationId,
-    });
+    } = paginatedAssets;
 
     const modelName = {
       singular: "asset",

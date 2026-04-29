@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useReducer, useRef, useEffect } from "react";
 import { AuditStatus } from "@prisma/client";
 import {
   Popover,
@@ -20,9 +20,39 @@ import { CancelAuditDialog } from "./cancel-audit-dialog";
 import { DeleteAuditDialog } from "./delete-audit-dialog";
 import { EditAuditDialog } from "./edit-audit-dialog";
 import { Button } from "../shared/button";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 
 const receiptAutoOpenKey = "auditReceiptAutoOpen";
+
+/**
+ * Which audit action dialog is currently open (if any). All five dialogs are
+ * mutually exclusive, so we consolidate their open/close state into a single
+ * discriminated value instead of five separate booleans.
+ */
+type AuditDialogKind =
+  | "none"
+  | "edit"
+  | "cancel"
+  | "archive"
+  | "delete"
+  | "receipt";
+
+type DialogAction =
+  | { type: "open"; dialog: Exclude<AuditDialogKind, "none"> }
+  | { type: "close" };
+
+function dialogReducer(
+  _state: AuditDialogKind,
+  action: DialogAction
+): AuditDialogKind {
+  switch (action.type) {
+    case "open":
+      return action.dialog;
+    case "close":
+      return "none";
+  }
+}
 
 const ConditionalActionsDropdown = () => {
   const { session, isAdminOrOwner, teamMembers } =
@@ -30,11 +60,12 @@ const ConditionalActionsDropdown = () => {
   const actionData = useActionData<typeof action>();
   const user = useUserData();
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
-  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
+  const [openDialog, dispatchDialog] = useReducer(dialogReducer, "none");
+  const isEditDialogOpen = openDialog === "edit";
+  const isCancelDialogOpen = openDialog === "cancel";
+  const isArchiveDialogOpen = openDialog === "archive";
+  const isDeleteDialogOpen = openDialog === "delete";
+  const isReceiptDialogOpen = openDialog === "receipt";
   // Track auto-open so the email deep link only triggers once.
   const hasAutoOpenedReceiptRef = useRef(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -75,7 +106,7 @@ const ConditionalActionsDropdown = () => {
         window.sessionStorage.setItem(receiptAutoOpenKey, session.id);
       }
       // Open receipt preview when coming from the email link.
-      setIsReceiptDialogOpen(true);
+      dispatchDialog({ type: "open", dialog: "receipt" });
       hasAutoOpenedReceiptRef.current = true;
       // Remove receipt flag so closing the dialog doesn't re-trigger.
       const nextParams = new URLSearchParams(searchParams);
@@ -121,18 +152,7 @@ const ConditionalActionsDropdown = () => {
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }}
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
             ref={popoverContentRef}
@@ -156,7 +176,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsEditDialogOpen(true);
+                      dispatchDialog({ type: "open", dialog: "edit" });
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -175,7 +195,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsCancelDialogOpen(true);
+                      dispatchDialog({ type: "open", dialog: "cancel" });
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -194,7 +214,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsArchiveDialogOpen(true);
+                      dispatchDialog({ type: "open", dialog: "archive" });
                     }}
                   >
                     Archive
@@ -211,7 +231,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsDeleteDialogOpen(true);
+                      dispatchDialog({ type: "open", dialog: "delete" });
                     }}
                   >
                     Delete
@@ -228,7 +248,7 @@ const ConditionalActionsDropdown = () => {
                   width="full"
                   onClick={() => {
                     handleMenuClose();
-                    setIsReceiptDialogOpen(true);
+                    dispatchDialog({ type: "open", dialog: "receipt" });
                   }}
                 >
                   <span className="flex items-center gap-2">
@@ -259,7 +279,7 @@ const ConditionalActionsDropdown = () => {
           audit={session}
           teamMembers={teamMembers}
           open={isEditDialogOpen}
-          onClose={() => setIsEditDialogOpen(false)}
+          onClose={() => dispatchDialog({ type: "close" })}
           actionData={actionData}
         />
       </When>
@@ -267,7 +287,7 @@ const ConditionalActionsDropdown = () => {
         <CancelAuditDialog
           auditName={session.name}
           open={isCancelDialogOpen}
-          onClose={() => setIsCancelDialogOpen(false)}
+          onClose={() => dispatchDialog({ type: "close" })}
         />
       </When>
 
@@ -275,7 +295,7 @@ const ConditionalActionsDropdown = () => {
         <ArchiveAuditDialog
           auditName={session.name}
           open={isArchiveDialogOpen}
-          onClose={() => setIsArchiveDialogOpen(false)}
+          onClose={() => dispatchDialog({ type: "close" })}
         />
       </When>
 
@@ -283,7 +303,7 @@ const ConditionalActionsDropdown = () => {
         <DeleteAuditDialog
           auditName={session.name}
           open={isDeleteDialogOpen}
-          onClose={() => setIsDeleteDialogOpen(false)}
+          onClose={() => dispatchDialog({ type: "close" })}
         />
       </When>
 
@@ -291,7 +311,7 @@ const ConditionalActionsDropdown = () => {
       <AuditReceiptPDF
         audit={{ id: session.id, name: session.name, status: session.status }}
         open={isReceiptDialogOpen}
-        onClose={() => setIsReceiptDialogOpen(false)}
+        onClose={() => dispatchDialog({ type: "close" })}
       />
     </>
   );

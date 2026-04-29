@@ -14,6 +14,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
@@ -149,17 +150,20 @@ export default function Join() {
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
 
+  /** Focus the email field on mount (intentional first-field focus on auth pages). */
+  const emailInputRef = useAutoFocus<HTMLInputElement>();
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
             <Input
+              ref={emailInputRef}
               data-test-id="email"
               label="Email address"
               placeholder="zaans@huisje.com"
               required
-              autoFocus={true}
               name={zo.fields.email()}
               type="email"
               autoComplete="email"

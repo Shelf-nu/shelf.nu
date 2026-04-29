@@ -28,7 +28,7 @@ export default function LineBreakText({
   text,
 }: LineBreakTextProps) {
   const lines = useMemo(() => {
-    const lines = [];
+    const result: { startIndex: number; content: string }[] = [];
     let startIndex = 0;
 
     for (let i = 0; i < numberOfLines; i++) {
@@ -37,12 +37,15 @@ export default function LineBreakText({
       if (startIndex >= text.length) break;
 
       const textToPush = text.slice(startIndex, endIndex);
-      lines.push(i === numberOfLines - 1 ? `${textToPush}...` : textToPush);
+      result.push({
+        startIndex,
+        content: i === numberOfLines - 1 ? `${textToPush}...` : textToPush,
+      });
 
       startIndex = endIndex;
     }
 
-    return lines;
+    return result;
   }, [charactersPerLine, numberOfLines, text]);
 
   return createElement(
@@ -51,6 +54,8 @@ export default function LineBreakText({
       className: tw("w-60 whitespace-pre-wrap", className),
       style,
     },
-    lines.map((line, i) => <span key={i}>{line}</span>)
+    // `startIndex` is the line's offset in the source text — stable and unique
+    // per rendered span even if the content itself repeats.
+    lines.map((line) => <span key={line.startIndex}>{line.content}</span>)
   );
 }

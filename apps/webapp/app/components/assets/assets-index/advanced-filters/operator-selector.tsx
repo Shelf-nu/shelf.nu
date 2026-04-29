@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -74,10 +74,9 @@ export function OperatorSelector({
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
-  const [operator, setOperator] = useState<FilterOperator>();
-  useEffect(() => {
-    setOperator(filter.operator);
-  }, [filter.operator]);
+  // `filter.operator` is the source of truth from props; derive directly to avoid
+  // a redundant useState/useEffect pair.
+  const operator: FilterOperator | undefined = filter.operator;
 
   /** Get the correct operators, based on the field type */
   const baseOperators = operatorsPerType[filter.type];
@@ -96,14 +95,29 @@ export function OperatorSelector({
       ? typeOnlyOperators
       : baseOperators.filter((op) => op !== "withinHierarchy");
 
-  // Reset selected index when popover opens
-  useEffect(() => {
-    if (isPopoverOpen) {
-      // Set initial selection to the current operator
-      const currentIndex = operators.findIndex((op) => op === operator);
-      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+  /** Scroll an option index into view inside the popover list. */
+  const scrollIndexIntoView = (index: number) => {
+    const selectedElement = document.getElementById(`operator-option-${index}`);
+    if (selectedElement) {
+      selectedElement.scrollIntoView({ block: "nearest" });
     }
-  }, [isPopoverOpen, operator, operators]);
+  };
+
+  /**
+   * Handle popover open/close. When opening, seed the highlighted index to the
+   * currently-selected operator. Previously this was a useEffect firing on
+   * `isPopoverOpen` — now it's colocated with the event that triggers it.
+   */
+  const handleOpenChange = (open: boolean) => {
+    setIsPopoverOpen(open);
+    if (open) {
+      const currentIndex = operators.findIndex((op) => op === operator);
+      const nextIndex = currentIndex >= 0 ? currentIndex : 0;
+      setSelectedIndex(nextIndex);
+      // Scroll after the popover has rendered its content.
+      setTimeout(() => scrollIndexIntoView(nextIndex), 0);
+    }
+  };
 
   const handleSelect = (operatorToSelect: FilterOperator) => {
     setFilter(operatorToSelect);
@@ -114,13 +128,19 @@ export function OperatorSelector({
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < operators.length - 1 ? prev + 1 : prev
-        );
+        setSelectedIndex((prev) => {
+          const next = prev < operators.length - 1 ? prev + 1 : prev;
+          scrollIndexIntoView(next);
+          return next;
+        });
         break;
       case "ArrowUp":
         event.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        setSelectedIndex((prev) => {
+          const next = prev > 0 ? prev - 1 : prev;
+          scrollIndexIntoView(next);
+          return next;
+        });
         break;
       case "Enter":
       case " ": // Space key
@@ -134,20 +154,8 @@ export function OperatorSelector({
     }
   };
 
-  // Scroll selected item into view
-  useEffect(() => {
-    if (isPopoverOpen) {
-      const selectedElement = document.getElementById(
-        `operator-option-${selectedIndex}`
-      );
-      if (selectedElement) {
-        selectedElement.scrollIntoView({ block: "nearest" });
-      }
-    }
-  }, [selectedIndex, isPopoverOpen]);
-
   return operator ? (
-    <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+    <Popover open={isPopoverOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"

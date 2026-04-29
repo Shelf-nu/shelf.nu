@@ -284,6 +284,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AuditOverview() {
   const { session, totalItems, generalImages, assetImages, canRemoveAssets } =
     useLoaderData<typeof loader>();

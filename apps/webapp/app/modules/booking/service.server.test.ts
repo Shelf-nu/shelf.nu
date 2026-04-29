@@ -215,6 +215,13 @@ vitest.mock(
   }
 );
 
+// why: booking service writes activity events from main's transactional
+// integration — stub so we can assert on calls without persisting them.
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vitest.fn().mockResolvedValue(undefined),
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),

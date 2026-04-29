@@ -267,6 +267,10 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
+  // Phase 3a renamed the implicit M2M `Asset.bookings` to the explicit
+  // `BookingAsset` pivot, so we walk `bookingAssets` and pluck the
+  // related booking from each pivot row. Main's `asset.bookings`
+  // shape no longer exists in this branch's schema.
   const bookings = kit.assets
     .map((asset) => {
       if (asset?.bookingAssets.length) {

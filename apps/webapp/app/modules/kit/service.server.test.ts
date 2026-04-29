@@ -103,6 +103,12 @@ vitest.mock("~/modules/note/service.server", () => ({
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
 }));
 
+// why: testing kit service without executing actual activity event recording
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vitest.fn().mockResolvedValue(undefined),
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: isolating kit service logic from asset utility dependencies
 vitest.mock("~/modules/asset/utils.server", () => ({
   getKitLocationUpdateNoteContent: vitest

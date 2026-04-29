@@ -42,12 +42,31 @@ const SelectContent = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, ...props }, _ref) {
+  /**
+   * Track the rendered Radix Content element in state so the touchend listener
+   * can be attached and cleaned up via a real `useEffect`. Using a callback
+   * ref's return value for cleanup is fragile — handle the lifecycle
+   * explicitly instead.
+   *
+   * why passive:false — the handler needs preventDefault() to stop the iOS
+   * Safari synthetic-click that Radix Select otherwise fires; passive:true
+   * would make preventDefault a no-op.
+   */
+  const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!contentEl) return;
+    const handler = (event: TouchEvent) => event.preventDefault();
+    contentEl.addEventListener("touchend", handler, { passive: false });
+    return () => {
+      contentEl.removeEventListener("touchend", handler);
+    };
+  }, [contentEl]);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
-        }
+        ref={setContentEl}
         className={tw(
           " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className

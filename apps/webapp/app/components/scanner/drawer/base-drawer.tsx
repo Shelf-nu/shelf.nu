@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ChevronUpIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useRouteLoaderData } from "react-router";
@@ -62,11 +62,18 @@ export default function BaseDrawer({
   const baseHeaderRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(148); // Default fallback
 
-  // Handle scanning mode changes
+  // Handle scanning mode changes. When the global scanning mode toggles, the
+  // drawer should snap to the mode's preferred expanded state (scanner = open,
+  // everything else = collapsed). We compare against the previous mode during
+  // render and reconcile in-place — the recommended pattern for resetting
+  // state on a prop/observer change, per
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const mode = useGlobalModeViaObserver();
-  useEffect(() => {
+  const previousModeRef = useRef(mode);
+  if (previousModeRef.current !== mode) {
+    previousModeRef.current = mode;
     setExpanded(mode === "scanner");
-  }, [mode]);
+  }
 
   // Calculate dynamic header height only when needed
   useEffect(() => {
@@ -138,7 +145,7 @@ export default function BaseDrawer({
         <div className={tw("h-full")} style={style}>
           <div className="mx-auto inline-flex size-full flex-col px-4 ">
             {/* Handle */}
-            <motion.div
+            <m.div
               className="py-1 text-center hover:cursor-grab"
               onClick={() => {
                 setExpanded((prev) => !prev);
@@ -157,7 +164,7 @@ export default function BaseDrawer({
                   expanded && "rotate-180 "
                 )}
               />
-            </motion.div>
+            </m.div>
 
             {/* Extra Header Content - Always visible */}
             <div ref={headerContentRef}>{headerContent}</div>

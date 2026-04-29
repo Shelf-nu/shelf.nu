@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
 import { useAtom } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -72,6 +72,7 @@ type BookingFormData = {
   action?: string;
 };
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function EditBookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
   const {
@@ -196,14 +197,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     currentUserId: userId,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (incomingEndDate) {
-        setEndDate(incomingEndDate);
-      }
-    },
-    [incomingEndDate]
-  );
+  /**
+   * Sync the editable `endDate` state with the `incomingEndDate` prop when it
+   * changes. Using the "store prior prop in ref + update during render" pattern
+   * (the React-recommended replacement for prop-sync effects) satisfies
+   * `no-effect-event-handler` while preserving the original behaviour.
+   */
+  const lastIncomingEndDateRef = useRef(incomingEndDate);
+  if (incomingEndDate && incomingEndDate !== lastIncomingEndDateRef.current) {
+    lastIncomingEndDateRef.current = incomingEndDate;
+    setEndDate(incomingEndDate);
+  }
 
   /**
    * Check whether the user can see actions
