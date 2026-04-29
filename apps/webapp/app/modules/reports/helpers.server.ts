@@ -2650,6 +2650,7 @@ export async function monthlyBookingTrendsReport(
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",
+            timeZone: "UTC", // Match UTC-based grouping
           }),
           monthStart: data.monthStart,
           bookingsCreated: data.created,

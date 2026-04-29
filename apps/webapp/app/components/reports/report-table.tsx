@@ -386,7 +386,7 @@ export function AssetCell({
             id: assetId,
             thumbnailImage,
           }}
-          alt={`Image of ${name}`}
+          alt="" // Decorative - asset name is displayed in adjacent text
           className="size-8 shrink-0 rounded object-cover"
         />
         <span className="font-medium">{name}</span>
