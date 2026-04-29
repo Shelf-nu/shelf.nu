@@ -4089,16 +4089,22 @@ export async function bulkCheckInAssets({
       });
 
       // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
+      // Phase 2 turned `Asset.custody` into a `Custody[]` array, so we
+      // use the same `getPrimaryCustody` helper as the note above to pick
+      // a representative custodian for the event.
       await recordEvents(
-        assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          teamMemberId: asset.custody!.custodian.id,
-        })),
+        assets.map((asset) => {
+          const primaryCustody = getPrimaryCustody(asset.custody);
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: asset.id,
+            assetId: asset.id,
+            teamMemberId: primaryCustody?.custodian?.id,
+          };
+        }),
         tx
       );
     });
