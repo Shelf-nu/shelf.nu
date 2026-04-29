@@ -230,16 +230,26 @@ const MFA_BYPASS_PATHS = new Set([
   '/api/oss-friends',
 ]);
 
-const MFA_FLOW_PATH_PREFIXES = ['/mfa/', '/auth/mobile-handoff'];
+const MFA_FLOW_PATH_PREFIXES = ['/mfa/'];
 
 export function enforceMfa(): MiddlewareHandler {
   return async (c, next) => {
-    const path = c.req.path;
+    // Use full URL so we can preserve querystring in the return param
+    // (critical for /mobile-handoff?state=... — losing state breaks pairing).
+    const url = new URL(c.req.url);
+    const path = url.pathname;
+    const returnUrl = `${url.pathname}${url.search}`;
+
     if (MFA_BYPASS_PATHS.has(path)) return next();
     if (MFA_FLOW_PATH_PREFIXES.some((p) => path.startsWith(p))) return next();
     if (path.startsWith('/logout')) return next();
 
-    const session = c.get('authSession') as AuthSession;
+    // Public paths (e.g. /mobile-handoff, /accept-invite/*) reach this
+    // middleware without an authSession. Let them through; the route
+    // handler itself decides whether to redirect to /login.
+    const session = c.get('authSession') as AuthSession | undefined;
+    if (!session) return next();
+
     const orgContext = c.get('orgContext') as OrgContext; // already resolved upstream
     const org = orgContext.currentOrganization;
 
@@ -253,18 +263,18 @@ export function enforceMfa(): MiddlewareHandler {
     const inGrace = now < org.mfaEnforceAfter!;
     const userHasFactor = orgContext.user.mfaFactors.length > 0;
 
-    // Owner escape hatch — can always reach security settings to disable
-    if (
-      path === '/settings/workspace/security' &&
-      orgContext.userOrganization.roles.includes(OrganizationRoles.OWNER)
-    ) {
-      return next();
-    }
+    // Note: no owner "escape hatch." The /settings/workspace/security action
+    // requires aal2 anyway (§4.8), so bypassing here would just produce a
+    // 403 on submit. Instead, route owners through the normal step-up flow:
+    // aal1 owner with a factor → /mfa/challenge → returns to settings at aal2.
+    // Owner without a factor → /mfa/setup → enrolls (factor verify mints
+    // aal2) → can disable. Sole-owner-totally-locked-out is the support
+    // process documented in §11.4.
 
     if (userHasFactor) {
       // Has factor: require aal2 session
       if (session.aal === 'aal2') return next();
-      return c.redirect(`/mfa/challenge?return=${encodeURIComponent(path)}`);
+      return c.redirect(`/mfa/challenge?return=${encodeURIComponent(returnUrl)}`);
     }
 
     // No factor
@@ -273,7 +283,7 @@ export function enforceMfa(): MiddlewareHandler {
       return next();
     }
     // Grace expired
-    return c.redirect(`/mfa/setup?return=${encodeURIComponent(path)}`);
+    return c.redirect(`/mfa/setup?return=${encodeURIComponent(returnUrl)}`);
   };
 }
 ```
@@ -295,7 +305,7 @@ export function enforceMfa(): MiddlewareHandler {
 | `/api/mfa/unenroll` | Self-initiated unenroll | aal2 |
 | `/api/mfa/backup-codes/regenerate` | Issues new 10-code set | aal2 |
 | `/api/mfa/admin/reset/:userId` | OWNER force-reset; emails user | aal2 + OWNER |
-| `/auth/mobile-handoff` | Mobile pairing handoff | aal1 (becomes aal2 if MFA required) |
+| `/mobile-handoff` | Mobile pairing handoff | aal1 (becomes aal2 if MFA required) |
 
 **Backup-code flow** (the case Supabase doesn't support natively — see A.D):
 
@@ -323,10 +333,10 @@ This is also the more secure pattern (forces re-arming) and matches 1Password/Au
 Mobile app launches
   → user taps "Sign in with Shelf"
   → mobile generates state token via expo-crypto
-  → mobile opens https://shelf.nu/auth/mobile-handoff?state=<state>
+  → mobile opens https://shelf.nu/mobile-handoff?state=<state>
        via expo-web-browser openAuthSessionAsync()
   → user authenticates on web (password / OTP / SSO + MFA if enrolled+enforced)
-  → web /auth/mobile-handoff loader has aal2 session, 302s to:
+  → web /mobile-handoff loader has aal2 session, 302s to:
        shelf://auth-complete?state=<state>&access_token=...&refresh_token=...
   → mobile deeplink handler validates state matches, calls
        supabase.auth.setSession({ access_token, refresh_token })
@@ -350,7 +360,7 @@ export async function signInViaWeb(): Promise<void> {
   const state = await Crypto.randomUUID(); // or randomBytes(32).toString('hex')
   await SecureStore.setItemAsync(PENDING_STATE_KEY, state);
 
-  const handoffUrl = `${WEB_BASE}/auth/mobile-handoff?state=${state}`;
+  const handoffUrl = `${WEB_BASE}/mobile-handoff?state=${state}`;
   const result = await WebBrowser.openAuthSessionAsync(
     handoffUrl,
     'shelf://auth-complete',
@@ -393,7 +403,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const session = context.getSession?.();
   if (!session) {
     return redirect(
-      `/login?return=${encodeURIComponent(`/auth/mobile-handoff?state=${state}`)}`,
+      `/login?return=${encodeURIComponent(`/mobile-handoff?state=${state}`)}`,
     );
   }
 
@@ -500,6 +510,15 @@ if (org.type === OrganizationType.PERSONAL) {
 ```
 
 Disabling enforcement also requires fresh aal2 — prevents a hijacked aal1 session from unilaterally disabling workspace security.
+
+**How an aal1 owner reaches this form (no escape hatch in middleware):**
+
+- *Owner has factor + aal1*: `enforceMfa()` redirects them to `/mfa/challenge?return=/settings/workspace/security` → step up → return at aal2 → action succeeds.
+- *Owner has no factor + still in grace*: page loads with the grace banner; the action returns the "must enroll first" `ShelfError`; CTA links to `/mfa/setup`.
+- *Owner has no factor + grace expired*: `enforceMfa()` redirects them to `/mfa/setup?return=/settings/workspace/security` → enrollment verifies the factor (Supabase mints aal2 on first verify) → return at aal2 with factor → action succeeds.
+- *Owner totally locked out (lost device + lost backup codes)*: support process per §11.4.
+
+This is why we removed the original draft's owner escape hatch — it allowed loading the page at aal1, which produced a 403 dead-end on submit. Letting `enforceMfa()` route the owner through the normal step-up flow is cleaner and has no dead-end.
 
 ### 4.9 Supabase client modes
 
@@ -678,14 +697,14 @@ Self-service MFA. No enforcement yet. Anyone can enable for themselves.
 - Rewrite `apps/companion/lib/auth-context.tsx` — `signIn()` → `signInViaWeb()`.
 - Replace `apps/companion/app/(auth)/login.tsx` with single-button screen.
 - Delete `apps/companion/app/(auth)/forgot-password.tsx`, `apps/companion/hooks/use-form-validation.ts`.
-- Webapp: new `apps/webapp/app/routes/_auth+/mobile-handoff.tsx`.
-- Webapp: add `/auth/mobile-handoff` to public-paths during the auth phase.
+- Webapp: new `apps/webapp/app/routes/_auth+/mobile-handoff.tsx` — Remix flat-routes resolves this to URL `/mobile-handoff` (matches existing `_auth+/login.tsx` → `/login` pattern).
+- Webapp: add `/mobile-handoff` to `protect()` public-paths list (matches the `/accept-invite/*` pattern — loader handles unauth by redirecting to `/login?return=/mobile-handoff?state=...`). MFA enforcement still applies via `enforceMfa()` — once the user is authenticated, the middleware will route them through `/mfa/challenge` if they need step-up before the loader issues tokens.
 - Maestro E2E: rewrite ~10 auth flows.
 - Manual test on iOS simulator + Android emulator.
 
 **Demo:** companion app authenticates via web; sessions persist across launches.
 
-**Rollback:** mobile is in dev/preview EAS profile only — no production users yet. Rollback = revert the mobile commits, redeploy preview build. Webapp `/auth/mobile-handoff` route is harmless if mobile reverts.
+**Rollback:** mobile is in dev/preview EAS profile only — no production users yet. Rollback = revert the mobile commits, redeploy preview build. Webapp `/mobile-handoff` route is harmless if mobile reverts.
 
 ### Phase 2 — Step-up on web login when enrolled (~3d)
 
