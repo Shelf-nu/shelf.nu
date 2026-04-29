@@ -42,6 +42,7 @@ import {
   buildAssetListMarkup,
   buildKitListMarkup,
 } from "./utils";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -686,32 +687,52 @@ export async function createLocation({
       parentId,
     });
 
-    return await db.location.create({
-      data: {
-        name: name.trim(),
-        description,
-        address,
-        latitude: coordinates?.lat || null,
-        longitude: coordinates?.lon || null,
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-        ...(validatedParentId && {
-          parent: {
+    // Use transaction to ensure location creation and activity event are atomic
+    const created = await db.$transaction(async (tx) => {
+      const location = await tx.location.create({
+        data: {
+          name: name.trim(),
+          description,
+          address,
+          latitude: coordinates?.lat || null,
+          longitude: coordinates?.lon || null,
+          user: {
             connect: {
-              id: validatedParentId,
+              id: userId,
             },
           },
-        }),
-      },
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+          ...(validatedParentId && {
+            parent: {
+              connect: {
+                id: validatedParentId,
+              },
+            },
+          }),
+        },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "LOCATION_CREATED",
+          entityType: "LOCATION",
+          entityId: location.id,
+          locationId: location.id,
+        },
+        tx
+      );
+
+      return location;
     });
+
+    return created;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -798,29 +819,47 @@ export async function updateLocation(payload: {
             currentLocationId: id,
           });
 
-    const updatedLocation = await db.location.update({
-      where: { id, organizationId },
-      data: {
-        name: name?.trim(),
-        description,
-        address,
-        ...(shouldUpdateCoordinates && {
-          latitude: coordinates?.lat || null,
-          longitude: coordinates?.lon || null,
-        }),
-        ...(validatedParentId !== undefined && {
-          parent: validatedParentId
-            ? {
-                connect: {
-                  id: validatedParentId,
-                },
-              }
-            : { disconnect: true },
-        }),
-      },
+    // Use transaction to ensure location update and activity event are atomic
+    const updatedLocation = await db.$transaction(async (tx) => {
+      const location = await tx.location.update({
+        where: { id, organizationId },
+        data: {
+          name: name?.trim(),
+          description,
+          address,
+          ...(shouldUpdateCoordinates && {
+            latitude: coordinates?.lat || null,
+            longitude: coordinates?.lon || null,
+          }),
+          ...(validatedParentId !== undefined && {
+            parent: validatedParentId
+              ? {
+                  connect: {
+                    id: validatedParentId,
+                  },
+                }
+              : { disconnect: true },
+          }),
+        },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "LOCATION_UPDATED",
+          entityType: "LOCATION",
+          entityId: id,
+          locationId: id,
+        },
+        tx
+      );
+
+      return location;
     });
 
-    // Create location activity notes for changed fields
+    // Create location activity notes for changed fields (not critical for atomicity)
     await createLocationEditNotes({
       locationId: id,
       userId,
@@ -1684,10 +1723,11 @@ export async function updateLocationAssets({
         });
       });
 
-    if (assetIds.length > 0) {
-      /** We update the location with the new assets */
-      await db.location
-        .update({
+    // Use transaction to ensure all location updates and activity events are atomic
+    await db.$transaction(async (tx) => {
+      if (assetIds.length > 0) {
+        /** We update the location with the new assets */
+        await tx.location.update({
           where: {
             id: locationId,
             organizationId,
@@ -1699,22 +1739,12 @@ export async function updateLocationAssets({
               })),
             },
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while adding the assets to the location. Please try again or contact support.",
-            additionalData: { assetIds, userId, locationId },
-            label: "Location",
-          });
         });
-    }
+      }
 
-    /** If some assets were removed, we also need to handle those */
-    if (removedAssetIds.length > 0) {
-      await db.location
-        .update({
+      /** If some assets were removed, we also need to handle those */
+      if (removedAssetIds.length > 0) {
+        await tx.location.update({
           where: {
             organizationId,
             id: locationId,
@@ -1726,19 +1756,41 @@ export async function updateLocationAssets({
               })),
             },
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while removing the assets from the location. Please try again or contact support.",
-            additionalData: { removedAssetIds, userId, locationId },
-            label: "Location",
-          });
         });
-    }
+      }
 
-    /** Creates the relevant notes for all the changed assets */
+      // Activity events — one ASSET_LOCATION_CHANGED per affected asset, inside tx.
+      const locEvents: Parameters<typeof recordEvents>[0] = [
+        ...actuallyNewAssetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          locationId,
+          field: "locationId",
+          fromValue: null,
+          toValue: locationId,
+        })),
+        ...removedAssetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          field: "locationId",
+          fromValue: locationId,
+          toValue: null,
+        })),
+      ];
+      if (locEvents.length > 0) {
+        await recordEvents(locEvents, tx);
+      }
+    });
+
+    /** Creates the relevant notes for all the changed assets (not critical for atomicity) */
     await createBulkLocationChangeNotes({
       modifiedAssets,
       assetIds: actuallyNewAssetIds,

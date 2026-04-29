@@ -1,30 +1,50 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// why: stub location note creation to isolate location service tests from note side effects
 const locationNoteMocks = vi.hoisted(() => ({
   createSystemLocationNote: vi.fn(),
   createLocationNote: vi.fn(),
 }));
 
+// why: mock database client to test location service without real DB operations
 const dbMocks = vi.hoisted(() => ({
+  // why: location model stubs for CRUD operations tested in location service
   location: {
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
     findFirstOrThrow: vi.fn(),
+    create: vi.fn(),
   },
+  // why: asset model stubs for bulk location changes (moveAssetsToNewLocation)
   asset: {
     findMany: vi.fn(),
+    updateMany: vi.fn(),
     // why: org-scope assertion in updateLocationAssets calls db.asset.count
     count: vi.fn(),
   },
+  // why: kit model stubs for fetching kits affected by location changes
   kit: {
     findMany: vi.fn(),
     // why: org-scope assertion in updateLocationKits calls db.kit.count
     count: vi.fn(),
   },
+  // why: user model stubs for resolving actor info in activity events
   user: {
+    findUniqueOrThrow: vi.fn(),
     findFirstOrThrow: vi.fn(),
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
   },
+  // why: transaction proxy to route calls to mocked clients for atomic operations
+  $transaction: vi.fn().mockImplementation((cb: any) => {
+    const txClient = {
+      location: dbMocks.location,
+      asset: dbMocks.asset,
+      kit: dbMocks.kit,
+      user: dbMocks.user,
+    };
+    return cb(txClient);
+  }),
 }));
 
 const geolocateMock = vi.hoisted(() => vi.fn());
@@ -50,6 +70,12 @@ vi.mock("~/modules/note/service.server", () => ({
 
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: getUserByIDMock,
+}));
+
+// why: testing location service without executing actual activity event recording
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/modules/asset/utils.server", () => ({

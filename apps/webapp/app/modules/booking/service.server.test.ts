@@ -153,6 +153,12 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: testing booking service without executing actual activity event recording
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vitest.fn().mockResolvedValue(undefined),
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),
