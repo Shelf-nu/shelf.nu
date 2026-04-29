@@ -169,8 +169,14 @@ export async function bookingComplianceReport(
       where.custodianUserId = custodianId;
     }
 
-    // TODO: Location filter requires join through assets
-    // if (locationId) { ... }
+    // Location filter — match bookings whose pivot rows include at
+    // least one asset at the given location. Phase 3a's `BookingAsset`
+    // pivot makes this join expressible directly in the where clause.
+    if (locationId) {
+      where.bookingAssets = {
+        some: { asset: { locationId } },
+      };
+    }
 
     // Fetch all data in parallel
     const [
@@ -1018,8 +1024,11 @@ async function computeOverdueKpis(
   const now = new Date();
 
   // Fetch all overdue bookings with asset info via the BookingAsset pivot.
+  // `organizationId` is spread into the where alongside `baseWhere` as a
+  // defense-in-depth guard — if a caller forgets to scope the base where
+  // we still won't leak across orgs.
   const overdueBookings = await db.booking.findMany({
-    where: baseWhere,
+    where: { ...baseWhere, organizationId },
     select: {
       to: true,
       bookingAssets: {
@@ -1253,14 +1262,15 @@ async function fetchIdleAssetRows(
 ): Promise<IdleAssetRow[]> {
   const now = new Date();
 
-  // Get assets with their last booking checkout from ActivityEvent
-  // For efficiency, we'll use a subquery approach
+  // Get assets with their last booking checkout. Phase 3a: walk the
+  // `BookingAsset` pivot for both the exclusion filter and the
+  // most-recent-completed sub-query. `organizationId` is enforced
+  // explicitly here for defense-in-depth alongside the caller's
+  // `assetWhere`.
   const assets = await db.asset.findMany({
     where: {
       ...assetWhere,
-      // Phase 3a: walk the BookingAsset pivot to filter on the related
-      // booking's status. Exclude assets that have been in an ONGOING or
-      // OVERDUE booking recently.
+      organizationId,
       NOT: {
         bookingAssets: {
           some: {
@@ -1349,10 +1359,12 @@ async function countIdleAssets(
 ): Promise<number> {
   // Get all potentially idle assets — Phase 3a: walk the BookingAsset
   // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query.
+  // sub-query. `organizationId` is enforced explicitly as a
+  // defense-in-depth guard alongside the caller-supplied `assetWhere`.
   const assets = await db.asset.findMany({
     where: {
       ...assetWhere,
+      organizationId,
       NOT: {
         bookingAssets: {
           some: {
@@ -1402,10 +1414,12 @@ async function computeIdleAssetsKpis(
 
   // Get idle assets with details — Phase 3a: walk the BookingAsset
   // pivot for both the exclusion filter and the most-recent-completed
-  // sub-query.
+  // sub-query. Org scoping is enforced explicitly here so the helper is
+  // safe even if `assetWhere` ever loses its organizationId clause.
   const idleAssets = await db.asset.findMany({
     where: {
       ...assetWhere,
+      organizationId,
       NOT: {
         bookingAssets: {
           some: {
@@ -1678,9 +1692,11 @@ async function computeCustodyKpis(
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Fetch custody data for KPIs
+  // Fetch custody data for KPIs. `Custody` has no direct organizationId
+  // column, so we scope through the related asset as a defense-in-depth
+  // guard alongside the caller-supplied `baseWhere`.
   const custodyRecords = await db.custody.findMany({
-    where: baseWhere,
+    where: { ...baseWhere, asset: { organizationId } },
     select: {
       createdAt: true,
       teamMemberId: true,
@@ -2108,15 +2124,13 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel
-    const [totalAssets, byCategory, byLocation, byStatus, kpis] =
-      await Promise.all([
-        db.asset.count({ where: { organizationId } }),
-        computeDistributionByCategory(organizationId),
-        computeDistributionByLocation(organizationId),
-        computeDistributionByStatus(organizationId),
-        computeDistributionKpis(organizationId),
-      ]);
+    // Fetch all distribution data in parallel.
+    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
+      computeDistributionByCategory(organizationId),
+      computeDistributionByLocation(organizationId),
+      computeDistributionByStatus(organizationId),
+      computeDistributionKpis(organizationId),
+    ]);
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -2477,15 +2491,19 @@ async function computeInventoryKpis(
   organizationId: string,
   where: Prisma.AssetWhereInput
 ): Promise<ReportKpi[]> {
+  // Defense-in-depth: enforce organizationId on every query even though
+  // callers' `where` already includes it. Cheap to add, prevents an
+  // accidental cross-org leak if the where-builder ever regresses.
+  const scopedWhere: Prisma.AssetWhereInput = { ...where, organizationId };
   const [totalAssets, totalValue, statusCounts] = await Promise.all([
-    db.asset.count({ where }),
+    db.asset.count({ where: scopedWhere }),
     db.asset.aggregate({
-      where,
+      where: scopedWhere,
       _sum: { valuation: true },
     }),
     db.asset.groupBy({
       by: ["status"],
-      where,
+      where: scopedWhere,
       _count: { id: true },
     }),
   ]);
