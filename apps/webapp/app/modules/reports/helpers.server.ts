@@ -1001,10 +1001,12 @@ async function fetchOverdueRows(
       0
     );
 
-    // Calculate check-in progress from partial check-ins
-    const checkedInAssetIds = b.partialCheckins.flatMap((pc) => pc.assetIds);
-    const checkedInCount = checkedInAssetIds.length;
-    const uncheckedCount = b._count.assets - checkedInCount;
+    // Calculate check-in progress from partial check-ins (dedupe in case of duplicates)
+    const checkedInAssetIds = new Set(
+      b.partialCheckins.flatMap((pc) => pc.assetIds)
+    );
+    const checkedInCount = checkedInAssetIds.size;
+    const uncheckedCount = Math.max(0, b._count.assets - checkedInCount);
 
     return {
       id: b.id,
@@ -1061,12 +1063,12 @@ async function computeOverdueKpis(
 
   const totalOverdue = overdueBookings.length;
 
-  // Calculate assets still outstanding (not yet returned)
+  // Calculate assets still outstanding (not yet returned), deduping asset IDs
   const totalAssetsOutstanding = overdueBookings.reduce((sum, b) => {
-    const checkedInCount = b.partialCheckins.flatMap(
-      (pc) => pc.assetIds
-    ).length;
-    return sum + (b._count.assets - checkedInCount);
+    const checkedInCount = new Set(
+      b.partialCheckins.flatMap((pc) => pc.assetIds)
+    ).size;
+    return sum + Math.max(0, b._count.assets - checkedInCount);
   }, 0);
 
   // Also track total for context in hero subtitle
