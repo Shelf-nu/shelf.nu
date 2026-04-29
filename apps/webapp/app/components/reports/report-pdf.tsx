@@ -9,13 +9,14 @@
  */
 
 import type { RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Spinner } from "~/components/shared/spinner";
+import useApiQuery from "~/hooks/use-api-query";
 import type {
   ReportPdfMeta,
   CompliancePdfMeta,
@@ -51,51 +52,40 @@ export function ReportPdf({
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pdfMeta, setPdfMeta] = useState<ReportPdfMeta | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
+  // Memoize so a new URLSearchParams reference doesn't refetch every render.
+  const searchParams = useMemo(() => {
+    const params = new URLSearchParams();
+    if (timeframe) params.set("timeframe", timeframe);
+    if (customFrom) params.set("from", customFrom);
+    if (customTo) params.set("to", customTo);
+    return params;
+  }, [timeframe, customFrom, customTo]);
+
+  // Fetch via the shared hook so the underlying useEffect+fetch lives in one
+  // dedicated place — mirrors the pattern in `audit-receipt-pdf.tsx`.
+  const { error } = useApiQuery<{ pdfMeta?: ReportPdfMeta }>({
+    api: `/api/reports/${reportId}/generate-pdf`,
+    searchParams,
+    // Avoid refetching on re-renders once the preview data is cached.
+    enabled: isDialogOpen && !pdfMeta,
+    onSuccess: (responseData) => {
+      setPdfMeta(responseData?.pdfMeta ?? null);
+    },
+    onError: () => {
+      setPdfMeta(null);
+    },
+  });
+
+  // Drop the cached meta on close so the next open refetches fresh data.
   useEffect(() => {
-    if (isDialogOpen) {
-      setIsLoading(true);
-      setError(null);
-
-      const params = new URLSearchParams();
-      if (timeframe) params.set("timeframe", timeframe);
-      if (customFrom) params.set("from", customFrom);
-      if (customTo) params.set("to", customTo);
-
-      void fetch(`/api/reports/${reportId}/generate-pdf?${params.toString()}`)
-        .then(async (response) => {
-          const text = await response.text();
-
-          let json;
-          try {
-            json = JSON.parse(text);
-          } catch {
-            throw new Error("Server returned invalid response");
-          }
-
-          if (!response.ok || json.error) {
-            throw new Error(
-              json.error?.message || `Server error: ${response.status}`
-            );
-          }
-          return json;
-        })
-        .then((responseData) => {
-          if (!responseData.pdfMeta) {
-            throw new Error("Invalid response: missing pdfMeta");
-          }
-          setPdfMeta(responseData.pdfMeta);
-        })
-        .catch((err: Error) => {
-          setError(err.message || "Failed to generate PDF");
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+    if (!isDialogOpen) {
+      setPdfMeta(null);
     }
-  }, [reportId, timeframe, customFrom, customTo, isDialogOpen]);
+  }, [isDialogOpen]);
+
+  // Derive at render time instead of mirroring fetch state into useState.
+  const isLoading = isDialogOpen && !pdfMeta && !error;
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
