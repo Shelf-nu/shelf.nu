@@ -22,6 +22,7 @@ import type {
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
+import { refreshExpiredReportThumbnails } from "./refresh-thumbnails.server";
 import type {
   AssetActivityRow,
   AssetActivityType,
@@ -1231,7 +1232,7 @@ export async function idleAssetsReport(
     }
 
     // Fetch data
-    const [rows, totalCount, kpis] = await Promise.all([
+    const [rawRows, totalCount, kpis] = await Promise.all([
       fetchIdleAssetRows(
         organizationId,
         assetWhere,
@@ -1242,6 +1243,9 @@ export async function idleAssetsReport(
       countIdleAssets(organizationId, assetWhere, cutoffDate),
       computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate),
     ]);
+
+    // Re-sign any expired thumbnail signed URLs before sending to client.
+    const rows = await refreshExpiredReportThumbnails(rawRows, organizationId);
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -1596,11 +1600,14 @@ export async function custodySnapshotReport(
     }
 
     // Fetch data in parallel
-    const [rows, totalCount, kpis] = await Promise.all([
+    const [rawRows, totalCount, kpis] = await Promise.all([
       fetchCustodyRows(where, page, pageSize),
       db.custody.count({ where }),
       computeCustodyKpis(organizationId, where),
     ]);
+
+    // Re-sign any expired thumbnail signed URLs before sending to client.
+    const rows = await refreshExpiredReportThumbnails(rawRows, organizationId);
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -1847,6 +1854,21 @@ export async function topBookedAssetsReport(
       computeTopBookedKpis(organizationId, assetWhere, timeframe),
     ]);
 
+    // Re-sign expired thumbnail signed URLs across both the paginated rows
+    // and the singular #1 top asset (used by the hero card). Doing them in
+    // one batch keeps duplicate assets from being re-signed twice.
+    const refreshedAll = await refreshExpiredReportThumbnails(
+      [
+        ...rowsResult.rows,
+        ...(rowsResult.topAsset ? [rowsResult.topAsset] : []),
+      ],
+      organizationId
+    );
+    const rows = refreshedAll.slice(0, rowsResult.rows.length);
+    const topBookedAsset = rowsResult.topAsset
+      ? refreshedAll[rowsResult.rows.length] ?? rowsResult.topAsset
+      : null;
+
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -1861,12 +1883,12 @@ export async function topBookedAssetsReport(
         filters: [],
       },
       kpis,
-      rows: rowsResult.rows,
+      rows,
       computedMs,
       totalRows: rowsResult.totalCount,
       page,
       pageSize,
-      topBookedAsset: rowsResult.topAsset,
+      topBookedAsset,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -2400,11 +2422,14 @@ export async function assetInventoryReport(
     }
 
     // Fetch data in parallel
-    const [rows, totalCount, kpis] = await Promise.all([
+    const [rawRows, totalCount, kpis] = await Promise.all([
       fetchInventoryRows(where, page, pageSize),
       db.asset.count({ where }),
       computeInventoryKpis(organizationId, where),
     ]);
+
+    // Re-sign any expired thumbnail signed URLs before sending to client.
+    const rows = await refreshExpiredReportThumbnails(rawRows, organizationId);
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -2986,6 +3011,13 @@ export async function assetUtilizationReport(
       },
     ];
 
+    // Re-sign expired thumbnails on just the page slice we're returning,
+    // not the full pre-pagination set — saves work for large workspaces.
+    const pagedRows = await refreshExpiredReportThumbnails(
+      rows.slice((page - 1) * pageSize, page * pageSize),
+      organizationId
+    );
+
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -3000,7 +3032,7 @@ export async function assetUtilizationReport(
         filters: [],
       },
       kpis,
-      rows: rows.slice((page - 1) * pageSize, page * pageSize),
+      rows: pagedRows,
       computedMs,
       totalRows: rows.length,
       page,
@@ -3213,6 +3245,15 @@ export async function assetActivityReport(
       },
     ];
 
+    // Re-sign expired thumbnails on the rows we're about to return.
+    // Activity rows can have empty `assetId` for events not tied to an
+    // asset (e.g. workspace-level events) — those are skipped naturally
+    // by the helper because their thumbnail is null.
+    const refreshedRows = await refreshExpiredReportThumbnails(
+      rows,
+      organizationId
+    );
+
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -3226,7 +3267,7 @@ export async function assetActivityReport(
         filters: [],
       },
       kpis,
-      rows,
+      rows: refreshedRows,
       computedMs,
       totalRows: totalCount,
       page,
