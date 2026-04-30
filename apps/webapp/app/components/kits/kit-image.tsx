@@ -140,7 +140,7 @@ export default function KitImage({
           <Dialog
             open={isDialogOpen}
             onClose={handleCloseDialog}
-            className="h-dvh w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+            className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
             title={
               <div>
                 <div className=" text-lg font-semibold text-gray-900">

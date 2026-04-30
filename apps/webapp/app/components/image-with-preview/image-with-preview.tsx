@@ -262,7 +262,7 @@ export default function ImageWithPreview({
             <Dialog
               open={open}
               onClose={handleCloseDialog}
-              className="h-dvh w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+              className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
               wrapperClassName="z-[100]"
               title={
                 <div>

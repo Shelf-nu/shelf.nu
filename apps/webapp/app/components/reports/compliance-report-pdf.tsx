@@ -106,7 +106,7 @@ export function ComplianceReportPdf({
         <Dialog
           open={isDialogOpen}
           onClose={() => setIsDialogOpen(false)}
-          className="h-dvh w-full py-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+          className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
           title={
             <div className="mx-auto w-full max-w-[210mm] border-b p-4 text-center">
               <h3 className="text-lg font-semibold">

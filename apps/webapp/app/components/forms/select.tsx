@@ -65,9 +65,10 @@ const SelectContent = React.forwardRef<
   React.useEffect(() => {
     if (!contentEl) return;
     const handler = (event: TouchEvent) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target;
       if (
-        target?.closest(
+        target instanceof Element &&
+        target.closest(
           '[role="option"], [data-radix-select-item], button, a, input, select, textarea, [role="checkbox"], [role="menuitem"]'
         )
       ) {
