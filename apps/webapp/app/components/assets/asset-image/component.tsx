@@ -114,12 +114,31 @@ export const AssetImage = ({
     dynamicThumbnailImage || updatedAssetThumbnailImage || thumbnailImage;
   const currentMainImage = updatedAssetMainImage || mainImage;
 
+  // After an image-load error, fall back to the placeholder so users see
+  // something instead of a broken-image icon. Two cases:
+  //   1. Caller passed no `mainImage` (e.g. reports' AssetCell). There's no
+  //      refresh path, so we can't recover the URL — show placeholder
+  //      immediately on error.
+  //   2. Caller passed `mainImage` (asset detail page). We attempt a refresh
+  //      via `refreshImage()`; only fall back if the fetcher finished without
+  //      yielding a usable URL. Avoids flashing the placeholder during the
+  //      refresh window.
+  const refreshYieldedNewUrl =
+    !!dynamicThumbnailImage || !!updatedAssetThumbnailImage;
+  const refreshAttemptFinishedWithoutUrl =
+    imageFetcher.state === "idle" &&
+    imageFetcher.data !== undefined &&
+    !refreshYieldedNewUrl;
+  const shouldShowPlaceholderFallback =
+    isImageError && (!mainImage || refreshAttemptFinishedWithoutUrl);
+
   // Only add cache-buster if we've had an error and attempted refresh
-  const imageUrl =
-    (useThumbnail && currentThumbnail
-      ? currentThumbnail
-      : currentMainImage || "/static/images/asset-placeholder.jpg") +
-    (hasAttemptedRefresh && isImageError ? cacheBuster : "");
+  const imageUrl = shouldShowPlaceholderFallback
+    ? "/static/images/asset-placeholder.jpg"
+    : (useThumbnail && currentThumbnail
+        ? currentThumbnail
+        : currentMainImage || "/static/images/asset-placeholder.jpg") +
+      (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   // For preview dialog, also add cache buster only when needed
   const previewImageUrl =
@@ -157,6 +176,14 @@ export const AssetImage = ({
   }, [assetId, thumbnailFetcher]);
 
   const handleImageLoad = () => {
+    // If we already fell back to the placeholder, this `onLoad` is the
+    // placeholder finishing — NOT the real image succeeding. Clearing the
+    // error state here would flip `imageUrl` back to the broken original
+    // URL on the next render, which errors again, which falls back to the
+    // placeholder, which loads, which clears the error… infinite loop.
+    if (shouldShowPlaceholderFallback) {
+      return;
+    }
     // Successfully loaded, clear both loading and error states
     dispatch({ type: "load_success" });
   };
@@ -165,6 +192,10 @@ export const AssetImage = ({
     // Only set error state and trigger refresh once
     if (!isImageError && !hasAttemptedRefreshRef.current) {
       dispatch({ type: "load_error" });
+      // We can only refresh when we have a `mainImage` to re-sign from
+      // (asset detail page and similar full-preview callers). Thumbnail-
+      // only callers (reports' AssetCell, list rows) fall through to the
+      // placeholder fallback in `imageUrl` below — no API call here.
       refreshImage();
     } else {
       dispatch({ type: "load_error" });

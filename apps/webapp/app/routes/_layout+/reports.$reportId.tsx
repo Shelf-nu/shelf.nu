@@ -8,7 +8,7 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useSetAtom } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
@@ -393,45 +393,66 @@ export default function ReportPage() {
 
   const navigate = useNavigate();
 
-  // Navigate to booking when row is clicked
-  const handleBookingRowClick = (row: BookingComplianceRow) => {
-    void navigate(`/bookings/${row.bookingId}`);
-  };
+  // Row-click handlers are wrapped in `useCallback` so their identity is stable
+  // across re-renders. Without this, every ReportPage re-render produced a new
+  // `onRowClick` prop for the report content components, which propagated down
+  // through TanStack `flexRender` and forced AssetCell/AssetImage to remount —
+  // creating an image-fetch storm visible in the network panel.
+  const handleBookingRowClick = useCallback(
+    (row: BookingComplianceRow) => {
+      void navigate(`/bookings/${row.bookingId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to booking when overdue row is clicked
-  const handleOverdueRowClick = (row: OverdueItemRow) => {
-    void navigate(`/bookings/${row.bookingId}`);
-  };
+  const handleOverdueRowClick = useCallback(
+    (row: OverdueItemRow) => {
+      void navigate(`/bookings/${row.bookingId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when idle asset row is clicked
-  const handleIdleAssetRowClick = (row: IdleAssetRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleIdleAssetRowClick = useCallback(
+    (row: IdleAssetRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when custody row is clicked
-  const handleCustodyRowClick = (row: CustodySnapshotRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleCustodyRowClick = useCallback(
+    (row: CustodySnapshotRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when top booked row is clicked
-  const handleTopBookedRowClick = (row: TopBookedAssetRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleTopBookedRowClick = useCallback(
+    (row: TopBookedAssetRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when inventory row is clicked
-  const handleInventoryRowClick = (row: AssetInventoryRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleInventoryRowClick = useCallback(
+    (row: AssetInventoryRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when utilization row is clicked
-  const handleUtilizationRowClick = (row: AssetUtilizationRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleUtilizationRowClick = useCallback(
+    (row: AssetUtilizationRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when activity row is clicked
-  const handleActivityRowClick = (row: AssetActivityRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleActivityRowClick = useCallback(
+    (row: AssetActivityRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
   // Render report content based on report ID
   const renderReportContent = () => {
@@ -605,17 +626,8 @@ export default function ReportPage() {
         </div>
       </Header>
 
-      {/* Content area matching app patterns.
-          `flex-1` cascades from the parent `<main>` (SidebarInset), which is a
-          `flex flex-col h-dvh` container. That makes this column exactly the
-          remaining viewport height under the app Header. Combined with the
-          `flex-1 min-h-0` main content area below, the table card fills the
-          available space and the footer (pagination + computed-in) stays
-          pinned at the bottom of the viewport. */}
-      {/* `-mb-8` cancels most of the SidebarInset's `pb-10`, keeping the
-          pagination footer close to the viewport bottom on report pages
-          without changing the global main padding. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-2 md:-mb-8 md:mt-4 md:px-0">
+      {/* Content area matching app patterns */}
+      <div className="flex flex-1 flex-col gap-2 px-4 pb-4 md:mt-4 md:px-0">
         {/* Filter bar - varies by report type */}
         {showTimeframePicker(reportId) && (
           <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
@@ -661,15 +673,8 @@ export default function ReportPage() {
           </div>
         )}
 
-        {/* Main content area — `flex-1 min-h-0` lets it grow within the route's
-            flex column and lets children using `flex-1` (e.g. the data table)
-            shrink past their content height to enable internal scrolling. */}
-        <div
-          className={tw(
-            "flex min-h-0 flex-1 flex-col transition-opacity",
-            isLoading && "opacity-60"
-          )}
-        >
+        {/* Main content area */}
+        <div className={tw("transition-opacity", isLoading && "opacity-60")}>
           {hasData ? (
             renderReportContent()
           ) : (
@@ -924,7 +929,7 @@ function BookingComplianceContent({
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* The Answer */}
       <ComplianceHero
         rate={complianceData?.rate ?? 0}
@@ -935,7 +940,7 @@ function BookingComplianceContent({
       />
 
       {/* Booking details table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Booking Details
@@ -947,7 +952,6 @@ function BookingComplianceContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           manualSorting
           initialSorting={[
@@ -1383,6 +1387,78 @@ function OverdueItemsContent({
 // R4: Idle Assets Content
 // -----------------------------------------------------------------------------
 
+/**
+ * Column definitions for the Idle Assets table, defined at module scope so
+ * the cell function references stay stable across IdleAssetsContent renders.
+ * See the loop bug fix in IdleAssetsContent for context.
+ */
+const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "daysSinceLastUse",
+    header: "Unused For",
+    cell: ({ row }) => {
+      const days = row.original.daysSinceLastUse;
+      return (
+        <span
+          className={tw(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+            days > 90
+              ? "bg-red-100 text-red-700"
+              : days > 60
+              ? "bg-orange-100 text-orange-700"
+              : "bg-yellow-100 text-yellow-700"
+          )}
+        >
+          {days} days
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "lastBookedAt",
+    header: "Last Used",
+    cell: ({ row }) =>
+      row.original.lastBookedAt ? (
+        <DateCell date={row.original.lastBookedAt} />
+      ) : (
+        <span className="text-gray-400">Never</span>
+      ),
+  },
+  {
+    accessorKey: "category",
+    header: "Category",
+    cell: ({ row }) =>
+      row.original.category || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "location",
+    header: "Location",
+    cell: ({ row }) =>
+      row.original.location || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "valuation",
+    header: "Value",
+    cell: ({ row }) =>
+      row.original.valuation ? (
+        `$${row.original.valuation.toLocaleString()}`
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+];
+
 function IdleAssetsContent({
   rows,
   kpis,
@@ -1396,74 +1472,17 @@ function IdleAssetsContent({
   timeframeLabel?: string;
   onRowClick?: (row: IdleAssetRow) => void;
 }) {
-  // Column definitions for unused assets table
-  // Order: What → Urgency → Context → Value → Status (tells a story)
-  const columns: ColumnDef<IdleAssetRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "daysSinceLastUse",
-      header: "Unused For",
-      cell: ({ row }) => {
-        const days = row.original.daysSinceLastUse;
-        return (
-          <span
-            className={tw(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-              days > 90
-                ? "bg-red-100 text-red-700"
-                : days > 60
-                ? "bg-orange-100 text-orange-700"
-                : "bg-yellow-100 text-yellow-700"
-            )}
-          >
-            {days} days
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "lastBookedAt",
-      header: "Last Used",
-      cell: ({ row }) =>
-        row.original.lastBookedAt ? (
-          <DateCell date={row.original.lastBookedAt} />
-        ) : (
-          <span className="text-gray-400">Never</span>
-        ),
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "location",
-      header: "Location",
-      cell: ({ row }) =>
-        row.original.location || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "valuation",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.valuation ? (
-          `$${row.original.valuation.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-  ];
+  // Column definitions for unused assets table.
+  // Memoized so cell function refs are stable across re-renders — without
+  // this, TanStack `flexRender` hands React a new component type on every
+  // render, which unmounts/remounts every AssetCell (and thereby its
+  // AssetImage child), causing image fetches to abort and re-issue in a
+  // loop. The deps list is empty because the cells only read from `row` —
+  // they don't capture any closure variables from this component.
+  const columns: ColumnDef<IdleAssetRow>[] = useMemo(
+    () => IDLE_ASSETS_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const totalIdle =
@@ -1474,7 +1493,7 @@ function IdleAssetsContent({
     (kpis.find((k) => k.id === "total_idle_value")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1519,7 +1538,7 @@ function IdleAssetsContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Unused Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1529,7 +1548,6 @@ function IdleAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1645,7 +1663,7 @@ function CustodySnapshotContent({
     (kpis.find((k) => k.id === "avg_days_in_custody")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1690,7 +1708,7 @@ function CustodySnapshotContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Current Assignments
@@ -1702,7 +1720,6 @@ function CustodySnapshotContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1861,7 +1878,7 @@ function TopBookedAssetsContent({
   const topAsset = topBookedAsset || null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1945,7 +1962,7 @@ function TopBookedAssetsContent({
 
       {/* Data table — fills remaining vertical space inside the route's flex column
           and scrolls internally when row count exceeds the visible area. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Top Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1955,7 +1972,6 @@ function TopBookedAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2155,7 +2171,7 @@ function AssetInventoryContent({
     (kpis.find((k) => k.id === "in_custody_count")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2198,7 +2214,7 @@ function AssetInventoryContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -2208,7 +2224,6 @@ function AssetInventoryContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2296,7 +2311,7 @@ function MonthlyBookingTrendsContent({
   const trendDescription = trendKpi?.description;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2391,7 +2406,7 @@ function MonthlyBookingTrendsContent({
       )}
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Monthly Breakdown
@@ -2403,7 +2418,6 @@ function MonthlyBookingTrendsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           emptyContent={
             <ReportEmptyState
               reason="no_data"
@@ -2502,7 +2516,7 @@ function AssetUtilizationContent({
     (kpis.find((k) => k.id === "avg_utilization")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2557,7 +2571,7 @@ function AssetUtilizationContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Asset Usage Rates
@@ -2569,7 +2583,6 @@ function AssetUtilizationContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2677,7 +2690,7 @@ function AssetActivityContent({
     kpis.find((k) => k.id === "most_active_asset")?.value || "—";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2747,7 +2760,7 @@ function AssetActivityContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Recent Activity
@@ -2759,7 +2772,6 @@ function AssetActivityContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
