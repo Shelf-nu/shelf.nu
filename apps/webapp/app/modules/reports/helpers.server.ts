@@ -995,9 +995,15 @@ async function fetchOverdueRows(
       Math.ceil(msOverdue / (1000 * 60 * 60 * 24))
     );
 
-    // Calculate check-in progress from partial check-ins (dedupe in case of duplicates)
+    // Calculate check-in progress from partial check-ins.
+    // Intersect with current b.assets so a partial-checkin row referencing an
+    // asset that was later removed from the booking doesn't overcount
+    // checkedInCount and desync it from valueAtRisk (which already filters via b.assets).
+    const currentAssetIds = new Set(b.assets.map((a) => a.id));
     const checkedInAssetIds = new Set(
-      b.partialCheckins.flatMap((pc) => pc.assetIds)
+      b.partialCheckins
+        .flatMap((pc) => pc.assetIds)
+        .filter((id) => currentAssetIds.has(id))
     );
     const checkedInCount = checkedInAssetIds.size;
     const uncheckedCount = Math.max(0, b._count.assets - checkedInCount);
@@ -1063,30 +1069,32 @@ async function computeOverdueKpis(
 
   const totalOverdue = overdueBookings.length;
 
-  // Calculate assets still outstanding (not yet returned), deduping asset IDs
-  const totalAssetsOutstanding = overdueBookings.reduce((sum, b) => {
-    const checkedInCount = new Set(
-      b.partialCheckins.flatMap((pc) => pc.assetIds)
-    ).size;
-    return sum + Math.max(0, b._count.assets - checkedInCount);
-  }, 0);
+  // Compute outstanding asset count and value at risk from the same filtered
+  // set of checked-in IDs (intersected with b.assets) so the two stay in sync
+  // when a partially-checked-in asset is later removed from the booking.
+  let totalAssetsOutstanding = 0;
+  let totalValueAtRisk = 0;
+  for (const b of overdueBookings) {
+    const currentAssetIds = new Set(b.assets.map((a) => a.id));
+    const checkedInAssetIds = new Set(
+      b.partialCheckins
+        .flatMap((pc) => pc.assetIds)
+        .filter((id) => currentAssetIds.has(id))
+    );
+    totalAssetsOutstanding += Math.max(
+      0,
+      b._count.assets - checkedInAssetIds.size
+    );
+    totalValueAtRisk += b.assets
+      .filter((asset) => !checkedInAssetIds.has(asset.id))
+      .reduce((assetSum, asset) => assetSum + (asset.valuation || 0), 0);
+  }
 
   // Also track total for context in hero subtitle
   const totalAssetsInBookings = overdueBookings.reduce(
     (sum, b) => sum + b._count.assets,
     0
   );
-
-  // Calculate value at risk - only for assets still outstanding
-  const totalValueAtRisk = overdueBookings.reduce((sum, b) => {
-    const checkedInAssetIds = new Set(
-      b.partialCheckins.flatMap((pc) => pc.assetIds)
-    );
-    const outstandingValuation = b.assets
-      .filter((asset) => !checkedInAssetIds.has(asset.id))
-      .reduce((assetSum, asset) => assetSum + (asset.valuation || 0), 0);
-    return sum + outstandingValuation;
-  }, 0);
 
   // Calculate days overdue
   const daysOverdueList = overdueBookings.map((b) => {
