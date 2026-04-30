@@ -789,34 +789,83 @@ export async function updateBasicBooking({
     }
 
     // Check and log start date changes
-    if (from && booking.from && from.getTime() !== booking.from.getTime()) {
+    const fromDateChanged =
+      !!from && !!booking.from && from.getTime() !== booking.from.getTime();
+    if (fromDateChanged) {
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
         content: `${userLink} changed booking start date from ${wrapDateForNote(
-          booking.from
-        )} to ${wrapDateForNote(from)}.`,
+          booking.from!
+        )} to ${wrapDateForNote(from!)}.`,
       });
       changes.push(
         `Start date changed from ${formatDateForEmail(
-          booking.from
-        )} to ${formatDateForEmail(from)}`
+          booking.from!
+        )} to ${formatDateForEmail(from!)}`
       );
     }
 
     // Check and log end date changes
-    if (to && booking.to && to.getTime() !== booking.to.getTime()) {
+    const toDateChanged =
+      !!to && !!booking.to && to.getTime() !== booking.to.getTime();
+    if (toDateChanged) {
       await createSystemBookingNote({
         bookingId: booking.id,
         organizationId,
         content: `${userLink} changed booking end date from ${wrapDateForNote(
-          booking.to
-        )} to ${wrapDateForNote(to)}.`,
+          booking.to!
+        )} to ${wrapDateForNote(to!)}.`,
       });
       changes.push(
         `End date changed from ${formatDateForEmail(
-          booking.to
-        )} to ${formatDateForEmail(to)}`
+          booking.to!
+        )} to ${formatDateForEmail(to!)}`
+      );
+    }
+
+    /**
+     * Activity events for date changes — one event per field that
+     * actually changed (per `record-event-payload-shapes.md`). Best-effort
+     * post-tx: matches the surrounding note-write location and avoids
+     * blocking the user's update on event persistence. The notes above
+     * still ship even if the event write fails.
+     */
+    try {
+      if (fromDateChanged) {
+        await recordEvent({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_DATES_CHANGED",
+          entityType: "BOOKING",
+          entityId: booking.id,
+          bookingId: booking.id,
+          field: "from",
+          fromValue: booking.from!.toISOString(),
+          toValue: from!.toISOString(),
+        });
+      }
+      if (toDateChanged) {
+        await recordEvent({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_DATES_CHANGED",
+          entityType: "BOOKING",
+          entityId: booking.id,
+          bookingId: booking.id,
+          field: "to",
+          fromValue: booking.to!.toISOString(),
+          toValue: to!.toISOString(),
+        });
+      }
+    } catch (err) {
+      Logger.error(
+        new ShelfError({
+          cause: err,
+          message: "Failed to record updateBasicBooking date events",
+          additionalData: { bookingId: booking.id },
+          label,
+        })
       );
     }
 
@@ -2100,6 +2149,30 @@ export async function fulfilModelRequestsAndCheckout({
           kitIds: unionKitIds,
           hasKits,
         });
+
+        /**
+         * Activity events — mirrors `checkoutBooking`'s emission so the
+         * combined fulfil-and-checkout flow produces the same per-asset
+         * `BOOKING_CHECKED_OUT` rows as the standalone checkout path.
+         * `allBookingAssetIds` is the post-scan snapshot: it covers both
+         * pre-existing booking assets and the newly scanned ones, which
+         * is the correct set for "assets that just transitioned to
+         * CHECKED_OUT".
+         */
+        if (allBookingAssetIds.length > 0) {
+          await recordEvents(
+            allBookingAssetIds.map((assetId) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "BOOKING_CHECKED_OUT" as const,
+              entityType: "BOOKING" as const,
+              entityId: bookingId,
+              bookingId,
+              assetId,
+            })),
+            tx
+          );
+        }
       },
       { timeout: 15000 }
     );
@@ -4531,6 +4604,52 @@ export async function extendBooking({
       )}** to **${wrapDateForNote(newEndDate)}**.`,
     });
 
+    /**
+     * Activity event — record the date change for reports. Best-effort:
+     * post-tx (mirrors the surrounding note-write location). The
+     * `extendBooking` flow does NOT call `createStatusTransitionNote`
+     * even when the status flips OVERDUE → ONGOING, so we also emit a
+     * `BOOKING_STATUS_CHANGED` event ourselves for that case.
+     */
+    try {
+      await recordEvent({
+        organizationId,
+        actorUserId: userId,
+        action: "BOOKING_DATES_CHANGED",
+        entityType: "BOOKING",
+        entityId: updatedBooking.id,
+        bookingId: updatedBooking.id,
+        field: "to",
+        fromValue: booking.to ? booking.to.toISOString() : null,
+        toValue: newEndDate.toISOString(),
+      });
+
+      // Status flip is determined by the same condition used in the tx
+      // update: OVERDUE → ONGOING. Anything else keeps the prior status.
+      if (booking.status === BookingStatus.OVERDUE) {
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_STATUS_CHANGED",
+          entityType: "BOOKING",
+          entityId: updatedBooking.id,
+          bookingId: updatedBooking.id,
+          field: "status",
+          fromValue: BookingStatus.OVERDUE,
+          toValue: BookingStatus.ONGOING,
+        });
+      }
+    } catch (err) {
+      Logger.error(
+        new ShelfError({
+          cause: err,
+          message: "Failed to record extendBooking activity events",
+          additionalData: { bookingId: updatedBooking.id },
+          label,
+        })
+      );
+    }
+
     // Resolve notification recipients and send personalized emails
     const recipients = await getBookingNotificationRecipients({
       booking: updatedBooking,
@@ -5959,10 +6078,18 @@ export async function bulkDeleteBookings({
 export async function bulkArchiveBookings({
   bookingIds,
   organizationId,
+  userId,
   currentSearchParams,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
+  /**
+   * Optional actor user ID — attributed on the per-booking
+   * `BOOKING_ARCHIVED` activity events so reports can surface "who
+   * archived these bookings". When absent, events are recorded as
+   * system-initiated.
+   */
+  userId?: User["id"];
   currentSearchParams?: string | null;
 }) {
   try {
@@ -6016,9 +6143,28 @@ export async function bulkArchiveBookings({
           organizationId,
           fromStatus: booking.status,
           toStatus: BookingStatus.ARCHIVED,
+          userId,
           custodianUserId: booking.custodianUserId || undefined,
         });
       }
+
+      /**
+       * Per-booking lifecycle event — mirrors the single
+       * `archiveBooking` emission so reports treat bulk + single
+       * archival identically. Inside the same tx so a rollback wipes
+       * both the status flips and the events together.
+       */
+      await recordEvents(
+        bookings.map((booking) => ({
+          organizationId,
+          actorUserId: userId ?? null,
+          action: "BOOKING_ARCHIVED" as const,
+          entityType: "BOOKING" as const,
+          entityId: booking.id,
+          bookingId: booking.id,
+        })),
+        tx
+      );
     });
 
     /** Cancel any active schedulers */
@@ -6182,6 +6328,26 @@ export async function bulkCancelBookings({
           custodianUserId: booking.custodianUserId || undefined,
         });
       }
+
+      /**
+       * Per-booking lifecycle event — mirrors the single
+       * `cancelBooking` emission so reports treat bulk + single
+       * cancellation identically. Inside the same tx so a rollback
+       * wipes both the status flips and the events together. The bulk
+       * path has no per-booking cancellation reason, so `meta` is
+       * omitted (the single-cancel path includes it when supplied).
+       */
+      await recordEvents(
+        bookings.map((booking) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_CANCELLED" as const,
+          entityType: "BOOKING" as const,
+          entityId: booking.id,
+          bookingId: booking.id,
+        })),
+        tx
+      );
     });
 
     /** Cancelling scheduler */
@@ -6500,6 +6666,28 @@ async function addScannedAssetsToBookingWithinTx(
     },
   });
 
+  /**
+   * Per-asset event for each newly attached asset. Mirrors the
+   * `BOOKING_ASSETS_ADDED` emission in `updateBookingAssets` so the
+   * scanner-driven path produces the same audit-trail rows as the
+   * manage-assets dialog. Inside the tx — rolls back together with
+   * the BookingAsset row creates above.
+   */
+  if (assetIds.length > 0) {
+    await recordEvents(
+      assetIds.map((assetId) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "BOOKING_ASSETS_ADDED" as const,
+        entityType: "BOOKING" as const,
+        entityId: bookingId,
+        bookingId,
+        assetId,
+      })),
+      tx
+    );
+  }
+
   /** When booking is active, newly added items must be flagged checked out */
   const isActiveBooking =
     booking.status === BookingStatus.ONGOING ||
@@ -6781,60 +6969,112 @@ export async function duplicateBooking({
     });
     const hints = getHints(request);
 
-    const newBooking = await db.booking.create({
-      data: {
-        name: bookingToDuplicate.name + " (Copy)",
-        description: bookingToDuplicate.description,
-        from: DateTime.fromFormat(
-          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
-            DATE_TIME_FORMAT
-          ),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
-        to: DateTime.fromFormat(
-          DateTime.fromJSDate(addDays(new Date(), 1), {
-            zone: hints.timeZone,
-          }).toFormat(DATE_TIME_FORMAT),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
-        organizationId,
-        creatorId: userId,
-        status: BookingStatus.DRAFT,
-        custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
-        custodianUserId: bookingToDuplicate.custodianUserId,
-        bookingAssets: {
-          /**
-           * Preserve per-asset booked quantity when duplicating. Without
-           * this the pivot row falls back to the schema default of 1,
-           * which silently drops reservation sizes for QUANTITY_TRACKED
-           * assets (bug reported during Phase 3b testing).
-           *
-           * Note: we copy the intent verbatim — the duplicate starts in
-           * DRAFT and availability is re-validated at checkout, so an
-           * over-reservation here is surfaced to the user at the right
-           * time instead of being silently truncated now.
-           */
-          create: bookingToDuplicate.bookingAssets.map((ba) => ({
-            assetId: ba.assetId,
-            quantity: ba.quantity,
+    /**
+     * Wrap creation + activity events in a transaction so the events
+     * commit atomically with the booking row (matches `createBooking`).
+     * `duplicateBooking` doesn't delegate to `createBooking` because it
+     * needs to copy across more fields (per-asset quantities, tags,
+     * notification recipients), so we mirror the emission pattern here.
+     */
+    const duplicatedAssetIds = bookingToDuplicate.bookingAssets.map(
+      (ba: { assetId: string }) => ba.assetId
+    ) as string[];
+
+    const newBooking = await db.$transaction(async (tx) => {
+      const created = await tx.booking.create({
+        data: {
+          name: bookingToDuplicate.name + " (Copy)",
+          description: bookingToDuplicate.description,
+          from: DateTime.fromFormat(
+            DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
+              DATE_TIME_FORMAT
+            ),
+            DATE_TIME_FORMAT,
+            { zone: hints.timeZone }
+          ).toJSDate(),
+          to: DateTime.fromFormat(
+            DateTime.fromJSDate(addDays(new Date(), 1), {
+              zone: hints.timeZone,
+            }).toFormat(DATE_TIME_FORMAT),
+            DATE_TIME_FORMAT,
+            { zone: hints.timeZone }
+          ).toJSDate(),
+          organizationId,
+          creatorId: userId,
+          status: BookingStatus.DRAFT,
+          custodianTeamMemberId: bookingToDuplicate.custodianTeamMemberId,
+          custodianUserId: bookingToDuplicate.custodianUserId,
+          bookingAssets: {
+            /**
+             * Preserve per-asset booked quantity when duplicating. Without
+             * this the pivot row falls back to the schema default of 1,
+             * which silently drops reservation sizes for QUANTITY_TRACKED
+             * assets (bug reported during Phase 3b testing).
+             *
+             * Note: we copy the intent verbatim — the duplicate starts in
+             * DRAFT and availability is re-validated at checkout, so an
+             * over-reservation here is surfaced to the user at the right
+             * time instead of being silently truncated now.
+             */
+            create: bookingToDuplicate.bookingAssets.map((ba) => ({
+              assetId: ba.assetId,
+              quantity: ba.quantity,
+            })),
+          },
+          tags: {
+            connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
+          },
+          // Copy per-booking notification recipients from the original
+          ...(bookingToDuplicate.notificationRecipients?.length
+            ? {
+                notificationRecipients: {
+                  connect: bookingToDuplicate.notificationRecipients.map(
+                    (tm: { id: string }) => ({ id: tm.id })
+                  ),
+                },
+              }
+            : {}),
+        },
+      });
+
+      /**
+       * Lifecycle event for the duplicated booking. Mirrors `createBooking`
+       * so reports treat the duplicate as a fresh draft just like any
+       * other newly created booking.
+       */
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_CREATED",
+          entityType: "BOOKING",
+          entityId: created.id,
+          bookingId: created.id,
+          meta: {
+            assetCount: duplicatedAssetIds.length,
+            duplicatedFromBookingId: bookingToDuplicate.id,
+          },
+        },
+        tx
+      );
+
+      // One BOOKING_ASSETS_ADDED event per copied asset.
+      if (duplicatedAssetIds.length > 0) {
+        await recordEvents(
+          duplicatedAssetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_ASSETS_ADDED" as const,
+            entityType: "BOOKING" as const,
+            entityId: created.id,
+            bookingId: created.id,
+            assetId,
           })),
-        },
-        tags: {
-          connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
-        },
-        // Copy per-booking notification recipients from the original
-        ...(bookingToDuplicate.notificationRecipients?.length
-          ? {
-              notificationRecipients: {
-                connect: bookingToDuplicate.notificationRecipients.map(
-                  (tm: { id: string }) => ({ id: tm.id })
-                ),
-              },
-            }
-          : {}),
-      },
+          tx
+        );
+      }
+
+      return created;
     });
 
     return newBooking;

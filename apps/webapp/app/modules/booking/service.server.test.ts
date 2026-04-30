@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import * as activityEventService from "~/modules/activity-event/service.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
@@ -38,6 +39,9 @@ import {
   extendBooking,
   removeAssets,
   getOngoingBookingForAsset,
+  bulkArchiveBookings,
+  bulkCancelBookings,
+  addScannedAssetsToBooking,
   // Phase 3c helpers
   computeBookingAssetRemaining,
   isBookingFullyCheckedIn,
@@ -82,6 +86,7 @@ vitest.mock("~/database/db.server", () => ({
     booking: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findFirstOrThrow: vitest.fn().mockResolvedValue({}),
       findUnique: vitest.fn().mockResolvedValue(null),
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
@@ -116,6 +121,13 @@ vitest.mock("~/database/db.server", () => ({
       create: vitest.fn().mockResolvedValue({}),
       findMany: vitest.fn().mockResolvedValue([]),
       deleteMany: vitest.fn().mockResolvedValue({ count: 1 }),
+    },
+    // why: bulkCancelBookings creates per-asset cancellation notes via
+    // tx.note.createMany inside its transaction. Returning a no-op count
+    // is enough — the assertion-under-test cares about the activity-event
+    // emission, not the note write.
+    note: {
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     tag: {
       findMany: vitest
@@ -1205,6 +1217,67 @@ describe("updateBasicBooking", () => {
       })
     );
   });
+
+  it("emits BOOKING_DATES_CHANGED events when from/to dates change", async () => {
+    expect.assertions(2);
+
+    const oldFrom = new Date("2024-01-01T09:00:00Z");
+    const oldTo = new Date("2024-01-01T17:00:00Z");
+    const newFrom = new Date("2024-02-01T09:00:00Z");
+    const newTo = new Date("2024-02-01T17:00:00Z");
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      custodianTeamMemberId: "team-member-1",
+      name: "Same Name",
+      description: "Same Description",
+      from: oldFrom,
+      to: oldTo,
+      custodianUser: null,
+      custodianTeamMember: null,
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await updateBasicBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      name: "Same Name",
+      description: "Same Description",
+      from: newFrom,
+      to: newTo,
+      custodianUserId: "user-1",
+      custodianTeamMemberId: "team-member-1",
+      tags: [],
+      userId: "editor-1",
+      hints: mockClientHints,
+    });
+
+    // One event per changed field — `from` and `to` separately so reports
+    // can `groupBy(field)` without unpacking JSON.
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_DATES_CHANGED",
+        bookingId: "booking-1",
+        field: "from",
+        fromValue: oldFrom.toISOString(),
+        toValue: newFrom.toISOString(),
+      })
+    );
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_DATES_CHANGED",
+        bookingId: "booking-1",
+        field: "to",
+        fromValue: oldTo.toISOString(),
+        toValue: newTo.toISOString(),
+      })
+    );
+  });
 });
 
 describe("updateBookingAssets", () => {
@@ -1964,7 +2037,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
   }
 
   it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     const mockBooking = buildPreTxBooking({
       bookingAssets: [
@@ -2055,6 +2128,25 @@ describe("fulfilModelRequestsAndCheckout", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
     expect(result).toEqual(hydratedBooking);
+
+    // Activity events — per-asset BOOKING_CHECKED_OUT for every asset on
+    // the post-scan booking (the same set the asset.updateMany flips).
+    // Mirrors `checkoutBooking`'s emission contract.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_CHECKED_OUT",
+          bookingId: "booking-1",
+          assetId: "hp-1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_CHECKED_OUT",
+          bookingId: "booking-1",
+          assetId: "dell-1",
+        }),
+      ]),
+      expect.anything()
+    );
   });
 
   it("should roll back the whole tx when requests remain outstanding after scanning", async () => {
@@ -2996,7 +3088,7 @@ describe("duplicateBooking", () => {
   });
 
   it("should duplicate booking successfully", async () => {
-    expect.assertions(2);
+    expect.assertions(4);
 
     const originalBooking = {
       ...mockBookingData,
@@ -3045,6 +3137,33 @@ describe("duplicateBooking", () => {
       })
     );
     expect(result).toEqual(duplicatedBooking);
+
+    // Lifecycle event for the duplicated booking — same recordEvent
+    // contract as createBooking.
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_CREATED",
+        bookingId: "booking-2",
+      }),
+      expect.anything()
+    );
+
+    // One BOOKING_ASSETS_ADDED per copied asset.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          bookingId: "booking-2",
+          assetId: "asset-1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          bookingId: "booking-2",
+          assetId: "asset-2",
+        }),
+      ]),
+      expect.anything()
+    );
   });
 });
 
@@ -3106,7 +3225,7 @@ describe("extendBooking", () => {
   });
 
   it("should extend booking successfully", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     const mockBooking = {
       ...mockBookingData,
@@ -3156,6 +3275,15 @@ describe("extendBooking", () => {
       })
     );
     expect(result).toEqual(extendedBooking);
+
+    // Activity event — BOOKING_DATES_CHANGED is recorded for the new end date.
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_DATES_CHANGED",
+        bookingId: "booking-1",
+        field: "to",
+      })
+    );
   });
 
   it("should throw error when booking cannot be extended", async () => {
@@ -3475,7 +3603,7 @@ describe("extendBooking", () => {
   });
 
   it("should transition OVERDUE booking to ONGOING when extended", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     const mockBooking = {
       ...mockBookingData,
@@ -3523,6 +3651,19 @@ describe("extendBooking", () => {
       })
     );
     expect(result.status).toBe(BookingStatus.ONGOING);
+
+    // Activity event — BOOKING_STATUS_CHANGED is recorded for the
+    // OVERDUE → ONGOING flip (extendBooking does not call
+    // createStatusTransitionNote, so it must emit the event itself).
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_STATUS_CHANGED",
+        bookingId: "booking-1",
+        field: "status",
+        fromValue: BookingStatus.OVERDUE,
+        toValue: BookingStatus.ONGOING,
+      })
+    );
   });
 
   it("should extend partially returned booking when returned assets have no conflicts", async () => {
@@ -4826,5 +4967,186 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       where: { id: mockQtyAssetId },
       data: { quantity: { decrement: 10 } },
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Activity Events — Track 4 gaps                                             */
+/*                                                                            */
+/* These suites cover the per-booking lifecycle events emitted by the bulk    */
+/* + scanner code paths. They focus on the event-emission contract (what     */
+/* gets passed to recordEvent / recordEvents), not on the unrelated mutation */
+/* logic which is exercised by integration scenarios elsewhere.              */
+/* -------------------------------------------------------------------------- */
+
+describe("bulkArchiveBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits one BOOKING_ARCHIVED event per archived booking inside the tx", async () => {
+    expect.assertions(1);
+
+    const completedBookings = [
+      {
+        id: "bk-arch-1",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "bk-arch-2",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: "user-2",
+        activeSchedulerReference: null,
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue(completedBookings);
+
+    await bulkArchiveBookings({
+      bookingIds: ["bk-arch-1", "bk-arch-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "bk-arch-1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "bk-arch-2",
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+});
+
+describe("bulkCancelBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits one BOOKING_CANCELLED event per cancelled booking inside the tx", async () => {
+    expect.assertions(1);
+
+    const cancellableBookings = [
+      {
+        id: "bk-canc-1",
+        name: "Booking 1",
+        status: BookingStatus.RESERVED,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 0 },
+      },
+      {
+        id: "bk-canc-2",
+        name: "Booking 2",
+        status: BookingStatus.RESERVED,
+        custodianUserId: "user-2",
+        activeSchedulerReference: null,
+        bookingAssets: [],
+        from: new Date("2025-01-03T09:00:00Z"),
+        to: new Date("2025-01-04T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 0 },
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue(cancellableBookings);
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-canc-1", "bk-canc-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      hints: mockClientHints,
+    });
+
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_CANCELLED",
+          bookingId: "bk-canc-1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_CANCELLED",
+          bookingId: "bk-canc-2",
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+});
+
+describe("addScannedAssetsToBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits one BOOKING_ASSETS_ADDED event per scanned asset inside the tx", async () => {
+    expect.assertions(1);
+
+    // Mock the asset metadata fetch inside the tx-helper. Empty
+    // assetModelId means the materialize-model-request loop is a no-op.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-scan-1",
+        title: "Scanned Asset 1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: null,
+      },
+      {
+        id: "asset-scan-2",
+        title: "Scanned Asset 2",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: null,
+      },
+    ]);
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await addScannedAssetsToBooking({
+      assetIds: ["asset-scan-1", "asset-scan-2"],
+      kitIds: [],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          bookingId: "booking-scan",
+          assetId: "asset-scan-1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          bookingId: "booking-scan",
+          assetId: "asset-scan-2",
+        }),
+      ]),
+      expect.anything()
+    );
   });
 });

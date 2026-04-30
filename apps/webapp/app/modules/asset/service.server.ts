@@ -3722,20 +3722,38 @@ export async function bulkDeleteAssets({
     });
 
     /**
-     * We have to remove the images of assets so we have to make this query first
+     * We have to remove the images of assets so we have to make this query first.
+     * `title` is also selected so we can attach it as `meta.title` on the
+     * `ASSET_DELETED` activity events emitted post-delete (useful for
+     * activity feeds where the asset row no longer exists to JOIN against).
      */
     const assets = await db.asset.findMany({
       where: {
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, mainImage: true },
+      select: { id: true, mainImage: true, title: true },
     });
 
     try {
       await db.asset.deleteMany({
         where: { id: { in: assets.map((asset) => asset.id) } },
       });
+
+      // Activity events — one ASSET_DELETED per deleted asset. Emitted
+      // post-deleteMany (the existing function is not tx-wrapped); the
+      // `meta.title` survives the delete so feeds can render the name.
+      await recordEvents(
+        assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_DELETED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          meta: { title: asset.title },
+        }))
+      );
 
       /** Deleting images of the assets (if any) */
       const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
@@ -4367,15 +4385,52 @@ export async function bulkUpdateAssetCategory({
       settings,
     });
 
-    await db.asset.updateMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-      },
-      data: {
-        /** If nothing is selected then we have to remove the relation and set category to null */
-        categoryId: !categoryId ? null : categoryId,
-      },
+    /** Normalised target value — null clears the category relation. */
+    const newCategoryId: string | null = !categoryId ? null : categoryId;
+
+    /**
+     * Pre-fetch the assets' current categoryId so we can emit
+     * per-asset `ASSET_CATEGORY_CHANGED` events with accurate
+     * `fromValue`/`toValue` and skip no-op updates (assets already
+     * in the target category).
+     */
+    await db.$transaction(async (tx) => {
+      const previousCategories = await tx.asset.findMany({
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
+        select: { id: true, categoryId: true },
+      });
+
+      await tx.asset.updateMany({
+        where: {
+          id: { in: resolvedIds },
+          organizationId,
+        },
+        data: {
+          /** If nothing is selected then we have to remove the relation and set category to null */
+          categoryId: newCategoryId,
+        },
+      });
+
+      // Activity events — one ASSET_CATEGORY_CHANGED per actually-changed
+      // asset. Skip no-ops where previous === new so reports don't get
+      // bloated with empty deltas.
+      const events = previousCategories
+        .filter((asset) => asset.categoryId !== newCategoryId)
+        .map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_CATEGORY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "categoryId",
+          fromValue: asset.categoryId,
+          toValue: newCategoryId,
+        }));
+      await recordEvents(events, tx);
     });
 
     return true;
@@ -4478,6 +4533,38 @@ export async function bulkAssignAssetTags({
         })
       )
     );
+
+    /**
+     * Activity events — one `ASSET_TAGS_CHANGED` per asset whose tag set
+     * actually changed. Emitted post-update (matches the existing pattern
+     * — the per-asset updates are not tx-wrapped). Skip no-ops by
+     * comparing sorted id arrays so a connect/disconnect that resolves
+     * to the same set doesn't pollute the report stream.
+     */
+    const tagEvents = updatedAssets
+      .map((asset) => {
+        const previousTagIds = (previousTagsByAssetId.get(asset.id) ?? [])
+          .map((t) => t.id)
+          .sort();
+        const currentTagIds = asset.tags.map((t) => t.id).sort();
+        return { asset, previousTagIds, currentTagIds };
+      })
+      .filter(
+        ({ previousTagIds, currentTagIds }) =>
+          JSON.stringify(previousTagIds) !== JSON.stringify(currentTagIds)
+      )
+      .map(({ asset, previousTagIds, currentTagIds }) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_TAGS_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: asset.id,
+        assetId: asset.id,
+        field: "tags",
+        fromValue: previousTagIds,
+        toValue: currentTagIds,
+      }));
+    await recordEvents(tagEvents);
 
     return true;
   } catch (cause) {
@@ -5089,7 +5176,32 @@ export async function checkOutQuantity({
         tx,
       });
 
-      /** Step 8: Return the refreshed asset */
+      /**
+       * Step 8: Activity event — emit `CUSTODY_ASSIGNED` inside the tx so
+       * it commits atomically with the custody upsert. The `viaQuantity`
+       * meta flag distinguishes qty-tracked custody slices from
+       * INDIVIDUAL-asset custody assignments.
+       */
+      const custodianTeamMember = await tx.teamMember.findUnique({
+        where: { id: teamMemberId },
+        select: { user: { select: { id: true } } },
+      });
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          teamMemberId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { quantity, viaQuantity: true },
+        },
+        tx
+      );
+
+      /** Step 9: Return the refreshed asset */
       return tx.asset.findUniqueOrThrow({
         where: { id: assetId },
       });
@@ -5249,7 +5361,32 @@ export async function releaseQuantity({
         tx,
       });
 
-      /** Step 8: Return the refreshed asset */
+      /**
+       * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
+       * it commits atomically with the custody decrement/delete. Mirrors
+       * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
+       * qty-tracked releases from INDIVIDUAL-asset custody releases.
+       */
+      const custodianTeamMember = await tx.teamMember.findUnique({
+        where: { id: teamMemberId },
+        select: { user: { select: { id: true } } },
+      });
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          teamMemberId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { quantity, viaQuantity: true },
+        },
+        tx
+      );
+
+      /** Step 9: Return the refreshed asset */
       return tx.asset.findUniqueOrThrow({
         where: { id: assetId },
       });
