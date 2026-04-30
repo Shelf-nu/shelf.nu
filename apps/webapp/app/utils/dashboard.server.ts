@@ -118,7 +118,14 @@ interface BookingForCustodians {
     profilePicture: string | null;
     email: string;
   } | null;
-  _count: { assets: number };
+  /**
+   * Count of assets on this booking via the explicit `BookingAsset` pivot.
+   * Pre-Phase-3a this field was `_count.assets` (from the implicit M2M);
+   * the migration renamed it to `bookingAssets` across the Prisma schema
+   * but this interface wasn't updated, which caused `_count.assets` to
+   * resolve as `undefined` → NaN in the dashboard "Top custodians" widget.
+   */
+  _count: { bookingAssets: number };
 }
 
 export function getCustodiansOrderedByTotalCustodies({
@@ -173,7 +180,7 @@ export function getCustodiansOrderedByTotalCustodies({
 
   // Add booking custodies
   for (const booking of bookings) {
-    const assetCount = booking._count.assets;
+    const assetCount = booking._count.bookingAssets;
     if (assetCount === 0) continue;
 
     if (booking.custodianTeamMemberId && booking.custodianTeamMember) {

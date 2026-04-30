@@ -1,7 +1,10 @@
+import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
@@ -9,6 +12,7 @@ import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
+import { WarningBox } from "../shared/warning-box";
 
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
@@ -20,6 +24,11 @@ export default function BulkAssignCustodyDialog() {
 
   const { isSelfService } = useUserRoleHelper();
   const { currentUserTeamMember } = useLoaderData<typeof loader>();
+
+  const selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const quantityTrackedCount = selectedItems.filter((item) =>
+    isQuantityTracked(item)
+  ).length;
 
   return (
     <BulkUpdateDialogContent
@@ -34,6 +43,17 @@ export default function BulkAssignCustodyDialog() {
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
+          {quantityTrackedCount > 0 ? (
+            <div className="mb-4">
+              <WarningBox>
+                <span>
+                  {quantityTrackedCount} quantity-tracked asset(s) in your
+                  selection will be skipped. Quantity-tracked assets must be
+                  assigned custody individually with a specific quantity.
+                </span>
+              </WarningBox>
+            </div>
+          ) : null}
           <div className="relative z-50 mb-8">
             {isSelfService && currentUserTeamMember ? (
               <input

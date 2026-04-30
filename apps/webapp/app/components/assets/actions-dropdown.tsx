@@ -5,13 +5,15 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { AlarmClockIcon } from "lucide-react";
+import { AlarmClockIcon, ArrowUpDownIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
   PermissionAction,
@@ -20,6 +22,8 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import { QuantityCustodyDialog } from "./quantity-custody-dialog";
+import { QuickAdjustDialog } from "./quick-adjust-dialog";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
@@ -33,9 +37,24 @@ const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
   const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
+  const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
+    useState(false);
+  const [isAdjustQuantityDialogOpen, setIsAdjustQuantityDialogOpen] =
+    useState(false);
 
-  const assetCanBeReleased = asset.custody;
+  const isQtyTracked = isQuantityTracked(asset);
+  const assetCanBeReleased = hasCustody(asset.custody);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+
+  /** Compute available quantity for quantity-tracked assets */
+  const quantityAvailable = isQtyTracked
+    ? (asset.quantity ?? 0) -
+      (asset.custody?.reduce(
+        (sum: number, c: { quantity?: number }) => sum + (c.quantity ?? 0),
+        0
+      ) ?? 0)
+    : 0;
+  const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
   const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
   const user = useUserData();
@@ -52,7 +71,8 @@ const ConditionalActionsDropdown = () => {
   }
 
   const disableReleaseForSelfService =
-    isSelfService && asset.custody?.custodian?.userId !== user?.id;
+    isSelfService &&
+    getPrimaryCustody(asset.custody)?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -105,6 +125,34 @@ const ConditionalActionsDropdown = () => {
           >
             <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
               <When
+                truthy={
+                  isQtyTracked &&
+                  userHasPermission({
+                    roles,
+                    entity: PermissionEntity.asset,
+                    action: PermissionAction.update,
+                  })
+                }
+              >
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    role="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsAdjustQuantityDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <ArrowUpDownIcon className="size-5" /> Adjust quantity
+                    </span>
+                  </Button>
+                </div>
+              </When>
+              <When
                 truthy={userHasPermission({
                   roles,
                   entity: PermissionEntity.asset,
@@ -115,7 +163,33 @@ const ConditionalActionsDropdown = () => {
                   className="border-b px-0 py-1 md:p-0"
                   aria-disabled={custodyActionDisabled}
                 >
-                  {assetCanBeReleased ? (
+                  {isQtyTracked ? (
+                    <Button
+                      type="button"
+                      role="button"
+                      variant="link"
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      disabled={
+                        custodyActionDisabled ||
+                        (noneAvailable
+                          ? {
+                              reason:
+                                "All units are currently in custody. Release some before assigning more.",
+                            }
+                          : false)
+                      }
+                      onClick={() => {
+                        handleMenuClose();
+                        setIsQuantityCustodyDialogOpen(true);
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Icon icon="assign-custody" />{" "}
+                        {isSelfService ? "Take" : "Assign"} custody
+                      </span>
+                    </Button>
+                  ) : assetCanBeReleased ? (
                     <Button
                       to="overview/release-custody"
                       role="link"
@@ -334,6 +408,38 @@ const ConditionalActionsDropdown = () => {
           onClose={() => {
             setIsSetReminderDialogOpen(false);
           }}
+        />
+      </When>
+      <When truthy={isQuantityCustodyDialogOpen}>
+        <QuantityCustodyDialog
+          assetId={asset.id}
+          unitOfMeasure={asset.unitOfMeasure}
+          availableQuantity={
+            (asset.quantity ?? 0) -
+            (asset.custody?.reduce(
+              (sum: number, c: { quantity?: number }) =>
+                sum + (c.quantity ?? 0),
+              0
+            ) ?? 0)
+          }
+          open={isQuantityCustodyDialogOpen}
+          onOpenChange={setIsQuantityCustodyDialogOpen}
+        />
+      </When>
+      <When truthy={isAdjustQuantityDialogOpen}>
+        <QuickAdjustDialog
+          assetId={asset.id}
+          unitOfMeasure={asset.unitOfMeasure}
+          availableQuantity={
+            (asset.quantity ?? 0) -
+            (asset.custody?.reduce(
+              (sum: number, c: { quantity?: number }) =>
+                sum + (c.quantity ?? 0),
+              0
+            ) ?? 0)
+          }
+          open={isAdjustQuantityDialogOpen}
+          onOpenChange={setIsAdjustQuantityDialogOpen}
         />
       </When>
     </>

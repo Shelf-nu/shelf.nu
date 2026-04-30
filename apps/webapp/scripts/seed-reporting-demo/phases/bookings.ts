@@ -245,7 +245,14 @@ async function createBooking(
       tags: state.markerTagId
         ? { connect: [{ id: state.markerTagId }] }
         : undefined,
-      assets: { connect: assetIds.map((id) => ({ id })) },
+      // Phase 3a renamed the implicit `Asset <-> Booking` M2M to the
+      // explicit `BookingAsset` pivot table. Each row is created with
+      // `quantity: 1` (the default for INDIVIDUAL assets). Qty-tracked
+      // bookings would override this; the seed only deals with
+      // INDIVIDUAL fixtures, so the default is fine.
+      bookingAssets: {
+        create: assetIds.map((id) => ({ asset: { connect: { id } } })),
+      },
     },
     select: { id: true },
   });

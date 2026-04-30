@@ -972,14 +972,16 @@ describe("updateKitsWithBookingCustodians", () => {
     //@ts-expect-error missing vitest type
     db.asset.findFirst.mockResolvedValue({
       id: "asset-1",
-      bookings: [
+      bookingAssets: [
         {
-          id: "booking-1",
-          custodianTeamMember: null,
-          custodianUser: {
-            firstName: "Jane",
-            lastName: "Doe",
-            profilePicture: "pic.jpg",
+          booking: {
+            id: "booking-1",
+            custodianTeamMember: null,
+            custodianUser: {
+              firstName: "Jane",
+              lastName: "Doe",
+              profilePicture: "pic.jpg",
+            },
           },
         },
       ],
@@ -1001,7 +1003,9 @@ describe("updateKitsWithBookingCustodians", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           kitId: "kit-co",
-          bookings: { some: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          bookingAssets: {
+            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          },
         }),
       })
     );
@@ -1022,11 +1026,13 @@ describe("updateKitsWithBookingCustodians", () => {
     //@ts-expect-error missing vitest type
     db.asset.findFirst.mockResolvedValue({
       id: "asset-1",
-      bookings: [
+      bookingAssets: [
         {
-          id: "booking-1",
-          custodianTeamMember: { name: "External Contractor" },
-          custodianUser: null,
+          booking: {
+            id: "booking-1",
+            custodianTeamMember: { name: "External Contractor" },
+            custodianUser: null,
+          },
         },
       ],
     });

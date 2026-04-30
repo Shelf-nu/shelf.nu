@@ -233,7 +233,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Check if there might be partial check-ins by looking at asset statuses OR booking status
     // We need to check both AVAILABLE assets (already partially checked in) AND
     // ONGOING/OVERDUE bookings (could have partial check-ins)
-    const hasAvailableAssets = booking.assets.some(
+    /**
+     * Flatten bookingAssets pivot to a plain assets array for downstream use.
+     * Preserves `bookedQuantity` from the pivot so quantity-tracked assets
+     * can display how many units were booked.
+     */
+    const bookingAssets = booking.bookingAssets.map((ba) => ({
+      ...ba.asset,
+      bookedQuantity: ba.quantity,
+    }));
+
+    const hasAvailableAssets = bookingAssets.some(
       (asset) => asset.status === "AVAILABLE"
     );
     const canHavePartialCheckins = ["ONGOING", "OVERDUE"].includes(
@@ -247,21 +257,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
-    const enhancedBooking = booking;
+    let sortedBookingAssets = bookingAssets;
 
     // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
     // For other sort options, the database orderBy is sufficient
     const isStatusSort = !orderBy || orderBy === "status";
     if (isStatusSort) {
-      enhancedBooking.assets = sortBookingAssets(
-        enhancedBooking.assets,
+      sortedBookingAssets = sortBookingAssets(
+        bookingAssets,
         partialCheckinDetails
       );
     }
 
     // Use helper to group assets by kit and sort them
     const sortedAssets = groupAndSortAssetsByKit(
-      enhancedBooking.assets,
+      sortedBookingAssets,
       orderBy,
       orderDirection
     );
@@ -270,7 +280,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const paginationItems: Array<{
       type: "kit" | "asset";
       id: string;
-      assets: Array<(typeof enhancedBooking.assets)[0]>;
+      assets: Array<(typeof sortedBookingAssets)[0]>;
     }> = [];
 
     const processedKitIds = new Set<string>();
@@ -355,44 +365,49 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
-          bookings: {
+          bookingAssets: {
             where: {
-              ...(booking.from && booking.to
-                ? {
-                    OR: [
-                      // Rule 1: RESERVED bookings always conflict
-                      {
-                        status: "RESERVED",
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                      // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
-                      {
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                    ],
-                  }
-                : {}),
+              booking: {
+                ...(booking.from && booking.to
+                  ? {
+                      OR: [
+                        // Rule 1: RESERVED bookings always conflict
+                        {
+                          status: "RESERVED",
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                        // Rule 2: ONGOING/OVERDUE bookings
+                        {
+                          status: { in: ["ONGOING", "OVERDUE"] },
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
+            include: {
+              booking: true,
             },
           },
         },
@@ -401,7 +416,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       /** Calculate booking flags considering all assets */
       getBookingFlags({
         id: booking.id,
-        assetIds: booking.assets.map((a) => a.id),
+        assetIds: bookingAssets.map((a) => a.id),
+        // Phase 3d: an "empty" booking with only model-level reservations
+        // must still be reservable. Passing the count lets the flags
+        // helper surface `hasModelRequests` for the Reserve disable check.
+        modelRequestCount: booking.modelRequests?.length ?? 0,
         from: booking.from,
         to: booking.to,
       }),
@@ -434,17 +453,95 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
 
-    // Enrich the paginated items with full asset details
+    // Build a lookup for booked quantities from the booking pivot
+    const bookedQuantityMap = new Map(
+      booking.bookingAssets.map((ba) => [ba.assetId, ba.quantity])
+    );
+
+    /**
+     * Phase 3c: sum already-dispositioned units per qty-tracked asset for
+     * this booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
+     * Attached to each enriched item below so the row UI can:
+     *   - show "Partially checked in" when `dispositioned > 0 && remaining > 0`
+     *   - render `remaining / booked` in the Qty column for partials
+     *   - show the fully-reconciled state once `dispositioned == booked`
+     *
+     * Only queries qty-tracked asset ids (empty query short-circuits).
+     */
+    const qtyAssetIdsInBooking = booking.bookingAssets
+      .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
+      .map((ba) => ba.assetId);
+
+    /**
+     * Per-asset, per-category sums of disposition logs. Broken down so
+     * the row's tooltip can show Returned / Consumed / Lost / Damaged
+     * separately instead of conflating everything into a single
+     * "Checked in" total — lost and damaged units shouldn't read the
+     * same as units that came back to the pool.
+     */
+    const dispositionSums =
+      qtyAssetIdsInBooking.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["assetId", "category"],
+            where: {
+              bookingId: booking.id,
+              assetId: { in: qtyAssetIdsInBooking },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+
+    type DispositionBreakdown = {
+      returned: number;
+      consumed: number;
+      lost: number;
+      damaged: number;
+    };
+    const emptyBreakdown = (): DispositionBreakdown => ({
+      returned: 0,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
+
+    const breakdownByAsset = new Map<string, DispositionBreakdown>();
+    for (const row of dispositionSums) {
+      const qty = row._sum.quantity ?? 0;
+      const bucket = breakdownByAsset.get(row.assetId) ?? emptyBreakdown();
+      if (row.category === "RETURN") bucket.returned += qty;
+      else if (row.category === "CONSUME") bucket.consumed += qty;
+      else if (row.category === "LOSS") bucket.lost += qty;
+      else if (row.category === "DAMAGE") bucket.damaged += qty;
+      breakdownByAsset.set(row.assetId, bucket);
+    }
+
+    const dispositionedByAsset = new Map<string, number>();
+    for (const [assetId, b] of breakdownByAsset) {
+      dispositionedByAsset.set(
+        assetId,
+        b.returned + b.consumed + b.lost + b.damaged
+      );
+    }
+
+    // Enrich the paginated items with full asset details, booked quantity,
+    // and qty-tracked disposition progress.
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
         const details = assetDetailsMap.get(asset.id);
-        return details || asset;
+        return {
+          ...(details || asset),
+          bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1,
+          dispositionedQuantity: dispositionedByAsset.get(asset.id) ?? 0,
+          dispositionBreakdown:
+            breakdownByAsset.get(asset.id) ?? emptyBreakdown(),
+        };
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,
     }));
 
-    const assetCategories = enhancedBooking.assets
+    const assetCategories = bookingAssets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -465,13 +562,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
-    // not the filtered count from booking.assets (which may be filtered by status)
+    // not the filtered count from bookingAssets (which may be filtered by status)
     // So we need to get the unfiltered asset count
-    const totalBookingAssets = await db.asset.count({
+    const totalBookingAssets = await db.bookingAsset.count({
       where: {
-        bookings: {
-          some: { id: booking.id },
-        },
+        bookingId: booking.id,
       },
     });
 
@@ -498,11 +593,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         currentOrganization,
         header,
-        booking: enhancedBooking,
+        booking,
         modelName,
         items: enrichedPaginatedItems,
         page,
-        totalItems: totalPaginationItems,
+        // `totalItems` drives the `ListTitle` header count. We include
+        // outstanding `BookingModelRequest` rows on top of the
+        // paginated asset/kit items because the Assets & Kits list now
+        // renders a model-request row per outstanding request (Phase
+        // 3d-Polish). `totalPaginationItems` stays
+        // `paginationItems.length` so pagination arithmetic over the
+        // concrete asset/kit list is unaffected.
+        totalItems:
+          totalPaginationItems +
+          (booking.modelRequests ?? []).filter(
+            (req) => req.fulfilledAt === null
+          ).length,
         totalPaginationItems,
         perPage,
         totalPages,
@@ -511,7 +617,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: paginationItems.filter((item) => item.type === "kit").length,
         totalValue: calculateTotalValueOfAssets({
-          assets: enhancedBooking.assets,
+          assets: bookingAssets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
@@ -696,7 +802,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         content: `${actor} deleted booking ${deletedBookingLink}.`,
         type: "UPDATE",
         userId: userId,
-        assetIds: deletedBooking.assets.map((a) => a.id),
+        assetIds: deletedBooking.bookingAssets.map(
+          (ba: { asset: { id: string } }) => ba.asset.id
+        ),
       });
 
       sendNotification({
@@ -867,7 +975,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: booking.bookingAssets.map((ba) => ba.assetId),
         });
 
         sendNotification({
@@ -940,7 +1048,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: booking.bookingAssets.map((ba) => ba.asset.id),
         });
 
         sendNotification({
@@ -1054,7 +1162,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }`,
           type: "UPDATE",
           userId,
-          assetIds: cancelledBooking.assets.map((a) => a.id),
+          assetIds: cancelledBooking.bookingAssets.map(
+            (ba: { assetId: string }) => ba.assetId
+          ),
         });
 
         sendNotification({
@@ -1294,6 +1404,7 @@ export default function BookingPage() {
   const shouldRenderOutlet = [
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
+    "booking.overview.fulfil-and-checkout",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

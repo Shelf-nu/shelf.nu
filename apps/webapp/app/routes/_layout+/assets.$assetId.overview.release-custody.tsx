@@ -7,7 +7,9 @@ import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { releaseCustody } from "~/modules/custody/service.server";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -72,13 +74,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset.custody) {
+    /**
+     * Quantity-tracked assets use the quantity-aware release flow
+     * on the asset overview page, not this modal.
+     */
+    if (isQuantityTracked(asset)) {
       return redirect(`/assets/${assetId}`);
     }
 
+    if (!hasCustody(asset.custody)) {
+      return redirect(`/assets/${assetId}`);
+    }
+
+    /** Get the primary custody record to display in the modal */
+    const primaryCustody = getPrimaryCustody(asset.custody);
+
     return payload({
       showModal: true,
-      custody: asset.custody,
+      custody: primaryCustody,
       asset: { title: asset.title },
     });
   } catch (cause) {
@@ -145,7 +158,24 @@ export const action = async ({
         },
       },
     });
-    const custodyRecord = assetWithCustody.custody;
+    /**
+     * Block quantity-tracked assets — they must use the
+     * quantity-aware release flow, not this generic one.
+     */
+    if (isQuantityTracked(assetWithCustody)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Quantity-tracked assets must have custody released individually through the quantity release flow.",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const custodyRecord = getPrimaryCustody(assetWithCustody.custody);
 
     if (isSelfService) {
       if (custodyRecord?.custodian?.userId !== user.id) {
@@ -171,7 +201,7 @@ export const action = async ({
       },
     });
 
-    if (!asset.custody) {
+    if (!hasCustody(asset.custody)) {
       const formData = await request.formData();
       const { custodianName } = parseData(
         formData,
@@ -256,7 +286,13 @@ export default function Custody() {
               "your"
             ) : (
               <span className="font-medium">
-                {resolveTeamMemberName(custody?.custodian)}'s'
+                {custody?.custodian
+                  ? resolveTeamMemberName({
+                      name: custody.custodian.name,
+                      user: custody.custodian.user,
+                    })
+                  : ""}
+                's'
               </span>
             )}{" "}
             custody over <span className="font-medium">{asset.title}</span>?
@@ -267,7 +303,14 @@ export default function Custody() {
             <input
               type="hidden"
               name="custodianName"
-              value={resolveTeamMemberName(custody?.custodian)}
+              value={
+                custody?.custodian
+                  ? resolveTeamMemberName({
+                      name: custody.custodian.name,
+                      user: custody.custodian.user,
+                    })
+                  : ""
+              }
             />
             <Button
               to=".."

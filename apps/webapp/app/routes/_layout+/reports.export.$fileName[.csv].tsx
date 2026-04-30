@@ -7,7 +7,7 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
-import { data, type LoaderFunctionArgs, type Params } from "react-router";
+import { data, type LoaderFunctionArgs } from "react-router";
 
 import {
   resolveTimeframe,

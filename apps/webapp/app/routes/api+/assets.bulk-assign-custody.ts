@@ -85,7 +85,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await bulkCheckOutAssets({
+    const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
       assetIds,
       custodianId: custodian.id,
@@ -95,10 +95,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       settings,
     });
 
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — assign custody individually.`
+        : "";
+
     sendNotification({
       title: `Assets are now in custody of ${custodian.name}`,
-      message:
-        "Remember, these assets will be unavailable until it is manually checked in.",
+      message: `Remember, these assets will be unavailable until custody is manually released.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

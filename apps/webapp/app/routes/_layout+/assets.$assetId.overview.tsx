@@ -1,5 +1,9 @@
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustomFieldType,
+  OrganizationRoles,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -10,6 +14,8 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
+import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import { UnlockBarcodesBanner } from "~/components/barcode/unlock-barcodes-banner";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -28,6 +34,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -36,11 +43,15 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -52,7 +63,10 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import {
+  userCanViewSpecificCustody,
+  userHasCustodyViewPermission,
+} from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -96,6 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      role,
     } = await requirePermission({
       userId,
       request,
@@ -134,11 +149,89 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       assetId: id,
       organizationId,
     });
-    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    /**
+     * Compute quantity availability for QUANTITY_TRACKED assets.
+     * Sums custody records AND booking reservations to determine how many
+     * units are currently available. Booking reservations are split into
+     * "reserved" (RESERVED status) and "checked out" (ONGOING/OVERDUE).
+     */
+    let quantityData: {
+      total: number;
+      inCustody: number;
+      reserved: number;
+      checkedOut: number;
+      /**
+       * Booking-aware availability: how many units can be reserved for a
+       * *future* booking. Subtracts everything that's already spoken for —
+       * in-custody + reserved in other bookings + checked-out.
+       */
+      available: number;
+      /**
+       * Physical availability: how many units are *actually* on the shelf
+       * right now — not held by a custodian AND not currently checked out
+       * on an active booking. Used to cap custody assignment and
+       * total-quantity adjustments. Reservations (future bookings) do
+       * NOT subtract from this because the units are still physically
+       * present until that booking is checked out. `CHECKED_OUT` via a
+       * booking DOES subtract, because those units are semantically held
+       * by the booking custodian until they're checked back in.
+       */
+      custodyAvailable: number;
+    } | null = null;
+
+    if (isQuantityTracked(asset)) {
+      const [custodyData, reservedSum, checkedOutSum] = await Promise.all([
+        computeAvailableQuantity(asset.id),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: "RESERVED" },
+          },
+          _sum: { quantity: true },
+        }),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
+
+      const reserved = reservedSum._sum?.quantity ?? 0;
+      const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+
+      quantityData = {
+        total: custodyData.total,
+        inCustody: custodyData.inCustody,
+        reserved,
+        checkedOut,
+        available:
+          custodyData.total - custodyData.inCustody - reserved - checkedOut,
+        custodyAvailable:
+          custodyData.total - custodyData.inCustody - checkedOut,
+      };
+    }
+
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members for the custody
+     * dialog. Self-service users are scoped to only their own record.
+     */
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
+
+    const bookingAsset =
+      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
     const currentBooking: any = null;
 
-    if (booking && booking.from) {
-      asset.bookings = [currentBooking];
+    if (bookingAsset && bookingAsset.booking.from) {
+      asset.bookingAssets = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
@@ -168,6 +261,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       timeZone,
       qrObj,
       reminders,
+      quantityData,
+      teamMembers,
+      totalTeamMembers,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -243,10 +339,12 @@ export default function AssetOverview() {
     lastScan,
     currentOrganization,
     userId,
+    quantityData,
   } = useLoaderData<typeof loader>();
+
   const booking =
-    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
-      ? asset?.bookings[0]
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
+      ? asset?.bookingAssets[0]?.booking
       : undefined;
 
   const customFieldsValues =
@@ -263,12 +361,21 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles } = useUserRoleHelper();
+  const { roles, isSelfService } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  const canViewAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: currentOrganization,
   });
 
   return (
@@ -405,6 +512,30 @@ export default function AssetOverview() {
                 </li>
               ) : null}
 
+              {asset?.assetModel ? (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Asset Model
+                  </span>
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                    {userHasPermission({
+                      roles,
+                      entity: PermissionEntity.assetModel,
+                      action: PermissionAction.update,
+                    }) ? (
+                      <Button
+                        to={`/settings/asset-models/${asset.assetModel.id}/edit`}
+                        variant="link-gray"
+                        className="text-gray-600 underline"
+                      >
+                        {asset.assetModel.name}
+                      </Button>
+                    ) : (
+                      <span>{asset.assetModel.name}</span>
+                    )}
+                  </div>
+                </li>
+              ) : null}
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
                 const barcodeCount =
@@ -618,16 +749,48 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: asset?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-          />
+          {!isQuantityTracked(asset) ? (
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
+                  ?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+            />
+          ) : null}
+
+          {isQuantityTracked(asset) ? (
+            <QuantityOverviewCard
+              assetId={asset.id}
+              quantity={asset.quantity ?? null}
+              unitOfMeasure={asset.unitOfMeasure ?? null}
+              minQuantity={asset.minQuantity ?? null}
+              consumptionType={asset.consumptionType ?? null}
+              availableQuantity={quantityData?.available}
+              custodyAvailableQuantity={quantityData?.custodyAvailable}
+              inCustodyQuantity={quantityData?.inCustody}
+              reservedQuantity={quantityData?.reserved}
+              checkedOutQuantity={quantityData?.checkedOut}
+              canUpdate={canUpdateAvailability}
+            />
+          ) : null}
+
+          {isQuantityTracked(asset) ? (
+            <QuantityCustodyList
+              custody={asset.custody}
+              assetId={asset.id}
+              unitOfMeasure={asset.unitOfMeasure}
+              availableQuantity={quantityData?.custodyAvailable}
+              isSelfService={isSelfService}
+              currentUserId={userId}
+              canViewAllCustody={canViewAllCustody}
+              canCustody={canCustody}
+            />
+          ) : null}
 
           {asset && (
             <CodePreview

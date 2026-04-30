@@ -29,23 +29,42 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
     },
   },
   _count: {
-    select: { assets: true },
+    select: { bookingAssets: true },
   },
 };
 
 /**
  * Extended include for reservation emails — adds minimal asset fields
- * for displaying booked items in the email.
+ * (via the BookingAsset pivot) for displaying booked items in the email.
  * Only used in reserveBooking(), NOT in other email flows.
+ *
+ * Phase 3d (Book-by-Model): also pulls `modelRequests` with the related
+ * `assetModel` so the reservation email can render a "Requested models"
+ * section alongside the booked items list.
  */
 export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
   ...BOOKING_INCLUDE_FOR_EMAIL,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      category: {
+  bookingAssets: {
+    include: {
+      asset: {
         select: {
+          id: true,
+          title: true,
+          type: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  modelRequests: {
+    include: {
+      assetModel: {
+        select: {
+          id: true,
           name: true,
         },
       },
@@ -54,18 +73,27 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets for reservation email, inferred from Prisma include
+ * Type for a booking with bookingAssets for reservation email, inferred from Prisma include
  */
 type BookingForReservationEmail = Prisma.BookingGetPayload<{
   include: typeof BOOKING_INCLUDE_FOR_RESERVATION_EMAIL;
 }>;
 
 /**
- * Type for assets as returned in reservation emails.
+ * Type for a single BookingAsset pivot row as returned in reservation emails.
  * Inferred from the Prisma include to ensure type safety.
  */
 export type ReservationEmailAsset =
-  BookingForReservationEmail["assets"][number];
+  BookingForReservationEmail["bookingAssets"][number];
+
+/**
+ * Type for a single outstanding `BookingModelRequest` row as returned
+ * in reservation emails (Phase 3d — Book-by-Model). Inferred from the
+ * Prisma include so the email renderer can rely on `assetModel.name`
+ * without restating the shape.
+ */
+export type ReservationEmailModelRequest =
+  BookingForReservationEmail["modelRequests"][number];
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
@@ -79,46 +107,79 @@ export const BOOKING_COMMON_INCLUDE = {
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      availableToBook: true,
-      status: true,
-      kitId: true,
-      valuation: true,
-      category: {
+  bookingAssets: {
+    include: {
+      asset: {
         select: {
           id: true,
-          name: true,
-          color: true,
-        },
-      },
-      kit: {
-        select: {
-          name: true,
+          title: true,
+          type: true,
+          consumptionType: true,
+          unitOfMeasure: true,
+          availableToBook: true,
+          status: true,
+          kitId: true,
+          valuation: true,
+          // `mainImage`/`thumbnailImage` are consumed by the partial
+          // check-in drawer's "expected assets" list (see the loader in
+          // `bookings.$bookingId.overview.checkin-assets.tsx`) and by
+          // the synthetic scanned-item payload produced by
+          // `quickCheckinQtyAssetAtom`. Selecting them here keeps those
+          // flows on the existing booking query rather than issuing a
+          // second round-trip for images.
+          mainImage: true,
+          thumbnailImage: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
+          // `kit.id`/`kit.image` are needed by the partial check-in
+          // drawer so we can render a kit summary row grouped from
+          // `booking.bookingAssets`. Previously only `name` was selected
+          // because no downstream consumer needed the rest.
+          kit: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+            },
+          },
         },
       },
     },
     orderBy: [
-      { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
-      { createdAt: "asc" }, // Then by creation order as fallback
+      { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
+      { asset: { createdAt: "asc" } }, // Then by creation order as fallback
     ],
+  },
+  // Phase 3d (Book-by-Model): surface any outstanding `BookingModelRequest`
+  // rows alongside concrete `bookingAssets` so every loader reusing this
+  // include can render the "unassigned model reservations" section and the
+  // checkout guard can enforce fulfilment. Intentionally kept cheap —
+  // `assetModel` selects just enough for UI/error messaging; no deep
+  // graph traversal required.
+  modelRequests: {
+    include: {
+      assetModel: true,
+    },
   },
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
+ * Type for a booking with bookingAssets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
  */
 type BookingWithAssets = Prisma.BookingGetPayload<{
   include: typeof BOOKING_WITH_ASSETS_INCLUDE;
 }>;
 
 /**
- * Type for assets as returned by BOOKING_WITH_ASSETS_INCLUDE
- * Inferred from the Prisma include to ensure type safety
+ * Type for a single BookingAsset pivot row as returned by BOOKING_WITH_ASSETS_INCLUDE.
+ * Inferred from the Prisma include to ensure type safety.
  */
-export type BookingAsset = BookingWithAssets["assets"][number];
+export type BookingAsset = BookingWithAssets["bookingAssets"][number];
 
 /**
  * This enum represents the types of different events that can be scheduled for a booking using PgBoss

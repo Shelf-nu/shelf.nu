@@ -107,23 +107,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               id: true,
               status: true,
               custody: { select: { id: true } },
-              bookings: {
+              bookingAssets: {
                 where: {
-                  status: { in: ["ONGOING", "OVERDUE"] },
+                  booking: {
+                    status: { in: ["ONGOING", "OVERDUE"] },
+                  },
                 },
                 select: {
-                  id: true,
-                  name: true,
-                  from: true,
-                  status: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
+                  booking: {
                     select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                      email: true,
+                      id: true,
+                      name: true,
+                      from: true,
+                      status: true,
+                      custodianTeamMember: true,
+                      custodianUser: {
+                        select: {
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                          email: true,
+                        },
+                      },
                     },
                   },
                 },
@@ -299,7 +305,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             where: { id: assetId, organizationId },
             data: {
               status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
+              custody: { deleteMany: {} },
             },
           });
         }
@@ -507,7 +513,7 @@ export default function KitDetails() {
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
-              custody={kit.custody}
+              custody={kit.custody ? [kit.custody] : null}
             />
           </When>
 

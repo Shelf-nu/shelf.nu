@@ -189,33 +189,39 @@ export async function getLocation(
       assetsWhere.OR = [
         ...(assetsWhere.OR ?? []),
         {
-          custody: { teamMemberId: { in: teamMemberIds } },
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
         {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
+          },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianUserId: { in: teamMemberIds },
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
+          ? [{ custody: { none: {} } }]
           : []),
       ];
     }
@@ -249,6 +255,7 @@ export async function getLocation(
               },
               custody: {
                 select: {
+                  quantity: true,
                   custodian: {
                     select: {
                       id: true,
@@ -1291,11 +1298,13 @@ export async function getLocationKits(
         {
           assets: {
             some: {
-              bookings: {
+              bookingAssets: {
                 some: {
-                  custodianTeamMemberId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  booking: {
+                    custodianTeamMemberId: { in: teamMemberIds },
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    },
                   },
                 },
               },
@@ -1305,11 +1314,13 @@ export async function getLocationKits(
         {
           assets: {
             some: {
-              bookings: {
+              bookingAssets: {
                 some: {
-                  custodianUserId: { in: teamMemberIds },
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  booking: {
+                    custodianUserId: { in: teamMemberIds },
+                    status: {
+                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    },
                   },
                 },
               },

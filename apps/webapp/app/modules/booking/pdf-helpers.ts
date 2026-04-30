@@ -22,6 +22,22 @@ export interface SortParams {
   orderDirection?: "asc" | "desc";
 }
 
+/**
+ * Minimal shape of a `BookingModelRequest` row as consumed by the PDF
+ * preview's "Requested models" section (Phase 3d — Book-by-Model).
+ * Declared structurally so callers that query a booking via
+ * `BOOKING_WITH_ASSETS_INCLUDE` (which includes `modelRequests` with
+ * `assetModel`) can pass their rows through without a widening cast.
+ */
+export type PdfModelRequest = {
+  id: string;
+  assetModelId: string;
+  quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: Date | string | null;
+  assetModel: { id: string; name: string };
+};
+
 export interface PdfDbResult {
   booking: Prisma.BookingGetPayload<{
     include: {
@@ -41,6 +57,15 @@ export interface PdfDbResult {
     "id" | "name" | "imageId" | "currency" | "updatedAt"
   >;
   assetIdToQrCodeMap: Record<string, string>;
+  /** Maps asset ID to booked quantity for quantity-tracked assets */
+  assetIdToQuantityMap: Record<string, number>;
+  /**
+   * Outstanding model-level reservations on the booking (Phase 3d).
+   * Only rows with `quantity > 0` are meaningful for the PDF — the
+   * renderer filters defensively and omits the section entirely when
+   * nothing is outstanding.
+   */
+  modelRequests: PdfModelRequest[];
   from?: string;
   to?: string;
   originalFrom?: string;
@@ -80,7 +105,9 @@ export async function fetchAllPdfRelatedData(
     const [assets, organization] = await Promise.all([
       db.asset.findMany({
         where: {
-          id: { in: booking?.assets.map((a) => a.id) || [] },
+          id: {
+            in: booking?.bookingAssets.map((ba) => ba.assetId) || [],
+          },
         },
         include: {
           category: {
@@ -135,16 +162,50 @@ export async function fetchAllPdfRelatedData(
       organizationId,
       size: "small",
     });
+
+    // Build a map of asset ID to booked quantity from the pivot records.
+    // Only entries with quantity > 1 are meaningful (QUANTITY_TRACKED assets).
+    const assetIdToQuantityMap: Record<string, number> = {};
+    for (const ba of booking.bookingAssets) {
+      if (ba.quantity > 1) {
+        assetIdToQuantityMap[ba.assetId] = ba.quantity;
+      }
+    }
+
+    // Phase 3d (Book-by-Model): surface outstanding model-level
+    // reservations so the PDF can render a dedicated "Requested models"
+    // section. `getBooking` merges with `BOOKING_WITH_ASSETS_INCLUDE`
+    // which already pulls `modelRequests` with `assetModel`, so this
+    // pass-through is cheap — no extra database query required.
+    const modelRequests: PdfModelRequest[] = (
+      (booking as unknown as { modelRequests?: PdfModelRequest[] })
+        .modelRequests ?? []
+    )
+      .filter((req) => req.fulfilledAt === null)
+      .map((req) => ({
+        id: req.id,
+        assetModelId: req.assetModelId,
+        quantity: req.quantity,
+        fulfilledQuantity: req.fulfilledQuantity,
+        fulfilledAt: req.fulfilledAt,
+        assetModel: {
+          id: req.assetModel.id,
+          name: req.assetModel.name,
+        },
+      }));
+
     return {
       booking,
       assets: sortedAssets,
       totalValue: calculateTotalValueOfAssets({
-        assets: booking.assets,
+        assets: booking.bookingAssets.map((ba) => ba.asset),
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),
       organization,
       assetIdToQrCodeMap,
+      assetIdToQuantityMap,
+      modelRequests,
     };
   } catch (cause) {
     throw new ShelfError({

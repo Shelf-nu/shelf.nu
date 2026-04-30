@@ -62,6 +62,7 @@ export default function SettingsPage() {
     ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
+    { to: "asset-models", content: "Asset models" },
     { to: "team", content: "Team" },
   ];
 
@@ -70,9 +71,14 @@ export default function SettingsPage() {
   if (isBaseOrSelfService) {
     items = items.filter(
       (item) =>
-        !["custom-fields", "team", "general", "bookings", "emails"].includes(
-          item.to
-        )
+        ![
+          "custom-fields",
+          "team",
+          "general",
+          "bookings",
+          "emails",
+          "asset-models",
+        ].includes(item.to)
     );
   }
 

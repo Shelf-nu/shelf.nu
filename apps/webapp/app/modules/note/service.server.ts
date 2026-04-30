@@ -9,6 +9,7 @@ import type {
   Tag,
   User,
 } from "@prisma/client";
+import type { ConsumptionType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   buildCategoryChangeNote,
@@ -581,4 +582,103 @@ export async function createAssetNotesForAuditRemoval({
       label,
     });
   }
+}
+
+/** Human-readable label for ConsumptionType values */
+function consumptionTypeLabel(
+  type: ConsumptionType | null | undefined
+): string {
+  if (type === "ONE_WAY") return "Used up (one-way)";
+  if (type === "TWO_WAY") return "Returnable (two-way)";
+  return "—";
+}
+
+/**
+ * Persist a note when quantity-related fields are changed via the edit form.
+ *
+ * Tracks changes to: quantity, minQuantity, consumptionType, unitOfMeasure.
+ * Only creates a note when at least one field actually changed.
+ */
+export async function createAssetQuantityChangeNote({
+  assetId,
+  userId,
+  previousQuantity,
+  newQuantity,
+  previousMinQuantity,
+  newMinQuantity,
+  previousConsumptionType,
+  newConsumptionType,
+  previousUnitOfMeasure,
+  newUnitOfMeasure,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  previousQuantity?: number | null;
+  newQuantity?: number | null;
+  previousMinQuantity?: number | null;
+  newMinQuantity?: number | null;
+  previousConsumptionType?: ConsumptionType | null;
+  newConsumptionType?: ConsumptionType | null;
+  previousUnitOfMeasure?: string | null;
+  newUnitOfMeasure?: string | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const changes: string[] = [];
+
+  if (
+    newQuantity !== undefined &&
+    (previousQuantity ?? null) !== (newQuantity ?? null)
+  ) {
+    changes.push(
+      `total quantity from **${previousQuantity ?? "—"}** to **${
+        newQuantity ?? "—"
+      }**`
+    );
+  }
+
+  if (
+    newMinQuantity !== undefined &&
+    (previousMinQuantity ?? null) !== (newMinQuantity ?? null)
+  ) {
+    changes.push(
+      `low-stock threshold from **${previousMinQuantity ?? "—"}** to **${
+        newMinQuantity ?? "—"
+      }**`
+    );
+  }
+
+  if (
+    newConsumptionType !== undefined &&
+    (previousConsumptionType ?? null) !== (newConsumptionType ?? null)
+  ) {
+    changes.push(
+      `behavior from **${consumptionTypeLabel(
+        previousConsumptionType
+      )}** to **${consumptionTypeLabel(newConsumptionType)}**`
+    );
+  }
+
+  if (
+    newUnitOfMeasure !== undefined &&
+    (previousUnitOfMeasure ?? null) !== (newUnitOfMeasure ?? null)
+  ) {
+    changes.push(
+      `unit of measure from **${previousUnitOfMeasure || "—"}** to **${
+        newUnitOfMeasure || "—"
+      }**`
+    );
+  }
+
+  if (changes.length === 0) return;
+
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = `${userLink} updated ${changes.join(", ")}.`;
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
 }

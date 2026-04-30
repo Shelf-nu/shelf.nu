@@ -88,7 +88,9 @@ export default function AddAssetsToBookingDrawer({
   // Asset blockers
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => booking.assets.some((a) => a?.id === asset.id))
+    .filter((asset) =>
+      booking.bookingAssets.some((ba) => ba.assetId === asset.id)
+    )
     .map((a) => !!a && a.id);
 
   const assetsPartOfKitIds = assets
@@ -288,7 +290,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     assetLabelPresets.partOfKit(!!asset.kitId),
     // Custom preset for "already in this booking"
     {
-      condition: booking.assets.some((a) => a?.id === asset.id),
+      condition: booking.bookingAssets.some((ba) => ba.assetId === asset.id),
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",

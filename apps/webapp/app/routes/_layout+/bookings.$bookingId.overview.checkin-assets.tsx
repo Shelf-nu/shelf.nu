@@ -6,8 +6,9 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, useNavigation } from "react-router";
+import { data, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
+import type { BookingExpectedAsset } from "~/atoms/qr-scanner";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -15,8 +16,10 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
+import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   checkinAssets,
   getBooking,
@@ -99,11 +102,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Calculate partial check-in progress
     // For progress calculation, we need the TOTAL number of assets in the booking,
     // not the filtered count from booking.assets (which may be filtered by status)
-    const totalBookingAssets = await db.asset.count({
+    const totalBookingAssets = await db.bookingAsset.count({
       where: {
-        bookings: {
-          some: { id: booking.id },
-        },
+        bookingId: booking.id,
       },
     });
 
@@ -112,6 +113,148 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       booking.status
     );
+
+    /**
+     * Phase 3c: compute per-asset "remaining" for QUANTITY_TRACKED assets
+     * in this booking. `remaining = BookingAsset.quantity − Σ(RETURN +
+     * CONSUME + LOSS + DAMAGE ConsumptionLog entries for this pair)`.
+     *
+     * Sent to the drawer so the UI can cap the per-row inputs, drive the
+     * auto-expand of the shortfall disclosure, and render a "fully
+     * reconciled → hidden" state. We compute with a single aggregate
+     * query + a lookup against the booking's already-loaded
+     * `bookingAssets` to avoid an N+1.
+     */
+    const qtyTrackedAssets = booking.bookingAssets.filter((ba) =>
+      isQuantityTracked(ba.asset)
+    );
+    const qtyAssetIds = qtyTrackedAssets.map((ba) => ba.assetId);
+
+    const loggedSums =
+      qtyAssetIds.length > 0
+        ? await db.consumptionLog.groupBy({
+            by: ["assetId"],
+            where: {
+              bookingId: booking.id,
+              assetId: { in: qtyAssetIds },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+
+    const loggedSumById = new Map<string, number>(
+      loggedSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
+    );
+
+    /**
+     * Shape consumed by `partial-checkin-drawer.tsx`:
+     *   { [assetId]: { booked, logged, remaining, consumptionType } }
+     * `consumptionType` lets the drawer pick between "Returned" (TWO_WAY)
+     * and "Consumed" (ONE_WAY) as the primary input label.
+     */
+    const qtyRemainingByAssetId: Record<
+      string,
+      {
+        booked: number;
+        logged: number;
+        remaining: number;
+        consumptionType: "ONE_WAY" | "TWO_WAY" | null;
+      }
+    > = {};
+
+    for (const ba of qtyTrackedAssets) {
+      const booked = ba.quantity ?? 0;
+      const logged = loggedSumById.get(ba.assetId) ?? 0;
+      qtyRemainingByAssetId[ba.assetId] = {
+        booked,
+        logged,
+        remaining: Math.max(0, booked - logged),
+        consumptionType:
+          (ba.asset.consumptionType as "ONE_WAY" | "TWO_WAY" | null) ?? null,
+      };
+    }
+
+    /**
+     * Phase 3c (drawer UX): derive an "expected assets" list — one
+     * entry per BookingAsset — that mirrors the audits drawer's
+     * expected-assets pattern. This lets the partial-checkin drawer
+     * render the booking's full contents up front (pending + already
+     * reconciled) instead of starting empty and only populating as
+     * scans come in.
+     *
+     * This is a pure derivation from `booking.bookingAssets`,
+     * `qtyRemainingByAssetId`, and `partialCheckinDetails` — all of
+     * which are already loaded above. No additional DB calls.
+     */
+    const expectedAssets: BookingExpectedAsset[] = booking.bookingAssets.map(
+      (ba) => {
+        const asset = ba.asset;
+        const base = {
+          id: asset.id,
+          title: asset.title,
+          mainImage: asset.mainImage ?? null,
+          thumbnailImage: asset.thumbnailImage ?? null,
+          kitId: asset.kitId ?? null,
+          kitName: asset.kit?.name ?? null,
+        };
+
+        if (asset.type === "QUANTITY_TRACKED") {
+          // Defensive defaults: if the asset was classified as
+          // qty-tracked but somehow isn't in the map (shouldn't
+          // happen), fall back to the raw BookingAsset.quantity and
+          // treat nothing as logged so the UI still renders sensibly.
+          const qty = qtyRemainingByAssetId[asset.id];
+          const booked = qty?.booked ?? ba.quantity ?? 0;
+          const logged = qty?.logged ?? 0;
+          const remaining = qty?.remaining ?? Math.max(0, booked - logged);
+          return {
+            ...base,
+            kind: "QUANTITY_TRACKED" as const,
+            booked,
+            logged,
+            remaining,
+            consumptionType: qty?.consumptionType ?? null,
+          };
+        }
+
+        return {
+          ...base,
+          kind: "INDIVIDUAL" as const,
+          alreadyCheckedIn: Boolean(partialCheckinDetails[asset.id]),
+        };
+      }
+    );
+
+    /**
+     * Bucket expected assets by kit so the drawer can render a kit
+     * summary row (kit name, image, asset count) rather than N
+     * individual rows for each kitted asset.
+     */
+    const kitMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        mainImage: string | null;
+        assetIds: string[];
+      }
+    >();
+    for (const ba of booking.bookingAssets) {
+      const kit = ba.asset.kit;
+      // `kitId` is the source of truth for "this asset belongs to a
+      // kit on this booking". When it's null, `kit` is also null.
+      if (!kit || !ba.asset.kitId) continue;
+      const entry = kitMap.get(ba.asset.kitId) ?? {
+        id: ba.asset.kitId,
+        name: kit.name,
+        mainImage: kit.image ?? null,
+        assetIds: [],
+      };
+      entry.assetIds.push(ba.asset.id);
+      kitMap.set(ba.asset.kitId, entry);
+    }
+    const expectedKits = [...kitMap.values()];
 
     const title = `Scan assets to check in | ${booking.name}`;
     const header: HeaderData = {
@@ -124,6 +267,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       partialCheckinProgress,
       partialCheckinDetails,
+      qtyRemainingByAssetId,
+      expectedAssets,
+      expectedKits,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -173,9 +319,26 @@ export const handle = {
 };
 
 export default function CheckinAssetsFromBooking() {
+  const { booking, expectedAssets } = useLoaderData<typeof loader>();
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
+
+  /**
+   * Seed the partial-checkin atoms with the loader's expected-asset
+   * list. The drawer reads `bookingExpectedAssetsAtom` to render the
+   * pending / scanned / already-reconciled buckets (mirrors the
+   * audits drawer pattern).
+   */
+  useBookingCheckinSessionInitialization({
+    session: {
+      bookingId: booking.id,
+      bookingName: booking.name,
+      status: booking.status,
+      expectedCount: expectedAssets.length,
+    },
+    expectedAssets,
+  });
 
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 67 : vh - 100;

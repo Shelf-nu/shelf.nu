@@ -2,10 +2,14 @@ import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  checkOutQuantity,
+  createAsset,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
   uploadDuplicateAssetMainImage,
@@ -17,11 +21,42 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findFirst: vitest.fn().mockResolvedValue(null),
       update: vitest.fn().mockResolvedValue({}),
+      // why: checkOutQuantity returns the refreshed asset at the end of its tx
+      findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
+    // why: checkOutQuantity upserts custody rows and aggregates custody/booking totals
+    custody: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      upsert: vitest.fn().mockResolvedValue({}),
+    },
+    // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
+    bookingAsset: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
+    // why: checkOutQuantity wraps its work in an interactive transaction — we
+    // route callbacks to the same mocked db so inner tx.* calls hit our stubs
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callbackOrArray) =>
+        typeof callbackOrArray === "function"
+          ? callbackOrArray(db)
+          : Promise.all(callbackOrArray)
+      ),
   },
+}));
+
+// why: lockAssetForQuantityUpdate runs a raw SELECT ... FOR UPDATE that we
+// cannot execute against a mocked tx — stub it to return a controlled asset
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vitest.fn(),
+}));
+
+// why: avoid touching real consumption log writes during checkOutQuantity tests
+vitest.mock("~/modules/consumption-log/service.server", () => ({
+  createConsumptionLog: vitest.fn().mockResolvedValue({}),
 }));
 
 // why: avoid real QR lookup during relink tests
@@ -373,5 +408,188 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (refresh failed gracefully)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
+  });
+});
+
+describe("createAsset quantity validation", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no quantity", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        consumptionType: "ONE_WAY",
+        // quantity intentionally omitted
+      })
+    ).rejects.toThrow("Quantity is required for quantity-tracked assets");
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no consumptionType", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        quantity: 100,
+        // consumptionType intentionally omitted
+      })
+    ).rejects.toThrow(
+      "Consumption type is required for quantity-tracked assets"
+    );
+  });
+
+  it("does not throw quantity validation for INDIVIDUAL assets", async () => {
+    // This test verifies that INDIVIDUAL assets skip quantity validation.
+    // The function will proceed past validation but will fail on
+    // other operations (e.g., sequential ID generation) which is expected.
+    // We assert the thrown error is NOT a quantity validation error.
+    await expect(
+      createAsset({
+        title: "Test Laptop",
+        description: "A laptop",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "INDIVIDUAL",
+        // No quantity or consumptionType — should not throw validation error
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining("Quantity is required"),
+      })
+    );
+  });
+});
+
+describe("checkOutQuantity — availability accounting", () => {
+  // Typed handles for the mocks we set up at the top of the file. Using the
+  // returned-type of vitest.fn keeps IntelliSense happy without casting on
+  // every call.
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyAggregate = db.custody.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyUpsert = db.custody.upsert as ReturnType<typeof vitest.fn>;
+  const mockBookingAssetAggregate = db.bookingAsset.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetFindUniqueOrThrow = db.asset.findUniqueOrThrow as ReturnType<
+    typeof vitest.fn
+  >;
+
+  // A realistic asset stub returned by the row-level lock. The service only
+  // reads id, organizationId, type, quantity, and title from it.
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    mockAssetFindUniqueOrThrow.mockResolvedValue({
+      ...lockedAsset,
+    });
+  });
+
+  it("rejects when booking-reserved units push requested qty over available", async () => {
+    // Regression guard for the Phase 3c fix: availability must subtract
+    // BOTH direct custody AND units tied to ONGOING/OVERDUE bookings.
+    // Pre-fix math was `100 - 0 = 100` and this checkout would have
+    // silently succeeded even though only 20 units are physically free.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 80 } });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 25,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ShelfError);
+    expect((caught as ShelfError).status).toBe(400);
+    // why: "Only 20" is the single most operator-meaningful substring — it
+    // encodes the post-fix math (100 - 0 - 80 = 20) and would not appear if
+    // the service regressed to "Only 100 available" (custody-only math).
+    expect((caught as ShelfError).message).toContain("Only 20");
+    // The service must not create a custody row or log entry on rejection.
+    expect(mockCustodyUpsert).not.toHaveBeenCalled();
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("accepts a checkout that fits within (total − custody − booked) availability", async () => {
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 80 } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 15,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CHECKOUT" })
+    );
+  });
+
+  it("ignores RESERVED bookings when computing availability", async () => {
+    // The service's bookingAsset.aggregate call filters on
+    // `status: { in: ["ONGOING", "OVERDUE"] }`, so RESERVED bookings are
+    // excluded at the DB layer. We mirror that by returning 0 from the
+    // aggregate mock — a RESERVED-only booking contributes nothing.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 90,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Assert the aggregate was invoked with the ONGOING/OVERDUE filter —
+    // this is what makes RESERVED invisible to availability math.
+    expect(mockBookingAssetAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetId: "asset-1",
+          booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+        }),
+        _sum: { quantity: true },
+      })
+    );
+    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
   });
 });

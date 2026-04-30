@@ -101,7 +101,7 @@ export function getBookingStatusRedirect({
 }: {
   bookingId: string;
   booking: Pick<Booking, "id" | "status"> & {
-    assets: Pick<Asset, "status">[];
+    bookingAssets: { asset: Pick<Asset, "status"> }[];
   };
   currentStatusParam: string | null;
   isMainBookingPage: boolean;
@@ -113,8 +113,8 @@ export function getBookingStatusRedirect({
   // Case 1: ONGOING/OVERDUE booking with no status param
   // -> Redirect to CHECKED_OUT if there are assets to show
   if (!currentStatusParam && ["ONGOING", "OVERDUE"].includes(booking.status)) {
-    const hasCheckedOutAssets = booking.assets.some(
-      (asset) => asset.status === AssetStatus.CHECKED_OUT
+    const hasCheckedOutAssets = booking.bookingAssets.some(
+      (ba) => ba.asset.status === AssetStatus.CHECKED_OUT
     );
 
     if (hasCheckedOutAssets) {
@@ -139,8 +139,14 @@ export function getBookingStatusRedirect({
 }
 
 /**
- * Creates standardized booking conflict query conditions for asset.bookings includes
- * This implements Pattern 1 from booking-conflict-queries.md documentation
+ * Creates standardized booking conflict query conditions for the
+ * `asset.bookingAssets` pivot relation. The conditions filter through
+ * `BookingAsset` to the related `Booking`, matching the explicit M2M
+ * schema (`BookingAsset { booking, asset, quantity }`).
+ *
+ * Previously this returned `Prisma.Asset$bookingsArgs` for the implicit
+ * M2M. Now it returns `Prisma.Asset$bookingAssetsArgs` with the booking
+ * conditions nested under `booking: { ... }`.
  */
 export function createBookingConflictConditions({
   currentBookingId,
@@ -152,50 +158,75 @@ export function createBookingConflictConditions({
   fromDate?: Date | string | null;
   toDate?: Date | string | null;
   includeCurrentBooking?: boolean;
-}): Prisma.Asset$bookingsArgs {
+}): Prisma.Asset$bookingAssetsArgs {
+  /** Booking-level where clause for date-overlap & status filtering */
+  const bookingWhere: Prisma.BookingWhereInput =
+    fromDate && toDate
+      ? {
+          OR: [
+            // Rule 1: RESERVED bookings always conflict
+            {
+              status: BookingStatus.RESERVED,
+              ...(includeCurrentBooking
+                ? {}
+                : { id: { not: currentBookingId } }),
+              OR: [
+                {
+                  from: { lte: toDate },
+                  to: { gte: fromDate },
+                },
+                {
+                  from: { gte: fromDate },
+                  to: { lte: toDate },
+                },
+              ],
+            },
+            // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in helpers)
+            {
+              status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+              ...(includeCurrentBooking
+                ? {}
+                : { id: { not: currentBookingId } }),
+              OR: [
+                {
+                  from: { lte: toDate },
+                  to: { gte: fromDate },
+                },
+                {
+                  from: { gte: fromDate },
+                  to: { lte: toDate },
+                },
+              ],
+            },
+          ],
+        }
+      : {};
+
   return {
     where: {
-      ...(fromDate && toDate
-        ? {
-            OR: [
-              // Rule 1: RESERVED bookings always conflict
-              {
-                status: BookingStatus.RESERVED,
-                ...(includeCurrentBooking
-                  ? {}
-                  : { id: { not: currentBookingId } }),
-                OR: [
-                  {
-                    from: { lte: toDate },
-                    to: { gte: fromDate },
-                  },
-                  {
-                    from: { gte: fromDate },
-                    to: { lte: toDate },
-                  },
-                ],
-              },
-              // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in helpers)
-              {
-                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-                ...(includeCurrentBooking
-                  ? {}
-                  : { id: { not: currentBookingId } }),
-                OR: [
-                  {
-                    from: { lte: toDate },
-                    to: { gte: fromDate },
-                  },
-                  {
-                    from: { gte: fromDate },
-                    to: { lte: toDate },
-                  },
-                ],
-              },
-            ],
-          }
-        : {}),
+      booking: bookingWhere,
     },
-    select: { id: true, status: true, name: true },
+    select: {
+      id: true,
+      quantity: true,
+      booking: {
+        select: { id: true, status: true, name: true },
+      },
+    },
   };
+}
+
+/**
+ * Normalizes BookingAsset pivot records into a flat asset array
+ * with bonus booking quantity info. Used at the boundary between
+ * the service layer and UI components for backward compatibility.
+ */
+export function normalizeBookingAssets<
+  T extends { asset: Record<string, unknown>; quantity: number; id: string },
+>(bookingAssets: T[]) {
+  return bookingAssets.map((ba) => ({
+    ...ba.asset,
+    bookingQuantity: ba.quantity,
+    bookingAssetId: ba.id,
+  }));
 }
