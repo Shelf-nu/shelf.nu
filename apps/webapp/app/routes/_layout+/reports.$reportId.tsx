@@ -1302,30 +1302,30 @@ function OverdueItemsContent({
       {/* Hero section with key metrics */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
-          {/* Main metric */}
+          {/* Main metric - lead with assets (the scope of the problem) */}
           <div className="flex items-center gap-4">
             <div className="flex items-baseline gap-1">
               <span
                 className={tw(
                   "text-3xl font-semibold",
-                  totalOverdue > 0 ? "text-red-600" : "text-green-600"
+                  assetsAtRisk > 0 ? "text-red-600" : "text-green-600"
                 )}
               >
-                {totalOverdue}
+                {assetsAtRisk}
               </span>
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-medium text-gray-700">
-                Items Not Returned
+                {assetsAtRisk === 1 ? "Asset" : "Assets"} Outstanding
               </span>
               {totalOverdue > 0 ? (
                 <span className="text-xs text-gray-500">
-                  {assetsAtRisk} assets still out across {totalOverdue} booking
+                  across {totalOverdue} overdue booking
                   {totalOverdue !== 1 ? "s" : ""}
                 </span>
               ) : (
                 <span className="text-xs text-green-600">
-                  All items returned on schedule
+                  All assets returned on time
                 </span>
               )}
             </div>
@@ -1355,7 +1355,7 @@ function OverdueItemsContent({
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
-            Items Waiting for Return
+            Overdue Bookings
           </h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
             {totalRows}
