@@ -1721,6 +1721,30 @@ function CustodySnapshotContent({
 // R3: Top Booked Assets Content
 // -----------------------------------------------------------------------------
 
+// why: defined at module scope so the function identity is stable across
+// renders. TanStack's flexRender treats a different `header` function ref as a
+// different component type and remounts the whole subtree — for a header that
+// renders Radix's InfoTooltip, the ref-attach/detach churn triggers
+// setTrigger(...) loops during navigation transitions ("Maximum update depth
+// exceeded" — see SHELF-WEBAPP-1J4).
+function AvgDurationHeader() {
+  return (
+    <span className="flex items-center gap-1">
+      Avg Duration
+      <InfoTooltip
+        iconClassName="size-3.5"
+        content={
+          <p>
+            <strong>Average booking duration</strong> — How long this asset is
+            typically kept per booking. Calculated as total days booked ÷ number
+            of bookings.
+          </p>
+        }
+      />
+    </span>
+  );
+}
+
 function TopBookedAssetsContent({
   rows,
   kpis,
@@ -1775,21 +1799,7 @@ function TopBookedAssetsContent({
     },
     {
       id: "avgDuration",
-      header: () => (
-        <span className="flex items-center gap-1">
-          Avg Duration
-          <InfoTooltip
-            iconClassName="size-3.5"
-            content={
-              <p>
-                <strong>Average booking duration</strong> — How long this asset
-                is typically kept per booking. Calculated as total days booked ÷
-                number of bookings.
-              </p>
-            }
-          />
-        </span>
-      ),
+      header: AvgDurationHeader,
       // Compute average duration for sorting
       accessorFn: (row) =>
         row.bookingCount > 0 ? row.totalDaysBooked / row.bookingCount : 0,
