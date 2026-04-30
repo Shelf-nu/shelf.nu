@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "auth0-mfa": {
+      "source": "auth0/agent-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/auth0/skills/auth0-mfa/SKILL.md",
+      "computedHash": "cad9d4758cd3e858ff628a33e06392822ac09f9cb6c5d68ffb2a2aff5e895a7c"
+    },
+    "oauth-oidc-misconfiguration": {
+      "source": "yaklang/hack-skills",
+      "sourceType": "github",
+      "skillPath": "skills/oauth-oidc-misconfiguration/SKILL.md",
+      "computedHash": "75c5eba1ae75e7b46e1b16621040257f1347913d049c0a5c6b51af30c493d0f8"
+    },
+    "security-review": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "skillPath": "skills/security-review/SKILL.md",
+      "computedHash": "9814020fb226bff5a25c01f6862be0ca2853187230e25bb092689b8ec3a23759"
+    },
+    "supabase": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase/SKILL.md",
+      "computedHash": "bf2fc86c62931e42d07e0a7bb9b33e1ebcc67de534e1531f3362d59dffc77265"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "computedHash": "d606a1146be6d54fb9e73f718b5320b9acac5ff2ba2d7230a555df4b5a923b4a"
+    },
+    "two-factor-authentication-best-practices": {
+      "source": "better-auth/skills",
+      "sourceType": "github",
+      "skillPath": "better-auth/twoFactor/SKILL.md",
+      "computedHash": "7e297aaf887e11fdc03e52bdbf44974e161e8f7c393170ced7dc66cace4f6d46"
+    }
+  }
+}
