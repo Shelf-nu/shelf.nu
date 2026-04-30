@@ -37,6 +37,12 @@ vi.mock("~/utils/markdoc-wrappers", () => ({
   ),
 }));
 
+// why: testing audit service without executing actual activity event recording
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  recordEvents: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
