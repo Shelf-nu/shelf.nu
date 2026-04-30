@@ -76,11 +76,21 @@ const COMPLIANCE_GRACE_PERIOD_MS = 15 * 60 * 1000;
 
 /**
  * Check if a booking was returned on-time (within grace period of scheduled end).
+ *
+ * @param scheduledEnd - The scheduled end/due date of the booking
+ * @param completedAt - When the booking was completed (for COMPLETE bookings)
+ * @param status - The booking status (COMPLETE or OVERDUE)
+ * @returns true if booking was returned on-time, false otherwise
  */
 function isBookingOnTime(
   scheduledEnd: Date | null,
-  completedAt: Date | null
+  completedAt: Date | null,
+  status: BookingStatus
 ): boolean {
+  // OVERDUE bookings are never on-time by definition - they haven't been fully returned
+  if (status === "OVERDUE") return false;
+
+  // For COMPLETE bookings: check if completion was within grace period
   if (!scheduledEnd || !completedAt) return true; // No data = assume on-time
   const msLate = completedAt.getTime() - scheduledEnd.getTime();
   return msLate <= COMPLIANCE_GRACE_PERIOD_MS;
@@ -135,7 +145,7 @@ export async function bookingComplianceReport(
     timeframe,
     statusFilter,
     custodianId,
-    locationId,
+    locationId: _locationId, // TODO: Location filter requires join through assets
     page = 1,
     pageSize = 50,
     sortBy = "scheduledEnd",
@@ -169,8 +179,7 @@ export async function bookingComplianceReport(
       where.custodianUserId = custodianId;
     }
 
-    // TODO: Location filter requires join through assets
-    // if (locationId) { ... }
+    // TODO: Location filter requires join through assets (see _locationId)
 
     // Fetch all data in parallel
     const [
@@ -415,7 +424,7 @@ async function fetchBookingComplianceRows(
       scheduledEnd: b.to!,
       actualCheckout: null,
       actualCheckin: null,
-      isOnTime: isBookingOnTime(b.to, b.updatedAt),
+      isOnTime: isBookingOnTime(b.to, b.updatedAt, b.status),
       isOverdue: b.status === "OVERDUE",
       latenessMs,
     };
@@ -591,6 +600,7 @@ async function computeComplianceRate(
 
 /**
  * Categorize completed bookings as on-time or late.
+ * Note: This function only processes COMPLETE bookings, so status is always COMPLETE.
  */
 function categorizeCompletions(
   bookings: { to: Date | null; updatedAt: Date | null }[]
@@ -599,7 +609,8 @@ function categorizeCompletions(
   let late = 0;
 
   for (const booking of bookings) {
-    if (isBookingOnTime(booking.to, booking.updatedAt)) {
+    // All bookings passed here have status COMPLETE (filtered at query time)
+    if (isBookingOnTime(booking.to, booking.updatedAt, "COMPLETE")) {
       onTime++;
     } else {
       late++;
@@ -682,10 +693,10 @@ async function computeComplianceTrend(
 
     // Categorize using same grace period logic as hero
     const onTime = bucketBookings.filter((b) =>
-      isBookingOnTime(b.to, b.updatedAt)
+      isBookingOnTime(b.to, b.updatedAt, b.status)
     ).length;
     const late = bucketBookings.filter(
-      (b) => !isBookingOnTime(b.to, b.updatedAt)
+      (b) => !isBookingOnTime(b.to, b.updatedAt, b.status)
     ).length;
     const total = onTime + late;
 
@@ -810,7 +821,8 @@ async function computeCustodianPerformance(
     const entry = custodianMap.get(key)!;
 
     // Use same grace period logic as hero
-    if (isBookingOnTime(booking.to, booking.updatedAt)) {
+    // All bookings here are COMPLETE (filtered by query), so pass "COMPLETE"
+    if (isBookingOnTime(booking.to, booking.updatedAt, "COMPLETE")) {
       entry.onTime++;
     } else {
       entry.late++;
@@ -957,7 +969,14 @@ async function fetchOverdueRows(
       },
       assets: {
         select: {
+          id: true,
           valuation: true,
+        },
+      },
+      // Fetch partial check-ins to calculate outstanding assets
+      partialCheckins: {
+        select: {
+          assetIds: true,
         },
       },
       _count: {
@@ -976,11 +995,23 @@ async function fetchOverdueRows(
       Math.ceil(msOverdue / (1000 * 60 * 60 * 24))
     );
 
-    // Sum up asset valuations
-    const valueAtRisk = b.assets.reduce(
-      (sum, asset) => sum + (asset.valuation || 0),
-      0
+    // Calculate check-in progress from partial check-ins.
+    // Intersect with current b.assets so a partial-checkin row referencing an
+    // asset that was later removed from the booking doesn't overcount
+    // checkedInCount and desync it from valueAtRisk (which already filters via b.assets).
+    const currentAssetIds = new Set(b.assets.map((a) => a.id));
+    const checkedInAssetIds = new Set(
+      b.partialCheckins
+        .flatMap((pc) => pc.assetIds)
+        .filter((id) => currentAssetIds.has(id))
     );
+    const checkedInCount = checkedInAssetIds.size;
+    const uncheckedCount = Math.max(0, b._count.assets - checkedInCount);
+
+    // Sum valuations only for assets still outstanding (not yet checked in)
+    const valueAtRisk = b.assets
+      .filter((asset) => !checkedInAssetIds.has(asset.id))
+      .reduce((sum, asset) => sum + (asset.valuation || 0), 0);
 
     return {
       id: b.id,
@@ -997,6 +1028,8 @@ async function fetchOverdueRows(
         : null,
       custodianId: b.custodianUserId,
       assetCount: b._count.assets,
+      checkedInCount,
+      uncheckedCount,
       scheduledEnd,
       daysOverdue,
       valueAtRisk: valueAtRisk > 0 ? valueAtRisk : null,
@@ -1005,19 +1038,25 @@ async function fetchOverdueRows(
 }
 
 async function computeOverdueKpis(
-  organizationId: string,
+  _organizationId: string,
   baseWhere: Prisma.BookingWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Fetch all overdue bookings with asset info
+  // Fetch all overdue bookings with asset info and partial check-ins
   const overdueBookings = await db.booking.findMany({
     where: baseWhere,
     select: {
       to: true,
       assets: {
         select: {
+          id: true,
           valuation: true,
+        },
+      },
+      partialCheckins: {
+        select: {
+          assetIds: true,
         },
       },
       _count: {
@@ -1029,19 +1068,31 @@ async function computeOverdueKpis(
   });
 
   const totalOverdue = overdueBookings.length;
-  const totalAssetsAtRisk = overdueBookings.reduce(
-    (sum, b) => sum + b._count.assets,
-    0
-  );
 
-  // Calculate value at risk
-  const totalValueAtRisk = overdueBookings.reduce(
-    (sum, b) =>
-      sum +
-      b.assets.reduce(
-        (assetSum, asset) => assetSum + (asset.valuation || 0),
-        0
-      ),
+  // Compute outstanding asset count and value at risk from the same filtered
+  // set of checked-in IDs (intersected with b.assets) so the two stay in sync
+  // when a partially-checked-in asset is later removed from the booking.
+  let totalAssetsOutstanding = 0;
+  let totalValueAtRisk = 0;
+  for (const b of overdueBookings) {
+    const currentAssetIds = new Set(b.assets.map((a) => a.id));
+    const checkedInAssetIds = new Set(
+      b.partialCheckins
+        .flatMap((pc) => pc.assetIds)
+        .filter((id) => currentAssetIds.has(id))
+    );
+    totalAssetsOutstanding += Math.max(
+      0,
+      b._count.assets - checkedInAssetIds.size
+    );
+    totalValueAtRisk += b.assets
+      .filter((asset) => !checkedInAssetIds.has(asset.id))
+      .reduce((assetSum, asset) => assetSum + (asset.valuation || 0), 0);
+  }
+
+  // Also track total for context in hero subtitle
+  const totalAssetsInBookings = overdueBookings.reduce(
+    (sum, b) => sum + b._count.assets,
     0
   );
 
@@ -1074,12 +1125,14 @@ async function computeOverdueKpis(
     },
     {
       id: "total_assets_at_risk",
-      label: "Assets at Risk",
-      value: totalAssetsAtRisk.toLocaleString(),
-      rawValue: totalAssetsAtRisk,
+      label: "Assets Outstanding",
+      value: totalAssetsOutstanding.toLocaleString(),
+      rawValue: totalAssetsOutstanding,
       format: "number",
       delta: null,
-      deltaType: totalAssetsAtRisk > 0 ? "negative" : "positive",
+      deltaType: totalAssetsOutstanding > 0 ? "negative" : "positive",
+      // Include total for context: "X outstanding across Y total"
+      description: `${totalAssetsOutstanding} still out across ${totalAssetsInBookings} total`,
     },
     {
       id: "total_value_at_risk",
@@ -1236,7 +1289,7 @@ export async function idleAssetsReport(
  * that was checked out since the cutoff date.
  */
 async function fetchIdleAssetRows(
-  organizationId: string,
+  _organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   page: number,
@@ -1327,7 +1380,7 @@ async function fetchIdleAssetRows(
  * Count total idle assets matching the criteria.
  */
 async function countIdleAssets(
-  organizationId: string,
+  _organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date
 ): Promise<number> {
@@ -1649,7 +1702,7 @@ async function fetchCustodyRows(
 }
 
 async function computeCustodyKpis(
-  organizationId: string,
+  _organizationId: string,
   baseWhere: Prisma.CustodyWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
@@ -1883,11 +1936,15 @@ async function fetchTopBookedAssetRows(
   );
 
   for (const booking of bookings) {
+    // Clamp to at least 1 day - handles edge case where to < from (inverted dates)
     const bookingDays =
       booking.from && booking.to
-        ? Math.ceil(
-            (booking.to.getTime() - booking.from.getTime()) /
-              (1000 * 60 * 60 * 24)
+        ? Math.max(
+            1,
+            Math.ceil(
+              (booking.to.getTime() - booking.from.getTime()) /
+                (1000 * 60 * 60 * 24)
+            )
           )
         : 1;
 
@@ -2074,7 +2131,7 @@ export async function assetDistributionReport(
 
   try {
     // Fetch all distribution data in parallel
-    const [totalAssets, byCategory, byLocation, byStatus, kpis] =
+    const [_totalAssets, byCategory, byLocation, byStatus, kpis] =
       await Promise.all([
         db.asset.count({ where: { organizationId } }),
         computeDistributionByCategory(organizationId),
@@ -2436,7 +2493,7 @@ async function fetchInventoryRows(
 }
 
 async function computeInventoryKpis(
-  organizationId: string,
+  _organizationId: string,
   where: Prisma.AssetWhereInput
 ): Promise<ReportKpi[]> {
   const [totalAssets, totalValue, statusCounts] = await Promise.all([
@@ -2555,13 +2612,16 @@ export async function monthlyBookingTrendsReport(
     >();
 
     for (const booking of bookings) {
-      const monthKey = `${booking.createdAt.getFullYear()}-${String(
-        booking.createdAt.getMonth() + 1
+      // Use UTC methods for consistent grouping regardless of server timezone
+      const monthKey = `${booking.createdAt.getUTCFullYear()}-${String(
+        booking.createdAt.getUTCMonth() + 1
       ).padStart(2, "0")}`;
       const monthStart = new Date(
-        booking.createdAt.getFullYear(),
-        booking.createdAt.getMonth(),
-        1
+        Date.UTC(
+          booking.createdAt.getUTCFullYear(),
+          booking.createdAt.getUTCMonth(),
+          1
+        )
       );
 
       if (!monthlyData.has(monthKey)) {
@@ -2600,6 +2660,7 @@ export async function monthlyBookingTrendsReport(
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",
+            timeZone: "UTC", // Match UTC-based grouping
           }),
           monthStart: data.monthStart,
           bookingsCreated: data.created,
@@ -2614,10 +2675,13 @@ export async function monthlyBookingTrendsReport(
     const totalBookings = bookings.length;
     const avgMonthly =
       rows.length > 0 ? Math.round(totalBookings / rows.length) : 0;
-    const peakMonth = rows.reduce(
-      (max, r) => (r.bookingsCreated > max.bookingsCreated ? r : max),
-      rows[0]
-    );
+    // Guard against empty rows - reduce with rows[0] crashes when array is empty
+    const peakMonth =
+      rows.length > 0
+        ? rows.reduce((max, r) =>
+            r.bookingsCreated > max.bookingsCreated ? r : max
+          )
+        : undefined;
 
     // Trend calculation: compare last two months
     const lastTwoMonths = rows.slice(-2);

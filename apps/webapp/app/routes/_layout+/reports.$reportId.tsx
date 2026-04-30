@@ -21,6 +21,7 @@ import {
 } from "react-router";
 
 import { showNotificationAtom } from "~/atoms/notifications";
+import { AssetImage } from "~/components/assets/asset-image";
 import Header from "~/components/layout/header";
 import {
   ReportFooter,
@@ -1220,9 +1221,32 @@ function OverdueItemsContent({
         row.original.custodian || <span className="text-gray-400">—</span>,
     },
     {
-      accessorKey: "assetCount",
+      accessorKey: "uncheckedCount",
       header: "Assets",
-      cell: ({ row }) => <NumberCell value={row.original.assetCount} />,
+      cell: ({ row }) => {
+        const { uncheckedCount, assetCount, checkedInCount } = row.original;
+        const hasPartialReturns = checkedInCount > 0;
+        const progressPercent =
+          assetCount > 0 ? (checkedInCount / assetCount) * 100 : 0;
+
+        return (
+          <div className="flex items-center gap-2">
+            <span className="font-medium tabular-nums">
+              {uncheckedCount}
+              <span className="font-normal text-gray-400"> / {assetCount}</span>
+            </span>
+            {/* Progress bar - shows return progress (green = returned) */}
+            {hasPartialReturns && (
+              <div className="h-2 w-12 overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className="h-full rounded-full bg-green-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       accessorKey: "scheduledEnd",
@@ -1296,7 +1320,7 @@ function OverdueItemsContent({
               </span>
               {totalOverdue > 0 ? (
                 <span className="text-xs text-gray-500">
-                  {assetsAtRisk} assets across {totalOverdue} booking
+                  {assetsAtRisk} assets still out across {totalOverdue} booking
                   {totalOverdue !== 1 ? "s" : ""}
                 </span>
               ) : (
@@ -1382,6 +1406,7 @@ function IdleAssetsContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
@@ -1548,6 +1573,7 @@ function CustodySnapshotContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
@@ -1720,6 +1746,7 @@ function TopBookedAssetsContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
@@ -1862,12 +1889,12 @@ function TopBookedAssetsContent({
                   to={`/assets/${topAsset.assetId}`}
                   className="group -mx-1.5 mt-0.5 flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-gray-50"
                 >
-                  <img
-                    src={
-                      topAsset.thumbnailImage ||
-                      "/static/images/asset-placeholder.jpg"
-                    }
-                    alt=""
+                  <AssetImage
+                    asset={{
+                      id: topAsset.assetId,
+                      thumbnailImage: topAsset.thumbnailImage,
+                    }}
+                    alt={`Image of ${topAsset.assetName}`}
                     className="size-8 rounded object-cover ring-1 ring-gray-200"
                   />
                   <div className="flex min-w-0 flex-col">
@@ -2058,6 +2085,7 @@ function AssetInventoryContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
@@ -2403,6 +2431,7 @@ function AssetUtilizationContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
@@ -2569,6 +2598,7 @@ function AssetActivityContent({
         <AssetCell
           name={row.original.assetName}
           thumbnailImage={row.original.thumbnailImage}
+          assetId={row.original.assetId}
         />
       ),
     },
