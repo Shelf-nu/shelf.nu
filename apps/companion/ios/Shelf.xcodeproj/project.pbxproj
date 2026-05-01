@@ -383,7 +383,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Shelf/Shelf.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 3V6BGGX7JS;
+				DEVELOPMENT_TEAM = 27Q4MHFB8K;
 				INFOPLIST_FILE = Shelf/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -397,7 +397,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.shelf.companion.carlos;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shelf.companion;
 				PRODUCT_NAME = Shelf;
 				SWIFT_OBJC_BRIDGING_HEADER = "Shelf/Shelf-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
