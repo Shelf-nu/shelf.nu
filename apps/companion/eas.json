@@ -28,5 +28,14 @@
         "EXPO_PUBLIC_SUPABASE_ANON_PUBLIC": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tbXFjdWlhc2VrZGFjbWh3c3hrIiwicm9sZSI6ImFub24iLCJpYXQiOjE2ODQ3NjY5NzcsImV4cCI6MjAwMDM0Mjk3N30.oJgybPmL8Y2naFbCABPAL9-sWF3cm6FFJETeyHu1hTc"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "cv@shelf.nu",
+        "ascAppId": "6765639874",
+        "appleTeamId": "27Q4MHFB8K"
+      }
+    }
   }
 }
