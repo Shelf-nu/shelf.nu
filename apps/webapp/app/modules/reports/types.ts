@@ -251,12 +251,14 @@ export interface BookingComplianceRow {
   latenessMs: number | null;
 }
 
-/** KPI IDs for the Booking Compliance report */
-export type BookingComplianceKpiId =
-  | "total_bookings"
-  | "completed_on_time"
-  | "completed_late"
-  | "currently_overdue";
+/**
+ * KPI IDs emitted by the Booking Compliance report.
+ *
+ * Compliance rate / on-time / late breakdowns are now exposed via the
+ * `complianceData` payload (sourced from `computeComplianceRate`) so the
+ * KPI list is intentionally minimal.
+ */
+export type BookingComplianceKpiId = "total_bookings" | "currently_overdue";
 
 // -----------------------------------------------------------------------------
 // R6: Overdue Items Report Types
