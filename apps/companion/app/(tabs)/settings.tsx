@@ -8,6 +8,7 @@ import {
   Switch,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as WebBrowser from "expo-web-browser";
 import { Image } from "expo-image";
 import Constants from "expo-constants";
 import { Ionicons } from "@expo/vector-icons";
@@ -317,6 +318,76 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Legal links + account actions */}
+      <View style={styles.section}>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.settingRow}
+            onPress={() =>
+              WebBrowser.openBrowserAsync("https://www.shelf.nu/privacy")
+            }
+            activeOpacity={0.7}
+            accessibilityLabel="Privacy Policy"
+            accessibilityRole="link"
+          >
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={20}
+                color={colors.foreground}
+              />
+              <Text style={styles.settingLabel}>Privacy Policy</Text>
+            </View>
+            <Ionicons name="open-outline" size={18} color={colors.mutedLight} />
+          </TouchableOpacity>
+
+          <View style={styles.separator} />
+
+          <TouchableOpacity
+            style={styles.settingRow}
+            onPress={() => {
+              Alert.alert(
+                "Delete Account",
+                "Account deletion is handled through the Shelf web app. You will be redirected to shelf.nu to complete this process.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Continue",
+                    style: "destructive",
+                    onPress: () =>
+                      WebBrowser.openBrowserAsync(
+                        "https://app.shelf.nu/settings/general"
+                      ),
+                  },
+                ]
+              );
+            }}
+            activeOpacity={0.7}
+            accessibilityLabel="Delete Account"
+            accessibilityRole="button"
+          >
+            <View style={styles.settingLeft}>
+              <Ionicons name="trash-outline" size={20} color={colors.error} />
+              <Text style={[styles.settingLabel, { color: colors.error }]}>
+                Delete Account
+              </Text>
+            </View>
+            <Ionicons name="open-outline" size={18} color={colors.mutedLight} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Text style={styles.companionFooter}>
+        The companion app is an extension of the web application.{"\n"}
+        For advanced features, visit{" "}
+        <Text
+          style={styles.companionFooterLink}
+          onPress={() => WebBrowser.openBrowserAsync("https://app.shelf.nu")}
+        >
+          app.shelf.nu
+        </Text>
+      </Text>
+
       <TouchableOpacity
         style={styles.signOutButton}
         onPress={handleSignOut}
@@ -480,6 +551,23 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.filterPillActiveText,
   },
 
+  separator: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: 14,
+  },
+  companionFooter: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    textAlign: "center",
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    lineHeight: 18,
+  },
+  companionFooterLink: {
+    color: colors.primary,
+    fontWeight: "600",
+  },
   signOutButton: {
     flexDirection: "row",
     alignItems: "center",

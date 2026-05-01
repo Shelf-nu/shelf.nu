@@ -2,7 +2,7 @@
   "expo": {
     "name": "Shelf",
     "slug": "shelf-companion",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shelf",
@@ -43,7 +43,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets."
+          "cameraPermission": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
+          "microphonePermission": false
         }
       ],
       "expo-font",
