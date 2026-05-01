@@ -1796,7 +1796,8 @@ export async function checkinBooking({
         try {
           await recordEvent({
             organizationId,
-            actorUserId: userId ?? null,
+            // We're inside `if (userId)` — `userId` is a string here.
+            actorUserId: userId,
             action: "BOOKING_STATUS_CHANGED",
             entityType: "BOOKING",
             entityId: updatedBooking.id,
