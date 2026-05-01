@@ -8,7 +8,7 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useSetAtom } from "jotai";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
@@ -393,45 +393,66 @@ export default function ReportPage() {
 
   const navigate = useNavigate();
 
-  // Navigate to booking when row is clicked
-  const handleBookingRowClick = (row: BookingComplianceRow) => {
-    void navigate(`/bookings/${row.bookingId}`);
-  };
+  // Row-click handlers are wrapped in `useCallback` so their identity is stable
+  // across re-renders. Without this, every ReportPage re-render produced a new
+  // `onRowClick` prop for the report content components, which propagated down
+  // through TanStack `flexRender` and forced AssetCell/AssetImage to remount —
+  // creating an image-fetch storm visible in the network panel.
+  const handleBookingRowClick = useCallback(
+    (row: BookingComplianceRow) => {
+      void navigate(`/bookings/${row.bookingId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to booking when overdue row is clicked
-  const handleOverdueRowClick = (row: OverdueItemRow) => {
-    void navigate(`/bookings/${row.bookingId}`);
-  };
+  const handleOverdueRowClick = useCallback(
+    (row: OverdueItemRow) => {
+      void navigate(`/bookings/${row.bookingId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when idle asset row is clicked
-  const handleIdleAssetRowClick = (row: IdleAssetRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleIdleAssetRowClick = useCallback(
+    (row: IdleAssetRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when custody row is clicked
-  const handleCustodyRowClick = (row: CustodySnapshotRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleCustodyRowClick = useCallback(
+    (row: CustodySnapshotRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when top booked row is clicked
-  const handleTopBookedRowClick = (row: TopBookedAssetRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleTopBookedRowClick = useCallback(
+    (row: TopBookedAssetRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when inventory row is clicked
-  const handleInventoryRowClick = (row: AssetInventoryRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleInventoryRowClick = useCallback(
+    (row: AssetInventoryRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when utilization row is clicked
-  const handleUtilizationRowClick = (row: AssetUtilizationRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleUtilizationRowClick = useCallback(
+    (row: AssetUtilizationRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
-  // Navigate to asset when activity row is clicked
-  const handleActivityRowClick = (row: AssetActivityRow) => {
-    void navigate(`/assets/${row.assetId}`);
-  };
+  const handleActivityRowClick = useCallback(
+    (row: AssetActivityRow) => {
+      void navigate(`/assets/${row.assetId}`);
+    },
+    [navigate]
+  );
 
   // Render report content based on report ID
   const renderReportContent = () => {
@@ -605,17 +626,8 @@ export default function ReportPage() {
         </div>
       </Header>
 
-      {/* Content area matching app patterns.
-          `flex-1` cascades from the parent `<main>` (SidebarInset), which is a
-          `flex flex-col h-dvh` container. That makes this column exactly the
-          remaining viewport height under the app Header. Combined with the
-          `flex-1 min-h-0` main content area below, the table card fills the
-          available space and the footer (pagination + computed-in) stays
-          pinned at the bottom of the viewport. */}
-      {/* `-mb-8` cancels most of the SidebarInset's `pb-10`, keeping the
-          pagination footer close to the viewport bottom on report pages
-          without changing the global main padding. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-2 md:-mb-8 md:mt-4 md:px-0">
+      {/* Content area matching app patterns */}
+      <div className="flex flex-1 flex-col gap-2 px-4 pb-4 md:mt-4 md:px-0">
         {/* Filter bar - varies by report type */}
         {showTimeframePicker(reportId) && (
           <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
@@ -661,15 +673,8 @@ export default function ReportPage() {
           </div>
         )}
 
-        {/* Main content area — `flex-1 min-h-0` lets it grow within the route's
-            flex column and lets children using `flex-1` (e.g. the data table)
-            shrink past their content height to enable internal scrolling. */}
-        <div
-          className={tw(
-            "flex min-h-0 flex-1 flex-col transition-opacity",
-            isLoading && "opacity-60"
-          )}
-        >
+        {/* Main content area */}
+        <div className={tw("transition-opacity", isLoading && "opacity-60")}>
           {hasData ? (
             renderReportContent()
           ) : (
@@ -924,7 +929,7 @@ function BookingComplianceContent({
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* The Answer */}
       <ComplianceHero
         rate={complianceData?.rate ?? 0}
@@ -935,7 +940,7 @@ function BookingComplianceContent({
       />
 
       {/* Booking details table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Booking Details
@@ -947,7 +952,6 @@ function BookingComplianceContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           manualSorting
           initialSorting={[
@@ -1383,6 +1387,78 @@ function OverdueItemsContent({
 // R4: Idle Assets Content
 // -----------------------------------------------------------------------------
 
+/**
+ * Column definitions for the Idle Assets table, defined at module scope so
+ * the cell function references stay stable across IdleAssetsContent renders.
+ * See the loop bug fix in IdleAssetsContent for context.
+ */
+const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "daysSinceLastUse",
+    header: "Unused For",
+    cell: ({ row }) => {
+      const days = row.original.daysSinceLastUse;
+      return (
+        <span
+          className={tw(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+            days > 90
+              ? "bg-red-100 text-red-700"
+              : days > 60
+              ? "bg-orange-100 text-orange-700"
+              : "bg-yellow-100 text-yellow-700"
+          )}
+        >
+          {days} days
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "lastBookedAt",
+    header: "Last Used",
+    cell: ({ row }) =>
+      row.original.lastBookedAt ? (
+        <DateCell date={row.original.lastBookedAt} />
+      ) : (
+        <span className="text-gray-400">Never</span>
+      ),
+  },
+  {
+    accessorKey: "category",
+    header: "Category",
+    cell: ({ row }) =>
+      row.original.category || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "location",
+    header: "Location",
+    cell: ({ row }) =>
+      row.original.location || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "valuation",
+    header: "Value",
+    cell: ({ row }) =>
+      row.original.valuation ? (
+        `$${row.original.valuation.toLocaleString()}`
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+];
+
 function IdleAssetsContent({
   rows,
   kpis,
@@ -1396,74 +1472,17 @@ function IdleAssetsContent({
   timeframeLabel?: string;
   onRowClick?: (row: IdleAssetRow) => void;
 }) {
-  // Column definitions for unused assets table
-  // Order: What → Urgency → Context → Value → Status (tells a story)
-  const columns: ColumnDef<IdleAssetRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "daysSinceLastUse",
-      header: "Unused For",
-      cell: ({ row }) => {
-        const days = row.original.daysSinceLastUse;
-        return (
-          <span
-            className={tw(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-              days > 90
-                ? "bg-red-100 text-red-700"
-                : days > 60
-                ? "bg-orange-100 text-orange-700"
-                : "bg-yellow-100 text-yellow-700"
-            )}
-          >
-            {days} days
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "lastBookedAt",
-      header: "Last Used",
-      cell: ({ row }) =>
-        row.original.lastBookedAt ? (
-          <DateCell date={row.original.lastBookedAt} />
-        ) : (
-          <span className="text-gray-400">Never</span>
-        ),
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "location",
-      header: "Location",
-      cell: ({ row }) =>
-        row.original.location || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "valuation",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.valuation ? (
-          `$${row.original.valuation.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-  ];
+  // Column definitions for unused assets table.
+  // Memoized so cell function refs are stable across re-renders — without
+  // this, TanStack `flexRender` hands React a new component type on every
+  // render, which unmounts/remounts every AssetCell (and thereby its
+  // AssetImage child), causing image fetches to abort and re-issue in a
+  // loop. The deps list is empty because the cells only read from `row` —
+  // they don't capture any closure variables from this component.
+  const columns: ColumnDef<IdleAssetRow>[] = useMemo(
+    () => IDLE_ASSETS_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const totalIdle =
@@ -1474,7 +1493,7 @@ function IdleAssetsContent({
     (kpis.find((k) => k.id === "total_idle_value")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1519,7 +1538,7 @@ function IdleAssetsContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Unused Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1529,7 +1548,6 @@ function IdleAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1564,75 +1582,83 @@ function CustodySnapshotContent({
   // Calculate max days for relative bar width
   const maxDays = Math.max(...rows.map((r) => r.daysInCustody), 1);
 
-  // Column definitions for custody snapshot table
-  const columns: ColumnDef<CustodySnapshotRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "custodianName",
-      header: "Assigned to",
-      cell: ({ row }) => row.original.custodianName,
-    },
-    {
-      accessorKey: "daysInCustody",
-      header: "Days Held",
-      cell: ({ row }) => {
-        const days = row.original.daysInCustody;
-        const percentage = Math.min((days / maxDays) * 100, 100);
-        return (
-          <div className="flex items-center gap-3">
-            {/* Tenure bar - visual indicator of relative duration */}
-            <div className="relative h-2 w-16 overflow-hidden rounded-full bg-gray-100">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full bg-primary-500 transition-all"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-            {/* Days value */}
-            <span className="min-w-16 text-sm font-medium tabular-nums text-gray-900">
-              {days} <span className="font-normal text-gray-500">days</span>
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "assignedAt",
-      header: "Assigned",
-      cell: ({ row }) => <DateCell date={row.original.assignedAt} />,
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "location",
-      header: "Location",
-      cell: ({ row }) =>
-        row.original.location || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "valuation",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.valuation ? (
-          `$${row.original.valuation.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
+  // Column definitions for custody snapshot table.
+  // Memoized so cell function refs are stable across re-renders. Without
+  // this, TanStack flexRender hands React a new component type on every
+  // render → every AssetCell unmounts/remounts → every AssetImage
+  // remounts → image-fetch storm. Deps include `maxDays` because the
+  // tenure-bar cell closes over it.
+  const columns: ColumnDef<CustodySnapshotRow>[] = useMemo(
+    () => [
+      {
+        accessorKey: "assetName",
+        header: "Asset",
+        cell: ({ row }) => (
+          <AssetCell
+            name={row.original.assetName}
+            thumbnailImage={row.original.thumbnailImage}
+            assetId={row.original.assetId}
+          />
         ),
-    },
-  ];
+      },
+      {
+        accessorKey: "custodianName",
+        header: "Assigned to",
+        cell: ({ row }) => row.original.custodianName,
+      },
+      {
+        accessorKey: "daysInCustody",
+        header: "Days Held",
+        cell: ({ row }) => {
+          const days = row.original.daysInCustody;
+          const percentage = Math.min((days / maxDays) * 100, 100);
+          return (
+            <div className="flex items-center gap-3">
+              {/* Tenure bar - visual indicator of relative duration */}
+              <div className="relative h-2 w-16 overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary-500 transition-all"
+                  style={{ width: `${percentage}%` }}
+                />
+              </div>
+              {/* Days value */}
+              <span className="min-w-16 text-sm font-medium tabular-nums text-gray-900">
+                {days} <span className="font-normal text-gray-500">days</span>
+              </span>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "assignedAt",
+        header: "Assigned",
+        cell: ({ row }) => <DateCell date={row.original.assignedAt} />,
+      },
+      {
+        accessorKey: "category",
+        header: "Category",
+        cell: ({ row }) =>
+          row.original.category || <span className="text-gray-400">—</span>,
+      },
+      {
+        accessorKey: "location",
+        header: "Location",
+        cell: ({ row }) =>
+          row.original.location || <span className="text-gray-400">—</span>,
+      },
+      {
+        accessorKey: "valuation",
+        header: "Value",
+        cell: ({ row }) =>
+          row.original.valuation ? (
+            `$${row.original.valuation.toLocaleString()}`
+          ) : (
+            <span className="text-gray-400">—</span>
+          ),
+      },
+    ],
+    [maxDays]
+  );
 
   // Extract KPI values
   const totalInCustody =
@@ -1645,7 +1671,7 @@ function CustodySnapshotContent({
     (kpis.find((k) => k.id === "avg_days_in_custody")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1690,7 +1716,7 @@ function CustodySnapshotContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Current Assignments
@@ -1702,7 +1728,6 @@ function CustodySnapshotContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -1745,6 +1770,97 @@ function AvgDurationHeader() {
   );
 }
 
+/**
+ * Column definitions for the Top Booked Assets table, defined at module
+ * scope so cell function refs are stable across TopBookedAssetsContent
+ * renders. See the loop fix explanation in IDLE_ASSETS_COLUMNS / the
+ * commit history of this file.
+ */
+const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "bookingCount",
+    header: "Bookings",
+    cell: ({ row }) => (
+      <Link
+        to={`/assets/${row.original.assetId}/bookings`}
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-200"
+        title="View all bookings for this asset"
+      >
+        {row.original.bookingCount}
+      </Link>
+    ),
+  },
+  {
+    accessorKey: "totalDaysBooked",
+    header: "Total Days",
+    cell: ({ row }) => (
+      <span className="text-sm text-gray-700">
+        {row.original.totalDaysBooked}
+      </span>
+    ),
+  },
+  {
+    id: "avgDuration",
+    header: AvgDurationHeader,
+    // Compute average duration for sorting
+    accessorFn: (row) =>
+      row.bookingCount > 0 ? row.totalDaysBooked / row.bookingCount : 0,
+    cell: ({ row }) => {
+      const avgDays = row.getValue("avgDuration") as number;
+
+      // Visual bar capped at 14 days (2 weeks) as reference max
+      const barPercent = Math.min((avgDays / 14) * 100, 100);
+
+      return (
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-12 overflow-hidden rounded-full bg-gray-100">
+            <div
+              className={tw(
+                "h-full rounded-full",
+                avgDays >= 7
+                  ? "bg-blue-600"
+                  : avgDays >= 3
+                  ? "bg-blue-400"
+                  : "bg-blue-200"
+              )}
+              style={{ width: `${barPercent}%` }}
+            />
+          </div>
+          <span className="whitespace-nowrap text-xs text-gray-600">
+            {avgDays >= 1
+              ? `${avgDays.toFixed(1)}d`
+              : `${Math.round(avgDays * 24)}h`}
+          </span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "category",
+    header: "Category",
+    cell: ({ row }) =>
+      row.original.category || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "location",
+    header: "Location",
+    cell: ({ row }) =>
+      row.original.location || <span className="text-gray-400">—</span>,
+  },
+];
+
 function TopBookedAssetsContent({
   rows,
   kpis,
@@ -1761,91 +1877,14 @@ function TopBookedAssetsContent({
   topBookedAsset?: TopBookedAssetRow | null;
   onRowClick?: (row: TopBookedAssetRow) => void;
 }) {
-  // Column definitions for top booked assets table
-  const columns: ColumnDef<TopBookedAssetRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "bookingCount",
-      header: "Bookings",
-      cell: ({ row }) => (
-        <Link
-          to={`/assets/${row.original.assetId}/bookings`}
-          onClick={(e) => e.stopPropagation()}
-          className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-200"
-          title="View all bookings for this asset"
-        >
-          {row.original.bookingCount}
-        </Link>
-      ),
-    },
-    {
-      accessorKey: "totalDaysBooked",
-      header: "Total Days",
-      cell: ({ row }) => (
-        <span className="text-sm text-gray-700">
-          {row.original.totalDaysBooked}
-        </span>
-      ),
-    },
-    {
-      id: "avgDuration",
-      header: AvgDurationHeader,
-      // Compute average duration for sorting
-      accessorFn: (row) =>
-        row.bookingCount > 0 ? row.totalDaysBooked / row.bookingCount : 0,
-      cell: ({ row }) => {
-        const avgDays = row.getValue("avgDuration") as number;
-
-        // Visual bar capped at 14 days (2 weeks) as reference max
-        const barPercent = Math.min((avgDays / 14) * 100, 100);
-
-        return (
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-12 overflow-hidden rounded-full bg-gray-100">
-              <div
-                className={tw(
-                  "h-full rounded-full",
-                  avgDays >= 7
-                    ? "bg-blue-600"
-                    : avgDays >= 3
-                    ? "bg-blue-400"
-                    : "bg-blue-200"
-                )}
-                style={{ width: `${barPercent}%` }}
-              />
-            </div>
-            <span className="whitespace-nowrap text-xs text-gray-600">
-              {avgDays >= 1
-                ? `${avgDays.toFixed(1)}d`
-                : `${Math.round(avgDays * 24)}h`}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "location",
-      header: "Location",
-      cell: ({ row }) =>
-        row.original.location || <span className="text-gray-400">—</span>,
-    },
-  ];
+  // Column definitions for top booked assets table.
+  // Memoized so cell function refs are stable across re-renders — see the
+  // detailed loop explanation in CustodySnapshotContent above. Cells here
+  // are pure (no closure variables), so deps are empty.
+  const columns: ColumnDef<TopBookedAssetRow>[] = useMemo(
+    () => TOP_BOOKED_ASSETS_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const totalBookings =
@@ -1861,7 +1900,7 @@ function TopBookedAssetsContent({
   const topAsset = topBookedAsset || null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -1945,7 +1984,7 @@ function TopBookedAssetsContent({
 
       {/* Data table — fills remaining vertical space inside the route's flex column
           and scrolls internally when row count exceeds the visible area. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Top Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1955,7 +1994,6 @@ function TopBookedAssetsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2075,6 +2113,68 @@ function AssetDistributionContent({
 // R1: Asset Inventory Content
 // -----------------------------------------------------------------------------
 
+/**
+ * Column definitions for the Asset Inventory table, hoisted to module
+ * scope so cell function refs stay stable across re-renders. Same loop
+ * fix as IDLE_ASSETS_COLUMNS.
+ */
+const ASSET_INVENTORY_COLUMNS: ColumnDef<AssetInventoryRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ row }) => (
+      <StatusCell
+        status={formatAssetStatus(row.original.status)}
+        variant={getAssetStatusVariant(row.original.status)}
+      />
+    ),
+  },
+  {
+    accessorKey: "category",
+    header: "Category",
+    cell: ({ row }) =>
+      row.original.category || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "location",
+    header: "Location",
+    cell: ({ row }) =>
+      row.original.location || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "custodian",
+    header: "Assigned to",
+    cell: ({ row }) =>
+      row.original.custodian || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "valuation",
+    header: "Value",
+    cell: ({ row }) =>
+      row.original.valuation ? (
+        `$${row.original.valuation.toLocaleString()}`
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+  {
+    accessorKey: "createdAt",
+    header: "Created",
+    cell: ({ row }) => <DateCell date={row.original.createdAt} />,
+  },
+];
+
 function AssetInventoryContent({
   rows,
   kpis,
@@ -2086,63 +2186,10 @@ function AssetInventoryContent({
   totalRows: number;
   onRowClick?: (row: AssetInventoryRow) => void;
 }) {
-  // Column definitions for inventory table
-  const columns: ColumnDef<AssetInventoryRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => (
-        <StatusCell
-          status={formatAssetStatus(row.original.status)}
-          variant={getAssetStatusVariant(row.original.status)}
-        />
-      ),
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "location",
-      header: "Location",
-      cell: ({ row }) =>
-        row.original.location || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "custodian",
-      header: "Assigned to",
-      cell: ({ row }) =>
-        row.original.custodian || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "valuation",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.valuation ? (
-          `$${row.original.valuation.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-    {
-      accessorKey: "createdAt",
-      header: "Created",
-      cell: ({ row }) => <DateCell date={row.original.createdAt} />,
-    },
-  ];
+  const columns: ColumnDef<AssetInventoryRow>[] = useMemo(
+    () => ASSET_INVENTORY_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const totalAssets =
@@ -2155,7 +2202,7 @@ function AssetInventoryContent({
     (kpis.find((k) => k.id === "in_custody_count")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2198,7 +2245,7 @@ function AssetInventoryContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">Assets</h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -2208,7 +2255,6 @@ function AssetInventoryContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2296,7 +2342,7 @@ function MonthlyBookingTrendsContent({
   const trendDescription = trendKpi?.description;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2391,7 +2437,7 @@ function MonthlyBookingTrendsContent({
       )}
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Monthly Breakdown
@@ -2403,7 +2449,6 @@ function MonthlyBookingTrendsContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           emptyContent={
             <ReportEmptyState
               reason="no_data"
@@ -2421,6 +2466,74 @@ function MonthlyBookingTrendsContent({
 // R8: Asset Utilization Content
 // -----------------------------------------------------------------------------
 
+/**
+ * Column definitions for the Asset Utilization table, hoisted to module
+ * scope. Same loop fix as IDLE_ASSETS_COLUMNS.
+ */
+const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "utilizationRate",
+    header: "Usage Rate",
+    cell: ({ row }) => {
+      const rate = row.original.utilizationRate;
+      return (
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-20 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className="h-full rounded-full bg-primary-500"
+              style={{ width: `${Math.min(rate, 100)}%` }}
+            />
+          </div>
+          <span className="text-xs font-semibold tabular-nums text-gray-900">
+            {rate}%
+          </span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "daysInUse",
+    header: "Days Booked",
+    cell: ({ row }) => (
+      <span>
+        {row.original.daysInUse} / {row.original.totalDays}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "bookingCount",
+    header: "Bookings",
+    cell: ({ row }) => <NumberCell value={row.original.bookingCount} />,
+  },
+  {
+    accessorKey: "category",
+    header: "Category",
+    cell: ({ row }) =>
+      row.original.category || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "valuation",
+    header: "Value",
+    cell: ({ row }) =>
+      row.original.valuation ? (
+        `$${row.original.valuation.toLocaleString()}`
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+];
+
 function AssetUtilizationContent({
   rows,
   kpis,
@@ -2432,77 +2545,17 @@ function AssetUtilizationContent({
   totalRows: number;
   onRowClick?: (row: AssetUtilizationRow) => void;
 }) {
-  // Column definitions for utilization table
-  const columns: ColumnDef<AssetUtilizationRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "utilizationRate",
-      header: "Usage Rate",
-      cell: ({ row }) => {
-        const rate = row.original.utilizationRate;
-        return (
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-20 overflow-hidden rounded-full bg-gray-200">
-              <div
-                className="h-full rounded-full bg-primary-500"
-                style={{ width: `${Math.min(rate, 100)}%` }}
-              />
-            </div>
-            <span className="text-xs font-semibold tabular-nums text-gray-900">
-              {rate}%
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "daysInUse",
-      header: "Days Booked",
-      cell: ({ row }) => (
-        <span>
-          {row.original.daysInUse} / {row.original.totalDays}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "bookingCount",
-      header: "Bookings",
-      cell: ({ row }) => <NumberCell value={row.original.bookingCount} />,
-    },
-    {
-      accessorKey: "category",
-      header: "Category",
-      cell: ({ row }) =>
-        row.original.category || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "valuation",
-      header: "Value",
-      cell: ({ row }) =>
-        row.original.valuation ? (
-          `$${row.original.valuation.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-  ];
+  const columns: ColumnDef<AssetUtilizationRow>[] = useMemo(
+    () => ASSET_UTILIZATION_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const avgUtilization =
     (kpis.find((k) => k.id === "avg_utilization")?.rawValue as number) || 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2557,7 +2610,7 @@ function AssetUtilizationContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Asset Usage Rates
@@ -2569,7 +2622,6 @@ function AssetUtilizationContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
@@ -2588,6 +2640,74 @@ function AssetUtilizationContent({
 // R7: Asset Activity Content
 // -----------------------------------------------------------------------------
 
+/**
+ * Column definitions for the Asset Activity table, hoisted to module
+ * scope. Same loop fix as IDLE_ASSETS_COLUMNS.
+ */
+const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
+  {
+    accessorKey: "assetName",
+    header: "Asset",
+    cell: ({ row }) => (
+      <AssetCell
+        name={row.original.assetName}
+        thumbnailImage={row.original.thumbnailImage}
+        assetId={row.original.assetId}
+      />
+    ),
+  },
+  {
+    accessorKey: "activityType",
+    header: "Activity",
+    cell: ({ row }) => {
+      const type = row.original.activityType;
+      // Plain English labels — no jargon or internal codes
+      const labels: Record<string, string> = {
+        CREATED: "Asset created",
+        UPDATED: "Asset updated",
+        CUSTODY_ASSIGNED: "Assigned to team member",
+        CUSTODY_RELEASED: "Returned from team member",
+        BOOKING_CHECKED_OUT: "Checked out",
+        BOOKING_CHECKED_IN: "Checked in",
+        LOCATION_CHANGED: "Location changed",
+        CATEGORY_CHANGED: "Category changed",
+      };
+      // Semantic colors for activity types
+      const colors: Record<string, string> = {
+        CREATED: "bg-green-100 text-green-700",
+        UPDATED: "bg-blue-100 text-blue-700",
+        CUSTODY_ASSIGNED: "bg-violet-100 text-violet-700",
+        CUSTODY_RELEASED: "bg-violet-100 text-violet-700",
+        BOOKING_CHECKED_OUT: "bg-orange-100 text-orange-700",
+        BOOKING_CHECKED_IN: "bg-green-100 text-green-700",
+        LOCATION_CHANGED: "bg-blue-100 text-blue-700",
+        CATEGORY_CHANGED: "bg-blue-100 text-blue-700",
+      };
+      return (
+        <span
+          className={tw(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+            colors[type] || "bg-gray-100 text-gray-700"
+          )}
+        >
+          {labels[type] || type}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "performedBy",
+    header: "Changed by",
+    cell: ({ row }) =>
+      row.original.performedBy || <span className="text-gray-400">System</span>,
+  },
+  {
+    accessorKey: "occurredAt",
+    header: "Date & Time",
+    cell: ({ row }) => <DateCell date={row.original.occurredAt} />,
+  },
+];
+
 function AssetActivityContent({
   rows,
   kpis,
@@ -2599,72 +2719,10 @@ function AssetActivityContent({
   totalRows: number;
   onRowClick?: (row: AssetActivityRow) => void;
 }) {
-  // Column definitions for activity table
-  const columns: ColumnDef<AssetActivityRow>[] = [
-    {
-      accessorKey: "assetName",
-      header: "Asset",
-      cell: ({ row }) => (
-        <AssetCell
-          name={row.original.assetName}
-          thumbnailImage={row.original.thumbnailImage}
-          assetId={row.original.assetId}
-        />
-      ),
-    },
-    {
-      accessorKey: "activityType",
-      header: "Activity",
-      cell: ({ row }) => {
-        const type = row.original.activityType;
-        // Plain English labels — no jargon or internal codes
-        const labels: Record<string, string> = {
-          CREATED: "Asset created",
-          UPDATED: "Asset updated",
-          CUSTODY_ASSIGNED: "Assigned to team member",
-          CUSTODY_RELEASED: "Returned from team member",
-          BOOKING_CHECKED_OUT: "Checked out",
-          BOOKING_CHECKED_IN: "Checked in",
-          LOCATION_CHANGED: "Location changed",
-          CATEGORY_CHANGED: "Category changed",
-        };
-        // Semantic colors for activity types
-        const colors: Record<string, string> = {
-          CREATED: "bg-green-100 text-green-700",
-          UPDATED: "bg-blue-100 text-blue-700",
-          CUSTODY_ASSIGNED: "bg-violet-100 text-violet-700",
-          CUSTODY_RELEASED: "bg-violet-100 text-violet-700",
-          BOOKING_CHECKED_OUT: "bg-orange-100 text-orange-700",
-          BOOKING_CHECKED_IN: "bg-green-100 text-green-700",
-          LOCATION_CHANGED: "bg-blue-100 text-blue-700",
-          CATEGORY_CHANGED: "bg-blue-100 text-blue-700",
-        };
-        return (
-          <span
-            className={tw(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-              colors[type] || "bg-gray-100 text-gray-700"
-            )}
-          >
-            {labels[type] || type}
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "performedBy",
-      header: "Changed by",
-      cell: ({ row }) =>
-        row.original.performedBy || (
-          <span className="text-gray-400">System</span>
-        ),
-    },
-    {
-      accessorKey: "occurredAt",
-      header: "Date & Time",
-      cell: ({ row }) => <DateCell date={row.original.occurredAt} />,
-    },
-  ];
+  const columns: ColumnDef<AssetActivityRow>[] = useMemo(
+    () => ASSET_ACTIVITY_COLUMNS,
+    []
+  );
 
   // Extract KPI values
   const totalActivities =
@@ -2677,7 +2735,7 @@ function AssetActivityContent({
     kpis.find((k) => k.id === "most_active_asset")?.value || "—";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {/* Hero section */}
       <div className="rounded border border-gray-200 bg-white">
         <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between md:p-6">
@@ -2747,7 +2805,7 @@ function AssetActivityContent({
       </div>
 
       {/* Data table */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded border border-gray-200 bg-white">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 md:px-6">
           <h3 className="text-sm font-semibold text-gray-900">
             Recent Activity
@@ -2759,7 +2817,6 @@ function AssetActivityContent({
         <ReportTable
           data={rows}
           columns={columns}
-          fillParent
           onRowClick={onRowClick}
           emptyContent={
             <ReportEmptyState
