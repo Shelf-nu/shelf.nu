@@ -1,5 +1,10 @@
 node_modules
 
+# This is a pnpm workspace; pnpm-lock.yaml is authoritative
+# Reject npm/yarn lockfiles to prevent accidental package-manager mixing
+package-lock.json
+yarn.lock
+
 # Build outputs
 **/build
 **/dist
