@@ -45,6 +45,7 @@ import type {
   TopBookedAssetRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import { refreshExpiredAssetImages } from "../asset/service.server";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -1230,7 +1231,8 @@ export async function idleAssetsReport(
       assetWhere.locationId = locationId;
     }
 
-    // Fetch data
+    // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
+    // inline (see its body) so we don't need a separate refresh round-trip.
     const [rows, totalCount, kpis] = await Promise.all([
       fetchIdleAssetRows(
         organizationId,
@@ -1298,7 +1300,10 @@ async function fetchIdleAssetRows(
   const now = new Date();
 
   // Get assets with their last booking checkout from ActivityEvent
-  // For efficiency, we'll use a subquery approach
+  // For efficiency, we'll use a subquery approach.
+  // `mainImage`, `mainImageExpiration`, `organizationId` are selected so we
+  // can pipe the assets through `refreshExpiredAssetImages` below without
+  // an extra round-trip to the DB.
   const assets = await db.asset.findMany({
     where: {
       ...assetWhere,
@@ -1316,7 +1321,10 @@ async function fetchIdleAssetRows(
     take: pageSize,
     select: {
       id: true,
+      organizationId: true,
       title: true,
+      mainImage: true,
+      mainImageExpiration: true,
       thumbnailImage: true,
       status: true,
       valuation: true,
@@ -1351,7 +1359,11 @@ async function fetchIdleAssetRows(
     return lastBookingEnd < cutoffDate;
   });
 
-  return idleAssets.map((asset) => {
+  // Re-sign expired thumbnail signed URLs in place. No-op when URLs are
+  // still fresh (the helper checks `mainImageExpiration > now` first).
+  const refreshedAssets = await refreshExpiredAssetImages(idleAssets);
+
+  return refreshedAssets.map((asset) => {
     const lastBookedAt = asset.bookings[0]?.to || null;
     const daysSinceLastUse = lastBookedAt
       ? Math.ceil(
@@ -1595,7 +1607,8 @@ export async function custodySnapshotReport(
       where.teamMemberId = teamMemberId;
     }
 
-    // Fetch data in parallel
+    // Fetch data in parallel — `fetchCustodyRows` re-signs expired thumbnail
+    // URLs inline (see its body); no separate refresh round-trip.
     const [rows, totalCount, kpis] = await Promise.all([
       fetchCustodyRows(where, page, pageSize),
       db.custody.count({ where }),
@@ -1648,6 +1661,9 @@ async function fetchCustodyRows(
 ): Promise<CustodySnapshotRow[]> {
   const now = new Date();
 
+  // The nested asset select includes `mainImage`, `mainImageExpiration`,
+  // and `organizationId` so we can pipe the assets through
+  // `refreshExpiredAssetImages` below without an extra round-trip.
   const custodyRecords = await db.custody.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -1665,7 +1681,10 @@ async function fetchCustodyRows(
       asset: {
         select: {
           id: true,
+          organizationId: true,
           title: true,
+          mainImage: true,
+          mainImageExpiration: true,
           thumbnailImage: true,
           valuation: true,
           category: {
@@ -1679,6 +1698,18 @@ async function fetchCustodyRows(
     },
   });
 
+  // Refresh expired thumbnail signed URLs in place, then look up the fresh
+  // URL by asset id when building rows. No-op when URLs are still fresh.
+  // Custody records are unique per asset-currently-held, but we dedupe
+  // defensively in case a row appears more than once.
+  const uniqueAssets = Array.from(
+    new Map(custodyRecords.map((c) => [c.asset.id, c.asset])).values()
+  );
+  const refreshedAssets = await refreshExpiredAssetImages(uniqueAssets);
+  const refreshedThumbnailByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.thumbnailImage])
+  );
+
   return custodyRecords.map((c) => {
     const assignedAt = c.createdAt;
     const daysInCustody = Math.ceil(
@@ -1689,7 +1720,8 @@ async function fetchCustodyRows(
       id: c.id,
       assetId: c.asset.id,
       assetName: c.asset.title,
-      thumbnailImage: c.asset.thumbnailImage,
+      thumbnailImage:
+        refreshedThumbnailByAssetId.get(c.asset.id) ?? c.asset.thumbnailImage,
       category: c.asset.category?.name || null,
       location: c.asset.location?.name || null,
       custodianId: c.custodian.id,
@@ -1835,7 +1867,8 @@ export async function topBookedAssetsReport(
       assetWhere.locationId = locationId;
     }
 
-    // Fetch data
+    // Fetch data — `fetchTopBookedAssetRows` re-signs expired thumbnail URLs
+    // inline (see its body) for both the paginated rows and the topAsset.
     const [rowsResult, kpis] = await Promise.all([
       fetchTopBookedAssetRows(
         organizationId,
@@ -1846,6 +1879,8 @@ export async function topBookedAssetsReport(
       ),
       computeTopBookedKpis(organizationId, assetWhere, timeframe),
     ]);
+    const rows = rowsResult.rows;
+    const topBookedAsset = rowsResult.topAsset;
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -1861,12 +1896,12 @@ export async function topBookedAssetsReport(
         filters: [],
       },
       kpis,
-      rows: rowsResult.rows,
+      rows,
       computedMs,
       totalRows: rowsResult.totalCount,
       page,
       pageSize,
-      topBookedAsset: rowsResult.topAsset,
+      topBookedAsset,
     };
   } catch (cause) {
     throw new ShelfError({
@@ -1889,7 +1924,10 @@ async function fetchTopBookedAssetRows(
   totalCount: number;
   topAsset: TopBookedAssetRow | null;
 }> {
-  // Get all bookings in the timeframe with their assets
+  // Get all bookings in the timeframe with their assets.
+  // The nested asset select includes `mainImage`, `mainImageExpiration`,
+  // and `organizationId` so we can pipe assets through
+  // `refreshExpiredAssetImages` below without an extra round-trip.
   const bookings = await db.booking.findMany({
     where: {
       organizationId,
@@ -1906,7 +1944,10 @@ async function fetchTopBookedAssetRows(
         where: assetWhere,
         select: {
           id: true,
+          organizationId: true,
           title: true,
+          mainImage: true,
+          mainImageExpiration: true,
           thumbnailImage: true,
           category: { select: { name: true } },
           location: { select: { name: true } },
@@ -1935,6 +1976,13 @@ async function fetchTopBookedAssetRows(
     (timeframe.to.getTime() - timeframe.from.getTime()) / (1000 * 60 * 60 * 24)
   );
 
+  // Collect unique assets keyed by id so we can refresh once per asset even
+  // when the same asset appears in many bookings.
+  const uniqueAssetsById = new Map<
+    string,
+    (typeof bookings)[number]["assets"][number]
+  >();
+
   for (const booking of bookings) {
     // Clamp to at least 1 day - handles edge case where to < from (inverted dates)
     const bookingDays =
@@ -1949,6 +1997,9 @@ async function fetchTopBookedAssetRows(
         : 1;
 
     for (const asset of booking.assets) {
+      if (!uniqueAssetsById.has(asset.id)) {
+        uniqueAssetsById.set(asset.id, asset);
+      }
       if (!assetMap.has(asset.id)) {
         assetMap.set(asset.id, {
           asset: {
@@ -1969,13 +2020,24 @@ async function fetchTopBookedAssetRows(
     }
   }
 
+  // Refresh expired thumbnail signed URLs in place. Builds a map of
+  // assetId → fresh URL we use when constructing the final rows below.
+  const refreshedAssets = await refreshExpiredAssetImages(
+    Array.from(uniqueAssetsById.values())
+  );
+  const refreshedThumbnailByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.thumbnailImage])
+  );
+
   // Convert to array and sort by booking count
   const results = Array.from(assetMap.values())
     .map((entry) => ({
       id: entry.asset.id,
       assetId: entry.asset.id,
       assetName: entry.asset.title,
-      thumbnailImage: entry.asset.thumbnailImage,
+      thumbnailImage:
+        refreshedThumbnailByAssetId.get(entry.asset.id) ??
+        entry.asset.thumbnailImage,
       category: entry.asset.category,
       location: entry.asset.location,
       bookingCount: entry.bookingCount,
@@ -2399,7 +2461,8 @@ export async function assetInventoryReport(
       where.status = { in: statuses as AssetStatus[] };
     }
 
-    // Fetch data in parallel
+    // Fetch data in parallel — `fetchInventoryRows` re-signs expired
+    // thumbnail URLs inline (see its body); no separate refresh round-trip.
     const [rows, totalCount, kpis] = await Promise.all([
       fetchInventoryRows(where, page, pageSize),
       db.asset.count({ where }),
@@ -2449,6 +2512,9 @@ async function fetchInventoryRows(
   page: number,
   pageSize: number
 ): Promise<AssetInventoryRow[]> {
+  // `mainImage`, `mainImageExpiration`, `organizationId` are selected so we
+  // can pipe assets through `refreshExpiredAssetImages` below without an
+  // extra round-trip.
   const assets = await db.asset.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -2456,7 +2522,10 @@ async function fetchInventoryRows(
     take: pageSize,
     select: {
       id: true,
+      organizationId: true,
       title: true,
+      mainImage: true,
+      mainImageExpiration: true,
       thumbnailImage: true,
       status: true,
       valuation: true,
@@ -2475,7 +2544,10 @@ async function fetchInventoryRows(
     },
   });
 
-  return assets.map((a) => ({
+  // Re-sign expired thumbnail signed URLs in place. No-op when fresh.
+  const refreshedAssets = await refreshExpiredAssetImages(assets);
+
+  return refreshedAssets.map((a) => ({
     id: a.id,
     assetId: a.id,
     assetName: a.title,
@@ -2861,12 +2933,18 @@ export async function assetUtilizationReport(
         (1000 * 60 * 60 * 24)
     );
 
-    // Fetch assets with their bookings in the timeframe
+    // Fetch assets with their bookings in the timeframe.
+    // `mainImage`, `mainImageExpiration`, `organizationId` are selected so
+    // we can pipe assets through `refreshExpiredAssetImages` below without
+    // an extra round-trip.
     const assets = await db.asset.findMany({
       where: assetWhere,
       select: {
         id: true,
+        organizationId: true,
         title: true,
+        mainImage: true,
+        mainImageExpiration: true,
         thumbnailImage: true,
         valuation: true,
         category: { select: { name: true } },
@@ -2884,6 +2962,10 @@ export async function assetUtilizationReport(
         },
       },
     });
+
+    // Index raw assets by id so we can refresh only the paginated subset
+    // below — saves work for large workspaces with many idle assets.
+    const rawAssetsById = new Map(assets.map((a) => [a.id, a]));
 
     // Calculate utilization for each asset
     const rows: AssetUtilizationRow[] = assets.map((asset) => {
@@ -2986,6 +3068,24 @@ export async function assetUtilizationReport(
       },
     ];
 
+    // Re-sign expired thumbnails on just the page slice we're returning,
+    // not the full pre-pagination set. Look the raw assets back up by id
+    // (we saved them in `rawAssetsById` above) so the refresh helper has
+    // the `mainImage` / `mainImageExpiration` fields it needs.
+    const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
+    const pageAssets = pageRows
+      .map((r) => rawAssetsById.get(r.assetId))
+      .filter((a): a is NonNullable<typeof a> => a !== undefined);
+    const refreshedPageAssets = await refreshExpiredAssetImages(pageAssets);
+    const refreshedThumbnailByAssetId = new Map(
+      refreshedPageAssets.map((a) => [a.id, a.thumbnailImage])
+    );
+    const pagedRows = pageRows.map((r) => ({
+      ...r,
+      thumbnailImage:
+        refreshedThumbnailByAssetId.get(r.assetId) ?? r.thumbnailImage,
+    }));
+
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
@@ -3000,7 +3100,7 @@ export async function assetUtilizationReport(
         filters: [],
       },
       kpis,
-      rows: rows.slice((page - 1) * pageSize, page * pageSize),
+      rows: pagedRows,
       computedMs,
       totalRows: rows.length,
       page,
@@ -3099,15 +3199,25 @@ export async function assetActivityReport(
       db.activityEvent.count({ where }),
     ]);
 
-    // Get asset details for the events
+    // Get asset details for the events. `mainImage`, `mainImageExpiration`,
+    // `organizationId` are selected so we can pipe assets through
+    // `refreshExpiredAssetImages` below without an extra round-trip.
     const assetIds = [
       ...new Set(events.map((e) => e.assetId).filter(Boolean)),
     ] as string[];
     const assets = await db.asset.findMany({
       where: { id: { in: assetIds } },
-      select: { id: true, title: true, thumbnailImage: true },
+      select: {
+        id: true,
+        organizationId: true,
+        title: true,
+        mainImage: true,
+        mainImageExpiration: true,
+        thumbnailImage: true,
+      },
     });
-    const assetMap = new Map(assets.map((a) => [a.id, a]));
+    const refreshedAssets = await refreshExpiredAssetImages(assets);
+    const assetMap = new Map(refreshedAssets.map((a) => [a.id, a]));
 
     // Map events to rows
     const rows: AssetActivityRow[] = events.map((event) => {
@@ -3213,6 +3323,9 @@ export async function assetActivityReport(
       },
     ];
 
+    // Thumbnail URLs were already refreshed when we built `assetMap` above,
+    // so the rows we just constructed have fresh URLs — no separate
+    // refresh step needed here.
     const computedMs = Math.round(performance.now() - startTime);
 
     return {
