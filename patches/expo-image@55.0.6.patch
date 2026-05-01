@@ -1,0 +1,30 @@
+diff --git a/ios/ImageView.swift b/ios/ImageView.swift
+index adcf377af3e7d02cac515400e0f514b4b3cddca5..442389e7304821a8e521990df6b3a256cbfafb19 100644
+--- a/ios/ImageView.swift
++++ b/ios/ImageView.swift
+@@ -664,22 +664,9 @@ public final class ImageView: ExpoView {
+ 
+   @available(iOS 26.0, tvOS 26.0, *)
+   private func applySymbolEffectiOS26(effect: SFSymbolEffectType, scope: SFSymbolEffectScope?, options: SymbolEffectOptions) {
+-    switch effect {
+-    case .drawOn:
+-      switch scope {
+-      case .byLayer: sdImageView.addSymbolEffect(.drawOn.byLayer, options: options)
+-      case .wholeSymbol: sdImageView.addSymbolEffect(.drawOn.wholeSymbol, options: options)
+-      case .none: sdImageView.addSymbolEffect(.drawOn, options: options)
+-      }
+-    case .drawOff:
+-      switch scope {
+-      case .byLayer: sdImageView.addSymbolEffect(.drawOff.byLayer, options: options)
+-      case .wholeSymbol: sdImageView.addSymbolEffect(.drawOff.wholeSymbol, options: options)
+-      case .none: sdImageView.addSymbolEffect(.drawOff, options: options)
+-      }
+-    default:
+-      break
+-    }
++    // drawOn/drawOff SF Symbol effects require the iOS 26 SDK (Xcode 26+).
++    // Stubbed out so the app compiles on Xcode 16.x (stable).
++    // This only affects SF Symbol draw animations — no impact on image display.
+   }
+ 
+   func startSymbolAnimation() {

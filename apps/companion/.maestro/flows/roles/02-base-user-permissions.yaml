@@ -1,0 +1,106 @@
+appId: com.shelf.companion.carlos
+name: "Roles - Base User Permissions"
+tags:
+  - roles
+  - base
+  - permissions
+
+---
+# Test: Base user sees only View action in scanner, no custody or location
+#
+# Base CAN:    View assets, Read bookings, Read audits
+# Base CANNOT: Assign/Release Custody, Update Location, Create assets,
+#              Checkout/Checkin bookings
+#
+# Verifies scanner only shows View pill and asset list is read-only
+
+- runFlow: ../../shared/login-base.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# ── Verify scanner action pills ──────────────────────────────────────
+
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Base user should ONLY see View — no Assign, Release, or Location
+- extendedWaitUntil:
+    visible: "Scan to view asset"
+    timeout: 10000
+- assertVisible: "Scanner action: View.*"
+- assertNotVisible: "Scanner action: Assign"
+- assertNotVisible: "Scanner action: Release"
+- assertNotVisible: "Scanner action: Location"
+
+- takeScreenshot: roles-base-scanner-view-only
+
+# ── Verify scan in View mode works ───────────────────────────────────
+
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+# View mode navigates to asset detail
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 20000
+
+- takeScreenshot: roles-base-scan-view-detail
+
+# ── Navigate to Assets tab — verify no Create button ─────────────────
+
+# Go back from asset detail
+- back
+
+# Close dev scan input if still open
+- tapOn:
+    id: "dev-scan-toggle"
+    optional: true
+
+- tapOn:
+    text: "Assets"
+    index: 1
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+# Base user cannot create assets
+- assertNotVisible: "Create Asset"
+
+- takeScreenshot: roles-base-assets-no-create
+
+# ── Navigate to Bookings — verify no checkout/checkin ────────────────
+
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+
+# Base user should see bookings list but no checkout/checkin actions
+- assertNotVisible: "Ready to check out"
+- assertNotVisible: "Check in"
+
+- takeScreenshot: roles-base-bookings-read-only
+
+# ── Navigate to Audits — verify base can view ────────────────────────
+
+- tapOn: "Home"
+- tapOn:
+    text: "Quick Actions"
+
+# Tap Audits from quick actions or dashboard
+- tapOn:
+    text: "Audits"
+    index: 0
+
+# Tap first audit card by position (stale a11y tree after tab navigation)
+- waitForAnimationToEnd
+- tapOn:
+    point: "50%,40%"
+
+- takeScreenshot: roles-base-audit-detail

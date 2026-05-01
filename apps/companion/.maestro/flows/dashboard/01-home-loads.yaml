@@ -1,0 +1,40 @@
+appId: com.shelf.companion.carlos
+name: "Dashboard - Home Loads"
+tags:
+  - dashboard
+  - smoke
+
+---
+# Test: Dashboard loads with all sections
+# Verifies KPIs, Quick Actions, and content sections render
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow (stale-cache workaround)
+- tapOn:
+    text: "Quick Actions"
+
+# Verify compact KPI chips (label text: Assets, Custody, Categories, Locations)
+- assertVisible: "Assets"
+- assertVisible: "Custody"
+- assertVisible: "Categories"
+- assertVisible: "Locations"
+
+# Verify Quick Actions section and buttons
+- assertVisible: "Quick Actions"
+- assertVisible: "New Asset"
+- assertVisible: "Scan Code"
+- assertVisible: "Bookings"
+- assertVisible: "Audits"
+
+- takeScreenshot: dashboard-home-top
+
+# Scroll down to see more sections (may not exist on empty workspaces)
+- scrollUntilVisible:
+    element:
+      text: "Assets by Status"
+    direction: DOWN
+    timeout: 5000
+    optional: true
+
+- takeScreenshot: dashboard-home-bottom

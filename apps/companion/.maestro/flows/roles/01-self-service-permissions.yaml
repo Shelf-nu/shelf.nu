@@ -1,0 +1,100 @@
+appId: com.shelf.companion.carlos
+name: "Roles - Self-Service User Permissions"
+tags:
+  - roles
+  - self-service
+  - permissions
+
+---
+# Test: Self-service user sees correct scanner actions and asset restrictions
+#
+# Self-service CAN:  View assets, Assign Custody, Release Custody
+# Self-service CANNOT: Update Location, Create/Edit/Delete assets
+#
+# Verifies scanner pills match role permissions and "Create Asset" is hidden
+
+- runFlow: ../../shared/login-self-service.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# ── Verify scanner action pills ──────────────────────────────────────
+
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Self-service should see View, Assign, Release — but NOT Location
+# Wait for scanner to fully load (pills + camera viewfinder)
+- extendedWaitUntil:
+    visible: "Scan to view asset"
+    timeout: 10000
+- assertVisible: "Scanner action: View.*"
+- assertVisible: "Scanner action: Assign"
+- assertVisible: "Scanner action: Release"
+- assertNotVisible: "Scanner action: Location"
+
+- takeScreenshot: roles-self-service-scanner-actions
+
+# ── Verify scan + assign custody works ───────────────────────────────
+
+- tapOn: "Scanner action: Assign"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+- extendedWaitUntil:
+    visible: "1 asset scanned"
+    timeout: 15000
+
+- takeScreenshot: roles-self-service-assign-custody
+
+# ── Navigate to Assets tab — verify no Create button ─────────────────
+
+# Tab bar is still visible below the batch drawer — tap Assets directly
+- tapOn:
+    point: "30%,96%"
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+# Self-service cannot create assets — button should be hidden
+- assertNotVisible: "Create Asset"
+
+- takeScreenshot: roles-self-service-assets-no-create
+
+# ── Navigate to Audits — verify self-service can see and participate ──
+
+- tapOn: "Home"
+- tapOn:
+    text: "Quick Actions"
+
+# Tap Audits from quick actions or dashboard
+- tapOn:
+    text: "Audits"
+    index: 0
+
+# Stale a11y tree workaround: tap audit card area by point to force refresh
+# First card "Tap to scan" is at roughly 50%, 40% based on screenshots
+- waitForAnimationToEnd
+- tapOn:
+    point: "50%,40%"
+
+- takeScreenshot: roles-self-service-audit-detail
+
+# Self-service can participate — tap "Start Scanning" button by position
+# (a11y tree is stale after point-tap navigation, but button is at ~50%,67%)
+- tapOn:
+    point: "50%,67%"
+
+# If Start Scanning was tapped, we should see the audit scanner screen
+# Camera permission dialog or scanner UI confirms we got through
+- tapOn:
+    text: "Allow"
+    optional: true
+
+- takeScreenshot: roles-self-service-audit-scan
