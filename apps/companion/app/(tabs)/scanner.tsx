@@ -529,6 +529,10 @@ function ScannerContent() {
         finalizeScan();
       }
     },
+    // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing, setScanResult,
+    // and shouldSkipScan are stable across renders (refs and setState identities) or
+    // would cause render storms if listed; intentionally excluded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       router,
       action,

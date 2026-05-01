@@ -159,6 +159,8 @@ function BookingsListContent() {
           });
         }
       });
+      // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, activeFilter, fetchBookings])
   );
 

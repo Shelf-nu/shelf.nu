@@ -65,6 +65,8 @@ function HomeContent() {
       setData(result);
       setError(null);
     }
+    // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg?.id]);
 
   // Stale-while-revalidate — skip refetch if data is fresh (< 60s old)
@@ -90,6 +92,8 @@ function HomeContent() {
         lastFetchedAt.current = Date.now();
         hasFetchedRef.current = true;
       });
+      // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchDashboard])
   );
 

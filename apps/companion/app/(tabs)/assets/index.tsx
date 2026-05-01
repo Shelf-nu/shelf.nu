@@ -166,6 +166,9 @@ function AssetsListContent() {
       setIsLoading(false);
       lastFetchedAt.current = Date.now();
     });
+    // why: search/filter changes intentionally re-fetch; fetchAssets and currentOrg are
+    // captured stably via useOrg context so we do not want them in deps (would cause loops)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, activeFilter]);
 
   // Refresh on tab focus — skip if data is fresh (< 60s old) to avoid double-fetches
@@ -198,6 +201,8 @@ function AssetsListContent() {
           });
         }
       });
+      // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAssets])
   );
 

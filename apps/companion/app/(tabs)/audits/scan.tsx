@@ -1,4 +1,10 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -25,7 +31,6 @@ import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { clearAuditScanState } from "@/lib/audit-scan-persistence";
-import React from "react";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -192,12 +197,16 @@ function AuditScannerContent() {
 
   useEffect(() => {
     return () => {
+      // why: reads .current at unmount time intentionally — we want to clear whatever
+      // timer is currently active, not whatever was active at effect setup
+      /* eslint-disable react-hooks/exhaustive-deps */
       if (frameHighlightTimer.current)
         clearTimeout(frameHighlightTimer.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       // Normal exit — clear persisted state (crash recovery not needed)
       debouncedSaverRef.current?.cancel();
+      /* eslint-enable react-hooks/exhaustive-deps */
       if (auditId) clearAuditScanState(auditId);
     };
   }, [auditId, toastTimerRef, retryTimerRef, debouncedSaverRef]);
@@ -396,7 +405,6 @@ function AuditScannerContent() {
       expectedTotal,
       flashFrame,
       showToast,
-      startCooldown,
       resetInactivityTimer,
       animateProgress,
       enqueueScan,

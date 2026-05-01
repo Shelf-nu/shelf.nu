@@ -63,6 +63,9 @@ function RootLayoutNav() {
     } else if (session && inAuthGroup) {
       router.replace(startPageRoute as any);
     }
+    // why: router from expo-router is a stable reference across renders; including it
+    // would not affect behavior but adds noise to the dep array
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, isLoading, segments, splashComplete, startPageRoute]);
 
   return (

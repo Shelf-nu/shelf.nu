@@ -293,6 +293,10 @@ export function LocationPicker({
       setSearch("");
       setDebouncedSearch("");
     }
+    // why: PICKER_CACHE_TTL is a module constant; debouncedSearch and locations.length
+    // are read only inside the visibility branch and listing them would re-fire the
+    // effect on every keystroke
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, fetchLocations]);
 
   // Build hierarchy when not searching; keep flat for search results

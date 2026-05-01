@@ -92,6 +92,9 @@ export default function AnimatedSplash({
         setIntroComplete(true);
       });
     });
+    // why: animation values from useRef (Animated.Value) are stable; listing them adds
+    // noise without changing behavior
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduceMotion]);
 
   // ── Phase 3: reveal (after intro + auth ready) ──────────────────────────
@@ -118,6 +121,9 @@ export default function AnimatedSplash({
     ]).start(() => {
       onComplete();
     });
+    // why: animation values are stable refs; onComplete is invoked once on reveal end
+    // and including it would defeat the hasStartedReveal guard
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [introComplete, isReady, reduceMotion]);
 
   return (

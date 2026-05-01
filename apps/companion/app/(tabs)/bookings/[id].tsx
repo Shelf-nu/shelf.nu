@@ -307,6 +307,9 @@ export default function BookingDetailScreen() {
         </TouchableOpacity>
       );
     },
+    // why: toggleAssetSelection is stable (defined via useCallback in this component)
+    // and intentionally not listed; adding it would cause unnecessary row re-renders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       checkedInAssetIds,
       isSelectMode,

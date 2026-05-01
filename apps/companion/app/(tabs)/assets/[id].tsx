@@ -15,15 +15,6 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-// Lazy-loaded: ~50KB library only needed when viewing QR codes on asset detail
-let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
-try {
-  QRCode =
-    require("react-native-qrcode-svg").default ??
-    require("react-native-qrcode-svg");
-} catch {
-  // Will render graceful fallback instead of QR code
-}
 import { api, type Location as LocationType } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
@@ -45,6 +36,19 @@ import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-sec
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
+// Lazy-loaded: ~50KB library only needed when viewing QR codes on asset detail
+let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
+try {
+  // why: dynamic require keeps react-native-qrcode-svg out of the initial JS bundle
+  // for screens that don't render QR codes; static import would defeat the optimization
+  QRCode =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("react-native-qrcode-svg").default ??
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("react-native-qrcode-svg");
+} catch {
+  // Will render graceful fallback instead of QR code
+}
 
 export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

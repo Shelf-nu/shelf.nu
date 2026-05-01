@@ -132,6 +132,9 @@ function AuditDetailContent() {
         useNativeDriver: false,
       }).start();
     }
+    // why: reduceMotion is captured by closure but only read on initial render path;
+    // rebuilding fetchAudit when reduceMotion toggles would re-fire focus refetches
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, currentOrg, progressAnim]);
 
   useFocusEffect(
@@ -147,6 +150,8 @@ function AuditDetailContent() {
         lastFetchedAt.current = Date.now();
         hasFetched.current = true;
       });
+      // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAudit])
   );
 

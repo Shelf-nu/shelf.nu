@@ -51,6 +51,9 @@ export default function LoginScreen() {
     return () => {
       if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
     };
+    // why: handleLogin is defined inline below and recreated each render; including it
+    // in deps would cause the effect to re-fire on every keystroke
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [email, password, isSubmitting]);
 
   const handleLogin = async () => {

@@ -18,22 +18,25 @@ import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type Category, type Location } from "@/lib/api";
+import { useOrg } from "@/lib/org-context";
+import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { useTheme } from "@/lib/theme-context";
+import { createStyles } from "@/lib/create-styles";
+import { labelForRequired } from "@/lib/a11y";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try {
+  // why: dynamic require so dev clients without the native module rebuilt fall back
+  // gracefully instead of crashing at JS evaluation time
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   ImagePicker = require("expo-image-picker");
 } catch {
   console.warn(
     "[CreateAsset] expo-image-picker native module not available. Rebuild dev client."
   );
 }
-import { useOrg } from "@/lib/org-context";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
-import { useTheme } from "@/lib/theme-context";
-import { createStyles } from "@/lib/create-styles";
-import { labelForRequired } from "@/lib/a11y";
 
 export default function CreateAssetScreen() {
   const router = useRouter();

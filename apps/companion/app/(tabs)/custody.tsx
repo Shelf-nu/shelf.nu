@@ -97,6 +97,8 @@ function MyCustodyContent() {
     setIsLoading(true);
     nextPage.current = 1;
     fetchAssets(1, true).finally(() => setIsLoading(false));
+    // why: debounced search drives this effect; fetchAssets and currentOrg captured stably
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
 
   // Refresh on tab focus — skip if data is fresh (< 60s old)
@@ -128,6 +130,8 @@ function MyCustodyContent() {
         lastFetchedAt.current = Date.now();
         hasFetchedCustody.current = true;
       });
+      // why: depend on org id (not full object) to avoid re-runs on identity-only changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAssets])
   );
 
