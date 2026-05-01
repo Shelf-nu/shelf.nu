@@ -7,6 +7,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -94,6 +95,9 @@ export default function AddMember() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /** Focus the name field when the modal route mounts (replaces autoFocus). */
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
+
   return (
     <>
       <div className="modal-content-wrapper">
@@ -109,13 +113,13 @@ export default function AddMember() {
         </div>
         <Form method="post" ref={zo.ref}>
           <Input
+            ref={nameInputRef}
             name={zo.fields.name()}
             type="text"
             label="Name"
             className="mb-8"
             placeholder="Enter team member’s name"
             required
-            autoFocus
             error={zo.errors.name()?.message}
             disabled={disabled}
           />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useAtom } from "jotai";
 import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -22,6 +22,7 @@ import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import { NotificationRecipientsField } from "./fields/notification-recipients";
 import { BookingFormSchema, type BookingFormSchemaType } from "./forms-schema";
 import { Button } from "../../shared/button";
 import { Card } from "../../shared/card";
@@ -98,14 +99,14 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     currentUserId: userId,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (defaultEndDate) {
-        setEndDate(defaultEndDate);
-      }
-    },
-    [defaultEndDate]
-  );
+  // Re-sync endDate when the computed default changes (e.g. when working hours or
+  // buffer settings load). Uses the React "store previous value in a ref" pattern
+  // so we mirror the prop during render instead of via a useEffect.
+  const prevDefaultEndDate = useRef(defaultEndDate);
+  if (defaultEndDate && defaultEndDate !== prevDefaultEndDate.current) {
+    prevDefaultEndDate.current = defaultEndDate;
+    setEndDate(defaultEndDate);
+  }
 
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
@@ -181,6 +182,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                     validationErrors?.description?.message ||
                     zo.errors.description()?.message
                   }
+                />
+              </Card>
+              <Card className="field-card m-0 overflow-visible">
+                <NotificationRecipientsField
+                  disabled={disabled}
+                  isAdminOrOwner={isAdministratorOrOwner}
+                  creatorName="You"
                 />
               </Card>
             </div>

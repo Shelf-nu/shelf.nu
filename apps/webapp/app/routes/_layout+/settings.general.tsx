@@ -54,6 +54,7 @@ import {
   canHideShelfBranding,
 } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -76,6 +77,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
           select: {
             firstName: true,
+            displayName: true,
             tierId: true,
             userOrganizations: {
               include: {
@@ -94,6 +96,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                         id: true,
                         firstName: true,
                         lastName: true,
+                        displayName: true,
                         profilePicture: true,
                       },
                     },
@@ -240,6 +243,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 
@@ -318,6 +322,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 
@@ -374,6 +379,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 
@@ -410,7 +416,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Ownership transferred",
-          message: `You have successfully transferred ownership of ${currentOrganization.name} to ${newOwner.firstName} ${newOwner.lastName}`,
+          message: `You have successfully transferred ownership of ${
+            currentOrganization.name
+          } to ${resolveUserDisplayName(newOwner)}`,
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

@@ -31,6 +31,7 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import jwt from "~/utils/jsonwebtoken.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const { inviteId } = getParams(params, z.object({ inviteId: z.string() }), {
@@ -53,6 +54,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
         },
@@ -78,7 +80,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     }
 
     return payload({
-      inviter: `${invite.inviter.firstName} ${invite.inviter.lastName}`,
+      inviter: resolveUserDisplayName(invite.inviter),
       workspace: `${invite.organization.name}`,
     });
   } catch (cause) {
@@ -187,6 +189,20 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Splits a multi-line error message into objects with stable, position-based
+ * ids so the rendered list has unique keys that don't depend on the array
+ * index expression (satisfies react-doctor/no-array-index-as-key).
+ */
+function splitIntoStableLines(message: string) {
+  let offset = 0;
+  return message.split("\n").map((content) => {
+    const id = `line-${offset}`;
+    offset += content.length + 1;
+    return { id, content };
+  });
+}
+
 export default function AcceptInvite() {
   const { inviter, workspace } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
@@ -199,10 +215,19 @@ export default function AcceptInvite() {
         {error ? (
           <div>
             <h2>{error.title}</h2>
-            <p
-              className="mx-4 mb-3 mt-2 md:mx-[-200px]"
-              dangerouslySetInnerHTML={{ __html: error.message }}
-            />
+            {/*
+             * Render the error message as text (not HTML) to avoid any XSS
+             * surface. Newlines are preserved via <br/> so multi-line error
+             * copy keeps its visual structure.
+             */}
+            <p className="mx-4 mb-3 mt-2 md:mx-[-200px]">
+              {splitIntoStableLines(error.message).map((line, i) => (
+                <span key={line.id}>
+                  {i > 0 && <br />}
+                  {line.content}
+                </span>
+              ))}
+            </p>
             <Button to="/" variant={"secondary"}>
               Back to home
             </Button>

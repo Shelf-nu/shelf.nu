@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 type CheckinDropdownProps = {
   disabled?: boolean;
@@ -97,18 +98,7 @@ export default function CheckinDropdown({
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }}
-          />
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           ref={dropdownRef}

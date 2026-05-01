@@ -95,6 +95,7 @@ export async function getLocationNotes({
         additionalData: { locationId, organizationId },
         label,
         status: 404,
+        shouldBeCaptured: false,
       });
     }
 
@@ -106,6 +107,7 @@ export async function getLocationNotes({
           select: {
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },
@@ -143,5 +145,7 @@ export async function deleteLocationNote({
 }
 
 export type LocationNoteWithUser = Prisma.LocationNoteGetPayload<{
-  include: { user: { select: { firstName: true; lastName: true } } };
+  include: {
+    user: { select: { firstName: true; lastName: true; displayName: true } };
+  };
 }>;

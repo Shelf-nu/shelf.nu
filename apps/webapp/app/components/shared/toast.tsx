@@ -7,6 +7,7 @@ import {
   clearNotificationAtom,
   showNotificationAtom,
 } from "~/atoms/notifications";
+import { useTabId } from "~/hooks/use-tab-id";
 import { tw } from "~/utils/tw";
 import { iconsMap } from "./icons-map";
 import When from "../when/when";
@@ -24,10 +25,15 @@ export const Toaster = () => {
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
 
+  // Side effect: useTabId patches window.fetch to inject an X-Tab-Id header
+  // on same-origin requests, so the server can scope notifications to this tab.
+  const tabId = useTabId();
+
   /** New notification coming from the server */
-  const newNotification = useEventSource(`/api/sse/notification`, {
-    event: "new-notification",
-  });
+  const newNotification = useEventSource(
+    `/api/sse/notification${tabId ? `?tabId=${tabId}` : ""}`,
+    { event: "new-notification" }
+  );
   /** When the stream sends us a new notification update the state so it displays */
   useEffect(() => {
     if (!newNotification) return;
@@ -78,7 +84,7 @@ export const Toaster = () => {
           {iconsMap["x"]}
         </Toast.Close>
       </Toast.Root>
-      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] outline-none [--viewport-padding:_25px] md:w-[390px]" />
+      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] pb-[calc(var(--viewport-padding)_+_env(safe-area-inset-bottom))] outline-none [--viewport-padding:_25px] md:w-[390px]" />
     </Toast.Provider>
   );
 };

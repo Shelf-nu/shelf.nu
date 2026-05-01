@@ -48,6 +48,7 @@ import {
   getStripePricesAndProducts,
   getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
@@ -80,6 +81,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         email: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         username: true,
         profilePicture: true,
         createdAt: true,
@@ -337,11 +339,12 @@ export const action = async ({
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         await createStripeCustomer({
           email: user.email,
-          name: `${user.firstName} ${user.lastName}`,
+          name: resolveUserDisplayName(user),
           userId: user.id,
         });
         return payload(null);
@@ -402,6 +405,112 @@ export const action = async ({
   }
 };
 
+// User type extracted from the loader's return value; used by the
+// module-scope renderers below.
+type LoaderUser = NonNullable<Awaited<ReturnType<typeof loader>>["user"]>;
+type LoaderBusinessIntel = Pick<
+  UserBusinessIntel,
+  | "howDidYouHearAboutUs"
+  | "jobTitle"
+  | "teamSize"
+  | "companyName"
+  | "primaryUseCase"
+  | "currentSolution"
+  | "timeline"
+>;
+
+/**
+ * Renders the right-hand cell for a given user-profile field in the admin
+ * user detail table. Extracted to module scope so React can treat it as a
+ * stable component identity (avoids render-in-render churn).
+ */
+function UserFieldValue({
+  fieldKey,
+  value,
+  user,
+  premiumIsEnabled,
+}: {
+  fieldKey: keyof LoaderUser;
+  value: LoaderUser[keyof LoaderUser];
+  user: LoaderUser;
+  premiumIsEnabled: boolean;
+}): ReactNode {
+  switch (fieldKey) {
+    case "tierId":
+      return <TierUpdateForm tierId={user.tierId} />;
+    case "customerId":
+      if (!premiumIsEnabled) return null;
+      return !value ? (
+        <Form className="inline-block" method="POST">
+          <input type="hidden" name="intent" value="createCustomerId" />
+          <Button type="submit" variant="link" size="sm">
+            Create customer ID
+          </Button>
+        </Form>
+      ) : (
+        <>
+          <Button
+            to={`https://dashboard.stripe.com/customers/${value}`}
+            target="_blank"
+            variant={"block-link"}
+          >
+            {value}
+          </Button>
+        </>
+      );
+    case "skipSubscriptionCheck":
+      return (
+        <SubscriptionCheckUpdateForm
+          skipSubscriptionCheck={user.skipSubscriptionCheck}
+        />
+      );
+    case "hasUnpaidInvoice":
+      return (
+        <BooleanToggleForm
+          fieldName="hasUnpaidInvoice"
+          fieldValue={user.hasUnpaidInvoice}
+        />
+      );
+    case "warnForNoPaymentMethod":
+      return (
+        <BooleanToggleForm
+          fieldName="warnForNoPaymentMethod"
+          fieldValue={user.warnForNoPaymentMethod}
+        />
+      );
+    case "createdAt":
+    case "updatedAt":
+      return <DateS date={value as string | Date} />;
+    default:
+      return typeof value === "string"
+        ? value
+        : typeof value === "boolean"
+        ? String(value)
+        : null;
+  }
+}
+
+/**
+ * Renders a single business-intel field value, substituting an em-dash for
+ * missing/empty values. Extracted to module scope to satisfy React's
+ * no-render-in-render rule.
+ */
+function BusinessIntelValue({
+  value,
+}: {
+  value: LoaderBusinessIntel[keyof LoaderBusinessIntel];
+}): ReactNode {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  if (typeof value === "string" && value.trim().length === 0) {
+    return "—";
+  }
+
+  return value;
+}
+
 export default function Area51UserPage() {
   const {
     user,
@@ -414,87 +523,6 @@ export default function Area51UserPage() {
   } = useLoaderData<typeof loader>();
   const hasCustomTier =
     user?.tierId === "custom" && user?.customTierLimit !== null;
-  // Extract user type from loader data
-  type User = NonNullable<Awaited<ReturnType<typeof loader>>["user"]>;
-  type BusinessIntel = Pick<
-    UserBusinessIntel,
-    | "howDidYouHearAboutUs"
-    | "jobTitle"
-    | "teamSize"
-    | "companyName"
-    | "primaryUseCase"
-    | "currentSolution"
-    | "timeline"
-  >;
-
-  const renderValue = (key: keyof User, value: User[keyof User]): ReactNode => {
-    switch (key) {
-      case "tierId":
-        return <TierUpdateForm tierId={user.tierId} />;
-      case "customerId":
-        if (!premiumIsEnabled) return null;
-        return !value ? (
-          <Form className="inline-block" method="POST">
-            <input type="hidden" name="intent" value="createCustomerId" />
-            <Button type="submit" variant="link" size="sm">
-              Create customer ID
-            </Button>
-          </Form>
-        ) : (
-          <>
-            <Button
-              to={`https://dashboard.stripe.com/customers/${value}`}
-              target="_blank"
-              variant={"block-link"}
-            >
-              {value}
-            </Button>
-          </>
-        );
-      case "skipSubscriptionCheck":
-        return (
-          <SubscriptionCheckUpdateForm
-            skipSubscriptionCheck={user.skipSubscriptionCheck}
-          />
-        );
-      case "hasUnpaidInvoice":
-        return (
-          <BooleanToggleForm
-            fieldName="hasUnpaidInvoice"
-            fieldValue={user.hasUnpaidInvoice}
-          />
-        );
-      case "warnForNoPaymentMethod":
-        return (
-          <BooleanToggleForm
-            fieldName="warnForNoPaymentMethod"
-            fieldValue={user.warnForNoPaymentMethod}
-          />
-        );
-      case "createdAt":
-      case "updatedAt":
-        return <DateS date={value as string | Date} />;
-      default:
-        return typeof value === "string"
-          ? value
-          : typeof value === "boolean"
-          ? String(value)
-          : null;
-    }
-  };
-  const renderBusinessIntelValue = (
-    value: BusinessIntel[keyof BusinessIntel]
-  ): ReactNode => {
-    if (value === null || value === undefined) {
-      return "—";
-    }
-
-    if (typeof value === "string" && value.trim().length === 0) {
-      return "—";
-    }
-
-    return value;
-  };
 
   const hasSubscription = (customer?.subscriptions?.data?.length ?? 0) > 0;
 
@@ -521,7 +549,12 @@ export default function Area51UserPage() {
                     .map(([key, value]) => (
                       <li key={key}>
                         <span className="font-semibold">{key}</span>:{" "}
-                        {renderValue(key as keyof User, value)}
+                        <UserFieldValue
+                          fieldKey={key as keyof LoaderUser}
+                          value={value}
+                          user={user}
+                          premiumIsEnabled={premiumIsEnabled}
+                        />
                       </li>
                     ))
                 : null}
@@ -533,9 +566,11 @@ export default function Area51UserPage() {
                   {Object.entries(user.businessIntel).map(([key, value]) => (
                     <li key={key}>
                       <span className="font-semibold">{key}</span>:{" "}
-                      {renderBusinessIntelValue(
-                        value as BusinessIntel[keyof BusinessIntel]
-                      )}
+                      <BusinessIntelValue
+                        value={
+                          value as LoaderBusinessIntel[keyof LoaderBusinessIntel]
+                        }
+                      />
                     </li>
                   ))}
                 </ul>

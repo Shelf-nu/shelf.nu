@@ -17,8 +17,10 @@ export function Breadcrumbs() {
   return (
     <div className="breadcrumbs">
       {breadcrumbs.map((match, index) => (
+        // `match.id` is the stable Remix route id for this match, which uniquely
+        // identifies each breadcrumb entry regardless of position in the chain.
         <Breadcrumb
-          key={index}
+          key={match.id}
           match={match}
           isLastItem={index === breadcrumbs.length - 1}
         />

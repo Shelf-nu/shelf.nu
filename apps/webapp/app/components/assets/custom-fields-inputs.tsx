@@ -36,7 +36,7 @@ export default function AssetCustomFields({
   const customFieldsValues =
     (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
 
-  const [dateObj, setDateObj] = useState(
+  const [dateObj, setDateObj] = useState(() =>
     customFieldsValues
       .filter((v) => v.value.valueDate)
       .reduce(

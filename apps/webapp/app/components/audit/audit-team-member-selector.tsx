@@ -30,9 +30,11 @@ export default function AuditTeamMemberSelector({
   defaultValue,
 }: AuditTeamMemberSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  // Lazy initializer avoids a false-positive derived-state lint: after mount this
+  // state is user-controlled via the selector, so it must NOT re-sync with the prop.
   const [selectedTeamMember, setSelectedTeamMember] = useState<
     string | undefined
-  >(defaultValue);
+  >(() => defaultValue);
 
   const user = useUserData();
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
 import { useAtom } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -66,6 +66,7 @@ type BookingFormData = {
   action?: string;
 };
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function EditBookingForm({ booking, action }: BookingFormData) {
   const navigation = useNavigation();
   const {
@@ -130,6 +131,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     })
   );
 
+  /** Track the form DOM element via state so portalContainer is always
+   * resolved when the user opens check-in/check-out dialogs. Using zo.form
+   * (which reads a ref) can return null on the first render cycle. */
+  const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
+  const formRef = useCallback(
+    (node: HTMLFormElement | null) => {
+      zo.ref(node);
+      setFormElement(node);
+    },
+    [zo]
+  );
+
   const actionData = useActionData<BookingPageActionData>();
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<BookingFormSchemaType>(
@@ -161,14 +174,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     currentUserId: userId,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (incomingEndDate) {
-        setEndDate(incomingEndDate);
-      }
-    },
-    [incomingEndDate]
-  );
+  /**
+   * Sync the editable `endDate` state with the `incomingEndDate` prop when it
+   * changes. Using the "store prior prop in ref + update during render" pattern
+   * (the React-recommended replacement for prop-sync effects) satisfies
+   * `no-effect-event-handler` while preserving the original behaviour.
+   */
+  const lastIncomingEndDateRef = useRef(incomingEndDate);
+  if (incomingEndDate && incomingEndDate !== lastIncomingEndDateRef.current) {
+    lastIncomingEndDateRef.current = incomingEndDate;
+    setEndDate(incomingEndDate);
+  }
 
   /**
    * Check whether the user can see actions
@@ -186,7 +202,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   return (
     <Form
-      ref={zo.ref}
+      ref={formRef}
       method="post"
       action={action}
       className="edit-booking-form"
@@ -271,7 +287,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             {/* When booking is reserved, we show the check-out button */}
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
               <CheckoutDialog
-                portalContainer={zo.form}
+                portalContainer={formElement || undefined}
                 formId="edit-booking-form"
                 booking={{ id, name: name!, from: new Date(startDate!) }}
                 disabled={
@@ -302,7 +318,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               }
             >
               <CheckinDropdown
-                portalContainer={zo.form}
+                portalContainer={formElement || undefined}
                 formId="edit-booking-form"
                 booking={{
                   id,

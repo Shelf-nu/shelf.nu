@@ -59,6 +59,7 @@ import {
   KITS_INCLUDE_FIELDS,
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
@@ -168,7 +169,27 @@ export async function createKit({
       data.location = { connect: { id: locationId } };
     }
 
-    return await db.kit.create({ data });
+    // Use transaction to ensure kit creation and activity event are atomic
+    const kit = await db.$transaction(async (tx) => {
+      const created = await tx.kit.create({ data });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: createdById,
+          action: "KIT_CREATED",
+          entityType: "KIT",
+          entityId: created.id,
+          kitId: created.id,
+        },
+        tx
+      );
+
+      return created;
+    });
+
+    return kit;
   } catch (cause) {
     // If it's a Prisma unique constraint violation on barcode values,
     // use our detailed validation to provide specific field errors
@@ -258,6 +279,15 @@ export async function updateKit({
         userId: createdById,
       });
     }
+
+    await recordEvent({
+      organizationId,
+      actorUserId: createdById,
+      action: "KIT_UPDATED",
+      entityType: "KIT",
+      entityId: kit.id,
+      kitId: kit.id,
+    });
 
     return kit;
   } catch (cause) {
@@ -761,7 +791,12 @@ export async function releaseCustody({
           name: true,
           assets: { select: { id: true, title: true } },
           createdBy: {
-            select: { id: true, firstName: true, lastName: true },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            },
           },
           custody: { select: { custodian: { include: { user: true } } } },
         },
@@ -770,6 +805,7 @@ export async function releaseCustody({
         select: {
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -785,6 +821,7 @@ export async function releaseCustody({
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
     // Use transaction for atomicity - prevents orphaned custody records on partial failure
+    // Activity events must be inside to ensure audit trail consistency
     await db.$transaction(async (tx) => {
       // Delete kit custody and update kit status
       await tx.kit.update({
@@ -806,6 +843,24 @@ export async function releaseCustody({
         where: { id: { in: assetIds }, organizationId },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      // Activity events — one CUSTODY_RELEASED per asset in the kit.
+      // Must be inside transaction to ensure atomicity with custody release
+      await recordEvents(
+        kit.assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: kit.id,
+          teamMemberId: kit.custody?.custodian?.id ?? undefined,
+          targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
 
     // Notes can be created outside transaction (not critical for consistency)
@@ -870,6 +925,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
                 select: {
                   firstName: true,
                   lastName: true,
+                  displayName: true,
                   profilePicture: true,
                 },
               },
@@ -1078,6 +1134,7 @@ export async function bulkAssignKitCustody({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.teamMember.findUnique({
@@ -1085,7 +1142,14 @@ export async function bulkAssignKitCustody({
         select: {
           id: true,
           name: true,
-          user: { select: { id: true, firstName: true, lastName: true } },
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            },
+          },
         },
       }),
     ]);
@@ -1173,6 +1237,23 @@ export async function bulkAssignKitCustody({
           };
         }),
       });
+
+      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      await recordEvents(
+        allAssetsOfAllKits.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: asset.kit?.id ?? undefined,
+          teamMemberId: custodianId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
   } catch (cause) {
     const message =
@@ -1240,6 +1321,7 @@ export async function bulkReleaseKitCustody({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
     ]);
@@ -1308,6 +1390,22 @@ export async function bulkReleaseKitCustody({
           };
         }),
       });
+
+      // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
+      await recordEvents(
+        allAssetsOfAllKits.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: asset.kit?.id ?? undefined,
+          teamMemberId: custodian?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
     });
   } catch (cause) {
     const message =
@@ -1483,6 +1581,7 @@ export async function relinkKitQrCode({
       message: "Kit not found.",
       label,
       additionalData: { kitId, organizationId, qrId },
+      shouldBeCaptured: false,
     });
   }
 
@@ -1597,6 +1696,7 @@ export async function updateKitLocation({
         cause: null,
         message: "Kit not found",
         label,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1623,6 +1723,7 @@ export async function updateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const location = await db.location.findUnique({
@@ -1670,6 +1771,7 @@ export async function updateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const currentLocation = await db.location.findUnique({
@@ -1775,6 +1877,7 @@ export async function bulkUpdateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         const location = await db.location.findUnique({
@@ -1817,6 +1920,7 @@ export async function bulkUpdateKitLocation({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
 
@@ -1856,6 +1960,7 @@ export async function bulkUpdateKitLocation({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const userLink = wrapUserLinkForNote({
@@ -1985,6 +2090,7 @@ export async function updateKitAssets({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const actor = wrapUserLinkForNote({
@@ -2018,6 +2124,7 @@ export async function updateKitAssets({
                       email: true,
                       firstName: true,
                       lastName: true,
+                      displayName: true,
                       profilePicture: true,
                     },
                   },
@@ -2034,6 +2141,7 @@ export async function updateKitAssets({
           additionalData: { kitId, userId, organizationId },
           status: 404,
           label: "Kit",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2149,6 +2257,36 @@ export async function updateKitAssets({
       userId,
     });
 
+    // Activity events — one ASSET_KIT_CHANGED per asset added or removed.
+    const kitChangeEvents: Parameters<typeof recordEvents>[0] = [
+      ...newlyAddedAssets.map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_KIT_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: asset.id,
+        assetId: asset.id,
+        kitId: kit.id,
+        field: "kitId",
+        fromValue: asset.kit?.id ?? null,
+        toValue: kit.id,
+      })),
+      ...(addOnly ? [] : removedAssets).map((asset) => ({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_KIT_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: asset.id,
+        assetId: asset.id,
+        field: "kitId",
+        fromValue: kit.id,
+        toValue: null,
+      })),
+    ];
+    if (kitChangeEvents.length > 0) {
+      await recordEvents(kitChangeEvents);
+    }
+
     // Handle location cascade for newly added assets (after kit assignment notes)
     if (newlyAddedAssets.length > 0) {
       if (kit.location) {
@@ -2164,6 +2302,7 @@ export async function updateKitAssets({
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           } satisfies Prisma.UserSelect,
         });
         await Promise.all(
@@ -2201,6 +2340,7 @@ export async function updateKitAssets({
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             } satisfies Prisma.UserSelect,
           });
           await Promise.all(
@@ -2366,6 +2506,7 @@ export async function bulkRemoveAssetsFromKits({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
     const actor = wrapUserLinkForNote({
@@ -2398,7 +2539,12 @@ export async function bulkRemoveAssetsFromKits({
               select: {
                 name: true,
                 user: {
-                  select: { id: true, firstName: true, lastName: true },
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
                 },
               },
             },

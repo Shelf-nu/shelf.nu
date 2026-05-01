@@ -25,8 +25,10 @@ import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
@@ -88,21 +90,7 @@ const ConditionalActionsDropdown = () => {
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }} // is a hack to fix the popover not being in the right place on mobile
-            // can not target [data-radix-popper-content-wrapper] for this file only with css
-            // so we have to use dangerouslySetInnerHTML
-            // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
             ref={popoverContentRef}

@@ -380,6 +380,7 @@ async function getQrCodes({
               email: true,
               firstName: true,
               lastName: true,
+              displayName: true,
             },
           },
           batch: true,

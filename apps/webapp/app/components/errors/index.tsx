@@ -10,6 +10,21 @@ import { Button } from "../shared/button";
 
 type ErrorContentProps = { className?: string };
 
+/**
+ * Splits a multi-line error message into objects with stable, cumulative-
+ * offset ids so the rendered list has unique keys that don't depend on the
+ * array index (satisfies react-doctor/no-array-index-as-key) and stays
+ * stable across re-renders even if line content changes.
+ */
+function splitIntoStableLines(message: string) {
+  let offset = 0;
+  return message.split("\n").map((content) => {
+    const id = `line-${offset}`;
+    offset += content.length + 1;
+    return { id, content };
+  });
+}
+
 export const ErrorContent = ({ className }: ErrorContentProps) => {
   const loc = useLocation();
   const response = useRouteError();
@@ -36,7 +51,11 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
       !error404.isError404 &&
       window.env?.SENTRY_DSN
     ) {
-      setSentryEventId(Sentry.captureException(response));
+      setSentryEventId(
+        Sentry.captureException(response, {
+          tags: { source: "error-boundary" },
+        })
+      );
     }
   }, [response, error404.isError404]);
   if (error404.isError404) {
@@ -48,8 +67,12 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
     );
   }
 
-  // Creating a string with <br/> tags for line breaks
-  const messageHtml = { __html: message.split("\n").join("<br/>") };
+  // Preserve newlines as <br/> without injecting HTML: split the message on
+  // "\n" and interleave <br/> elements between segments. Keeps the same
+  // visual output as the previous dangerouslySetInnerHTML approach while
+  // avoiding any raw HTML injection. Uses cumulative-offset ids so keys are
+  // stable when the message text changes (not derived from the array index).
+  const messageLines = splitIntoStableLines(message);
 
   return (
     <div
@@ -63,7 +86,14 @@ export const ErrorContent = ({ className }: ErrorContentProps) => {
           <ErrorIcon />
         </span>
         <h2 className="mb-2">{title}</h2>
-        <p className="max-w-[550px]" dangerouslySetInnerHTML={messageHtml} />
+        <p className="max-w-[550px]">
+          {messageLines.map((line, i) => (
+            <span key={line.id}>
+              {i > 0 && <br />}
+              {line.content}
+            </span>
+          ))}
+        </p>
         {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
         {sentryEventId && (
           <p className="text-gray-400">(Error ID: {sentryEventId})</p>

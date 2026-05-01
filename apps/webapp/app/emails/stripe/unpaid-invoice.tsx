@@ -11,6 +11,7 @@ import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { resolveUserDisplayName } from "~/utils/user";
 import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
 import { styles } from "../styles";
@@ -23,6 +24,7 @@ interface AdminEmailProps {
     email: string;
     firstName?: string | null;
     lastName?: string | null;
+    displayName?: string | null;
   };
   eventType: string;
   invoiceId: string;
@@ -33,7 +35,7 @@ export const unpaidInvoiceAdminText = ({
   eventType,
   invoiceId,
 }: AdminEmailProps) => {
-  const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
+  const name = resolveUserDisplayName(user);
 
   return `A Stripe invoice event requires attention.
 

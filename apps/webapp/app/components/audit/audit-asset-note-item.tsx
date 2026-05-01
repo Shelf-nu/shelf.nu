@@ -6,6 +6,7 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import type { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 import { UserBadge } from "../shared/user-badge";
 
 export type NoteData = {
@@ -110,7 +111,7 @@ export function AuditAssetNoteItem({
         type: fetcher.data.note.type,
         user: {
           id: fetcher.data.note.user.id,
-          name: `${fetcher.data.note.user.firstName} ${fetcher.data.note.user.lastName}`,
+          name: resolveUserDisplayName(fetcher.data.note.user),
           img: fetcher.data.note.user.profilePicture ?? null,
         },
         needsServerSync: false,

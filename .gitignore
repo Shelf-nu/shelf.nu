@@ -27,6 +27,10 @@ tsconfig.tsbuildinfo
 # Claude Code development notes (local only)
 .claude-notes/
 
+# Claude Code — personal settings (project-shared settings and skills are committed)
+.claude/settings.local.json
+.claude/.credentials*
+
 **/coverage
 
 # Benchmark results (regenerated on each run)
@@ -69,12 +73,10 @@ apps/docs/.vitepress/dist
 # Lefthook local overrides
 lefthook-local.yml
 .worktrees/
-
 # Local binaries
 .bin/
 
-# Claude Code
-.claude/
-
 # Certificate backups
 *.cert.bak/
+
+node-compile-cache/

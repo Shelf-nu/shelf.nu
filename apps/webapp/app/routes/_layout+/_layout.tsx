@@ -55,6 +55,7 @@ import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   installPwaPromptCookie,
+  expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
@@ -83,70 +84,80 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID(userId, {
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-        profilePicture: true,
-        onboarded: true,
-        customerId: true,
-        skipSubscriptionCheck: true,
-        sso: true,
-        tierId: true,
-        hasUnpaidInvoice: true,
-        warnForNoPaymentMethod: true,
-        roles: { select: { id: true, name: true } },
-        userOrganizations: {
-          where: {
-            userId: authSession.userId,
+    // Run user fetch and cookie parsing in parallel — these are independent
+    // and safe to run before the onboarding guard.
+    // NOTE: getSelectedOrganization is intentionally NOT included here.
+    // It can throw when a user has no org membership, and the onboarding
+    // guard (user.onboarded check) must run first to redirect non-onboarded
+    // users before org resolution is attempted.
+    const [user, userPrefsCookie, pwaPromptCookie] = await Promise.all([
+      getUserByID(userId, {
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+          profilePicture: true,
+          onboarded: true,
+          customerId: true,
+          skipSubscriptionCheck: true,
+          sso: true,
+          tierId: true,
+          hasUnpaidInvoice: true,
+          warnForNoPaymentMethod: true,
+          roles: { select: { id: true, name: true } },
+          userOrganizations: {
+            where: {
+              userId: authSession.userId,
+            },
+            select: {
+              id: true,
+              roles: true,
+              organization: { select: { id: true } },
+            },
           },
-          select: {
-            id: true,
-            roles: true,
-            organization: { select: { id: true } },
-          },
-        },
-      } satisfies Prisma.UserSelect,
-    });
+        } satisfies Prisma.UserSelect,
+      }),
+      initializePerPageCookieOnLayout(request),
+      installPwaPromptCookie
+        .parse(request.headers.get("Cookie"))
+        .then((c) => (c ?? {}) as { hidden?: boolean }),
+    ]);
 
     let subscription = null;
 
     if (user.customerId && stripe) {
-      // Get the Stripe customer
       const customer = (await getStripeCustomer(
         user.customerId
       )) as CustomerWithSubscriptions;
-      /** Find the active subscription for the Stripe customer */
       subscription = getCustomerActiveSubscription({ customer });
       await validateSubscriptionIsActive({ user, subscription });
     }
-
-    /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
-    const userPrefsCookie = await initializePerPageCookieOnLayout(request);
-
-    const cookieHeader = request.headers.get("Cookie");
-    const pwaPromptCookie =
-      (await installPwaPromptCookie.parse(cookieHeader)) || {};
 
     if (!user.onboarded) {
       return redirect("onboarding");
     }
 
-    /** There could be a case when you get removed from an organization while browsing it.
-     * In this case what we do is we set the current organization to the first one in the list
-     */
+    // Org resolution runs after the onboarding guard — safe now since
+    // we know the user is onboarded and should have org membership.
     const {
       organizationId,
       organizations,
       currentOrganization,
       cookieRefreshNeeded,
+      noVisibleOrganizations,
     } = await getSelectedOrganization({
       userId: authSession.userId,
       request,
     });
+
+    // SSO user with no team orgs — redirect to a friendly pending page
+    if (noVisibleOrganizations) {
+      return redirect("/sso-pending-assignment");
+    }
+
     const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
 
     // Get current user's organization role for updates filtering
@@ -162,14 +173,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const needsSequentialIdMigration =
       (isOwner || isOrgAdmin) && !currentOrganization.hasSequentialIdsMigrated;
 
-    // Get unread updates count for the current user (using first organization role)
-    const unreadUpdatesCount = currentOrganizationUserRoles?.[0]
-      ? await getUnreadCountForUser({
-          userId: authSession.userId,
-          userRole: currentOrganizationUserRoles[0],
-        })
-      : 0;
-
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -181,12 +184,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    const [bookingSettings, workingHoursRaw] = await Promise.all([
-      getBookingSettingsForOrganization(currentOrganization.id),
-      getWorkingHoursForOrganization(currentOrganization.id),
-    ]);
-
-    const workingHours = workingHoursRaw;
+    // Run booking settings, working hours, and unread count in parallel —
+    // all only depend on organizationId/userId which are available now.
+    const [bookingSettings, workingHours, unreadUpdatesCount] =
+      await Promise.all([
+        getBookingSettingsForOrganization(currentOrganization.id),
+        getWorkingHoursForOrganization(currentOrganization.id),
+        currentOrganizationUserRoles?.[0]
+          ? getUnreadCountForUser({
+              userId: authSession.userId,
+              userRole: currentOrganizationUserRoles[0],
+            })
+          : Promise.resolve(0),
+      ]);
 
     return data(
       payload({
@@ -223,6 +233,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {
         headers: [
           setCookie(await userPrefs.serialize(userPrefsCookie)),
+          expireHostOnlyUserPrefsCookie(),
           ...(cookieRefreshNeeded
             ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
             : []),
@@ -327,7 +338,10 @@ export default function App() {
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (
+            // `key` remounts the modal when the active organization changes,
+            // resetting its internal state without needing a derived-state effect.
             <SequentialIdMigrationModal
+              key={currentOrganizationId}
               organizationId={currentOrganizationId}
             />
           ) : null}

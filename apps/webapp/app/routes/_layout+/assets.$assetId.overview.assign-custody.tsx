@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
@@ -168,6 +169,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -190,6 +192,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             id: true,
             firstName: true,
             lastName: true,
+            displayName: true,
           },
         },
       },
@@ -217,26 +220,54 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** In order to do it with a single query
-     * 1. We update the asset status
-     * 2. We create a new custody record for that specific asset
-     * 3. We link it to the custodian
+    /** Assign custody to an asset inside a transaction so that the
+     * stale-custody cleanup and the new assignment are atomic — if the
+     * update fails the delete is rolled back automatically.
+     * 1. Clear any stale custody record (prevents P2002 unique constraint
+     *    if a previous release updated status but failed to delete custody)
+     * 2. Update the asset status to IN_CUSTODY
+     * 3. Create a new custody record linked to the custodian
      */
-    const asset = await db.asset
-      .update({
-        where: { id: assetId, organizationId } as Prisma.AssetWhereUniqueInput,
-        data: {
-          status: AssetStatus.IN_CUSTODY,
-          custody: {
-            create: {
-              custodian: { connect: { id: custodianId } },
+    // Use transaction to ensure custody assignment and activity event are atomic
+    const asset = await db
+      .$transaction(async (tx) => {
+        await tx.custody.deleteMany({ where: { assetId } });
+
+        const updated = await tx.asset.update({
+          where: {
+            id: assetId,
+            organizationId,
+          } as Prisma.AssetWhereUniqueInput,
+          data: {
+            status: AssetStatus.IN_CUSTODY,
+            custody: {
+              create: {
+                custodian: { connect: { id: custodianId } },
+              },
             },
           },
-        },
-        select: {
-          id: true,
-          title: true,
-        },
+          select: {
+            id: true,
+            title: true,
+          },
+        });
+
+        // Activity event must be inside transaction for atomicity
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_ASSIGNED",
+            entityType: "ASSET",
+            entityId: updated.id,
+            assetId: updated.id,
+            teamMemberId: custodianId,
+            targetUserId: custodianTeamMember.user?.id ?? undefined,
+          },
+          tx
+        );
+
+        return updated;
       })
       .catch((cause) => {
         throw new ShelfError({

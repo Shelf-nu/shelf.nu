@@ -63,6 +63,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           customerId: true,
           tierId: true,
           usedFreeTrial: true,
@@ -190,6 +191,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         customerId: true,
         firstName: true,
         lastName: true,
+        displayName: true,
         usedFreeTrial: true,
       } satisfies Prisma.UserSelect,
     });
@@ -214,6 +216,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
       }
 
+      // why: These three awaits MUST run sequentially. The user's tier/trial
+      // flag must only be updated after the Stripe subscription is created
+      // successfully, and the return URL should only be generated once both
+      // upstream steps succeed. Running them in parallel would risk marking
+      // the trial as used even if Stripe creation fails.
       // Create subscription directly via Stripe API — no checkout needed
       await createTeamTrialSubscription({
         customerId,

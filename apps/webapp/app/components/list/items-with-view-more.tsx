@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import _ from "lodash";
+import get from "lodash/get";
 import { tw } from "~/utils/tw";
 import { GrayBadge } from "../shared/gray-badge";
 import {
@@ -58,8 +58,8 @@ export default function ItemsWithViewMore<T>({
     }
 
     return (
-      <GrayBadge key={_.get(item, restProps.idKey)}>
-        {_.get(item, restProps.labelKey)}
+      <GrayBadge key={get(item, restProps.idKey)}>
+        {get(item, restProps.labelKey)}
       </GrayBadge>
     );
   }

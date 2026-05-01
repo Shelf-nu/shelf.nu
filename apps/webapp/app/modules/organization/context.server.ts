@@ -32,6 +32,8 @@ type SelectedOrganization = {
   userOrganizations: Awaited<ReturnType<typeof getUserOrganizations>>;
   currentOrganization: OrganizationFromUser;
   cookieRefreshNeeded: boolean;
+  /** True when an SSO user has no visible (non-personal) organizations. */
+  noVisibleOrganizations?: boolean;
 };
 
 type SelectedOrganizationCache = Map<string, Promise<SelectedOrganization>>;
@@ -55,9 +57,17 @@ export function destroySelectedOrganizationIdCookie() {
 
 /**
  * This function is used to get the selected organization for the user.
- * It checks if the user is part of the current selected organization
- * It always defaults to the personal organization if the user is not part of the current selected organization.
- * @throws If the user is not part of any organization
+ * It checks if the user is part of the current selected organization.
+ *
+ * For non-SSO users it defaults to the personal organization when no
+ * valid selection exists. For SSO users (`user.sso === true`) the
+ * personal workspace is automatically hidden — the fallback skips it.
+ *
+ * The SSO flag is resolved internally from the `getUserOrganizations`
+ * query so every caller (layout loader, child loaders, permission
+ * checks) gets consistent behaviour without needing to pass `isSSO`.
+ *
+ * @throws If a non-SSO user has no organizations at all.
  */
 // Uncached implementation used as the single source of truth.
 async function getSelectedOrganizationUncached({
@@ -73,7 +83,30 @@ async function getSelectedOrganizationUncached({
    * In this case what we do is we set the current organization to the first one in the list
    */
   const userOrganizations = await getUserOrganizations({ userId });
-  const organizations = userOrganizations.map((uo) => uo.organization);
+  const allOrganizations = userOrganizations.map((uo) => uo.organization);
+
+  // Resolve the SSO flag from the already-fetched user data so the
+  // result is consistent regardless of which loader populates the cache.
+  const isSSO = userOrganizations[0]?.user?.sso === true;
+
+  // SSO users never see their personal workspace — filter it out.
+  const organizations = isSSO
+    ? allOrganizations.filter((org) => org.type !== "PERSONAL")
+    : allOrganizations;
+
+  // SSO user with no team orgs — return early with a sentinel so the
+  // caller can redirect to the "pending assignment" page.
+  if (isSSO && organizations.length === 0) {
+    return {
+      organizationId: "",
+      organizations: [],
+      userOrganizations,
+      currentOrganization: null as unknown as OrganizationFromUser,
+      cookieRefreshNeeded: false,
+      noVisibleOrganizations: true,
+    };
+  }
+
   const userOrganizationIds = organizations.map((org) => org.id);
 
   // Track whether we need to refresh the cookie (fallback was used)
@@ -81,7 +114,7 @@ async function getSelectedOrganizationUncached({
 
   // If the organizationId is not set or the user is not part of the organization,
   // fall back to the last selected organization from the database (cross-device persistence),
-  // then to the personal organization, then to the first available organization
+  // then to the personal organization (non-SSO only), then to the first available organization
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
     cookieRefreshNeeded = true;
 
@@ -95,10 +128,13 @@ async function getSelectedOrganizationUncached({
     ) {
       // DB field is valid — cross-device persistence working
       organizationId = lastSelectedOrganizationId;
-    } else {
-      // DB field is null or points to an org the user lost access to
+    } else if (!isSSO) {
+      // Non-SSO: prefer the personal org, then first available
       const personalOrg = organizations.find((org) => org.type === "PERSONAL");
       organizationId = personalOrg?.id ?? userOrganizationIds[0];
+    } else {
+      // SSO: personal org already filtered out, use first team org
+      organizationId = userOrganizationIds[0];
     }
   }
 
@@ -134,6 +170,9 @@ async function getSelectedOrganizationUncached({
 /**
  * Returns the selected organization for the user and caches the result per
  * incoming request to avoid duplicate DB queries when loaders run in parallel.
+ *
+ * SSO filtering is resolved internally from the user record — callers do
+ * not need to pass an `isSSO` flag.
  */
 export async function getSelectedOrganization({
   userId,
@@ -157,13 +196,14 @@ export async function getSelectedOrganization({
   }
 
   // Store the in-flight promise so concurrent callers share it.
-  const pending = getSelectedOrganizationUncached({ userId, request }).catch(
-    (error) => {
-      // Evict failed promises so later calls in this request can retry.
-      requestCache.delete(userId);
-      throw error;
-    }
-  );
+  const pending = getSelectedOrganizationUncached({
+    userId,
+    request,
+  }).catch((error) => {
+    // Evict failed promises so later calls in this request can retry.
+    requestCache.delete(userId);
+    throw error;
+  });
   requestCache.set(userId, pending);
   return pending;
 }

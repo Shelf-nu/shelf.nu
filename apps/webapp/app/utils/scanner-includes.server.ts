@@ -10,6 +10,7 @@ export const CUSTODY_INCLUDE = {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },

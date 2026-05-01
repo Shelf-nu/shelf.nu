@@ -182,6 +182,7 @@ pnpm db:reset            # Reset database (careful!)
 pnpm turbo lint        # Run ESLint (all packages)
 pnpm run format        # Format code with Prettier
 pnpm webapp:validate   # Run all checks (lint, typecheck, format, tests)
+pnpm webapp:doctor     # React health scan (react-doctor) — advisory, not gated
 ```
 
 ### Git Hooks (Lefthook)

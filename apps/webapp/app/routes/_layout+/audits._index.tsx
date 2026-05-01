@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { DescriptionColumn } from "~/components/assets/assets-index/advanced-asset-columns";
+import AuditIndexBulkActionsDropdown from "~/components/audit/audit-index-bulk-actions-dropdown";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { NewAuditInfoDialog } from "~/components/audit/new-audit-info-dialog";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -34,6 +35,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 const AUDIT_SORTING_OPTIONS = {
   name: "Name",
@@ -123,6 +125,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
+/** Loader data type re-exported for child components (e.g. bulk archive dialog). */
+export type AuditsIndexLoaderData = typeof loader;
+
 export default function AuditsIndexPage() {
   const { isSelfServiceOrBase } = useLoaderData<typeof loader>();
   return (
@@ -138,6 +143,7 @@ export default function AuditsIndexPage() {
                   ACTIVE: "ACTIVE",
                   COMPLETED: "COMPLETED",
                   CANCELLED: "CANCELLED",
+                  ARCHIVED: "ARCHIVED",
                 }}
               />
             ),
@@ -151,6 +157,9 @@ export default function AuditsIndexPage() {
           }}
         />
         <List
+          bulkActions={
+            isSelfServiceOrBase ? undefined : <AuditIndexBulkActionsDropdown />
+          }
           ItemComponent={ListItemContent}
           headerChildren={
             <>
@@ -174,25 +183,22 @@ export default function AuditsIndexPage() {
   );
 }
 
-type AuditListItem = Prisma.AuditSessionGetPayload<{
+/** Shape of a row in the audits index list (includes relations from AUDIT_LIST_INCLUDE). */
+export type AuditListItem = Prisma.AuditSessionGetPayload<{
   include: typeof AUDIT_LIST_INCLUDE;
 }>;
 
 const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const { createdBy } = item;
   const creatorName =
-    createdBy?.firstName && createdBy?.lastName
-      ? `${createdBy.firstName} ${createdBy.lastName}`
-      : createdBy?.email || "Unknown";
+    resolveUserDisplayName(createdBy) || createdBy?.email || "Unknown";
   const creatorImg =
     createdBy?.profilePicture || "/static/images/default_pfp.jpg";
 
   // Get the first assignee to display
   const firstAssignment = item.assignments[0];
   const assigneeName = firstAssignment?.user
-    ? `${firstAssignment.user.firstName || ""} ${
-        firstAssignment.user.lastName || ""
-      }`.trim() ||
+    ? resolveUserDisplayName(firstAssignment.user) ||
       firstAssignment.user.email ||
       "Unknown"
     : null;

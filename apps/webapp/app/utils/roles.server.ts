@@ -22,6 +22,7 @@ export async function requireUserWithPermission(name: Roles, userId: string) {
       additionalData: { userId, name },
       label: "Permission",
       status: 403,
+      shouldBeCaptured: false,
     });
   }
 }

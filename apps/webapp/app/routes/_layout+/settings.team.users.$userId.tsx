@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getUserFromOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactById } from "~/modules/user-contact/service.server";
@@ -25,6 +26,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { organizationRolesMap } from "./settings.team";
 
@@ -124,9 +126,21 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const { user, organizationId } = useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+
+  /* Notes tab is only visible to ADMIN/OWNER roles.
+   * BASE and SELF_SERVICE users will never see it.
+   * Server-side permission check in the notes route loader provides a second layer of protection. */
+  const canReadUserNotes = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMemberNote,
+    action: PermissionAction.read,
+  });
+
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
+    ...(canReadUserNotes ? [{ to: "notes", content: "Notes" }] : []),
   ];
   /**
    * We find the user's role in the current organization

@@ -45,13 +45,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     await requireAdmin(userId);
 
-    const { search, totalQrCodes, perPage, page, qrCodes, totalPages } =
-      await getPaginatedAndFilterableQrCodes({
+    const [qrCodesResult, batches] = await Promise.all([
+      getPaginatedAndFilterableQrCodes({
         request,
-      });
-
-    /** We do this to get all the batches ever created so we can have the filter */
-    const batches = await db.printBatch.findMany();
+      }),
+      /** We do this to get all the batches ever created so we can have the filter */
+      db.printBatch.findMany(),
+    ]);
+    const { search, totalQrCodes, perPage, page, qrCodes, totalPages } =
+      qrCodesResult;
 
     if (totalPages > 0 && page > totalPages) {
       return redirect("/admin-dashboard/qrs?page=1");
@@ -181,6 +183,7 @@ const ListUserContent = ({
           email: true;
           firstName: true;
           lastName: true;
+          displayName: true;
         };
       };
       batch: true;

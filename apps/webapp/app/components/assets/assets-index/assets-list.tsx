@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { motion } from "framer-motion";
+import { useMemo } from "react";
+import { m } from "framer-motion";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
 import { List, type ListProps } from "~/components/list";
@@ -59,6 +60,9 @@ export const AssetsList = ({
   const { isAvailabilityView, shouldShowAvailabilityView } =
     useIsAvailabilityView();
   const columns = useAssetIndexColumns();
+  // Memoize so the object reference stays stable across re-renders,
+  // allowing React.memo on AdvancedAssetRow to work effectively.
+  const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
   const { isBase } = useUserRoleHelper();
@@ -110,7 +114,7 @@ export const AssetsList = ({
       )}
     >
       <When truthy={!!isSwappingMode}>
-        <motion.div
+        <m.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -119,7 +123,7 @@ export const AssetsList = ({
         >
           <Spinner />
           <p className="mt-2">Changing mode...</p>
-        </motion.div>
+        </m.div>
       </When>
 
       {!isMd && !modeIsSimple ? (
@@ -192,6 +196,9 @@ export const AssetsList = ({
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
               headerChildren={headerChildren}
+              extraItemComponentProps={
+                modeIsSimple ? undefined : advancedExtraProps
+              }
             />
           )}
         </ListContentWrapper>

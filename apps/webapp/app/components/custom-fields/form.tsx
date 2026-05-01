@@ -5,6 +5,7 @@ import { Link, useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useOrganizationId } from "~/hooks/use-organization-id";
 import type { action as editCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.$fieldId_.edit";
 import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.new";
@@ -64,6 +65,14 @@ interface Props {
   categories?: string[];
 }
 
+/**
+ * Stable empty array used as the default for the `categories` prop. Keeping
+ * this at module scope (instead of inlining `categories = []` in the
+ * destructure) avoids creating a new array reference on every render, which
+ * would otherwise invalidate downstream memoization / reducer identity.
+ */
+const EMPTY_CATEGORIES: string[] = [];
+
 const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
   OPTION: "A dropdown list of predefined options.",
@@ -84,7 +93,7 @@ export const CustomFieldForm = ({
   type,
   active,
   isEdit = false,
-  categories = [],
+  categories = EMPTY_CATEGORIES,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -97,6 +106,10 @@ export const CustomFieldForm = ({
   const [useCategories, setUseCategories] = useState(categories.length > 0);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+
+  // Focus the Name field on mount — the form is the entry point for both
+  // create and edit pages, so initial focus belongs on the first field.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
 
   // keeping text field type by default selected
   const organizationId = useOrganizationId();
@@ -121,12 +134,12 @@ export const CustomFieldForm = ({
           required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.name)}
         >
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
             error={validationErrors?.name?.message || zo.errors.name()?.message}
-            autoFocus
             onChange={updateTitle}
             className="w-full"
             defaultValue={name || ""}
@@ -189,8 +202,11 @@ export const CustomFieldForm = ({
                   onAdd={(o: string) => setOptions([...options, o])}
                 />
                 {options.map((op, i) => (
+                  // Option values are the stable identity here — the
+                  // OptionBuilder above disallows duplicates, so each
+                  // option string is unique within this list.
                   <input
-                    key={i}
+                    key={op}
                     type="hidden"
                     name={zo.fields.options(i)()}
                     value={op}

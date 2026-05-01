@@ -88,6 +88,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
           select: {
             firstName: true,
+            displayName: true,
           },
         })
         .catch((cause) => {
@@ -123,6 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           "You don't have permission to access the advanced mode. We will automatically switch you back to 'simple' mode. Please reload the page.",
         label: "Assets",
         status: 403,
+        shouldBeCaptured: false,
       });
     }
 

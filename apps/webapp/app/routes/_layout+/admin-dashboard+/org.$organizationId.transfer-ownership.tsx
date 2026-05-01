@@ -25,6 +25,7 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Transfer organization ownership") },
@@ -38,6 +39,9 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
   );
 
   try {
+    // why: requireAdmin is an auth gate and must resolve before any DB reads
+    // (otherwise we'd leak queries for unauthorized users). The follow-up
+    // queries depend on its successful completion, so this remains sequential.
     await requireAdmin(userId);
 
     // Fetch admins for the select dropdown and organization for the confirmation input
@@ -46,20 +50,21 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       getOrganizationById(organizationId),
     ]);
 
-    // Get subscription info for the workspace owner
-    const ownerSubscriptionInfo = await getOwnerSubscriptionInfo(
-      organization.userId,
-      organizationId
-    );
-
-    // Count owner's other team workspaces (for warning about tier downgrade)
-    const ownerOtherTeamWorkspacesCount = await db.organization.count({
-      where: {
-        userId: organization.userId,
-        type: OrganizationType.TEAM,
-        id: { not: organizationId },
-      },
-    });
+    // Subscription info and other-workspaces count both depend on organization.userId
+    // but are independent of each other, so fetch them in parallel
+    const [ownerSubscriptionInfo, ownerOtherTeamWorkspacesCount] =
+      await Promise.all([
+        // Get subscription info for the workspace owner
+        getOwnerSubscriptionInfo(organization.userId, organizationId),
+        // Count owner's other team workspaces (for warning about tier downgrade)
+        db.organization.count({
+          where: {
+            userId: organization.userId,
+            type: OrganizationType.TEAM,
+            id: { not: organizationId },
+          },
+        }),
+      ]);
 
     return payload({
       admins,
@@ -114,7 +119,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Ownership transferred",
-      message: `You have successfully transferred ownership of ${currentOrganization.name} to ${newOwner.firstName} ${newOwner.lastName}`,
+      message: `You have successfully transferred ownership of ${
+        currentOrganization.name
+      } to ${resolveUserDisplayName(newOwner)}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

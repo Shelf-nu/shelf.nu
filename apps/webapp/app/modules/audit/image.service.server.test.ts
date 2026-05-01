@@ -255,6 +255,7 @@ describe("audit image service", () => {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },

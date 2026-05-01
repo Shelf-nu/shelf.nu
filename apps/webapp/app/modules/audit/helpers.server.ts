@@ -24,6 +24,7 @@ export async function createAuditCreationNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -86,6 +87,7 @@ export async function createAssetScanNote({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         },
       }),
   ]);
@@ -136,6 +138,7 @@ export async function createAssetScanRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -188,6 +191,7 @@ export async function createAuditStartedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }));
 
@@ -239,6 +243,7 @@ export async function createAuditCompletedNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -307,6 +312,7 @@ export async function createAuditUpdateNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -360,6 +366,7 @@ export async function createAuditAssetImagesAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.auditAsset.findUnique({
@@ -425,6 +432,7 @@ export async function createDueDateChangedNote({
       id: true,
       firstName: true,
       lastName: true,
+      displayName: true,
     },
   });
 
@@ -508,6 +516,7 @@ export async function createAssigneeAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.user.findUnique({
@@ -516,6 +525,7 @@ export async function createAssigneeAddedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -565,6 +575,7 @@ export async function createAssigneeRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.user.findUnique({
@@ -573,6 +584,7 @@ export async function createAssigneeRemovedNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
   ]);
@@ -625,6 +637,7 @@ export async function createAssetsAddedToAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findMany({
@@ -685,6 +698,7 @@ export async function createAssetRemovedFromAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findUnique({
@@ -737,6 +751,7 @@ export async function createAssetsRemovedFromAuditNote({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       },
     }),
     tx.asset.findMany({

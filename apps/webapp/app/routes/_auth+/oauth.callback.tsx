@@ -14,6 +14,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getUserOrganizations } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { setCookie } from "~/utils/cookies.server";
@@ -128,17 +129,28 @@ export async function action({ request, context }: ActionFunctionArgs) {
         context.setSession(authSession);
 
         // If org exists (SCIM SSO case), redirect to that org
-        // Otherwise (Pure SSO case), redirect to personal workspace
-        return redirect(
-          safeRedirect(redirectTo || "/assets"),
-          org?.id
-            ? {
-                headers: [
-                  setCookie(await setSelectedOrganizationIdCookie(org?.id)),
-                ],
-              }
-            : {}
+        if (org?.id) {
+          return redirect(safeRedirect(redirectTo || "/assets"), {
+            headers: [setCookie(await setSelectedOrganizationIdCookie(org.id))],
+          });
+        }
+
+        // Pure SSO case — check if the SSO user has any team orgs
+        // (e.g. from a previous invite). If not, redirect to the pending
+        // page so they don't land on a hidden personal workspace.
+        const userOrgs = await getUserOrganizations({
+          userId: authSession.userId,
+        });
+        const isSSO = userOrgs[0]?.user?.sso === true;
+        const hasTeamOrgs = userOrgs.some(
+          (uo) => uo.organization.type !== "PERSONAL"
         );
+
+        if (isSSO && !hasTeamOrgs) {
+          return redirect("/sso-pending-assignment");
+        }
+
+        return redirect(safeRedirect(redirectTo || "/assets"));
       }
     }
 

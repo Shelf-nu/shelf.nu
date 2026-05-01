@@ -162,6 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             customerId: true,
           } satisfies Prisma.UserSelect,
         });
@@ -214,6 +215,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             email: true,
             firstName: true,
             lastName: true,
+            displayName: true,
             customerId: true,
           } satisfies Prisma.UserSelect,
         });

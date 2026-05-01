@@ -1,5 +1,5 @@
 import { addHours, addDays, subDays, addMinutes } from "date-fns";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import { BookingFormSchema, ExtendBookingSchema } from "./forms-schema";
 
 /**
@@ -295,5 +295,134 @@ describe("ExtendBookingSchema - time restrictions", () => {
       // Should fail because restrictions should be enforced by default
       expect(result.success).toBe(false);
     });
+  });
+});
+
+/**
+ * Regression tests for working hours override comparison across timezones.
+ *
+ * Working hours overrides are stored as UTC-midnight Date values representing
+ * an absolute calendar date. Previously, validation formatted the override
+ * date with the runtime's local timezone, which shifted the date backwards one
+ * day for users west of UTC. A user in America/Chicago that set a closed-day
+ * override for 4/24 was blocked from booking on 4/23, because the override
+ * Date (UTC midnight 4/24 = 7 PM CDT on 4/23) formatted in local time read as
+ * "2026-04-23" and falsely matched the booking's calendar day.
+ */
+describe("BookingFormSchema - override timezone handling", () => {
+  const ORIGINAL_TZ = process.env.TZ;
+
+  // Force America/Chicago so the test exercises the exact condition the user
+  // reported (CDT, UTC-5 in April). Node honors process.env.TZ dynamically.
+  beforeAll(() => {
+    process.env.TZ = "America/Chicago";
+  });
+
+  afterAll(() => {
+    // Assigning `process.env.TZ = undefined` would write the literal string
+    // "undefined" and leak into other tests in the same vitest worker, so
+    // delete the var when it was originally unset.
+    if (ORIGINAL_TZ === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = ORIGINAL_TZ;
+    }
+  });
+
+  const baseBookingSettings = {
+    bufferStartTime: 0,
+    tagsRequired: false,
+    maxBookingLength: null,
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  // Dates are pinned in 2099 so the "must be in the future" guard never trips
+  // — the TZ boundary scenario (UTC-midnight override on day D matching a
+  // day-D-1 booking in CDT) is year-independent.
+  const workingHoursWith424Closed = {
+    enabled: true,
+    weeklySchedule: {
+      "0": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "1": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "2": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "3": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "4": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "5": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+      "6": { isOpen: true, openTime: "00:00", closeTime: "23:59" },
+    },
+    // Override stored the way createWorkingHoursOverride does: new Date("2099-04-24")
+    // which yields UTC midnight on April 24.
+    overrides: [
+      {
+        id: "override-1",
+        date: new Date("2099-04-24").toISOString(),
+        isOpen: false,
+        openTime: null,
+        closeTime: null,
+        reason: "Closed",
+      },
+    ],
+  };
+
+  it("does not flag a 4/23 booking as closed when the override is for 4/24", () => {
+    const schema = BookingFormSchema({
+      hints: { timeZone: "America/Chicago" } as any,
+      action: "new",
+      workingHours: workingHoursWith424Closed,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true, // Bypass buffer check so we isolate the override logic
+    });
+
+    // Booking on 4/23 in the user's local time.
+    const startDate = new Date("2099-04-23T17:00:00-05:00"); // 4/23 5 PM CDT
+    const endDate = new Date("2099-04-23T18:00:00-05:00");
+
+    const result = schema.safeParse({
+      name: "Test Booking",
+      startDate,
+      endDate,
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    // With isAdminOrOwner=true + 24/7 schedule + no matching override, the
+    // booking must parse cleanly. Asserting .success directly guards against
+    // unrelated validation regressions beyond the "closed" message.
+    expect(result.success).toBe(true);
+  });
+
+  it("still flags a 4/24 booking as closed when the override is for 4/24", () => {
+    const schema = BookingFormSchema({
+      hints: { timeZone: "America/Chicago" } as any,
+      action: "new",
+      workingHours: workingHoursWith424Closed,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    const startDate = new Date("2099-04-24T10:00:00-05:00");
+    const endDate = new Date("2099-04-24T11:00:00-05:00");
+
+    const result = schema.safeParse({
+      name: "Test Booking",
+      startDate,
+      endDate,
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errorMessages = result.error.errors.map((e) => e.message);
+      expect(
+        errorMessages.some((msg) => msg.toLowerCase().includes("closed"))
+      ).toBe(true);
+    }
   });
 });

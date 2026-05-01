@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -7,6 +7,7 @@ import { CustodianField } from "~/components/booking/forms/fields/custodian";
 import { DatesFields } from "~/components/booking/forms/fields/dates";
 import { DescriptionField } from "~/components/booking/forms/fields/description";
 import { NameField } from "~/components/booking/forms/fields/name";
+import { NotificationRecipientsField } from "~/components/booking/forms/fields/notification-recipients";
 import type { BookingFormSchemaType } from "~/components/booking/forms/forms-schema";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
@@ -69,14 +70,14 @@ export default function CreateBookingForSelectedAssetsDialog() {
     currentUserId: user?.id,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (defaultEndDate) {
-        setEndDate(defaultEndDate);
-      }
-    },
-    [defaultEndDate]
-  );
+  // Re-sync endDate when the computed default changes (e.g. when working hours or
+  // buffer settings load). Uses the React "store previous value in a ref" pattern
+  // so we mirror the prop during render instead of via a useEffect.
+  const prevDefaultEndDate = useRef(defaultEndDate);
+  if (defaultEndDate && defaultEndDate !== prevDefaultEndDate.current) {
+    prevDefaultEndDate.current = defaultEndDate;
+    setEndDate(defaultEndDate);
+  }
 
   return (
     <BulkUpdateDialogContent
@@ -151,7 +152,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
               />
             </Card>
 
-            <Card className="m-0">
+            <Card className="m-0 mb-2">
               <DescriptionField
                 description={undefined}
                 fieldName={zo.fields.description()}
@@ -160,6 +161,14 @@ export default function CreateBookingForSelectedAssetsDialog() {
                   validationErrors?.description?.message ||
                   zo.errors.description()?.message
                 }
+              />
+            </Card>
+
+            <Card className="m-0 overflow-visible">
+              <NotificationRecipientsField
+                disabled={disabled}
+                isAdminOrOwner={isAdministratorOrOwner}
+                creatorName="You"
               />
             </Card>
 

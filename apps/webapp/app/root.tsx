@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { User } from "@prisma/client";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import type {
@@ -20,6 +20,8 @@ import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
+import { CloudflareWebAnalytics } from "./components/marketing/cloudflare-web-analytics";
+import { AnimationProvider } from "./components/shared/animation-provider";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
@@ -73,14 +75,27 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
+/**
+ * Subscribe/snapshot helpers for reading `navigator.cookieEnabled` via
+ * `useSyncExternalStore`. `navigator.cookieEnabled` is a static boolean per
+ * session — no actual change event exists — so `subscribe` is a no-op. Using
+ * `useSyncExternalStore` (instead of `useEffect` + `useState`) lets us read the
+ * browser value consistently without a flash-of-wrong-content on hydration.
+ */
+const subscribeCookieEnabled = () => () => {};
+const getCookieEnabledSnapshot = () => navigator.cookieEnabled;
+// On the server we optimistically assume cookies are enabled so children render;
+// `suppressHydrationWarning` on the <body> absorbs any client-side mismatch.
+const getCookieEnabledServerSnapshot = () => true;
+
 export function Layout({ children }: { children: ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
   const nonce = useNonce();
-  const [hasCookies, setHasCookies] = useState(true);
-
-  useEffect(() => {
-    setHasCookies(navigator.cookieEnabled);
-  }, []);
+  const hasCookies = useSyncExternalStore(
+    subscribeCookieEnabled,
+    getCookieEnabledSnapshot,
+    getCookieEnabledServerSnapshot
+  );
 
   return (
     <html lang="en" className="overflow-hidden">
@@ -93,7 +108,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <Links />
         <Clarity />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <noscript>
           <BlockInteractions
             title="JavaScript is disabled"
@@ -113,11 +128,14 @@ export function Layout({ children }: { children: ReactNode }) {
         )}
 
         <ScrollRestoration />
+        {/* why: SSR env injection must execute in the browser; React's `<script>{text}</script>` does not run. */}
         <script
+          // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{
             __html: `window.env = ${JSON.stringify(data?.env)}`,
           }}
         />
+        <CloudflareWebAnalytics />
         <Scripts />
       </body>
     </html>
@@ -142,7 +160,9 @@ function App() {
     />
   ) : (
     <PwaManagerProvider>
-      <Outlet />
+      <AnimationProvider>
+        <Outlet />
+      </AnimationProvider>
     </PwaManagerProvider>
   );
 }

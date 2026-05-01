@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 import type { User } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import {
@@ -50,6 +50,69 @@ interface TransferRecipient {
   isOwner: boolean;
 }
 
+/**
+ * Consolidated UI state for {@link ChangeRoleDialog}.
+ *
+ * Replaces five parallel `useState` hooks to satisfy `prefer-useReducer` and
+ * to allow atomic transitions (e.g. selecting a role *and* closing its popover
+ * in a single dispatch) that previously required cascading `setState` calls —
+ * the root cause of the `no-cascading-set-state` diagnostic.
+ */
+interface DialogState {
+  selectedRole: string;
+  transferToUserId: string;
+  rolePopoverOpen: boolean;
+  recipientPopoverOpen: boolean;
+  isSuccess: boolean;
+}
+
+type DialogAction =
+  | { type: "selectRole"; role: string }
+  | { type: "selectRecipient"; userId: string }
+  | { type: "setDefaultRecipient"; userId: string }
+  | { type: "setRolePopover"; open: boolean }
+  | { type: "setRecipientPopover"; open: boolean }
+  | { type: "markSuccess" }
+  | { type: "reset"; currentRoleEnum: string };
+
+function dialogReducer(state: DialogState, action: DialogAction): DialogState {
+  switch (action.type) {
+    case "selectRole":
+      // Atomic: choose role + close its popover. Previously required two
+      // separate setState calls, which triggered `no-cascading-set-state`.
+      return {
+        ...state,
+        selectedRole: action.role,
+        rolePopoverOpen: false,
+      };
+    case "selectRecipient":
+      return {
+        ...state,
+        transferToUserId: action.userId,
+        recipientPopoverOpen: false,
+      };
+    case "setDefaultRecipient":
+      if (state.transferToUserId) return state;
+      return { ...state, transferToUserId: action.userId };
+    case "setRolePopover":
+      return { ...state, rolePopoverOpen: action.open };
+    case "setRecipientPopover":
+      return { ...state, recipientPopoverOpen: action.open };
+    case "markSuccess":
+      return { ...state, isSuccess: true };
+    case "reset":
+      return {
+        selectedRole: action.currentRoleEnum,
+        transferToUserId: "",
+        rolePopoverOpen: false,
+        recipientPopoverOpen: false,
+        isSuccess: false,
+      };
+    default:
+      return state;
+  }
+}
+
 export function ChangeRoleDialog({
   userId,
   currentRoleEnum,
@@ -66,11 +129,20 @@ export function ChangeRoleDialog({
   const recipientsFetcher = useFetcher<TransferRecipient[]>();
   const disabled = isFormProcessing(fetcher.state);
 
-  const [selectedRole, setSelectedRole] = useState(currentRoleEnum as string);
-  const [transferToUserId, setTransferToUserId] = useState("");
-  const [rolePopoverOpen, setRolePopoverOpen] = useState(false);
-  const [recipientPopoverOpen, setRecipientPopoverOpen] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [state, dispatch] = useReducer(dialogReducer, {
+    selectedRole: currentRoleEnum as string,
+    transferToUserId: "",
+    rolePopoverOpen: false,
+    recipientPopoverOpen: false,
+    isSuccess: false,
+  });
+  const {
+    selectedRole,
+    transferToUserId,
+    rolePopoverOpen,
+    recipientPopoverOpen,
+    isSuccess,
+  } = state;
 
   const isSameRole = selectedRole === currentRoleEnum;
   const showDemotion =
@@ -93,23 +165,24 @@ export function ChangeRoleDialog({
     const recipients = recipientsFetcher.data;
     if (recipients && recipients.length > 0 && !transferToUserId) {
       const owner = recipients.find((r) => r.isOwner);
-      setTransferToUserId(owner?.id ?? recipients[0].id);
+      dispatch({
+        type: "setDefaultRecipient",
+        userId: owner?.id ?? recipients[0].id,
+      });
     }
   }, [recipientsFetcher.data, transferToUserId]);
 
   /** Show success state on successful response */
   useEffect(() => {
     if (fetcher.data && !fetcher.data.error && fetcher.state === "idle") {
-      setIsSuccess(true);
+      dispatch({ type: "markSuccess" });
     }
   }, [fetcher.data, fetcher.state]);
 
   /** Reset state when dialog closes */
   useEffect(() => {
     if (!open) {
-      setSelectedRole(currentRoleEnum);
-      setTransferToUserId("");
-      setIsSuccess(false);
+      dispatch({ type: "reset", currentRoleEnum });
     }
   }, [open, currentRoleEnum]);
 
@@ -176,7 +249,9 @@ export function ChangeRoleDialog({
                 </label>
                 <Popover
                   open={rolePopoverOpen}
-                  onOpenChange={setRolePopoverOpen}
+                  onOpenChange={(nextOpen) =>
+                    dispatch({ type: "setRolePopover", open: nextOpen })
+                  }
                 >
                   <PopoverTrigger asChild>
                     <Button
@@ -208,14 +283,12 @@ export function ChangeRoleDialog({
                             "px-4 py-2 text-[14px] text-gray-600 hover:cursor-pointer hover:bg-gray-50",
                             selectedRole === k && "bg-gray-50 font-medium"
                           )}
-                          onClick={() => {
-                            setSelectedRole(k);
-                            setRolePopoverOpen(false);
-                          }}
-                          onKeyDown={handleActivationKeyPress(() => {
-                            setSelectedRole(k);
-                            setRolePopoverOpen(false);
-                          })}
+                          onClick={() =>
+                            dispatch({ type: "selectRole", role: k })
+                          }
+                          onKeyDown={handleActivationKeyPress(() =>
+                            dispatch({ type: "selectRole", role: k })
+                          )}
                         >
                           {v}
                         </div>
@@ -282,7 +355,12 @@ export function ChangeRoleDialog({
                             </label>
                             <Popover
                               open={recipientPopoverOpen}
-                              onOpenChange={setRecipientPopoverOpen}
+                              onOpenChange={(nextOpen) =>
+                                dispatch({
+                                  type: "setRecipientPopover",
+                                  open: nextOpen,
+                                })
+                              }
                             >
                               <PopoverTrigger asChild>
                                 <Button
@@ -321,15 +399,17 @@ export function ChangeRoleDialog({
                                         transferToUserId === r.id &&
                                           "bg-gray-50 font-medium"
                                       )}
-                                      onClick={() => {
-                                        setTransferToUserId(r.id);
-                                        setRecipientPopoverOpen(false);
-                                      }}
-                                      onKeyDown={handleActivationKeyPress(
-                                        () => {
-                                          setTransferToUserId(r.id);
-                                          setRecipientPopoverOpen(false);
-                                        }
+                                      onClick={() =>
+                                        dispatch({
+                                          type: "selectRecipient",
+                                          userId: r.id,
+                                        })
+                                      }
+                                      onKeyDown={handleActivationKeyPress(() =>
+                                        dispatch({
+                                          type: "selectRecipient",
+                                          userId: r.id,
+                                        })
                                       )}
                                     >
                                       {r.name}

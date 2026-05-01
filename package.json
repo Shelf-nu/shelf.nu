@@ -11,15 +11,21 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "prepare": "git config --unset core.hooksPath || echo ok && npx lefthook install || echo ok",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
+    "webapp:dev:staging": "pnpm --filter @shelf/webapp run staging:dev",
     "webapp:dev:production": "pnpm --filter @shelf/webapp run production:dev",
     "webapp:build": "turbo run build --filter=@shelf/webapp",
     "webapp:test": "pnpm --filter @shelf/webapp test",
     "webapp:lint": "pnpm --filter @shelf/webapp lint",
+    "webapp:doctor": "pnpm --filter @shelf/webapp run doctor",
     "webapp:validate": "pnpm --filter @shelf/webapp validate",
     "webapp:start": "pnpm --filter @shelf/webapp start:local",
     "webapp:setup": "pnpm --filter @shelf/webapp run setup",
     "webapp:deploy:staging": "fly deploy --remote-only --app shelf-webapp-staging --dockerfile apps/webapp/Dockerfile",
     "webapp:deploy:production": "fly deploy --remote-only --app shelf-webapp --dockerfile apps/webapp/Dockerfile",
+    "webapp:seed:reporting-demo": "pnpm --filter @shelf/webapp seed:reporting-demo",
+    "webapp:seed:reporting-demo:staging": "pnpm --filter @shelf/webapp seed:reporting-demo:staging",
+    "webapp:clean:reporting-demo": "pnpm --filter @shelf/webapp clean:reporting-demo",
+    "webapp:clean:reporting-demo:staging": "pnpm --filter @shelf/webapp clean:reporting-demo:staging",
     "companion:dev": "pnpm --filter @shelf/companion dev",
     "companion:dev:clear": "pnpm --filter @shelf/companion dev:clear",
     "companion:dev:tunnel": "pnpm --filter @shelf/companion dev:tunnel",
@@ -43,11 +49,11 @@
     "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.4.3",
-    "@commitlint/config-conventional": "^20.4.3",
-    "@evilmartians/lefthook": "^1.13.6",
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@evilmartians/lefthook": "^2.1.5",
     "prettier": "3.0.3",
-    "turbo": "^2.8.13"
+    "turbo": "^2.9.5"
   },
   "pnpm": {
     "overrides": {

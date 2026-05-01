@@ -60,6 +60,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   select: {
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     profilePicture: true,
                     email: true,
                   },
@@ -113,6 +114,7 @@ export const action = async ({
         id: true,
         firstName: true,
         lastName: true,
+        displayName: true,
       } satisfies Prisma.UserSelect,
     });
 
@@ -134,6 +136,7 @@ export const action = async ({
                     id: true,
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                   },
                 },
               },
@@ -157,7 +160,16 @@ export const action = async ({
       }
     }
 
-    const asset = await releaseCustody({ assetId, organizationId });
+    // Pass activity event data to releaseCustody for atomic recording
+    const asset = await releaseCustody({
+      assetId,
+      organizationId,
+      activityEvent: {
+        actorUserId: userId,
+        teamMemberId: custodyRecord?.custodian?.id,
+        targetUserId: custodyRecord?.custodian?.user?.id,
+      },
+    });
 
     if (!asset.custody) {
       const formData = await request.formData();
@@ -205,7 +217,7 @@ export const action = async ({
       });
 
       sendNotification({
-        title: `‘${asset.title}’ is no longer in custody of ‘${custodianDisplayName}’`,
+        title: `'${asset.title}' is no longer in custody of '${custodianDisplayName}'`,
         message: "This asset is available again.",
         icon: { name: "success", variant: "success" },
         senderId: userId,
