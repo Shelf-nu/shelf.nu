@@ -24,6 +24,7 @@ import {
   MEASURABLE_BOOKING_STATUSES,
   getLatenessMs,
   isOnTime,
+  resolveCheckInAt,
 } from "~/modules/booking/lateness";
 import { ShelfError } from "~/utils/error";
 
@@ -233,91 +234,43 @@ export async function bookingComplianceReport(
   }
 }
 
+/**
+ * Build the KPI tiles for the Booking Compliance report.
+ *
+ * Historically this returned four KPIs, two of which (`compliance_rate` and
+ * `completed_on_time`) were computed from a placeholder heuristic that did
+ * not reflect actual check-in times. They are intentionally dropped here:
+ * the compliance rate is now exposed via the dedicated `complianceData`
+ * payload (`computeComplianceRate`), which uses the same lateness helper as
+ * the table and the trend, so callers see one consistent number.
+ *
+ * Remaining KPIs:
+ * - `total_bookings` — count of measurable bookings (COMPLETE + OVERDUE +
+ *   ARCHIVED) whose due date falls in the timeframe.
+ * - `currently_overdue` — count of OVERDUE bookings with a due date in the
+ *   timeframe. Consumed by the PDF generator's hero overdue tile.
+ */
 async function computeBookingComplianceKpis(
-  organizationId: string,
-  timeframe: ResolvedTimeframe,
+  _organizationId: string,
+  _timeframe: ResolvedTimeframe,
   baseWhere: Prisma.BookingWhereInput
 ): Promise<ReportKpi[]> {
-  // Count bookings by status in the timeframe
-  // Only COMPLETE and OVERDUE are measurable for compliance
-  const [total, complete, overdue] = await Promise.all([
+  const [total, overdue] = await Promise.all([
     db.booking.count({ where: baseWhere }),
-    db.booking.count({
-      where: { ...baseWhere, status: "COMPLETE" },
-    }),
     db.booking.count({
       where: { ...baseWhere, status: "OVERDUE" },
     }),
   ]);
 
-  // For "completed on time" we need to check if checkin happened before scheduled end
-  // This is a simplified version — full implementation would check ActivityEvent
-  const completedOnTime = complete; // Simplified for now
-  const completedLate = 0; // Would need ActivityEvent analysis
-
-  // Calculate delta vs prior period (simplified — same length period before)
-  const priorPeriodLength = timeframe.to.getTime() - timeframe.from.getTime();
-  const priorFrom = new Date(timeframe.from.getTime() - priorPeriodLength);
-  const priorTo = new Date(timeframe.from.getTime() - 1);
-
-  const priorTotal = await db.booking.count({
-    where: {
-      organizationId,
-      OR: [
-        { from: { gte: priorFrom, lte: priorTo } },
-        { to: { gte: priorFrom, lte: priorTo } },
-      ],
-    },
-  });
-
-  // Only show delta when we have current data (showing -100% for 0 is not helpful)
-  const showDelta = total > 0 && priorTotal > 0;
-  const totalDelta = showDelta
-    ? Math.round(((total - priorTotal) / priorTotal) * 100)
-    : 0;
-
-  // Calculate compliance rate
-  const complianceRate =
-    completedOnTime > 0
-      ? Math.round((completedOnTime / (completedOnTime + completedLate)) * 100)
-      : total > 0
-      ? 0
-      : 100; // 100% if no bookings yet
-
   return [
-    {
-      id: "compliance_rate",
-      label: "Compliance Rate",
-      value: `${complianceRate}%`,
-      rawValue: complianceRate,
-      format: "percent",
-      delta: null,
-      deltaType: "neutral",
-    },
     {
       id: "total_bookings",
       label: "Total Bookings",
       value: total.toLocaleString(),
       rawValue: total,
       format: "number",
-      delta:
-        showDelta && totalDelta !== 0
-          ? `${totalDelta > 0 ? "+" : ""}${totalDelta}%`
-          : null,
-      deltaType:
-        totalDelta > 0 ? "positive" : totalDelta < 0 ? "negative" : "neutral",
-      deltaPeriodLabel: showDelta
-        ? `vs prior ${timeframe.label.toLowerCase()}`
-        : undefined,
-    },
-    {
-      id: "completed_on_time",
-      label: "On-Time Returns",
-      value: completedOnTime.toLocaleString(),
-      rawValue: completedOnTime,
-      format: "number",
       delta: null,
-      deltaType: "positive",
+      deltaType: "neutral",
     },
     {
       id: "currently_overdue",
@@ -355,6 +308,11 @@ async function fetchBookingComplianceRows(
       status: true,
       from: true,
       to: true,
+      // `updatedAt` is a COMPLETE-only fallback when the canonical
+      // `BOOKING_STATUS_CHANGED → COMPLETE` ActivityEvent is missing
+      // (legacy bookings, partial check-ins that recorded a custom note,
+      // or rare event-write failures). See `resolveCheckInAt`.
+      updatedAt: true,
       custodianUser: {
         select: {
           firstName: true,
@@ -377,8 +335,8 @@ async function fetchBookingComplianceRows(
   // Resolve canonical check-in moments for every booking in one batched query.
   // The resolver returns a `Map<bookingId, Date>` keyed only by bookings that
   // actually emitted a `BOOKING_STATUS_CHANGED → COMPLETE` event. Missing
-  // entries are intentional (legacy data pre-2026-04-21) and treated as
-  // "no signal" by `getLatenessMs` / `isOnTime`.
+  // entries fall back via `resolveCheckInAt` (COMPLETE → `updatedAt`,
+  // ARCHIVED/other → null and treated as on-time per `isOnTime`).
   const checkInTimes = await resolveCheckInTimes(bookings.map((b) => b.id));
 
   // Capture a single `now` reference so every OVERDUE row in the result set
@@ -388,7 +346,11 @@ async function fetchBookingComplianceRows(
 
   // Transform to row objects with computed fields
   const allRows: BookingComplianceRow[] = bookings.map((b) => {
-    const checkInAt = checkInTimes.get(b.id) ?? null;
+    const checkInAt = resolveCheckInAt({
+      status: b.status,
+      updatedAt: b.updatedAt,
+      fromEvent: checkInTimes.get(b.id) ?? null,
+    });
 
     // Lateness via the canonical helper:
     // - OVERDUE → `now − to`
@@ -544,12 +506,14 @@ async function computeComplianceRate(
       from: true,
       to: true,
       status: true,
+      // COMPLETE-only fallback when the canonical event is missing.
+      updatedAt: true,
     },
   });
 
   // Resolve canonical check-in times in a single batched query. Bookings
-  // missing an event (legacy data predating the ActivityEvent layer) are
-  // absent from the map and treated as on-time by `isOnTime`.
+  // missing an event fall back via `resolveCheckInAt` (COMPLETE → `updatedAt`,
+  // ARCHIVED/other → null and treated as on-time by `isOnTime`).
   const checkInTimes = await resolveCheckInTimes(
     measurableBookings.map((b) => b.id)
   );
@@ -577,6 +541,7 @@ async function computeComplianceRate(
       from: true,
       to: true,
       status: true,
+      updatedAt: true,
     },
   });
 
@@ -609,27 +574,40 @@ async function computeComplianceRate(
 
 /**
  * Categorize a batch of measurable bookings as on-time vs late using the
- * central lateness helper. Bookings missing a check-in event (legacy data
- * predating the ActivityEvent layer) are treated as on-time per `isOnTime`.
+ * central lateness helper. Each booking's check-in moment is resolved via
+ * `resolveCheckInAt` (canonical event preferred; `updatedAt` fallback for
+ * COMPLETE; null for ARCHIVED with no event). Bookings with no signal at all
+ * are treated as on-time per `isOnTime`.
  *
  * @param bookings - Measurable bookings (COMPLETE / OVERDUE / ARCHIVED) with
- *   their `id`, scheduled return (`to`), and current `status` selected.
+ *   their `id`, scheduled return (`to`), `updatedAt`, and current `status`
+ *   selected.
  * @param checkInTimes - Map from `bookingId` to the canonical check-in moment
- *   produced by `resolveCheckInTimes`. Missing entries are treated as null.
+ *   produced by `resolveCheckInTimes`. Missing entries trigger the fallback.
  * @returns Counts of on-time and late bookings; the sum equals `bookings.length`.
  */
 function categorizeBookings(
-  bookings: { id: string; to: Date | null; status: BookingStatus }[],
+  bookings: {
+    id: string;
+    to: Date | null;
+    status: BookingStatus;
+    updatedAt: Date | null;
+  }[],
   checkInTimes: Map<string, Date>
 ): { onTime: number; late: number } {
   let onTime = 0;
   let late = 0;
   const now = new Date();
   for (const booking of bookings) {
+    const checkInAt = resolveCheckInAt({
+      status: booking.status,
+      updatedAt: booking.updatedAt,
+      fromEvent: checkInTimes.get(booking.id) ?? null,
+    });
     const latenessMs = getLatenessMs({
       status: booking.status,
       to: booking.to,
-      checkInAt: checkInTimes.get(booking.id) ?? null,
+      checkInAt,
       now,
     });
     if (isOnTime({ status: booking.status, latenessMs })) onTime++;
@@ -693,6 +671,8 @@ async function computeComplianceTrend(
       id: true,
       to: true,
       status: true,
+      // COMPLETE-only fallback when the canonical event is missing.
+      updatedAt: true,
     },
   });
 
@@ -721,14 +701,20 @@ async function computeComplianceTrend(
     });
 
     // Categorize using the central lateness helper for consistency with the
-    // hero compliance rate.
+    // hero compliance rate. `resolveCheckInAt` applies the COMPLETE-only
+    // `updatedAt` fallback when no canonical event is recorded.
     let onTime = 0;
     let late = 0;
     for (const b of bucketBookings) {
+      const checkInAt = resolveCheckInAt({
+        status: b.status,
+        updatedAt: b.updatedAt,
+        fromEvent: checkInTimes.get(b.id) ?? null,
+      });
       const latenessMs = getLatenessMs({
         status: b.status,
         to: b.to,
-        checkInAt: checkInTimes.get(b.id) ?? null,
+        checkInAt,
         now,
       });
       if (isOnTime({ status: b.status, latenessMs })) onTime++;
@@ -814,6 +800,8 @@ async function computeCustodianPerformance(
       id: true,
       to: true,
       status: true,
+      // COMPLETE-only fallback when the canonical event is missing.
+      updatedAt: true,
       custodianUserId: true,
       custodianUser: {
         select: {
@@ -868,11 +856,18 @@ async function computeCustodianPerformance(
     const entry = custodianMap.get(key)!;
 
     // Decide on-time vs late via the central lateness helper for parity with
-    // the hero compliance rate and trend chart.
+    // the hero compliance rate and trend chart. `resolveCheckInAt` applies
+    // the COMPLETE-only `updatedAt` fallback when no canonical event is
+    // recorded.
+    const checkInAt = resolveCheckInAt({
+      status: booking.status,
+      updatedAt: booking.updatedAt,
+      fromEvent: checkInTimes.get(booking.id) ?? null,
+    });
     const latenessMs = getLatenessMs({
       status: booking.status,
       to: booking.to,
-      checkInAt: checkInTimes.get(booking.id) ?? null,
+      checkInAt,
       now,
     });
     if (isOnTime({ status: booking.status, latenessMs })) {

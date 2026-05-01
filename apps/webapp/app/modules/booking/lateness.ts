@@ -53,7 +53,13 @@ export interface GetLatenessMsArgs {
   status: BookingStatus;
   /** Scheduled return date (`booking.to`). May be null on legacy data. */
   to: Date | null;
-  /** Actual check-in timestamp (`booking.checkInAt`). Null until checked in. */
+  /**
+   * Resolved check-in timestamp for COMPLETE/ARCHIVED bookings. Not a column
+   * on the `Booking` model — callers obtain it via {@link resolveCheckInAt}
+   * (which prefers the canonical `BOOKING_STATUS_CHANGED → COMPLETE`
+   * `ActivityEvent` and falls back to `Booking.updatedAt` for COMPLETE only).
+   * Pass `null` when no signal is available; ignored for OVERDUE.
+   */
   checkInAt: Date | null;
   /**
    * Reference "now" — injectable for deterministic testing. Defaults to
@@ -170,4 +176,49 @@ export function formatOverdueDuration(ms: number): {
   const minutes = Math.floor((ms % ONE_HOUR) / ONE_MINUTE);
 
   return { days, hours, minutes };
+}
+
+/** Arguments for {@link resolveCheckInAt}. */
+export interface ResolveCheckInAtArgs {
+  /** The booking's current status. */
+  status: BookingStatus;
+  /**
+   * `Booking.updatedAt` — last row mutation timestamp. Used as a COMPLETE-only
+   * fallback when no canonical event exists.
+   */
+  updatedAt: Date | null;
+  /**
+   * Timestamp from the canonical `BOOKING_STATUS_CHANGED → COMPLETE`
+   * `ActivityEvent` (resolved by `resolveCheckInTimes`). Pass `null` when no
+   * event was recorded.
+   */
+  fromEvent: Date | null;
+}
+
+/**
+ * Resolves the best-available check-in timestamp for a booking, applying the
+ * fallback policy that compliance reports rely on:
+ *
+ * 1. Prefer the canonical `BOOKING_STATUS_CHANGED → COMPLETE` event timestamp
+ *    when one exists. This is the most accurate signal — written inside the
+ *    booking status mutation transaction.
+ * 2. For `COMPLETE` bookings without an event, fall back to `updatedAt`.
+ *    This preserves backward compatibility with bookings completed before the
+ *    `ActivityEvent` layer existed (pre-2026-04-21), and protects against
+ *    rare event-write failures (the event is recorded best-effort).
+ * 3. For `ARCHIVED` (or any other) status without an event, return `null`.
+ *    `Booking.updatedAt` is unreliable for ARCHIVED — the auto-archive job
+ *    shifts it well after the actual check-in moment.
+ *
+ * Callers should pass the result to {@link getLatenessMs} as `checkInAt`.
+ *
+ * @param args - Booking status, raw `updatedAt`, and the resolved event timestamp.
+ * @returns The best-available check-in timestamp, or `null` when no reliable
+ *   signal is available (caller should treat as on-time per {@link isOnTime}).
+ */
+export function resolveCheckInAt(args: ResolveCheckInAtArgs): Date | null {
+  const { status, updatedAt, fromEvent } = args;
+  if (fromEvent) return fromEvent;
+  if (status === BookingStatus.COMPLETE) return updatedAt;
+  return null;
 }

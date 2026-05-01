@@ -6,6 +6,7 @@ import {
   formatOverdueDuration,
   getLatenessMs,
   isOnTime,
+  resolveCheckInAt,
 } from "./lateness";
 
 /**
@@ -188,5 +189,63 @@ describe("MEASURABLE_BOOKING_STATUSES", () => {
     expect(MEASURABLE_BOOKING_STATUSES).toContain(BookingStatus.COMPLETE);
     expect(MEASURABLE_BOOKING_STATUSES).toContain(BookingStatus.OVERDUE);
     expect(MEASURABLE_BOOKING_STATUSES).toContain(BookingStatus.ARCHIVED);
+  });
+});
+
+describe("resolveCheckInAt", () => {
+  const updatedAt = d("2026-04-10T12:00:00.000Z");
+  const fromEvent = d("2026-04-09T10:00:00.000Z");
+
+  it("prefers the canonical event timestamp when present", () => {
+    const result = resolveCheckInAt({
+      status: BookingStatus.COMPLETE,
+      updatedAt,
+      fromEvent,
+    });
+
+    expect(result).toBe(fromEvent);
+  });
+
+  it("falls back to updatedAt for COMPLETE bookings without an event", () => {
+    const result = resolveCheckInAt({
+      status: BookingStatus.COMPLETE,
+      updatedAt,
+      fromEvent: null,
+    });
+
+    expect(result).toBe(updatedAt);
+  });
+
+  it("returns null for ARCHIVED without an event (updatedAt is unreliable)", () => {
+    const result = resolveCheckInAt({
+      status: BookingStatus.ARCHIVED,
+      updatedAt,
+      fromEvent: null,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("uses event timestamp for ARCHIVED when present", () => {
+    const result = resolveCheckInAt({
+      status: BookingStatus.ARCHIVED,
+      updatedAt,
+      fromEvent,
+    });
+
+    expect(result).toBe(fromEvent);
+  });
+
+  it("returns null for non-measurable statuses without an event", () => {
+    for (const status of [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+      BookingStatus.CANCELLED,
+    ] as const) {
+      expect(
+        resolveCheckInAt({ status, updatedAt, fromEvent: null })
+      ).toBeNull();
+    }
   });
 });

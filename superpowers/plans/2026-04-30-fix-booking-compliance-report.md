@@ -28,7 +28,7 @@ The canonical signal is `ActivityEvent` with `action: "BOOKING_STATUS_CHANGED"`,
 
 ### Files involved
 
-```
+```text
 apps/webapp/app/modules/booking/
   lateness.ts                    NEW   helper module (getLatenessMs, isOnTime, constants)
   lateness.test.ts               NEW   unit tests for the helper

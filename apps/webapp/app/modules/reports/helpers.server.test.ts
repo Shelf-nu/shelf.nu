@@ -115,6 +115,81 @@ describe("bookingComplianceReport — complianceData hero", () => {
     expect(result.complianceData!.rate).toBe(50);
   });
 
+  it("falls back to updatedAt for COMPLETE bookings missing a check-in event", async () => {
+    // why: The partial-check-in completion path historically wrote a custom
+    // system note instead of calling `createStatusTransitionNote`, so no
+    // `BOOKING_STATUS_CHANGED → COMPLETE` event was recorded for those
+    // bookings. Without a fallback, every such booking would be counted as
+    // on-time regardless of when it was actually returned. With the fallback,
+    // a COMPLETE booking returned 1h late (well past the 15m grace window) is
+    // correctly counted as late via `Booking.updatedAt`.
+    const dueDate = new Date("2026-04-15T12:00:00Z");
+    const updatedAt = new Date(dueDate.getTime() + 60 * 60 * 1000); // 1h late
+
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      {
+        id: "booking-no-event",
+        name: "Partial Check-in",
+        status: "COMPLETE",
+        from: new Date("2026-04-14T12:00:00Z"),
+        to: dueDate,
+        updatedAt,
+        custodianUser: null,
+        custodianTeamMember: null,
+        custodianUserId: null,
+        custodianTeamMemberId: null,
+        _count: { assets: 1 },
+      },
+    ] as any);
+    // No activity event for this booking — the resolver returns an empty map
+    // and `resolveCheckInAt` must fall back to `updatedAt`.
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([] as any);
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.complianceData!.onTime).toBe(0);
+    expect(result.complianceData!.late).toBe(1);
+    expect(result.complianceData!.rate).toBe(0);
+  });
+
+  it("does NOT fall back to updatedAt for ARCHIVED without an event", async () => {
+    // why: For ARCHIVED bookings `Booking.updatedAt` is unreliable — the
+    // auto-archive job shifts it long after the actual check-in. Falling back
+    // to `updatedAt` here would systematically misreport archived bookings as
+    // very late. With no event, the booking carries no measurable signal and
+    // is treated as on-time per `isOnTime`'s null-data semantics.
+    const dueDate = new Date("2026-04-15T12:00:00Z");
+
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      {
+        id: "booking-archived-no-event",
+        name: "Legacy Archived",
+        status: "ARCHIVED",
+        from: new Date("2026-04-14T12:00:00Z"),
+        to: dueDate,
+        // 10 days after due date — would mark as very late if fallback applied.
+        updatedAt: new Date(dueDate.getTime() + 10 * 24 * 60 * 60 * 1000),
+        custodianUser: null,
+        custodianTeamMember: null,
+        custodianUserId: null,
+        custodianTeamMemberId: null,
+        _count: { assets: 1 },
+      },
+    ] as any);
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([] as any);
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.complianceData!.onTime).toBe(1);
+    expect(result.complianceData!.late).toBe(0);
+  });
+
   it("counts ARCHIVED bookings using their check-in event timestamp", async () => {
     const dueDate = new Date("2026-04-15T12:00:00Z");
     // Check-in occurred 5 minutes after `to` — well within the 15-minute
