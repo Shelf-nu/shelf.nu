@@ -1786,6 +1786,40 @@ export async function checkinBooking({
             user!
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
+
+        // Record the canonical status transition event for reports.
+        // The custom system note above replaces the standard transition note,
+        // but downstream consumers (Booking Compliance report) still need the
+        // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
+        // booking was actually checked in. Best-effort, mirroring the pattern
+        // inside createStatusTransitionNote.
+        try {
+          await recordEvent({
+            organizationId,
+            // We're inside `if (userId)` — `userId` is a string here.
+            actorUserId: userId,
+            action: "BOOKING_STATUS_CHANGED",
+            entityType: "BOOKING",
+            entityId: updatedBooking.id,
+            bookingId: updatedBooking.id,
+            field: "status",
+            fromValue: bookingFound.status,
+            toValue: BookingStatus.COMPLETE,
+          });
+        } catch (err) {
+          Logger.error(
+            new ShelfError({
+              cause: err,
+              message:
+                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
+              additionalData: {
+                bookingId: updatedBooking.id,
+                fromStatus: bookingFound.status,
+              },
+              label,
+            })
+          );
+        }
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
