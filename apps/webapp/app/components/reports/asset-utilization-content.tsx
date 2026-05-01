@@ -17,7 +17,6 @@
  * @see {@link file://./report-empty-state.tsx}
  */
 
-import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -122,10 +121,9 @@ export function AssetUtilizationContent({
   totalRows,
   onRowClick,
 }: Props) {
-  const columns: ColumnDef<AssetUtilizationRow>[] = useMemo(
-    () => ASSET_UTILIZATION_COLUMNS,
-    []
-  );
+  // Stable reference is guaranteed by `ASSET_UTILIZATION_COLUMNS` living at
+  // module scope (see its JSDoc for why that matters).
+  const columns = ASSET_UTILIZATION_COLUMNS;
 
   // Extract KPI values
   const avgUtilization =

@@ -16,7 +16,6 @@
  * @see {@link file://./report-empty-state.tsx}
  */
 
-import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -92,7 +91,8 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
     accessorKey: "valuation",
     header: "Value",
     cell: ({ row }) =>
-      row.original.valuation ? (
+      // `!= null` so a real $0 valuation renders as "$0", not "—".
+      row.original.valuation != null ? (
         `$${row.original.valuation.toLocaleString()}`
       ) : (
         <span className="text-gray-400">—</span>
@@ -128,17 +128,12 @@ export function IdleAssetsContent({
   timeframeLabel,
   onRowClick,
 }: Props) {
-  // Column definitions for unused assets table.
-  // Memoized so cell function refs are stable across re-renders — without
-  // this, TanStack `flexRender` hands React a new component type on every
-  // render, which unmounts/remounts every AssetCell (and thereby its
-  // AssetImage child), causing image fetches to abort and re-issue in a
-  // loop. The deps list is empty because the cells only read from `row` —
-  // they don't capture any closure variables from this component.
-  const columns: ColumnDef<IdleAssetRow>[] = useMemo(
-    () => IDLE_ASSETS_COLUMNS,
-    []
-  );
+  // Column definitions live at module scope (`IDLE_ASSETS_COLUMNS`) so the
+  // array reference — and every cell function inside — is stable across
+  // every render. That stability is what prevents TanStack `flexRender`
+  // from handing React a new component type per render, which would
+  // remount AssetCell → AssetImage → re-fetch + abort every image.
+  const columns = IDLE_ASSETS_COLUMNS;
 
   // Extract KPI values
   const totalIdle =

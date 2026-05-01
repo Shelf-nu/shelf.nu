@@ -13,7 +13,6 @@
  * @see {@link file://../../routes/_layout+/reports.$reportId.tsx}
  */
 
-import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Link } from "react-router";
 
@@ -171,14 +170,9 @@ export function TopBookedAssetsContent({
   topBookedAsset,
   onRowClick,
 }: Props) {
-  // Column definitions for top booked assets table.
-  // Memoized so cell function refs are stable across re-renders — see the
-  // detailed loop explanation in CustodySnapshotContent above. Cells here
-  // are pure (no closure variables), so deps are empty.
-  const columns: ColumnDef<TopBookedAssetRow>[] = useMemo(
-    () => TOP_BOOKED_ASSETS_COLUMNS,
-    []
-  );
+  // Stable reference is guaranteed by `TOP_BOOKED_ASSETS_COLUMNS` living
+  // at module scope (see its JSDoc for why that matters).
+  const columns = TOP_BOOKED_ASSETS_COLUMNS;
 
   // Extract KPI values
   const totalBookings =

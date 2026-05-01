@@ -25,6 +25,7 @@ import { BarChart } from "~/components/reports/bar-chart";
 import { ChartCard } from "~/components/reports/chart-card";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import { NumberCell, ReportTable } from "~/components/reports/report-table";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import type {
   ChartSeries,
   MonthlyBookingTrendRow,
@@ -155,45 +156,42 @@ export function MonthlyBookingTrendsContent({
               <span className="text-xs text-gray-500">
                 Trend (Last 2 Months)
               </span>
-              <div
-                className="group relative cursor-help"
-                title={
-                  trendDescription ||
-                  "Compares the most recent month to the previous month"
-                }
-              >
-                <div className="flex items-center gap-1.5">
+              {/* Use the shared InfoTooltip so the explanation is reachable
+                  via keyboard focus (the previous custom hover-only div was
+                  inaccessible to keyboard and touch users). */}
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={tw(
+                    "text-lg font-medium",
+                    trendDirection === "Increasing"
+                      ? "text-green-600"
+                      : trendDirection === "Decreasing"
+                      ? "text-red-600"
+                      : "text-gray-900"
+                  )}
+                >
+                  {trendDirection}
+                </span>
+                {trendDelta !== null && (
                   <span
                     className={tw(
-                      "text-lg font-medium",
-                      trendDirection === "Increasing"
-                        ? "text-green-600"
-                        : trendDirection === "Decreasing"
-                        ? "text-red-600"
-                        : "text-gray-900"
+                      "text-sm",
+                      trendDelta > 0 ? "text-green-600" : "text-red-600"
                     )}
                   >
-                    {trendDirection}
+                    ({trendDelta > 0 ? "+" : ""}
+                    {trendDelta})
                   </span>
-                  {trendDelta !== null && (
-                    <span
-                      className={tw(
-                        "text-sm",
-                        trendDelta > 0 ? "text-green-600" : "text-red-600"
-                      )}
-                    >
-                      ({trendDelta > 0 ? "+" : ""}
-                      {trendDelta})
-                    </span>
-                  )}
-                </div>
-                {/* Hover tooltip with more details */}
-                {trendDescription && (
-                  <div className="invisible absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:visible group-hover:opacity-100">
-                    {trendDescription}
-                    <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
-                  </div>
                 )}
+                <InfoTooltip
+                  iconClassName="size-3.5"
+                  content={
+                    <p>
+                      {trendDescription ||
+                        "Compares the most recent month to the previous month"}
+                    </p>
+                  }
+                />
               </div>
             </div>
           </div>

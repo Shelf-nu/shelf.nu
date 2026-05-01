@@ -15,7 +15,6 @@
  * @see {@link file://./../../routes/_layout+/reports.$reportId.tsx}
  */
 
-import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -149,10 +148,9 @@ export function AssetInventoryContent({
   totalRows,
   onRowClick,
 }: Props) {
-  const columns: ColumnDef<AssetInventoryRow>[] = useMemo(
-    () => ASSET_INVENTORY_COLUMNS,
-    []
-  );
+  // Stable reference is guaranteed by `ASSET_INVENTORY_COLUMNS` living at
+  // module scope (see its JSDoc for why that matters).
+  const columns = ASSET_INVENTORY_COLUMNS;
 
   // Extract KPI values
   const totalAssets =

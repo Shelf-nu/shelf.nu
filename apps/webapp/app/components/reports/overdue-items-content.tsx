@@ -1,7 +1,7 @@
 /**
  * @file Overdue Items Report Content
  *
- * Renders the body of the "Overdue Items" report (R3): a hero metric
+ * Renders the body of the "Overdue Items" report (R6): a hero metric
  * summarising the number of assets currently outstanding plus aggregate
  * value-at-risk and longest-overdue stats, followed by a table listing each
  * overdue booking with its return progress.
@@ -118,7 +118,8 @@ export function OverdueItemsContent({
       accessorKey: "valueAtRisk",
       header: "Value",
       cell: ({ row }) =>
-        row.original.valueAtRisk ? (
+        // `!= null` so a real $0 value-at-risk renders as "$0", not "—".
+        row.original.valueAtRisk != null ? (
           `$${row.original.valueAtRisk.toLocaleString()}`
         ) : (
           <span className="text-gray-400">—</span>

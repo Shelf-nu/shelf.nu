@@ -16,7 +16,6 @@
  * @see {@link file://./report-empty-state.tsx}
  */
 
-import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -118,10 +117,9 @@ export function AssetActivityContent({
   totalRows,
   onRowClick,
 }: Props) {
-  const columns: ColumnDef<AssetActivityRow>[] = useMemo(
-    () => ASSET_ACTIVITY_COLUMNS,
-    []
-  );
+  // Stable reference is guaranteed by `ASSET_ACTIVITY_COLUMNS` living at
+  // module scope (see its JSDoc for why that matters).
+  const columns = ASSET_ACTIVITY_COLUMNS;
 
   // Extract KPI values
   const totalActivities =

@@ -43,12 +43,19 @@ export function IdleThresholdSelector({
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm text-gray-600">Unused for:</span>
-      <div className="flex items-center gap-1 rounded border border-gray-200 bg-white p-1">
+      <span id="idle-threshold-label" className="text-sm text-gray-600">
+        Unused for:
+      </span>
+      <div
+        role="group"
+        aria-labelledby="idle-threshold-label"
+        className="flex items-center gap-1 rounded border border-gray-200 bg-white p-1"
+      >
         {thresholds.map((t) => (
           <button
             key={t.days}
             type="button"
+            aria-pressed={value === t.days}
             onClick={() => onChange(t.days)}
             disabled={disabled}
             className={tw(
