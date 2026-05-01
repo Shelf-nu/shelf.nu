@@ -92,8 +92,15 @@ p {
 .dialog-backdrop {
   @apply fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
 }
+/*
+ * why h-[100dvh]: on iOS Safari `h-full` resolves to the LARGE viewport (LVH),
+ * so a footer pushed to the bottom of a fullscreen dialog sat under the URL
+ * bar and home indicator and was unreachable. `dvh` tracks the visible area
+ * as the toolbar shows/hides. The pb-[env(safe-area-inset-bottom)] adds
+ * iPhone home-indicator clearance — desktop overrides reset both.
+ */
 dialog {
-  @apply fixed m-0 h-full w-full bg-transparent p-0 md:relative   md:m-auto md:h-auto md:w-[600px]  md:py-8;
+  @apply fixed m-0 h-[100dvh] w-full bg-transparent p-0 pb-[env(safe-area-inset-bottom)] md:relative   md:m-auto md:h-auto md:w-[600px] md:pb-0  md:py-8;
 }
 
 .dialog > .scrollable-content::-webkit-scrollbar {
