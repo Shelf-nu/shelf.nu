@@ -58,7 +58,11 @@
     "extra": {
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "b6d6a6cb-c242-4474-815f-b55d5e691c58"
       }
-    }
+    },
+    "owner": "shelfassetmanagement"
   }
 }
