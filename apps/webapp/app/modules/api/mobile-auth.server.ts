@@ -1,4 +1,4 @@
-import type { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
@@ -202,7 +202,10 @@ export async function getMobileUserContext(
   }
 
   return {
-    role: userOrg.roles[0],
+    // why: roles is an array but we always operate on the first role; mirror
+    // the convention used in roles.server.ts and invite/service.server.ts so
+    // an empty array doesn't surface as `undefined` to downstream callers.
+    role: userOrg.roles[0] ?? OrganizationRoles.BASE,
     canUseBarcodes: userOrg.organization.barcodesEnabled,
   };
 }

@@ -7,6 +7,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { createNote } from "~/modules/note/service.server";
+import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -35,7 +36,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const { assetId, content } = z
       .object({
         assetId: z.string().min(1),
-        content: z.string().min(1).max(5000),
+        content: z.string().min(1).max(NOTE_MAX_CONTENT_LENGTH),
       })
       .parse(body);
 
