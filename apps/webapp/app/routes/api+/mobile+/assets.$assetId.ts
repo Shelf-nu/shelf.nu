@@ -1,28 +1,34 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
-import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  requireMobileAuth,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
-import { Logger } from "~/utils/logger";
-import { oneDayFromNow } from "~/utils/one-week-from-now";
-import { createSignedUrl } from "~/utils/storage.server";
 
 /**
  * GET /api/mobile/assets/:assetId
  *
  * Returns full asset details including category, location, custody, and kit.
- * Automatically refreshes expired signed image URLs.
+ *
+ * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
+ * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
+ * they detect a near-expired URL — keeps this loader read-only.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
+    const organizationId = await requireOrganizationAccess(request, user.id);
     const { assetId } = getParams(params, z.object({ assetId: z.string() }));
 
     const asset = await db.asset.findUnique({
       where: {
+        // why: inline-scope to org so cross-org probes 404 — matches the
+        // pattern used by every other mobile route.
         id: assetId,
+        organizationId,
       },
       select: {
         id: true,
@@ -36,7 +42,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         valuation: true,
         createdAt: true,
         updatedAt: true,
-        organizationId: true,
         userId: true,
         category: { select: { id: true, name: true, color: true } },
         location: { select: { id: true, name: true } },
@@ -98,84 +103,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    // Verify user has access to the asset's organization
-    const membership = await db.userOrganization.findUnique({
-      where: {
-        userId_organizationId: {
-          userId: user.id,
-          organizationId: asset.organizationId,
-        },
-      },
-      select: { id: true },
-    });
+    // Strip internal user id; keep mainImageExpiration so the client can
+    // decide when to call the refresh endpoint.
+    const { userId: _, ...assetData } = asset;
 
-    if (!membership) {
-      return data({ error: { message: "Access denied" } }, { status: 403 });
-    }
-
-    // Refresh signed image URLs if expired (or expiring within 1 hour)
-    let { mainImage, thumbnailImage } = asset;
-    const needsRefresh =
-      asset.mainImage &&
-      (!asset.mainImageExpiration ||
-        new Date(asset.mainImageExpiration).getTime() <
-          Date.now() + 60 * 60 * 1000);
-
-    if (needsRefresh && asset.mainImage) {
-      try {
-        const mainPath = extractStoragePath(asset.mainImage, "assets");
-        if (mainPath) {
-          mainImage = await createSignedUrl({
-            filename: mainPath,
-            bucketName: "assets",
-          });
-
-          // Also refresh thumbnail if present
-          if (asset.thumbnailImage) {
-            const thumbPath = extractStoragePath(
-              asset.thumbnailImage,
-              "assets"
-            );
-            if (thumbPath) {
-              thumbnailImage = await createSignedUrl({
-                filename: thumbPath,
-                bucketName: "assets",
-              });
-            }
-          }
-
-          // Update DB with fresh URLs (fire and forget)
-          db.asset
-            .update({
-              where: { id: assetId },
-              data: {
-                mainImage,
-                thumbnailImage,
-                mainImageExpiration: oneDayFromNow(),
-              },
-            })
-            .catch((err) => {
-              Logger.error(
-                new Error(
-                  `Failed to update refreshed image URLs for asset ${assetId}: ${err}`
-                )
-              );
-            });
-        }
-      } catch (err) {
-        // If refresh fails, return the existing (possibly expired) URLs
-        Logger.warn(
-          `Failed to refresh image URLs for asset ${assetId}: ${err}`
-        );
-      }
-    }
-
-    // Strip internal fields before returning
-    const { mainImageExpiration: _, userId: __, ...assetData } = asset;
-
-    return data({
-      asset: { ...assetData, mainImage, thumbnailImage },
-    });
+    return data({ asset: assetData });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
