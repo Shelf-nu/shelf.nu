@@ -38,7 +38,10 @@ import {
   parseBarcodesFromImportData,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
-import { createCategoriesIfNotExists } from "~/modules/category/service.server";
+import {
+  createCategoriesIfNotExists,
+  getCategory,
+} from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
@@ -1325,6 +1328,10 @@ export async function updateAsset({
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
+      // why: connect: { id } is unscoped — verify the category belongs to this
+      // org before connecting, otherwise an attacker who knows a foreign-org
+      // category id could attach it to their asset (cross-org IDOR).
+      await getCategory({ id: categoryId, organizationId });
       Object.assign(data, {
         category: {
           connect: {
@@ -1336,6 +1343,25 @@ export async function updateAsset({
 
     /** Connect the new location id */
     if (newLocationId) {
+      // why: same IDOR concern as category — verify the location is in this
+      // org before connecting. Lightweight findFirst, getLocation() loads
+      // paginated assets and is too heavy here.
+      const orgLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+        select: { id: true },
+      });
+      if (!orgLocation) {
+        throw new ShelfError({
+          cause: null,
+          title: "Location not found",
+          message:
+            "The selected location does not exist or you don't have access to it.",
+          additionalData: { newLocationId, organizationId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
       Object.assign(data, {
         location: {
           connect: {
