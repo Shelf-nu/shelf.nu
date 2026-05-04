@@ -17,6 +17,7 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
+import { mobileIpRateLimit } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
@@ -110,6 +111,13 @@ export default createHonoServer<ServerEnv>({
      * Add logger middleware
      */
     server.use("*", logger());
+
+    /**
+     * Mobile API rate limit. Path-scoped so webapp routes are unaffected.
+     * Runs after logger() so 429s appear in logs, and before session() since
+     * the mobile prefix is in publicPaths anyway — short-circuit early.
+     */
+    server.use("/api/mobile/*", mobileIpRateLimit());
 
     /**
      * Add session middleware

@@ -299,6 +299,9 @@ importers:
       hono:
         specifier: ^4.12.14
         version: 4.12.16
+      hono-rate-limiter:
+        specifier: ^0.5.3
+        version: 0.5.3(hono@4.12.16)
       html-to-image:
         specifier: 1.11.11
         version: 1.11.11
@@ -3594,95 +3597,111 @@ packages:
 
   '@react-email/body@0.2.0':
     resolution: {integrity: sha512-9GCWmVmKUAoRfloboCd+RKm6X17xn7eGL7HnpAZUnjBXBilWCxsKnLMTC/ixSHDKS/A/057M1Tx6ZUXd89sVBw==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/button@0.2.0':
     resolution: {integrity: sha512-8i+v6cMxr2emz4ihCrRiYJPp2/sdYsNNsBzXStlcA+/B9Umpm5Jj3WJKYpgTPM+aeyiqlG/MMI1AucnBm4f1oQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/code-block@0.2.0':
     resolution: {integrity: sha512-eIrPW9PIFgDopQU0e/OPpwCW2QWQDtNZDSsiN4sJO8KdMnWWnXJicnRfzrit5rHwFo+Y98i+w/Y5ScnBAFr1dQ==}
     engines: {node: '>=22.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/code-inline@0.0.5':
     resolution: {integrity: sha512-MmAsOzdJpzsnY2cZoPHFPk6uDO/Ncpb4Kh1hAt9UZc1xOW3fIzpe1Pi9y9p6wwUmpaeeDalJxAxH6/fnTquinA==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/column@0.0.13':
     resolution: {integrity: sha512-Lqq17l7ShzJG/d3b1w/+lVO+gp2FM05ZUo/nW0rjxB8xBICXOVv6PqjDnn3FXKssvhO5qAV20lHM6S+spRhEwQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/components@1.0.0':
     resolution: {integrity: sha512-PVqzptGFPR2wZGtlSejSMTrmAdxGUB0b2HH5+2HUUtaUFy3N1v5wblb9s+Ar8TqSL9c05KOH3sITbnmZYCVgSQ==}
     engines: {node: '>=22.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/container@0.0.15':
     resolution: {integrity: sha512-Qo2IQo0ru2kZq47REmHW3iXjAQaKu4tpeq/M8m1zHIVwKduL2vYOBQWbC2oDnMtWPmkBjej6XxgtZByxM6cCFg==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/font@0.0.9':
     resolution: {integrity: sha512-4zjq23oT9APXkerqeslPH3OZWuh5X4crHK6nx82mVHV2SrLba8+8dPEnWbaACWTNjOCbcLIzaC9unk7Wq2MIXw==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/head@0.0.12':
     resolution: {integrity: sha512-X2Ii6dDFMF+D4niNwMAHbTkeCjlYYnMsd7edXOsi0JByxt9wNyZ9EnhFiBoQdqkE+SMDcu8TlNNttMrf5sJeMA==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/heading@0.0.15':
     resolution: {integrity: sha512-xF2GqsvBrp/HbRHWEfOgSfRFX+Q8I5KBEIG5+Lv3Vb2R/NYr0s8A5JhHHGf2pWBMJdbP4B2WHgj/VUrhy8dkIg==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/hr@0.0.11':
     resolution: {integrity: sha512-S1gZHVhwOsd1Iad5IFhpfICwNPMGPJidG/Uysy1AwmspyoAP5a4Iw3OWEpINFdgh9MHladbxcLKO2AJO+cA9Lw==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/html@0.0.11':
     resolution: {integrity: sha512-qJhbOQy5VW5qzU74AimjAR9FRFQfrMa7dn4gkEXKMB/S9xZN8e1yC1uA9C15jkXI/PzmJ0muDIWmFwatm5/+VA==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/img@0.0.11':
     resolution: {integrity: sha512-aGc8Y6U5C3igoMaqAJKsCpkbm1XjguQ09Acd+YcTKwjnC2+0w3yGUJkjWB2vTx4tN8dCqQCXO8FmdJpMfOA9EQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/link@0.0.12':
     resolution: {integrity: sha512-vF+xxQk2fGS1CN7UPQDbzvcBGfffr+GjTPNiWM38fhBfsLv6A/YUfaqxWlmL7zLzVmo0K2cvvV9wxlSyNba1aQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/markdown@0.0.17':
     resolution: {integrity: sha512-6op3AfsBC9BJKkhG+eoMFRFWlr0/f3FYbtQrK+VhGzJocEAY0WINIFN+W8xzXr//3IL0K/aKtnH3FtpIuescQQ==}
     engines: {node: '>=22.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/preview@0.0.13':
     resolution: {integrity: sha512-F7j9FJ0JN/A4d7yr+aw28p4uX7VLWs7hTHtLo7WRyw4G+Lit6Zucq4UWKRxJC8lpsUdzVmG7aBJnKOT+urqs/w==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
@@ -3696,18 +3715,21 @@ packages:
   '@react-email/row@0.0.12':
     resolution: {integrity: sha512-HkCdnEjvK3o+n0y0tZKXYhIXUNPDx+2vq1dJTmqappVHXS5tXS6W5JOPZr5j+eoZ8gY3PShI2LWj5rWF7ZEtIQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/section@0.0.16':
     resolution: {integrity: sha512-FjqF9xQ8FoeUZYKSdt8sMIKvoT9XF8BrzhT3xiFKdEMwYNbsDflcjfErJe3jb7Wj/es/lKTbV5QR1dnLzGpL3w==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
   '@react-email/tailwind@2.0.0':
     resolution: {integrity: sha512-CV2rBO+bUzhJkra/H9bw1M9BwvBiNyT3RmC5DSfRXp/a0TYMtPjRo9IRnKeyNl40D/qPxH3bKNg6O7cTOVVsog==}
     engines: {node: '>=22.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       '@react-email/body': 0.2.0
       '@react-email/button': 0.2.0
@@ -3746,6 +3768,7 @@ packages:
   '@react-email/text@0.1.5':
     resolution: {integrity: sha512-o5PNHFSE085VMXayxH+SJ1LSOtGsTv+RpNKnTiJDrJUwoBu77G3PlKOsZZQHCNyD28WsQpl9v2WcJLbQudqwPg==}
     engines: {node: '>=18.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       react: ^18.0 || ^19.0 || ^19.0.0-rc
 
@@ -5019,6 +5042,7 @@ packages:
   '@xmldom/xmldom@0.8.11':
     resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -6970,6 +6994,15 @@ packages:
 
   hermes-parser@0.33.3:
     resolution: {integrity: sha512-Yg3HgaG4CqgyowtYjX/FsnPAuZdHOqSMtnbpylbptsQ9nwwSKsy6uRWcGO5RK0EqiX12q8HvDWKgeAVajRO5DA==}
+
+  hono-rate-limiter@0.5.3:
+    resolution: {integrity: sha512-M0DxbVMpPELEzLi0AJg1XyBHLGJXz7GySjsPoK+gc5YeeBsdGDGe+2RvVuCAv8ydINiwlbxqYMNxUEyYfRji/A==}
+    peerDependencies:
+      hono: ^4.10.8
+      unstorage: ^1.17.3
+    peerDependenciesMeta:
+      unstorage:
+        optional: true
 
   hono@4.12.16:
     resolution: {integrity: sha512-jN0ZewiNAWSe5khM3EyCmBb250+b40wWbwNILNfEvq84VREWwOIkuUsFONk/3i3nqkz7Oe1PcpM2mwQEK2L9Kg==}
@@ -16500,9 +16533,9 @@ snapshots:
       '@typescript-eslint/eslint-plugin': 8.56.1(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/parser': 8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.4(jiti@2.6.1)
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-expo: 1.0.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-react-hooks: 5.2.0(eslint@9.39.4(jiti@2.6.1))
       globals: 16.5.0
@@ -16531,7 +16564,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.6.1)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3
@@ -16542,7 +16575,7 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -16561,14 +16594,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1)):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.4(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -16592,7 +16625,7 @@ snapshots:
       - supports-color
       - typescript
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -16603,7 +16636,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 9.39.4(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1))
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.56.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3
@@ -17607,6 +17640,10 @@ snapshots:
   hermes-parser@0.33.3:
     dependencies:
       hermes-estree: 0.33.3
+
+  hono-rate-limiter@0.5.3(hono@4.12.16):
+    dependencies:
+      hono: 4.12.16
 
   hono@4.12.16: {}
 
