@@ -37,6 +37,16 @@ vi.mock("~/modules/asset/service.server", () => ({
   updateAsset: vi.fn(),
 }));
 
+// why: avoid hitting the DB to load org custom field defs
+vi.mock("~/modules/custom-field/service.server", () => ({
+  getActiveCustomFields: vi.fn().mockResolvedValue([]),
+}));
+
+// why: spy on the validator so we can assert it received the org-scoped defs
+vi.mock("~/utils/custom-fields", () => ({
+  extractCustomFieldValuesFromPayload: vi.fn(() => []),
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -58,6 +68,8 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { updateAsset } from "~/modules/asset/service.server";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 
 const mockUser = {
   id: "user-1",
@@ -143,5 +155,40 @@ describe("POST /api/mobile/asset/update", () => {
     expect((result as unknown as Response).status).toBeGreaterThanOrEqual(400);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toBeDefined();
+  });
+
+  it("validates customFields against org-scoped definitions before update", async () => {
+    (updateAsset as any).mockResolvedValue({
+      id: "asset-1",
+      title: "T",
+      description: null,
+    });
+
+    const request = createRequest({
+      assetId: "asset-1",
+      categoryId: "cat-1",
+      customFields: [
+        { id: "cf-text-1", value: "hello" },
+        { id: "cf-num-1", value: 42 },
+      ],
+    });
+
+    const result = await action(createActionArgs({ request }));
+    expect(result instanceof Response).toBe(true);
+
+    // org-scoped defs were loaded for the right org and category
+    expect(getActiveCustomFields).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      category: "cat-1",
+    });
+
+    // values were validated through the helper, not passed through raw
+    expect(extractCustomFieldValuesFromPayload).toHaveBeenCalledWith({
+      payload: {
+        "cf-cf-text-1": "hello",
+        "cf-cf-num-1": 42,
+      },
+      customFieldDef: [],
+    });
   });
 });

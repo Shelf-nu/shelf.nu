@@ -6,7 +6,8 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { updateAsset } from "~/modules/asset/service.server";
-import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -75,13 +76,27 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    // Transform custom fields into the format updateAsset expects
-    let customFieldsValues: ShelfAssetCustomFieldValueType[] | undefined;
+    // why: validate custom-field values against the org's active definitions.
+    // Bypassing this lets a mobile client smuggle arbitrary JSON (or values
+    // that don't match the field's declared type) into the asset record.
+    // Mirrors how the webapp edit form processes form data.
+    let customFieldsValues;
     if (customFields && customFields.length > 0) {
-      customFieldsValues = customFields.map((cf) => ({
-        id: cf.id,
-        value: cf.value,
-      })) as unknown as ShelfAssetCustomFieldValueType[];
+      const customFieldDef = await getActiveCustomFields({
+        organizationId,
+        category: categoryId ?? null,
+      });
+
+      // The helper expects a flat object with cf-{id} keys (form-data shape).
+      // Reshape the mobile array into that contract.
+      const cfPayload = Object.fromEntries(
+        customFields.map((cf) => [`cf-${cf.id}`, cf.value])
+      );
+
+      customFieldsValues = extractCustomFieldValuesFromPayload({
+        payload: cfPayload,
+        customFieldDef,
+      });
     }
 
     const asset = await updateAsset({
