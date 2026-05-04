@@ -13,6 +13,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
  * POST /api/mobile/bulk-release-custody
@@ -23,6 +24,8 @@ import {
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
+    await enforceUserRateLimit(user.id, "bulk");
+
     const organizationId = await requireOrganizationAccess(request, user.id);
 
     await requireMobilePermission({

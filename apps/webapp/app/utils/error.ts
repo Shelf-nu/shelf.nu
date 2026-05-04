@@ -148,6 +148,7 @@ export type FailureReason = {
     | 404 // not found
     | 405 // method not allowed
     | 409 // conflict
+    | 429 // too many requests
     | 499 // client closed request
     | 500 // internal server error
     | 503; // service unavailable
