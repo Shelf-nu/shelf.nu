@@ -509,7 +509,9 @@ export default function AddKitsToBooking() {
    *
    * Initialized synchronously during the first render (guarded by a ref) instead
    * of a mount effect to avoid the empty-first-frame hydration flicker flagged
-   * by `rendering-hydration-no-flicker`.
+   * by `rendering-hydration-no-flicker`. `AtomsResetHandler` performs its
+   * pathname-change reset during render too, so it runs before this init and
+   * does not clobber the selection.
    */
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
