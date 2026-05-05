@@ -101,11 +101,11 @@ export async function getScimUser(
     },
   });
 
-  if (!user) {
+  if (!user || user.userOrganizations.length === 0) {
     throw new ScimError("User not found", 404);
   }
 
-  const isActive = user.userOrganizations.length > 0;
+  const isActive = true;
   return userToScimResource(user, isActive);
 }
 
