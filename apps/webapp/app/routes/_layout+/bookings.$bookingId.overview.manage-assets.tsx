@@ -522,27 +522,15 @@ export default function AddAssetsToNewBooking() {
    * (guarded by a ref) instead of running the set inside a mount effect. This
    * avoids the empty-first-frame hydration flicker flagged by
    * `rendering-hydration-no-flicker` (useEffect(setState, []) → useSyncExternalStore
-   * or synchronous initialization).
+   * or synchronous initialization). `AtomsResetHandler` performs its
+   * pathname-change reset during render too, so it runs before this init and
+   * does not clobber the selection.
    */
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
     setSelectedBulkItems(bookingAssets);
   }
-
-  /**
-   * Re-assert the selection after mount.
-   *
-   * `AtomsResetHandler` (rendered as a sibling above this route in
-   * `_layout+/_layout.tsx`) clears `selectedBulkItemsAtom` inside a
-   * pathname-change `useEffect` that runs *after* the synchronous render-time
-   * init above but *before* this effect (sibling effects fire in render order).
-   * Without this re-init, assets already attached to the booking would appear
-   * unchecked on revisit, and submitting would mark them as removed.
-   */
-  useEffect(() => {
-    setSelectedBulkItems(bookingAssets);
-  }, [bookingAssets, setSelectedBulkItems]);
 
   /**
    * Set disabled items for assets
