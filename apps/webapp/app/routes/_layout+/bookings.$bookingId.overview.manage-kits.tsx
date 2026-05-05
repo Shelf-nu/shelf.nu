@@ -511,11 +511,30 @@ export default function AddKitsToBooking() {
    * of a mount effect to avoid the empty-first-frame hydration flicker flagged
    * by `rendering-hydration-no-flicker`.
    */
+  const initialSelectedKits = useMemo(
+    () => bookingKitIds.map((kitId) => ({ id: kitId })),
+    [bookingKitIds]
+  );
+
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+    setSelectedBulkItems(initialSelectedKits);
   }
+
+  /**
+   * Re-assert the selection after mount.
+   *
+   * `AtomsResetHandler` (rendered as a sibling above this route in
+   * `_layout+/_layout.tsx`) clears `selectedBulkItemsAtom` inside a
+   * pathname-change `useEffect` that runs *after* the synchronous render-time
+   * init above but *before* this effect (sibling effects fire in render order).
+   * Without this re-init, kits already attached to the booking would appear
+   * unchecked on revisit, and submitting would mark them as removed.
+   */
+  useEffect(() => {
+    setSelectedBulkItems(initialSelectedKits);
+  }, [initialSelectedKits, setSelectedBulkItems]);
 
   /**
    * Set disabled items for kit
