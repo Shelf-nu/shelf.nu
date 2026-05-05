@@ -10,6 +10,7 @@ import {
   revokeAccessToOrganization,
 } from "~/modules/user/service.server";
 import { isLikeShelfError } from "~/utils/error";
+import { randomUsernameFromEmail } from "~/utils/user";
 import { ScimError } from "./errors.server";
 import { parseScimFilter } from "./filters.server";
 import { userToScimResource } from "./mappers.server";
@@ -189,7 +190,7 @@ export async function createScimUser(
   // local-part would collide across SCIM orgs with a common local-part
   // (e.g. two distinct orgs both provisioning `jane@…`).
   const placeholderId = randomUUID();
-  const username = email;
+  const username = randomUsernameFromEmail(email);
 
   // The check-then-create above can race with a concurrent SCIM POST for the
   // same email. Catch Prisma's unique-constraint violation and surface it as
