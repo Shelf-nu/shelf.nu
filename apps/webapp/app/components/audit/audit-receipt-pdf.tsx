@@ -85,7 +85,7 @@ export const AuditReceiptPDF = ({
       <Dialog
         open={open}
         onClose={onClose}
-        className="h-[90vh] w-full py-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+        className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
         title={
           <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
             <h3>Generate audit receipt for "{audit.name}"</h3>
