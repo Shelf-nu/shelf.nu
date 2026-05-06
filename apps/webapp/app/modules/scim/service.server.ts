@@ -368,7 +368,7 @@ export async function patchScimUser(
     },
   });
 
-  if (!user) {
+  if (!user || user.userOrganizations.length === 0) {
     throw new ScimError("User not found", 404);
   }
 
