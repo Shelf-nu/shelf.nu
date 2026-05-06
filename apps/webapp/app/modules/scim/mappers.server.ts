@@ -7,7 +7,7 @@ interface ShelfUserForScim {
   email: string;
   firstName: string | null;
   lastName: string | null;
-  scimExternalId: string | null;
+  scimExternalIds: { scimExternalId: string }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,7 +29,9 @@ export function userToScimResource(
   return {
     schemas: [SCIM_SCHEMA_USER],
     id: user.id,
-    ...(user.scimExternalId && { externalId: user.scimExternalId }),
+    ...(user.scimExternalIds[0]?.scimExternalId && {
+      externalId: user.scimExternalIds[0].scimExternalId,
+    }),
     userName: user.email,
     name: {
       givenName: user.firstName ?? undefined,

@@ -24,6 +24,11 @@ vi.mock("~/database/db.server", () => ({
     userOrganization: {
       create: vi.fn(),
     },
+    // Org-scoped SCIM external ID table used instead of User.scimExternalId
+    userScimExternalId: {
+      upsert: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     teamMember: {
       updateMany: vi.fn(),
     },
@@ -57,12 +62,13 @@ const mockTeamMemberService = await import(
 
 const ORG_ID = "org-123";
 
+// scimExternalId is now org-scoped; the select returns a relation array
 const mockShelfUser = {
   id: "user-abc",
   email: "jane@example.com",
   firstName: "Jane",
   lastName: "Doe",
-  scimExternalId: "entra-456",
+  scimExternalIds: [{ scimExternalId: "entra-456" }],
   createdAt: new Date("2024-06-01T10:00:00Z"),
   updatedAt: new Date("2024-06-15T12:00:00Z"),
 };
@@ -169,7 +175,7 @@ describe("listScimUsers", () => {
     );
   });
 
-  it("should apply externalId filter to scimExternalId query", async () => {
+  it("should apply externalId filter to scimExternalIds relation query", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findMany.mockResolvedValue([]);
     // @ts-expect-error - vitest mock type
@@ -182,7 +188,9 @@ describe("listScimUsers", () => {
     expect(mockDb.db.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          scimExternalId: "entra-id-789",
+          scimExternalIds: {
+            some: { organizationId: ORG_ID, scimExternalId: "entra-id-789" },
+          },
         }),
       })
     );
@@ -301,7 +309,7 @@ describe("createScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userOrganization.create.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.update.mockResolvedValue({});
+    mockDb.db.userScimExternalId.upsert.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
     // @ts-expect-error - vitest mock type
@@ -334,7 +342,7 @@ describe("createScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockUserService.createUser.mockResolvedValue({ id: "new-user-id" });
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.update.mockResolvedValue({});
+    mockDb.db.userScimExternalId.upsert.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockTeamMemberService.createTeamMember.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
@@ -425,7 +433,7 @@ describe("createScimUser", () => {
 
     await createScimUser(ORG_ID, { userName: "jane@example.com" });
 
-    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockDb.db.userScimExternalId.upsert).not.toHaveBeenCalled();
   });
 });
 
@@ -452,6 +460,8 @@ describe("replaceScimUser", () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.update.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.upsert.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
     mockDb.db.teamMember.updateMany.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUniqueOrThrow.mockResolvedValue({
@@ -465,13 +475,21 @@ describe("replaceScimUser", () => {
       externalId: "new-ext-id",
     });
 
+    // Core user fields updated without scimExternalId (that's org-scoped separately)
     expect(mockDb.db.user.update).toHaveBeenCalledWith({
       where: { id: "user-abc" },
-      data: {
-        firstName: "Janet",
-        lastName: "Doe",
+      data: { firstName: "Janet", lastName: "Doe" },
+    });
+    expect(mockDb.db.userScimExternalId.upsert).toHaveBeenCalledWith({
+      where: {
+        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
+      },
+      create: {
+        userId: "user-abc",
+        organizationId: ORG_ID,
         scimExternalId: "new-ext-id",
       },
+      update: { scimExternalId: "new-ext-id" },
     });
     expect(mockDb.db.teamMember.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-abc", organizationId: ORG_ID },
@@ -717,14 +735,14 @@ describe("patchScimUser", () => {
     });
   });
 
-  it("should update externalId", async () => {
+  it("should update externalId via org-scoped upsert", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUnique.mockResolvedValue({
       ...mockShelfUser,
       userOrganizations: [{ id: "uo-1" }],
     });
     // @ts-expect-error - vitest mock type
-    mockDb.db.user.update.mockResolvedValue({});
+    mockDb.db.userScimExternalId.upsert.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
 
@@ -733,9 +751,18 @@ describe("patchScimUser", () => {
       Operations: [{ op: "replace", path: "externalId", value: "new-ext-id" }],
     });
 
-    expect(mockDb.db.user.update).toHaveBeenCalledWith({
-      where: { id: "user-abc" },
-      data: expect.objectContaining({ scimExternalId: "new-ext-id" }),
+    // externalId is org-scoped and must never appear in the User row update
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockDb.db.userScimExternalId.upsert).toHaveBeenCalledWith({
+      where: {
+        userId_organizationId: { userId: "user-abc", organizationId: ORG_ID },
+      },
+      create: {
+        userId: "user-abc",
+        organizationId: ORG_ID,
+        scimExternalId: "new-ext-id",
+      },
+      update: { scimExternalId: "new-ext-id" },
     });
   });
 

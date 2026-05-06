@@ -22,15 +22,41 @@ import type {
 } from "./types";
 import { SCIM_SCHEMA_LIST_RESPONSE } from "./types";
 
-const SCIM_USER_SELECT = {
-  id: true,
-  email: true,
-  firstName: true,
-  lastName: true,
-  scimExternalId: true,
-  createdAt: true,
-  updatedAt: true,
-} satisfies Prisma.UserSelect;
+/**
+ * Returns a Prisma select object for SCIM user queries scoped to an org.
+ * The `scimExternalIds` relation is pre-filtered to the calling org so the
+ * result contains at most one entry (enforced by the unique constraint).
+ */
+function scimUserSelect(organizationId: string) {
+  return {
+    id: true,
+    email: true,
+    firstName: true,
+    lastName: true,
+    scimExternalIds: {
+      where: { organizationId },
+      select: { scimExternalId: true },
+    },
+    createdAt: true,
+    updatedAt: true,
+  } satisfies Prisma.UserSelect;
+}
+
+/**
+ * Upserts a SCIM external ID for a user within a specific organization.
+ * Safe to call even when the row does not yet exist.
+ */
+async function upsertScimExternalId(
+  userId: string,
+  organizationId: string,
+  scimExternalId: string
+): Promise<void> {
+  await db.userScimExternalId.upsert({
+    where: { userId_organizationId: { userId, organizationId } },
+    create: { userId, organizationId, scimExternalId },
+    update: { scimExternalId },
+  });
+}
 
 // ──────────────────────────────────────────────
 // LIST / SEARCH
@@ -57,7 +83,10 @@ export async function listScimUsers(
       if (parsed.attribute === "username") {
         where.email = { equals: parsed.value, mode: "insensitive" };
       } else if (parsed.attribute === "externalid") {
-        where.scimExternalId = parsed.value;
+        // Filter within the org-scoped relation to avoid cross-org leakage
+        where.scimExternalIds = {
+          some: { organizationId, scimExternalId: parsed.value },
+        };
       }
     }
   }
@@ -65,7 +94,7 @@ export async function listScimUsers(
   const [users, totalResults] = await Promise.all([
     db.user.findMany({
       where,
-      select: SCIM_USER_SELECT,
+      select: scimUserSelect(organizationId),
       skip: startIndex - 1, // SCIM is 1-based
       take: count,
       orderBy: { createdAt: "asc" },
@@ -93,7 +122,7 @@ export async function getScimUser(
   const user = await db.user.findUnique({
     where: { id: userId },
     select: {
-      ...SCIM_USER_SELECT,
+      ...scimUserSelect(organizationId),
       userOrganizations: {
         where: { organizationId },
         select: { id: true },
@@ -130,7 +159,7 @@ export async function createScimUser(
   const existingUser = await db.user.findUnique({
     where: { email },
     select: {
-      ...SCIM_USER_SELECT,
+      ...scimUserSelect(organizationId),
       userOrganizations: {
         where: { organizationId },
         select: { id: true },
@@ -165,17 +194,13 @@ export async function createScimUser(
       userId: existingUser.id,
     });
 
-    // Update scimExternalId if provided
     if (externalId) {
-      await db.user.update({
-        where: { id: existingUser.id },
-        data: { scimExternalId: externalId },
-      });
+      await upsertScimExternalId(existingUser.id, organizationId, externalId);
     }
 
     const updatedUser = await db.user.findUniqueOrThrow({
       where: { id: existingUser.id },
-      select: SCIM_USER_SELECT,
+      select: scimUserSelect(organizationId),
     });
 
     return userToScimResource(updatedUser, true);
@@ -223,12 +248,8 @@ export async function createScimUser(
     throw err;
   }
 
-  // Set scimExternalId and create TeamMember
   if (externalId) {
-    await db.user.update({
-      where: { id: newUser.id },
-      data: { scimExternalId: externalId },
-    });
+    await upsertScimExternalId(newUser.id, organizationId, externalId);
   }
 
   const teamMemberName =
@@ -241,7 +262,7 @@ export async function createScimUser(
 
   const createdUser = await db.user.findUniqueOrThrow({
     where: { id: newUser.id },
-    select: SCIM_USER_SELECT,
+    select: scimUserSelect(organizationId),
   });
 
   return userToScimResource(createdUser, true);
@@ -259,7 +280,7 @@ export async function replaceScimUser(
   const user = await db.user.findUnique({
     where: { id: userId },
     select: {
-      ...SCIM_USER_SELECT,
+      ...scimUserSelect(organizationId),
       userOrganizations: {
         where: { organizationId },
         select: { id: true },
@@ -285,15 +306,20 @@ export async function replaceScimUser(
     await updateUserEmail(userId, user.email, newEmail);
   }
 
-  // Update user attributes
+  // Update core user attributes (name fields only — externalId is org-scoped)
   await db.user.update({
     where: { id: userId },
-    data: {
-      firstName,
-      lastName,
-      scimExternalId: externalId,
-    },
+    data: { firstName, lastName },
   });
+
+  // PUT replaces all attributes: upsert the external ID when provided, clear it otherwise
+  if (externalId !== null) {
+    await upsertScimExternalId(userId, organizationId, externalId);
+  } else {
+    await db.userScimExternalId.deleteMany({
+      where: { userId, organizationId },
+    });
+  }
 
   // Update team member name if exists
   const currentEmail = newEmail || user.email;
@@ -316,7 +342,7 @@ export async function replaceScimUser(
 
   const updatedUser = await db.user.findUniqueOrThrow({
     where: { id: userId },
-    select: SCIM_USER_SELECT,
+    select: scimUserSelect(organizationId),
   });
 
   return userToScimResource(updatedUser, shouldBeActive);
@@ -334,7 +360,7 @@ export async function patchScimUser(
   const user = await db.user.findUnique({
     where: { id: userId },
     select: {
-      ...SCIM_USER_SELECT,
+      ...scimUserSelect(organizationId),
       userOrganizations: {
         where: { organizationId },
         select: { id: true },
@@ -348,6 +374,8 @@ export async function patchScimUser(
 
   let isActive = user.userOrganizations.length > 0;
   const updateData: Prisma.UserUpdateInput = {};
+  // externalId is org-scoped and cannot go in the main UserUpdateInput
+  let pendingExternalId: string | undefined;
 
   for (const op of patchOp.Operations) {
     if (op.op !== "replace") {
@@ -373,7 +401,7 @@ export async function patchScimUser(
     } else if (op.path === "name.familyName") {
       updateData.lastName = String(op.value ?? "");
     } else if (op.path === "externalId") {
-      updateData.scimExternalId = String(op.value ?? "");
+      pendingExternalId = String(op.value ?? "");
     } else if (!op.path && typeof op.value === "object" && op.value !== null) {
       // Entra sometimes sends: { op: "replace", value: { active: false } }
       const val = op.value as Record<string, unknown>;
@@ -403,7 +431,7 @@ export async function patchScimUser(
         updateData.email = String(val.userName ?? "").toLowerCase();
       }
       if ("externalId" in val) {
-        updateData.scimExternalId = String(val.externalId ?? "");
+        pendingExternalId = String(val.externalId ?? "");
       }
     }
   }
@@ -415,7 +443,7 @@ export async function patchScimUser(
     delete updateData.email;
   }
 
-  // Apply accumulated updates
+  // Apply accumulated user attribute updates
   if (Object.keys(updateData).length > 0) {
     await db.user.update({ where: { id: userId }, data: updateData });
 
@@ -439,9 +467,14 @@ export async function patchScimUser(
     }
   }
 
+  // Apply org-scoped external ID update separately
+  if (pendingExternalId !== undefined) {
+    await upsertScimExternalId(userId, organizationId, pendingExternalId);
+  }
+
   const updatedUser = await db.user.findUniqueOrThrow({
     where: { id: userId },
-    select: SCIM_USER_SELECT,
+    select: scimUserSelect(organizationId),
   });
 
   return userToScimResource(updatedUser, isActive);

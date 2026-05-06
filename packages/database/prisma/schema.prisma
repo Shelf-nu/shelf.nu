@@ -111,8 +111,8 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
-  scimExternalId String? // External ID from SCIM identity provider (e.g. Entra ID)
-
+  // Org-scoped SCIM external IDs (one per org, managed by the org's identity provider)
+  scimExternalIds UserScimExternalId[]
 
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
@@ -126,7 +126,6 @@ model User {
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])
-  @@index([scimExternalId])
 }
 
 model UserContact {
@@ -756,8 +755,9 @@ model Organization {
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   
-  scimTokens             ScimToken[]
-  roleChangeLogs     RoleChangeLog[]
+  scimTokens      ScimToken[]
+  scimExternalIds UserScimExternalId[]
+  roleChangeLogs  RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
 
 
@@ -830,7 +830,7 @@ model SsoDetails {
 }
 
 model ScimToken {
-  id    String @id @default(cuid())
+  id        String @id @default(cuid())
   tokenHash String @unique // SHA-256 hash of the raw bearer token
 
   label String // Human-friendly label, e.g. "Entra ID Production"
@@ -839,9 +839,30 @@ model ScimToken {
   organizationId String
 
   createdById String // User ID of the admin who created this token
-  createdAt DateTime @default(now())
-  lastUsedAt DateTime?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
 
+  @@index([organizationId])
+}
+
+/**
+ * Org-scoped SCIM external ID linking a Shelf user to an identity-provider
+ * object within a specific organization.  A single Shelf user can appear in
+ * multiple organizations, each managed by a different identity provider, so the
+ * external ID must be scoped to the (user, organization) pair.
+ */
+model UserScimExternalId {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  scimExternalId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, organizationId])
   @@index([organizationId])
 }
 

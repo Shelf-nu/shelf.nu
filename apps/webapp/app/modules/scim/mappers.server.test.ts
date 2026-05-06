@@ -7,7 +7,7 @@ const baseUser = {
   email: "jane@example.com",
   firstName: "Jane",
   lastName: "Doe",
-  scimExternalId: "entra-id-456",
+  scimExternalIds: [{ scimExternalId: "entra-id-456" }],
   createdAt: new Date("2024-06-01T10:00:00Z"),
   updatedAt: new Date("2024-06-15T12:00:00Z"),
 };
@@ -45,7 +45,7 @@ describe("userToScimResource", () => {
   });
 
   it("should omit externalId when null", () => {
-    const user = { ...baseUser, scimExternalId: null };
+    const user = { ...baseUser, scimExternalIds: [] };
     const result = userToScimResource(user, true);
 
     expect(result.externalId).toBeUndefined();
