@@ -522,7 +522,9 @@ export default function AddAssetsToNewBooking() {
    * (guarded by a ref) instead of running the set inside a mount effect. This
    * avoids the empty-first-frame hydration flicker flagged by
    * `rendering-hydration-no-flicker` (useEffect(setState, []) → useSyncExternalStore
-   * or synchronous initialization).
+   * or synchronous initialization). `AtomsResetHandler` performs its
+   * pathname-change reset during render too, so it runs before this init and
+   * does not clobber the selection.
    */
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
