@@ -233,16 +233,22 @@ describe("getScimUser", () => {
     expect(result.userName).toBe("jane@example.com");
   });
 
-  it("should return active=false when user has no org membership", async () => {
+  it("should throw ScimError 404 when user is not a member of the calling org", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.findUnique.mockResolvedValue({
+      ...mockShelfUser,
+      userOrganizations: [], // exists globally, but not in ORG_ID
+    });
+
+    await expect(getScimUser(ORG_ID, "user-abc")).rejects.toThrow(ScimError);
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUnique.mockResolvedValue({
       ...mockShelfUser,
       userOrganizations: [],
     });
-
-    const result = await getScimUser(ORG_ID, "user-abc");
-
-    expect(result.active).toBe(false);
+    await expect(getScimUser(ORG_ID, "user-abc")).rejects.toThrow(
+      "User not found"
+    );
   });
 
   it("should throw ScimError 404 when user does not exist", async () => {
@@ -360,7 +366,9 @@ describe("createScimUser", () => {
     expect(mockUserService.createUser).toHaveBeenCalledWith(
       expect.objectContaining({
         email: "jane@example.com",
-        username: "jane@example.com",
+        // username is derived from the email local-part + random suffix via
+        // randomUsernameFromEmail — we verify the prefix rather than exact value
+        username: expect.stringContaining("jane"),
         firstName: "Jane",
         lastName: "Doe",
         organizationId: ORG_ID,
@@ -824,38 +832,30 @@ describe("patchScimUser", () => {
     });
   });
 
-  it("should reactivate user via active=true when currently inactive", async () => {
+  it("should throw 404 when user is not in the calling org (cross-tenant protection)", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUnique.mockResolvedValue({
       ...mockShelfUser,
-      userOrganizations: [], // inactive
-    });
-    // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.create.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockTeamMemberService.createTeamMember.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
-
-    await patchScimUser(ORG_ID, "user-abc", {
-      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-      Operations: [{ op: "replace", path: "active", value: true }],
+      userOrganizations: [], // exists globally but not in ORG_ID
     });
 
-    expect(mockDb.db.userOrganization.create).toHaveBeenCalled();
-    expect(mockTeamMemberService.createTeamMember).toHaveBeenCalled();
+    await expect(
+      patchScimUser(ORG_ID, "user-abc", {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [{ op: "replace", path: "active", value: true }],
+      })
+    ).rejects.toThrow("User not found");
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
   });
 
-  it("should handle active='True' string (Entra ID format)", async () => {
+  it("should treat active='True' string as active (Entra ID format) — no-op for active user", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUnique.mockResolvedValue({
       ...mockShelfUser,
-      userOrganizations: [], // inactive
+      userOrganizations: [{ id: "uo-1" }], // already active
     });
-    // @ts-expect-error - vitest mock type
-    mockDb.db.userOrganization.create.mockResolvedValue({});
-    // @ts-expect-error - vitest mock type
-    mockTeamMemberService.createTeamMember.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockDb.db.user.findUniqueOrThrow.mockResolvedValue(mockShelfUser);
 
@@ -864,7 +864,9 @@ describe("patchScimUser", () => {
       Operations: [{ op: "replace", path: "active", value: "True" }],
     });
 
-    expect(mockDb.db.userOrganization.create).toHaveBeenCalled();
+    // Active user receiving active=True is a no-op: neither deactivate nor activate
+    expect(mockUserService.revokeAccessToOrganization).not.toHaveBeenCalled();
+    expect(mockDb.db.userOrganization.create).not.toHaveBeenCalled();
   });
 
   it("should update email via userName path", async () => {

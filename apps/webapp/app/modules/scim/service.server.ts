@@ -211,9 +211,9 @@ export async function createScimUser(
   // via SSO, the SSO callback will create the auth account and link it
   // to this Shelf user by updating the user ID.
   //
-  // Using email as username (User.username is @unique): deriving from the
-  // local-part would collide across SCIM orgs with a common local-part
-  // (e.g. two distinct orgs both provisioning `jane@…`).
+  // A random suffix is appended to the email local-part to avoid collisions
+  // across SCIM orgs that provision users with the same local-part
+  // (e.g. two orgs both provisioning `jane@…`).
   const placeholderId = randomUUID();
   const username = randomUsernameFromEmail(email);
 
@@ -333,11 +333,11 @@ export async function replaceScimUser(
   const isCurrentlyActive = user.userOrganizations.length > 0;
   const shouldBeActive = input.active !== false;
 
-  // Handle activation state changes
+  // Handle activation state changes.
+  // Only deactivation is possible here: the guard above ensures the user is
+  // already a member of this org, so !isCurrentlyActive can never be true.
   if (isCurrentlyActive && !shouldBeActive) {
     await revokeAccessToOrganization({ userId, organizationId });
-  } else if (!isCurrentlyActive && shouldBeActive) {
-    await reactivateUser(userId, organizationId, teamMemberName);
   }
 
   const updatedUser = await db.user.findUniqueOrThrow({
@@ -383,16 +383,12 @@ export async function patchScimUser(
     }
 
     if (op.path === "active") {
+      // Only deactivation is reachable here: the guard above ensures the user
+      // is already a member of this org, so isActive is always true on entry.
       const newActive = op.value === true || op.value === "True";
       if (isActive && !newActive) {
         await revokeAccessToOrganization({ userId, organizationId });
         isActive = false;
-      } else if (!isActive && newActive) {
-        const name =
-          [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-          user.email;
-        await reactivateUser(userId, organizationId, name);
-        isActive = true;
       }
     } else if (op.path === "userName") {
       updateData.email = String(op.value ?? "").toLowerCase();
@@ -406,16 +402,11 @@ export async function patchScimUser(
       // Entra sometimes sends: { op: "replace", value: { active: false } }
       const val = op.value as Record<string, unknown>;
       if ("active" in val) {
+        // Same deactivation-only logic as the path-based branch above.
         const newActive = val.active === true || val.active === "True";
         if (isActive && !newActive) {
           await revokeAccessToOrganization({ userId, organizationId });
           isActive = false;
-        } else if (!isActive && newActive) {
-          const name =
-            [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-            user.email;
-          await reactivateUser(userId, organizationId, name);
-          isActive = true;
         }
       }
       if ("name" in val && typeof val.name === "object" && val.name !== null) {
@@ -563,28 +554,4 @@ async function updateUserEmail(
   } catch {
     // No Supabase auth account — expected for pre-SSO users
   }
-}
-
-/**
- * Re-adds a previously deactivated user to the organization.
- * Creates a new UserOrganization + TeamMember.
- */
-async function reactivateUser(
-  userId: string,
-  organizationId: string,
-  name: string
-) {
-  await db.userOrganization.create({
-    data: {
-      userId,
-      organizationId,
-      roles: [OrganizationRoles.SELF_SERVICE],
-    },
-  });
-
-  await createTeamMember({
-    name,
-    organizationId,
-    userId,
-  });
 }

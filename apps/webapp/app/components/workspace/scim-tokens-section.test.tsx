@@ -34,7 +34,9 @@ vi.mock("react-router", async () => {
 // why: stub clipboard.writeText to prevent errors and verify copy behavior
 const mockWriteText = vi.fn().mockResolvedValue(undefined);
 
-// ── Lazy import of component under test (after mocks) ──
+// ── Component under test ──
+// Dynamic import must come AFTER the vi.mock() calls above so the mocks are
+// in place before edit-form.tsx (and its transitive deps) are loaded.
 
 const { WorkspaceEditForms } = await import("./edit-form");
 
@@ -140,13 +142,20 @@ function renderScimSection(tokens?: ScimTokenItem[]) {
 }
 
 // ── Tests ──────────────────────────────────────────────
+//
+// Note: assertions use native Vitest matchers rather than
+// @testing-library/jest-dom because the happy-dom environment in this
+// project does not load the jest-dom extension. Idiomatic replacements:
+//   getByText/getByRole (throws if absent) replaces .toBeInTheDocument()
+//   expect(queryByText(...)).toBeNull()     replaces .not.toBeInTheDocument()
 
 describe("WorkspaceScimTokensSection", () => {
   describe("Conditional rendering", () => {
     it("should render when user is owner with SSO enabled", () => {
       renderScimSection();
 
-      expect(screen.getByText("SCIM provisioning")).toBeInTheDocument();
+      // getByText throws if the element is absent — no additional assertion needed
+      screen.getByText("SCIM provisioning");
     });
 
     it("should not render when user is not owner", () => {
@@ -159,7 +168,7 @@ describe("WorkspaceScimTokensSection", () => {
 
       renderScimSection();
 
-      expect(screen.queryByText("SCIM provisioning")).not.toBeInTheDocument();
+      expect(screen.queryByText("SCIM provisioning")).toBeNull();
     });
 
     it("should not render when SSO is disabled", () => {
@@ -169,7 +178,7 @@ describe("WorkspaceScimTokensSection", () => {
 
       renderScimSection();
 
-      expect(screen.queryByText("SCIM provisioning")).not.toBeInTheDocument();
+      expect(screen.queryByText("SCIM provisioning")).toBeNull();
     });
 
     it("should not render when ssoDetails is null", () => {
@@ -177,7 +186,7 @@ describe("WorkspaceScimTokensSection", () => {
 
       renderScimSection();
 
-      expect(screen.queryByText("SCIM provisioning")).not.toBeInTheDocument();
+      expect(screen.queryByText("SCIM provisioning")).toBeNull();
     });
   });
 
@@ -185,13 +194,13 @@ describe("WorkspaceScimTokensSection", () => {
     it("should show empty state when no tokens exist", () => {
       renderScimSection([]);
 
-      expect(screen.getByText(/No active SCIM tokens/)).toBeInTheDocument();
+      screen.getByText(/No active SCIM tokens/);
     });
 
     it("should show empty state when scimTokens is undefined", () => {
       renderScimSection(undefined);
 
-      expect(screen.getByText(/No active SCIM tokens/)).toBeInTheDocument();
+      screen.getByText(/No active SCIM tokens/);
     });
 
     it("should render token table with token data", () => {
@@ -207,15 +216,15 @@ describe("WorkspaceScimTokensSection", () => {
       renderScimSection(tokens);
 
       // Table headers
-      expect(screen.getByText("Label")).toBeInTheDocument();
-      expect(screen.getByText("Last used")).toBeInTheDocument();
+      screen.getByText("Label");
+      screen.getByText("Last used");
 
       // Token data
-      expect(screen.getByText("Entra ID Production")).toBeInTheDocument();
-      expect(screen.getByText("Staging Token")).toBeInTheDocument();
+      screen.getByText("Entra ID Production");
+      screen.getByText("Staging Token");
 
       // "Never" shown for null lastUsedAt
-      expect(screen.getByText("Never")).toBeInTheDocument();
+      screen.getByText("Never");
     });
 
     it("should show a delete button for each token", () => {
@@ -235,10 +244,8 @@ describe("WorkspaceScimTokensSection", () => {
     it("should render label input and generate button", () => {
       renderScimSection();
 
-      expect(screen.getByPlaceholderText(/Token label/)).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Generate token" })
-      ).toBeInTheDocument();
+      screen.getByPlaceholderText(/Token label/);
+      screen.getByRole("button", { name: "Generate token" });
     });
   });
 
@@ -249,13 +256,11 @@ describe("WorkspaceScimTokensSection", () => {
 
       await user.click(screen.getByRole("button", { name: "Delete" }));
 
-      expect(screen.getByText("Delete SCIM token")).toBeInTheDocument();
-      expect(
-        screen.getByText(/will stop working immediately/)
-      ).toBeInTheDocument();
+      screen.getByText("Delete SCIM token");
+      screen.getByText(/will stop working immediately/);
       // Token label appears in both the table and dialog text
       const dialog = screen.getByRole("alertdialog");
-      expect(within(dialog).getByText(/My Token/)).toBeInTheDocument();
+      within(dialog).getByText(/My Token/);
     });
 
     it("should close when cancel is clicked", async () => {
@@ -263,10 +268,10 @@ describe("WorkspaceScimTokensSection", () => {
       renderScimSection([createToken()]);
 
       await user.click(screen.getByRole("button", { name: "Delete" }));
-      expect(screen.getByText("Delete SCIM token")).toBeInTheDocument();
+      screen.getByText("Delete SCIM token");
 
       await user.click(screen.getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByText("Delete SCIM token")).not.toBeInTheDocument();
+      expect(screen.queryByText("Delete SCIM token")).toBeNull();
     });
 
     it("should submit delete and close dialog when confirm is clicked", async () => {
@@ -297,9 +302,9 @@ describe("WorkspaceScimTokensSection", () => {
 
       renderScimSection();
 
-      expect(screen.getByText("SCIM token generated")).toBeInTheDocument();
-      expect(screen.getByText(/will not be shown again/)).toBeInTheDocument();
-      expect(screen.getByText("shf_abc123secret")).toBeInTheDocument();
+      screen.getByText("SCIM token generated");
+      screen.getByText(/will not be shown again/);
+      screen.getByText("shf_abc123secret");
     });
 
     it("should copy token to clipboard when copy button is clicked", async () => {
@@ -318,9 +323,7 @@ describe("WorkspaceScimTokensSection", () => {
       await vi.waitFor(() => {
         expect(mockWriteText).toHaveBeenCalledWith("shf_copyme");
       });
-      expect(
-        screen.getByRole("button", { name: "Copied!" })
-      ).toBeInTheDocument();
+      screen.getByRole("button", { name: "Copied!" });
     });
 
     it("should close dialog when Done is clicked", async () => {
@@ -331,13 +334,11 @@ describe("WorkspaceScimTokensSection", () => {
 
       renderScimSection();
 
-      expect(screen.getByText("SCIM token generated")).toBeInTheDocument();
+      screen.getByText("SCIM token generated");
 
       await user.click(screen.getByRole("button", { name: "Done" }));
 
-      expect(
-        screen.queryByText("SCIM token generated")
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText("SCIM token generated")).toBeNull();
     });
   });
 });
