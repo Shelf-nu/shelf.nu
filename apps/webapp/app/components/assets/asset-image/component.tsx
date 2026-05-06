@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 
 import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
@@ -12,6 +12,57 @@ import { isAssetForPreview } from "./utils";
 // Import the debug helper (uncomment during debugging)
 // import { debugImageUrl } from "~/utils/debug-helpers";
 
+/**
+ * Consolidated UI state for AssetImage. Grouped in a reducer because
+ * several of these transitions are triggered together (e.g. `load_success`
+ * flips both `isLoading` and `isImageError`), so expressing them as
+ * explicit actions makes the flow easier to reason about than four
+ * separate useState setters.
+ */
+type AssetImageState = {
+  isLoading: boolean;
+  isImageError: boolean;
+  isDialogOpen: boolean;
+  hasAttemptedRefresh: boolean;
+};
+
+type AssetImageAction =
+  | { type: "load_success" }
+  | { type: "load_error" }
+  | { type: "clear_error" }
+  | { type: "mark_refresh_attempted" }
+  | { type: "open_dialog" }
+  | { type: "close_dialog" };
+
+const INITIAL_ASSET_IMAGE_STATE: AssetImageState = {
+  isLoading: true,
+  isImageError: false,
+  isDialogOpen: false,
+  hasAttemptedRefresh: false,
+};
+
+function assetImageReducer(
+  state: AssetImageState,
+  action: AssetImageAction
+): AssetImageState {
+  switch (action.type) {
+    case "load_success":
+      return { ...state, isLoading: false, isImageError: false };
+    case "load_error":
+      return { ...state, isLoading: false, isImageError: true };
+    case "clear_error":
+      return { ...state, isImageError: false };
+    case "mark_refresh_attempted":
+      return { ...state, hasAttemptedRefresh: true };
+    case "open_dialog":
+      return { ...state, isDialogOpen: true };
+    case "close_dialog":
+      return { ...state, isDialogOpen: false };
+    default:
+      return state;
+  }
+}
+
 export const AssetImage = ({
   asset,
   className,
@@ -23,15 +74,16 @@ export const AssetImage = ({
   const imageFetcher = useFetcher<typeof refreshImageLoader>();
   const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [isImageError, setIsImageError] = useState(false);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [state, dispatch] = useReducer(
+    assetImageReducer,
+    INITIAL_ASSET_IMAGE_STATE
+  );
+  const { isLoading, isImageError, isDialogOpen, hasAttemptedRefresh } = state;
 
   // Track if we've already tried refreshing to prevent loops.
   // The ref is the authoritative guard (readable from stale closures);
-  // state drives the cache-buster in the render output.
+  // the `hasAttemptedRefresh` state drives the cache-buster in render.
   const hasAttemptedRefreshRef = useRef(false);
-  const [hasAttemptedRefresh, setHasAttemptedRefresh] = useState(false);
 
   const { id: assetId, thumbnailImage } = asset;
 
@@ -78,7 +130,7 @@ export const AssetImage = ({
   const refreshImage = useCallback(() => {
     if (assetId && mainImage && !hasAttemptedRefreshRef.current) {
       hasAttemptedRefreshRef.current = true;
-      setHasAttemptedRefresh(true);
+      dispatch({ type: "mark_refresh_attempted" });
       void imageFetcher.submit(
         { assetId, mainImage },
         {
@@ -93,7 +145,7 @@ export const AssetImage = ({
   const generateThumbnail = useCallback(() => {
     if (assetId && !hasAttemptedRefreshRef.current) {
       hasAttemptedRefreshRef.current = true;
-      setHasAttemptedRefresh(true);
+      dispatch({ type: "mark_refresh_attempted" });
       void thumbnailFetcher.submit(
         { assetId },
         {
@@ -106,28 +158,25 @@ export const AssetImage = ({
 
   const handleImageLoad = () => {
     // Successfully loaded, clear both loading and error states
-    setIsLoading(false);
-    if (isImageError) {
-      setIsImageError(false);
-    }
+    dispatch({ type: "load_success" });
   };
 
   const handleImageError = () => {
-    setIsLoading(false);
-
-    // Only set error state and refresh once
+    // Only set error state and trigger refresh once
     if (!isImageError && !hasAttemptedRefreshRef.current) {
-      setIsImageError(true);
+      dispatch({ type: "load_error" });
       refreshImage();
+    } else {
+      dispatch({ type: "load_error" });
     }
   };
 
   const handleOpenDialog = () => {
-    setIsDialogOpen(true);
+    dispatch({ type: "open_dialog" });
   };
 
   const handleCloseDialog = () => {
-    setIsDialogOpen(false);
+    dispatch({ type: "close_dialog" });
   };
 
   // Check for image expiration and generate thumbnail on component mount only
@@ -185,7 +234,7 @@ export const AssetImage = ({
 
     if (hasValidNewImage && isImageError) {
       // We have new images, clear the error state but don't trigger new loading
-      setIsImageError(false);
+      dispatch({ type: "clear_error" });
     }
   }, [updatedAssetMainImage, updatedAssetThumbnailImage, isImageError]);
 
@@ -240,6 +289,21 @@ export const AssetImage = ({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
+          // When the image acts as a preview trigger, make it keyboard
+          // reachable and activatable with Enter or Space.
+          onKeyDown={
+            withPreview
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleOpenDialog();
+                  }
+                }
+              : undefined
+          }
+          role={withPreview ? "button" : undefined}
+          tabIndex={withPreview ? 0 : undefined}
+          aria-label={withPreview ? `Open preview for ${alt}` : undefined}
           src={imageUrl}
           width={108}
           height={108}
@@ -260,7 +324,7 @@ export const AssetImage = ({
           <Dialog
             open={isDialogOpen}
             onClose={handleCloseDialog}
-            className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+            className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
             title={
               <div>
                 <div className="text-lg font-semibold text-gray-900">{alt}</div>

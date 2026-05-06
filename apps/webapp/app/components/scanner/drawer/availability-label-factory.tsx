@@ -59,9 +59,12 @@ export function createAvailabilityLabels(
 
     return (
       <div className="flex flex-wrap gap-1">
-        {activeLabels.map((label, index) => (
+        {activeLabels.map((label) => (
+          // `badgeText` is the user-facing label and is unique across the
+          // preset configurations defined below (e.g. "In custody", "Checked
+          // out", etc.), so it serves as a stable identity for this badge.
           <AvailabilityBadge
-            key={`label-${index}`}
+            key={label.badgeText}
             badgeText={label.badgeText}
             tooltipTitle={label.tooltipTitle}
             tooltipContent={label.tooltipContent}

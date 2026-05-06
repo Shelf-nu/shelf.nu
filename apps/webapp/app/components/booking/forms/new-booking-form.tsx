@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useAtom } from "jotai";
 import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -99,14 +99,14 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     currentUserId: userId,
   });
 
-  useEffect(
-    function updateEndDate() {
-      if (defaultEndDate) {
-        setEndDate(defaultEndDate);
-      }
-    },
-    [defaultEndDate]
-  );
+  // Re-sync endDate when the computed default changes (e.g. when working hours or
+  // buffer settings load). Uses the React "store previous value in a ref" pattern
+  // so we mirror the prop during render instead of via a useEffect.
+  const prevDefaultEndDate = useRef(defaultEndDate);
+  if (defaultEndDate && defaultEndDate !== prevDefaultEndDate.current) {
+    prevDefaultEndDate.current = defaultEndDate;
+    setEndDate(defaultEndDate);
+  }
 
   /** This handles server side errors in case client side validation fails */
   const validationErrors = getValidationErrors<BookingFormSchemaType>(

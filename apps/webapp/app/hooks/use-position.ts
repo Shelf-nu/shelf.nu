@@ -19,12 +19,13 @@ export const usePosition = () => {
 
   useEffect(() => {
     if (navigator && navigator.geolocation && scanId) {
+      // The error callback must be a function or omitted; passing `null` makes
+      // WebKit throw a `TypeError: Argument 2 ('errorCallback') ... must be a
+      // function`. Use `undefined` to opt out cleanly. The caller doesn't
+      // surface geolocation errors anyway, so a no-op handler is unnecessary.
       navigator.geolocation.getCurrentPosition(
-        // Success function
         (position) => setPosition(position.coords),
-        // Error function
-        null,
-        // Options. See MDN for details.
+        undefined,
         {
           enableHighAccuracy: true,
           timeout: 5000,

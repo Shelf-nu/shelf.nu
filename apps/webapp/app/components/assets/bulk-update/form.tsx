@@ -9,7 +9,7 @@
  */
 import type React from "react";
 import type { ChangeEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
@@ -31,6 +31,59 @@ import When from "../../when/when";
 
 type Stage = "upload" | "preview" | "results";
 
+/** Consolidated state for the bulk update import flow. */
+type ImportState = {
+  selectedFile: File | null;
+  clientValidation: ClientValidation | null;
+  stage: Stage;
+  preview: UpdatePreview | null;
+  result: BulkUpdateResult | null;
+  agreed: string;
+};
+
+type ImportAction =
+  | { type: "file_selected"; file: File }
+  | { type: "client_validation"; validation: ClientValidation }
+  | { type: "preview_loaded"; preview: UpdatePreview }
+  | { type: "result_loaded"; result: BulkUpdateResult }
+  | { type: "set_agreed"; value: string }
+  | { type: "reset_for_new_file" }
+  | { type: "reset" };
+
+const INITIAL_IMPORT_STATE: ImportState = {
+  selectedFile: null,
+  clientValidation: null,
+  stage: "upload",
+  preview: null,
+  result: null,
+  agreed: "",
+};
+
+function importReducer(state: ImportState, action: ImportAction): ImportState {
+  switch (action.type) {
+    case "file_selected":
+      // Start over (in upload stage) whenever a new file is chosen
+      return {
+        ...INITIAL_IMPORT_STATE,
+        selectedFile: action.file,
+      };
+    case "client_validation":
+      return { ...state, clientValidation: action.validation };
+    case "preview_loaded":
+      return { ...state, preview: action.preview, stage: "preview" };
+    case "result_loaded":
+      return { ...state, result: action.result, stage: "results" };
+    case "set_agreed":
+      return { ...state, agreed: action.value };
+    case "reset_for_new_file":
+      return { ...INITIAL_IMPORT_STATE, selectedFile: state.selectedFile };
+    case "reset":
+      return INITIAL_IMPORT_STATE;
+    default:
+      return state;
+  }
+}
+
 /**
  * Main orchestration component for the bulk asset update CSV import.
  * Manages a three-stage flow: file upload with client-side validation,
@@ -47,13 +100,9 @@ export function UpdateImportForm({
   const previewFetcher = useFetcherWithReset<typeof action>();
   const applyFetcher = useFetcherWithReset<typeof action>();
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [clientValidation, setClientValidation] =
-    useState<ClientValidation | null>(null);
-  const [stage, setStage] = useState<Stage>("upload");
-  const [preview, setPreview] = useState<UpdatePreview | null>(null);
-  const [result, setResult] = useState<BulkUpdateResult | null>(null);
-  const [agreed, setAgreed] = useState("");
+  const [state, dispatch] = useReducer(importReducer, INITIAL_IMPORT_STATE);
+  const { selectedFile, clientValidation, stage, preview, result, agreed } =
+    state;
   const lastProcessedPreview = useRef<UpdatePreview | null>(null);
   const lastProcessedResult = useRef<BulkUpdateResult | null>(null);
   const activeFileNonce = useRef(0);
@@ -63,12 +112,7 @@ export function UpdateImportForm({
 
   const processFile = useCallback(
     (file: File) => {
-      setSelectedFile(file);
-      setStage("upload");
-      setPreview(null);
-      setResult(null);
-      setClientValidation(null);
-      setAgreed("");
+      dispatch({ type: "file_selected", file });
       previewFetcher.reset();
       applyFetcher.reset();
 
@@ -80,7 +124,7 @@ export function UpdateImportForm({
         if (nonce !== activeFileNonce.current) return;
         const text = reader.result as string;
         const validation = validateCsvClientSide(text);
-        setClientValidation(validation);
+        dispatch({ type: "client_validation", validation });
       };
       // Read enough to get headers + a few rows
       reader.readAsText(file.slice(0, 50_000));
@@ -138,8 +182,7 @@ export function UpdateImportForm({
       fetchedPreview !== lastProcessedPreview.current
     ) {
       lastProcessedPreview.current = fetchedPreview;
-      setPreview(fetchedPreview);
-      setStage("preview");
+      dispatch({ type: "preview_loaded", preview: fetchedPreview });
       onStageChange?.("preview");
     }
   }, [previewData, onStageChange]);
@@ -162,19 +205,13 @@ export function UpdateImportForm({
       fetchedResult !== lastProcessedResult.current
     ) {
       lastProcessedResult.current = fetchedResult;
-      setResult(fetchedResult);
-      setStage("results");
+      dispatch({ type: "result_loaded", result: fetchedResult });
       onStageChange?.("results");
     }
   }, [applyData, onStageChange]);
 
   const handleReset = () => {
-    setSelectedFile(null);
-    setClientValidation(null);
-    setStage("upload");
-    setPreview(null);
-    setResult(null);
-    setAgreed("");
+    dispatch({ type: "reset" });
     previewFetcher.reset();
     applyFetcher.reset();
     if (formRef.current) {
@@ -274,12 +311,12 @@ export function UpdateImportForm({
           preview={preview}
           formRef={formRef}
           agreed={agreed}
-          setAgreed={setAgreed}
+          setAgreed={(value) => dispatch({ type: "set_agreed", value })}
           applyFetcher={applyFetcher}
           isApplyLoading={isApplyLoading}
           selectedFile={selectedFile}
           onReanalyze={() => {
-            setAgreed("");
+            dispatch({ type: "set_agreed", value: "" });
             previewFetcher.reset();
             applyFetcher.reset();
             requestAnimationFrame(() => {

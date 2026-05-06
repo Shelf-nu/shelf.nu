@@ -1,5 +1,9 @@
 import { BookingStatus } from "@prisma/client";
 import { Clock } from "lucide-react";
+import {
+  formatOverdueDuration,
+  getLatenessMs,
+} from "~/modules/booking/lateness";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
 export function TimeRemaining({
@@ -32,12 +36,22 @@ export function TimeRemaining({
 
   // Handle case where time has already passed
   if (remainingMs < 0) {
-    // For OVERDUE status, show how long it's been overdue
+    // For OVERDUE status, show how long it's been overdue.
+    // Math is delegated to the central helper for parity with the
+    // Booking Compliance report — both surfaces must agree on lateness.
     if (status === BookingStatus.OVERDUE) {
-      const overdueMs = Math.abs(remainingMs);
-      const overdueDays = Math.floor(overdueMs / ONE_DAY);
-      const overdueHours = Math.floor((overdueMs % ONE_DAY) / ONE_HOUR);
-      const overdueMinutes = Math.floor((overdueMs % ONE_HOUR) / (1000 * 60));
+      const overdueMs =
+        getLatenessMs({
+          status: BookingStatus.OVERDUE,
+          to,
+          checkInAt: null,
+          now: currentDate,
+        }) ?? 0;
+      const {
+        days: overdueDays,
+        hours: overdueHours,
+        minutes: overdueMinutes,
+      } = formatOverdueDuration(overdueMs);
 
       return (
         <div className="flex items-center text-sm text-gray-600 md:ml-4 [&_span]:whitespace-nowrap">

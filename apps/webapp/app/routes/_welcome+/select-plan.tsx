@@ -82,6 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function SelectPlan() {
   const { prices, auditPrices, barcodePrices } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();

@@ -131,6 +131,7 @@ function AuditDrawerFooter({
   );
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function AuditDrawer({
   contextLabel,
   contextName,
@@ -149,15 +150,40 @@ export function AuditDrawer({
   const items = useAtomValue(scannedItemsAtom);
   const auditSession = useAtomValue(auditSessionAtom);
   const duplicateScan = useAtomValue(lastDuplicateScanAtom);
-  const [highlightedQrId, setHighlightedQrId] = useState<string | null>(null);
 
-  // Highlight the duplicate row briefly when a duplicate scan is detected
+  /** Duration of the row-highlight animation after a duplicate scan. */
+  const HIGHLIGHT_DURATION_MS = 2500;
+
+  /**
+   * Derive the currently highlighted row at render time from the duplicate
+   * scan atom's timestamp — if the timestamp is within the highlight window
+   * we show the highlight, otherwise we don't. The companion effect only
+   * schedules a single re-render at the window boundary via an "expiry"
+   * counter bump, so no cascading state transitions happen in reaction to
+   * the atom change.
+   */
+  const [, setHighlightExpiryTick] = useState(0);
+  const now = Date.now();
+  const highlightedQrId =
+    duplicateScan && now - duplicateScan.timestamp < HIGHLIGHT_DURATION_MS
+      ? duplicateScan.qrId
+      : null;
+
   useEffect(() => {
-    if (duplicateScan) {
-      setHighlightedQrId(duplicateScan.qrId);
-      const timer = setTimeout(() => setHighlightedQrId(null), 2500);
-      return () => clearTimeout(timer);
-    }
+    if (!duplicateScan) return;
+    const remaining =
+      HIGHLIGHT_DURATION_MS - (Date.now() - duplicateScan.timestamp);
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => {
+      // Single state update — forces a re-render so the derived
+      // `highlightedQrId` above becomes `null`.
+      setHighlightExpiryTick((tick) => tick + 1);
+    }, remaining);
+    return () => clearTimeout(timer);
+    // `highlightExpiryTick` intentionally excluded — it only exists to force
+    // re-renders when the highlight window ends and does not affect
+    // scheduling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duplicateScan]);
   const auditAssetMeta = useAtomValue(auditAssetMetaAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);

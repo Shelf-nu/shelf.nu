@@ -27,6 +27,7 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   "remove-from-kit": false,
   "start-audit": false,
   "add-to-audit": false,
+  "delete-audit": false,
 };
 
 export const bulkDialogAtom =

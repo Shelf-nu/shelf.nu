@@ -84,7 +84,7 @@ export function SelectWithOther({
   className,
 }: SelectWithOtherProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const inputId = useMemo(() => `${name}-other`, [name]);
+  const inputId = `${name}-other`;
 
   const { selection: initialSelection, customValue: initialOther } = useMemo(
     () => resolveSelectState(options, defaultValue ?? undefined),

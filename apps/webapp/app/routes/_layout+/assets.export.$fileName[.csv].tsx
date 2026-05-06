@@ -27,15 +27,18 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         action: PermissionAction.export,
       });
 
-    await assertUserCanExportAssets({ organizationId, organizations });
-
-    /** Get the setttings, we need them for a few things */
-    const settings = await getAssetIndexSettings({
-      userId,
-      organizationId,
-      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-      role,
-    });
+    // Subscription assertion and settings lookup are independent once
+    // requirePermission has resolved — run them in parallel
+    const [, settings] = await Promise.all([
+      assertUserCanExportAssets({ organizationId, organizations }),
+      /** Get the setttings, we need them for a few things */
+      getAssetIndexSettings({
+        userId,
+        organizationId,
+        canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+        role,
+      }),
+    ]);
     const { mode } = settings;
 
     const searchParams = getCurrentSearchParams(request);

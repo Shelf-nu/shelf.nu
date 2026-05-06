@@ -109,11 +109,20 @@ async function validateTeamMembersForReminder(
   });
 
   if (teamMembersWithUserCount !== teamMembers.length) {
+    // Stale form state: a team member the user selected has since been
+    // removed, lost their linked user account, or never belonged to this
+    // workspace. This is a 4xx, not a 5xx — surface it without paging.
     throw new ShelfError({
       cause: null,
       label,
       message:
-        "Something went wrong while validating team members for reminder. Please contact support",
+        "One or more selected team members are no longer available. Please refresh the page and pick recipients again.",
+      additionalData: {
+        requestedTeamMemberCount: teamMembers.length,
+        validTeamMemberCount: teamMembersWithUserCount,
+      },
+      status: 400,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -287,6 +296,14 @@ export async function editAssetReminder({
       cause,
       message,
       label,
+      // Forward the inner ShelfError's decision when the cause is already
+      // a ShelfError — otherwise this wrapper re-captures intentional 4xx
+      // throws like the stale-team-member validator (`shouldBeCaptured:
+      // false`) or the "Edit is not allowed" guard above. Fall back to the
+      // Prisma not-found check for raw causes.
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }
@@ -310,6 +327,11 @@ export async function deleteAssetReminder({
         ? "Reminder not found or you are viewing in wrong organization."
         : "Something went wrong while deleting reminder.",
       label,
+      // Forward the inner ShelfError's decision when present so this
+      // wrapper does not re-capture intentional 4xx throws.
+      shouldBeCaptured: isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
     });
   }
 }

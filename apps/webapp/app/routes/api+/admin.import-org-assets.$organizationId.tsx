@@ -22,23 +22,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     await requireAdmin(userId);
 
-    const organization = await db.organization
-      .findUniqueOrThrow({
-        where: { id: organizationId },
-        include: {
-          owner: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "No organization found",
-          additionalData: { userId, organizationId },
-          label: "Organization",
-        });
-      });
-
-    const csvData = await csvDataFromRequest({ request });
+    // Organization lookup and CSV parsing are independent — run in parallel
+    const [organization, csvData] = await Promise.all([
+      db.organization
+        .findUniqueOrThrow({
+          where: { id: organizationId },
+          include: {
+            owner: true,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "No organization found",
+            additionalData: { userId, organizationId },
+            label: "Organization",
+          });
+        }),
+      csvDataFromRequest({ request }),
+    ]);
 
     if (csvData.length < 2) {
       throw new ShelfError({

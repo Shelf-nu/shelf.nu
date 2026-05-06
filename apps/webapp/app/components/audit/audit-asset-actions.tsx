@@ -133,7 +133,7 @@ export function AuditAssetActions({
           {isUploading ? (
             <Loader
               className="size-4"
-              style={{ animation: "spinner 2s linear infinite" }}
+              style={{ animation: "spinner 500ms linear infinite" }}
             />
           ) : (
             <ImagePlus className="size-4" />

@@ -523,6 +523,59 @@ describe("getBarcodeByValue", () => {
 
     expect(result).toBeNull();
   });
+
+  it("should use custom include when provided", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
+
+    const customInclude = {
+      asset: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          mainImage: true,
+          category: { select: { name: true } },
+          location: { select: { name: true } },
+        },
+      },
+    };
+
+    await getBarcodeByValue({
+      value: "test123",
+      organizationId: "org-1",
+      include: customInclude,
+    });
+
+    expect(db.barcode.findFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [{ value: "test123" }, { value: "TEST123" }],
+        organizationId: "org-1",
+      },
+      include: customInclude,
+    });
+  });
+
+  it("should try case-insensitive matching with OR clause", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
+
+    await getBarcodeByValue({
+      value: "abc123",
+      organizationId: "org-1",
+    });
+
+    // Verify the OR clause includes both original and uppercase
+    expect(db.barcode.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ value: "abc123" }, { value: "ABC123" }],
+        }),
+      })
+    );
+  });
 });
 
 describe("getAssetBarcodes", () => {

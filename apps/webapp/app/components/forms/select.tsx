@@ -24,7 +24,7 @@ const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={tw(
-        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50 ",
+        "select-trigger flex w-full touch-manipulation items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50 ",
         className
       )}
       {...props}
@@ -42,12 +42,50 @@ const SelectContent = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, ...props }, _ref) {
+  /**
+   * Track the rendered Radix Content element in state so the touchend listener
+   * can be attached and cleaned up via a real `useEffect`. Using a callback
+   * ref's return value for cleanup is fragile — handle the lifecycle
+   * explicitly instead.
+   *
+   * why passive:false — the handler needs preventDefault() to stop the iOS
+   * Safari synthetic-click that Radix Select otherwise fires when the user
+   * taps the content's padding/empty area; passive:true would make
+   * preventDefault a no-op.
+   *
+   * why the role="option" / button / input bail-out — preventing default on
+   * touchend over an interactive descendant cancels the synthetic click that
+   * iOS Safari fires for that tap. Radix selects on pointerup, but several
+   * focus / aria-activedescendant transitions in Radix Select still rely on
+   * the click event firing. Suppressing it intermittently breaks selection
+   * on iPhone/iPad — the original report behind these fixes.
+   */
+  const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!contentEl) return;
+    const handler = (event: TouchEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[role="option"], [data-radix-select-item], button, a, input, select, textarea, [role="checkbox"], [role="menuitem"]'
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+    };
+    contentEl.addEventListener("touchend", handler, { passive: false });
+    return () => {
+      contentEl.removeEventListener("touchend", handler);
+    };
+  }, [contentEl]);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
-        }
+        ref={setContentEl}
         className={tw(
           " relative z-[200] overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
@@ -84,7 +122,7 @@ const SelectItem = React.forwardRef<
     <SelectPrimitive.Item
       ref={ref}
       className={tw(
-        "relative flex cursor-default select-none items-center rounded p-1 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 ",
+        "relative flex min-h-[40px] cursor-default touch-manipulation select-none items-center rounded p-1 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 md:min-h-0 ",
         className
       )}
       {...props}

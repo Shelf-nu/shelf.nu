@@ -272,6 +272,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 
@@ -350,6 +351,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 
@@ -406,6 +408,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            shouldBeCaptured: false,
           });
         }
 

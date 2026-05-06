@@ -84,7 +84,7 @@ export const Toaster = () => {
           {iconsMap["x"]}
         </Toast.Close>
       </Toast.Root>
-      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] outline-none [--viewport-padding:_25px] md:w-[390px]" />
+      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] pb-[calc(var(--viewport-padding)_+_env(safe-area-inset-bottom))] outline-none [--viewport-padding:_25px] md:w-[390px]" />
     </Toast.Provider>
   );
 };

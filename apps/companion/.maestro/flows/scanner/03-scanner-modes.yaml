@@ -1,0 +1,25 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Scanner Modes"
+tags:
+  - scanner
+
+---
+# Test: Scanner mode UI elements
+# Verifies the scanner screen renders properly with action options
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+
+# Handle camera permission if needed
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# The scanner should show — take screenshot to verify
+- takeScreenshot: scanner-modes

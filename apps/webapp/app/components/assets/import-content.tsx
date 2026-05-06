@@ -7,6 +7,7 @@
  */
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
@@ -282,6 +283,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const fetcher = useFetcherWithReset<typeof action>();
 
   const { data } = fetcher;
@@ -289,6 +291,13 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
   //
+
+  // Focus the "I AGREE" confirmation input when the dialog opens (replaces
+  // `autoFocus`). Re-focuses each time the dialog re-opens; skipped while
+  // the success state is showing.
+  const agreeInputRef = useAutoFocus<HTMLInputElement>({
+    when: isDialogOpen && !isSuccessful,
+  });
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -321,6 +330,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
       <AlertDialog
         onOpenChange={(open) => {
+          setIsDialogOpen(open);
           if (!open) {
             // Reset form state when dialog is closed
             setAgreed("");
@@ -352,7 +362,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 <Input
                   type="text"
                   label={"Confirmation"}
-                  autoFocus
+                  ref={agreeInputRef}
                   name="agree"
                   value={agreed}
                   onChange={(e) => setAgreed(e.target.value.toUpperCase())}
@@ -449,8 +459,14 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                         kit: string;
                         issue: string;
                       }>
-                    ).map((conflict, index: number) => (
-                      <tr key={index} className="border-b">
+                    ).map((conflict) => (
+                      <tr
+                        // Compose a stable key from the conflict fields —
+                        // the backend can surface the same asset twice
+                        // for different issues, so include `issue` too.
+                        key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
+                        className="border-b"
+                      >
                         <td className="px-2 py-1">{conflict.asset}</td>
                         <td className="px-2 py-1">{conflict.custodian}</td>
                         <td className="px-2 py-1">{conflict.kit}</td>
@@ -588,8 +604,12 @@ function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
               <Td className="align-top">{barcode.value}</Td>
               <Td className="whitespace-normal">
                 <ul className="list-disc pl-4">
-                  {barcode.assets.map((asset, i) => (
-                    <li key={i}>
+                  {barcode.assets.map((asset) => (
+                    // CSV `row` number is unique per imported asset
+                    // within a single error payload, so it's a stable
+                    // key (include title+type to be extra safe if the
+                    // same row ever surfaces under multiple barcodes).
+                    <li key={`${asset.row}-${asset.type}-${asset.title}`}>
                       {asset.title} ({asset.type}): Line {asset.row}
                     </li>
                   ))}

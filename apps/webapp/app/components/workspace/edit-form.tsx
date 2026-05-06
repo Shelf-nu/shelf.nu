@@ -11,6 +11,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
@@ -100,6 +101,12 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
+  // Focus the Name input on mount, but skip when the field is disabled
+  // (personal workspaces don't allow renaming).
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: !isPersonalWorkspace,
+  });
+
   const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const fetcher = useFetcher({ key: "general" });
@@ -146,12 +153,12 @@ const WorkspaceGeneralEditForms = ({
           required={zodFieldIsRequired(schema.shape.name)}
         >
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}
             disabled={isPersonalWorkspace || disabled}
             error={zo.errors.name()?.message}
-            autoFocus
             onChange={updateTitle}
             className="w-full"
             defaultValue={name || undefined}

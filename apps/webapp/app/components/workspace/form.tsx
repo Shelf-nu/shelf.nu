@@ -84,7 +84,6 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
             name={zo.fields.name()}
             disabled={disabled}
             error={zo.errors.name()?.message}
-            autoFocus
             onChange={updateTitle}
             className="w-full"
             defaultValue={name || undefined}

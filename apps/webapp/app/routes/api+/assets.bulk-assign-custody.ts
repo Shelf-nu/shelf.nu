@@ -1,12 +1,17 @@
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { bulkCheckOutAssets } from "~/modules/asset/service.server";
+import { bulkAssignCustody } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  makeShelfError,
+  ShelfError,
+} from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -56,6 +61,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         additionalData: { userId, assetIds, custodian },
         label: "Assets",
         status: 404,
+        // `getTeamMember` already classifies its errors — forward that
+        // decision so DB / connectivity failures inside it still reach
+        // Sentry. Fall back to the Prisma not-found check otherwise.
+        shouldBeCaptured: isLikeShelfError(cause)
+          ? cause.shouldBeCaptured
+          : !isNotFoundError(cause),
       });
     });
 
@@ -74,7 +85,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await bulkCheckOutAssets({
+    await bulkAssignCustody({
       userId,
       assetIds,
       custodianId: custodian.id,

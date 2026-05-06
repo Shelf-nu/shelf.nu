@@ -83,6 +83,12 @@ vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
 }));
 
+// why: testing custody assignment without executing actual activity event recording
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+  recordEvents: vi.fn().mockResolvedValue(undefined),
+}));
+
 // why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),

@@ -1,0 +1,27 @@
+appId: com.shelf.companion.carlos
+name: "Settings - Logout"
+tags:
+  - settings
+
+---
+# Test: Sign out flow
+# Verifies sign out navigates back to login screen
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Run the shared logout flow
+- runFlow: ../../shared/logout.yaml
+
+# Use tapOn on login screen element to force tree refresh after runFlow
+- tapOn:
+    text: "Shelf"
+
+# Verify we're on the login screen
+- assertVisible:
+    id: "email-input"
+
+- takeScreenshot: settings-logout-success

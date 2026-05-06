@@ -15,6 +15,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_SSO_DOMAIN } from "~/utils/env";
@@ -107,17 +108,21 @@ export default function SSOLogin() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
+
+  /** Focus the domain field on mount (intentional first-field focus on auth pages). */
+  const domainInputRef = useAutoFocus<HTMLInputElement>();
+
   return (
     <>
       <div className="flex flex-col gap-3">
         <Form method="post" ref={zo.ref}>
           <div className="flex flex-col gap-3">
             <Input
+              ref={domainInputRef}
               data-test-id="domain"
               label="Company domain"
               placeholder="yourdomain.com"
               required
-              autoFocus={true}
               name={zo.fields.domain()}
               type="text"
               autoComplete="domain"

@@ -1,0 +1,37 @@
+appId: com.shelf.companion.carlos
+name: "Dashboard - Quick Actions"
+tags:
+  - dashboard
+
+---
+# Test: Quick action buttons navigate to correct screens
+# Verifies each quick action routes properly
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Test 1: Bookings quick action (index: 0 = quick action row, not tab bar)
+- tapOn:
+    text: "Bookings"
+    index: 0
+# Verify we navigated to the Bookings screen — use tapOn for reliable tree refresh
+- tapOn:
+    text: "Bookings"
+- takeScreenshot: quick-action-bookings
+
+# Go back to home
+- tapOn: "Home"
+- tapOn:
+    text: "Quick Actions"
+
+# Test 2: Audits quick action
+- tapOn:
+    text: "Audits"
+    index: 0
+# Verify we navigated to the Audits screen
+- tapOn:
+    text: "Audits"
+- takeScreenshot: quick-action-audits

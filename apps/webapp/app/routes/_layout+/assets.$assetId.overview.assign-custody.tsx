@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { createNote } from "~/modules/note/service.server";
@@ -227,11 +228,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * 2. Update the asset status to IN_CUSTODY
      * 3. Create a new custody record linked to the custodian
      */
+    // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
         await tx.custody.deleteMany({ where: { assetId } });
 
-        return tx.asset.update({
+        const updated = await tx.asset.update({
           where: {
             id: assetId,
             organizationId,
@@ -249,6 +251,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             title: true,
           },
         });
+
+        // Activity event must be inside transaction for atomicity
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_ASSIGNED",
+            entityType: "ASSET",
+            entityId: updated.id,
+            assetId: updated.id,
+            teamMemberId: custodianId,
+            targetUserId: custodianTeamMember.user?.id ?? undefined,
+          },
+          tx
+        );
+
+        return updated;
       })
       .catch((cause) => {
         throw new ShelfError({

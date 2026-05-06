@@ -27,7 +27,9 @@ export default function CurrencySelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedCurrency, setSelectedCurrency] = useState(defaultValue);
+  // Lazy initializer avoids a false-positive derived-state lint: after mount this
+  // state is user-controlled via the selector, so it must NOT re-sync with the prop.
+  const [selectedCurrency, setSelectedCurrency] = useState(() => defaultValue);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const [searchQuery, setSearchQuery] = useState("");

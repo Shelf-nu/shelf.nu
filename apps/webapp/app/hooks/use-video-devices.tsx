@@ -3,6 +3,60 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 
 /**
+ * Content for the camera-permissions UI. Declared at module scope (rather
+ * than inline inside the hook) so React can preserve its identity across
+ * renders and avoid unnecessary remounts.
+ */
+function DevicesPermissionContent({
+  error,
+  onRequestPermissions,
+}: {
+  error: Error | null;
+  onRequestPermissions: () => void | Promise<void>;
+}) {
+  if (!error) {
+    return (
+      <>
+        <Spinner /> Waiting for permission to access camera/s.
+      </>
+    );
+  }
+
+  if (error.name === "NotAllowedError") {
+    return (
+      <>
+        <p>
+          Permissions have been denied. You need to allow shelf to use your
+          device's camera to scan QR codes.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            void onRequestPermissions();
+          }}
+          className="mt-4"
+        >
+          {/* NOTE: this doesnt work in chrome or firefox on the web, only on mobile. Only tested on iPhone */}
+          Request permissions again
+        </Button>
+      </>
+    );
+  }
+
+  if (error.name === "NotFoundError") {
+    return (
+      <p>
+        No media devices found. Please ensure you have a camera connected to
+        your device.
+      </p>
+    );
+  }
+
+  return <>{error.message}</>;
+}
+
+/**
  * Custom hook for managing access to video input devices (cameras)
  * Handles device enumeration, permissions, and status updates
  *
@@ -79,52 +133,12 @@ export const useVideoDevices = () => {
    * Displays error messages or loading state
    */
   function DevicesPermissionComponent() {
-    const renderContent = () => {
-      switch (true) {
-        case !error:
-          return (
-            <>
-              <Spinner /> Waiting for permission to access camera/s.
-            </>
-          );
-
-        case error?.name === "NotAllowedError":
-          return (
-            <>
-              <p>
-                Permissions have been denied. You need to allow shelf to use
-                your device's camera to scan QR codes.
-              </p>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={getDevices}
-                className="mt-4"
-              >
-                {/* NOTE: this doesnt work in chrome or firefox on the web, only on mobile. Only tested on iPhone */}
-                Request permissions again
-              </Button>
-            </>
-          );
-
-        case error?.name === "NotFoundError":
-          return (
-            <>
-              <p>
-                No media devices found. Please ensure you have a camera
-                connected to your device.
-              </p>
-            </>
-          );
-
-        default:
-          return <>{error.message}</>;
-      }
-    };
-
     return (
       <div className="mx-auto mt-16 flex h-full max-w-[90%] flex-col items-center text-center">
-        {renderContent()}
+        <DevicesPermissionContent
+          error={error}
+          onRequestPermissions={getDevices}
+        />
       </div>
     );
   }

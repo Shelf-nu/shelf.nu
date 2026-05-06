@@ -41,7 +41,7 @@ export default function ManageNotificationsDialog() {
   const defaultRecipients = (booking.notificationRecipients ??
     []) as NotificationRecipientTeamMember[];
 
-  const [selectedIds, setSelectedIds] = useState<string[]>(
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     defaultRecipients.map((tm) => tm.id)
   );
   const [selectedNameMap, setSelectedNameMap] = useState<Map<string, string>>(
