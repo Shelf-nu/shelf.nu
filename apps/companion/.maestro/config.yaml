@@ -1,0 +1,2 @@
+# Use dev bundle ID for local testing (production: com.shelf.companion)
+appId: com.shelf.companion.carlos

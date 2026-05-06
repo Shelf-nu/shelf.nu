@@ -1,0 +1,39 @@
+appId: com.shelf.companion.carlos
+name: "Assets - Pagination"
+tags:
+  - assets
+
+---
+# Test: Assets list pagination (infinite scroll)
+# Verifies scrolling loads more items
+# Note: On empty workspace (0 assets), pagination won't trigger — test is lenient
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Assets tab
+- tapOn:
+    text: "Assets"
+    index: 1
+
+# Wait for Assets screen to load
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+- takeScreenshot: assets-pagination-page1
+
+# Scroll down to trigger pagination (scroll defaults to DOWN)
+- scroll
+
+- takeScreenshot: assets-pagination-page2
+
+# Scroll further to verify more content loads
+- scroll
+
+- scroll
+
+- takeScreenshot: assets-pagination-page3

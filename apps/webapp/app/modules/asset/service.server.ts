@@ -38,7 +38,10 @@ import {
   parseBarcodesFromImportData,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
-import { createCategoriesIfNotExists } from "~/modules/category/service.server";
+import {
+  createCategoriesIfNotExists,
+  getCategory,
+} from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
@@ -1325,6 +1328,10 @@ export async function updateAsset({
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
+      // why: connect: { id } is unscoped — verify the category belongs to this
+      // org before connecting, otherwise an attacker who knows a foreign-org
+      // category id could attach it to their asset (cross-org IDOR).
+      await getCategory({ id: categoryId, organizationId });
       Object.assign(data, {
         category: {
           connect: {
@@ -1336,6 +1343,25 @@ export async function updateAsset({
 
     /** Connect the new location id */
     if (newLocationId) {
+      // why: same IDOR concern as category — verify the location is in this
+      // org before connecting. Lightweight findFirst, getLocation() loads
+      // paginated assets and is too heavy here.
+      const orgLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+        select: { id: true },
+      });
+      if (!orgLocation) {
+        throw new ShelfError({
+          cause: null,
+          title: "Location not found",
+          message:
+            "The selected location does not exist or you don't have access to it.",
+          additionalData: { newLocationId, organizationId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
       Object.assign(data, {
         location: {
           connect: {
@@ -3607,7 +3633,17 @@ export async function bulkDeleteAssets({
   }
 }
 
-export async function bulkCheckOutAssets({
+/**
+ * Assigns custody of multiple assets to a team member.
+ *
+ * Sets each asset's status to IN_CUSTODY, creates custody records linking
+ * them to the custodian, and logs activity notes. Only AVAILABLE assets
+ * can be assigned — throws if any selected asset is unavailable.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkAssignCustody({
   userId,
   assetIds,
   custodianId,
@@ -3751,7 +3787,7 @@ export async function bulkCheckOutAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking out assets.";
+        : "Something went wrong while assigning custody.";
 
     throw new ShelfError({
       cause,
@@ -3762,7 +3798,17 @@ export async function bulkCheckOutAssets({
   }
 }
 
-export async function bulkCheckInAssets({
+/**
+ * Releases custody of multiple assets, returning them to AVAILABLE status.
+ *
+ * Deletes custody records, sets each asset's status to AVAILABLE, and logs
+ * activity notes. Only assets that currently have custody can be released —
+ * throws if any selected asset has no custody.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkReleaseCustody({
   userId,
   assetIds,
   organizationId,
@@ -3890,7 +3936,7 @@ export async function bulkCheckInAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking in assSets.";
+        : "Something went wrong while releasing custody.";
 
     throw new ShelfError({
       cause,
