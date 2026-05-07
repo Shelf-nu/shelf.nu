@@ -141,7 +141,30 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
         custodianId: "custodian-1",
         custodianName: "Jane Doe",
         organizationId: "org-1",
+        role: "ADMIN",
       })
+    );
+  });
+
+  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202162994)", async () => {
+    // Pre-fix the mobile route resolved `role` but never passed it to
+    // `bulkCheckOutAssets`; the service's "self-service can only assign
+    // to themselves" guard never ran. This regression guard asserts the
+    // route now plumbs `role` through.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1"],
+      custodianId: "custodian-1",
+    });
+
+    await action(createActionArgs({ request }));
+
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "SELF_SERVICE" })
     );
   });
 

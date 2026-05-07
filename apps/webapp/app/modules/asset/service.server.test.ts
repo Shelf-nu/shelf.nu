@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -14,6 +15,7 @@ import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   bulkAssignAssetTags,
+  bulkCheckOutAssets,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
   checkOutQuantity,
@@ -1090,5 +1092,174 @@ describe("updateAsset cross-org guards", () => {
       where: { id: "location-from-org-B", organizationId: "org-A" },
       select: { id: true },
     });
+  });
+});
+
+/**
+ * Centralised SELF_SERVICE guards for the bulk custody flows.
+ *
+ * Both web and mobile bulk-assign / bulk-release routes funnel through
+ * `bulkCheckOutAssets` / `bulkCheckInAssets`. Pre-fix the
+ * "self-service can only assign-to-self" check lived inline in the
+ * web route only — the mobile route shipped without it (hex-security
+ * r3202162994 / r3202161632). Moving the check into the service makes
+ * both callers safe by default; these tests are the regression guard.
+ */
+describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Re-arm `db.asset.update` after the refreshExpiredAssetImages suite
+    // (see notes on the checkOutQuantity suites).
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+  });
+
+  it("rejects when SELF_SERVICE assigns to a custodian whose user is not the actor", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Other Person",
+      user: {
+        id: "other-user",
+        firstName: "Other",
+        lastName: "Person",
+        displayName: null,
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ShelfError);
+    expect((caught as ShelfError).status).toBe(403);
+    expect((caught as ShelfError).message).toContain(
+      "Self user can only assign custody to themselves"
+    );
+  });
+
+  it("allows SELF_SERVICE assigning to a custodian whose user IS the actor", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Self",
+      user: {
+        id: "user-current",
+        firstName: "Self",
+        lastName: "User",
+        displayName: null,
+      },
+    });
+
+    // Should not throw the 403; downstream calls may stub-fail but the
+    // SELF_SERVICE branch is past by the time that happens.
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-self",
+        custodianName: "Self",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
+  });
+
+  it("does not run the SELF_SERVICE check when role is ADMIN", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Anyone",
+      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
+    });
+
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-anyone",
+        custodianName: "Anyone",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.ADMIN,
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
+  });
+
+  it("does not run the SELF_SERVICE check when role is omitted (back-compat)", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Anyone",
+      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
+    });
+
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-anyone",
+        custodianName: "Anyone",
+        organizationId: "org-1",
+        settings: {} as any,
+        // role intentionally omitted — old call sites that haven't
+        // been updated must not start throwing 403s.
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
   });
 });

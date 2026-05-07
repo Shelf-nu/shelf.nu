@@ -80,6 +80,11 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
+    /**
+     * Pass `role` so the service-level SELF_SERVICE guard fires.
+     * Without it, a SELF_SERVICE user could assign custody to any
+     * team member (hex-security r3202162994).
+     */
     await bulkCheckOutAssets({
       userId: user.id,
       assetIds,
@@ -88,6 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams: "",
       settings,
+      role,
     });
 
     return data({ success: true });

@@ -758,7 +758,7 @@ updated to honour the same invariant at the same time.
       status is AVAILABLE don't. Apply `?status=CHECKED_OUT` —
       same pattern. Only `AVAILABLE` had its semantic widened to be
       qty-aware.
-- [ ] **Add-to-kit scanner drawer** — scan a Pens QR. The asset row
+- [x] **Add-to-kit scanner drawer** — scan a Pens QR. The asset row
       in the drawer shows `Pens · 100 units`. Drill shows just
       `Drill`. No regression on availability blockers.
 
@@ -766,14 +766,14 @@ updated to honour the same invariant at the same time.
 
 ## 13. Final checks before merging
 
-- [ ] `pnpm webapp:validate` green
-- [ ] `pnpm webapp:doctor` — no new react-doctor findings on the
+- [x] `pnpm webapp:validate` green
+- [x] `pnpm webapp:doctor` — no new react-doctor findings on the
       changed UI files (`advanced-asset-columns.tsx`,
       `custody-column.test.tsx`)
-- [ ] No new TypeScript warnings from `tsc --noEmit`
-- [ ] Migration applies cleanly on a fresh DB (`pnpm db:reset` then
+- [x] No new TypeScript warnings from `tsc --noEmit`
+- [x] Migration applies cleanly on a fresh DB (`pnpm db:reset` then
       `pnpm db:deploy-migration`)
-- [ ] Migration's backfill UPDATE applies cleanly on a snapshot of
+- [x] Migration's backfill UPDATE applies cleanly on a snapshot of
       production data (test on staging if available)
 
 ---

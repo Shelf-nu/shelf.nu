@@ -3861,6 +3861,7 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  role,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -3869,6 +3870,14 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Role of the user performing the operation. When `SELF_SERVICE`
+   * the service rejects assignments to anyone other than the calling
+   * user — symmetric counterpart to `bulkCheckInAssets`'s self-service
+   * guard. Centralised here so web + mobile callers share one source
+   * of truth.
+   */
+  role?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3913,6 +3922,26 @@ export async function bulkCheckOutAssets({
         },
       }),
     ]);
+
+    /**
+     * SELF_SERVICE guard: a self-service user can only assign custody
+     * to themselves. Centralised here so the web and mobile bulk-assign
+     * routes share the same enforcement — both just pass `role`.
+     */
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      custodianTeamMember?.user?.id !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetIds, custodianId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     /**
      * Filter out QUANTITY_TRACKED assets — they require per-asset

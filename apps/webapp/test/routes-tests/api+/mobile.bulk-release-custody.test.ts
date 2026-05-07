@@ -128,7 +128,29 @@ describe("POST /api/mobile/bulk-release-custody", () => {
         assetIds: ["asset-1", "asset-2"],
         organizationId: "org-1",
         currentSearchParams: "",
+        role: "ADMIN",
       })
+    );
+  });
+
+  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202161632)", async () => {
+    // Pre-fix the mobile route resolved `role` but never passed it to
+    // `bulkCheckInAssets`; the service's "self-service can only release
+    // their own custody" guard never ran. This regression guard asserts
+    // the route now plumbs `role` through.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+    });
+
+    const request = createBulkReleaseRequest({
+      assetIds: ["asset-1"],
+    });
+
+    await action(createActionArgs({ request }));
+
+    expect(bulkCheckInAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "SELF_SERVICE" })
     );
   });
 
