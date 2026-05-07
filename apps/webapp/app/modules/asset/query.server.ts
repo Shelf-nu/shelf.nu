@@ -941,7 +941,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // Only count booking custody when asset is still CHECKED_OUT
         // (partially checked-in assets should not show as in custody)
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -951,7 +951,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       }
       if (filter.value === "without-custody") {
         // Exclude both direct custody and active booking custody
-        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+        return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -981,7 +981,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     case "isNot":
       if (filter.value === "in-custody") {
         // Exclude both direct custody and active booking custody
-        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+        return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -992,7 +992,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (filter.value === "without-custody") {
         // Include both direct custody and active booking custody
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -1041,7 +1041,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // "in-custody" subsumes specific custodian IDs - just check for any custody
         // Only count booking custody when asset is still CHECKED_OUT
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
             JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -1055,7 +1055,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         const custodianIds = values.filter((v) => v !== "without-custody");
 
         if (custodianIds.length === 0) {
-          return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+          return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
               JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -1069,7 +1069,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND (
-          (cu.id IS NULL AND NOT (
+          (jsonb_array_length(custody_agg.custody) = 0 AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
               JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
@@ -1915,27 +1915,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         '[]'::jsonb
       ) AS tags,
       CASE
-        WHEN cu.id IS NOT NULL THEN
-          jsonb_build_array(
-            jsonb_build_object(
-              'name', tm.name,
-              'quantity', cu.quantity,
-              'custodian', jsonb_build_object(
-                'name', tm.name,
-                'user', CASE
-                  WHEN u.id IS NOT NULL THEN
-                    jsonb_build_object(
-                      'id', u.id,
-                      'firstName', u."firstName",
-                      'lastName', u."lastName",
-                      'profilePicture', u."profilePicture",
-                      'email', u.email
-                    )
-                  ELSE NULL
-                END
-              )
-            )
-          )
+        -- Direct custody (via Custody table) — aggregated by lateral
+        -- subquery so a multi-custodian qty-tracked asset returns one
+        -- row with the full list, not N rows. Always wins over the
+        -- booking-derived fallback when the asset has any direct
+        -- custody rows.
+        WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody
+        -- Booking-derived synthetic custody for CHECKED_OUT assets that
+        -- have no direct Custody row but are part of an active booking.
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
@@ -2017,9 +2004,39 @@ export const assetQueryJoins = Prisma.sql`
   LEFT JOIN public."Location" l ON a."locationId" = l.id
   LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
   LEFT JOIN public."Tag" t ON att."B" = t.id
-  LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
-  LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
-  LEFT JOIN public."User" u ON tm."userId" = u.id
+  LEFT JOIN LATERAL (
+    -- Aggregate ALL custody rows for this asset into a single jsonb
+    -- array. Replaces the previous direct LEFT JOINs on Custody +
+    -- TeamMember + User which caused per-custody-row duplication for
+    -- qty-tracked assets with multiple custodians (Issue A).
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'name', tm.name,
+          'quantity', cu.quantity,
+          'custodian', jsonb_build_object(
+            'name', tm.name,
+            'user', CASE
+              WHEN u.id IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', u.id,
+                  'firstName', u."firstName",
+                  'lastName', u."lastName",
+                  'profilePicture', u."profilePicture",
+                  'email', u.email
+                )
+              ELSE NULL
+            END
+          )
+        )
+      ),
+      '[]'::jsonb
+    ) AS custody
+    FROM public."Custody" cu
+    LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
+    LEFT JOIN public."User" u ON tm."userId" = u.id
+    WHERE cu."assetId" = a.id
+  ) custody_agg ON TRUE
   LEFT JOIN LATERAL (
     SELECT b.*
     FROM public."Booking" b

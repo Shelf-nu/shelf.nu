@@ -635,7 +635,31 @@ export async function getAssets(params: {
     }
 
     if (status) {
-      where.status = status;
+      // why: Asset.status flips to IN_CUSTODY/CHECKED_OUT for QUANTITY_TRACKED
+      // assets as soon as ANY unit is allocated, even if other units remain
+      // available. Filtering with `where.status = AVAILABLE` would incorrectly
+      // exclude qty-tracked rows that still have free stock. Treat AVAILABLE
+      // as inclusive of all qty-tracked rows; row.status keeps the existing
+      // strict semantic for IN_CUSTODY / CHECKED_OUT (which are already
+      // truthful for qty-tracked — the row enters those states whenever ANY
+      // unit does).
+      if (status === AssetStatus.AVAILABLE) {
+        where.AND = [
+          ...(Array.isArray(where.AND)
+            ? where.AND
+            : where.AND
+            ? [where.AND]
+            : []),
+          {
+            OR: [
+              { type: "INDIVIDUAL", status: AssetStatus.AVAILABLE },
+              { type: "QUANTITY_TRACKED" },
+            ],
+          },
+        ];
+      } else {
+        where.status = status;
+      }
     }
 
     if (categoriesIds?.length) {
@@ -957,7 +981,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        -- Note: custody_agg.custody must be in GROUP BY because the
+        -- SELECT references it. It is the per-asset aggregated jsonb
+        -- array from the lateral subquery; jsonb supports equality so
+        -- this is safe and produces one group per asset row.
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query
@@ -5316,6 +5344,31 @@ export async function releaseQuantity({
         });
       }
 
+      /**
+       * Step 4b: Reject the release if this Custody row was inherited from
+       * a kit's custody (`kitCustodyId IS NOT NULL`). Letting it through
+       * would delete the row while the parent KitCustody still exists —
+       * the kit would think it's in custody but the child allocation
+       * would be gone. The only correct path is releasing the kit's
+       * custody (which cascades). The UI hides the Release button for
+       * these rows already; this is a defense-in-depth check for direct
+       * API hits.
+       */
+      if (custody.kitCustodyId) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This custody is held via a kit. Release the kit's custody to clear this allocation.",
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            teamMemberId,
+            kitCustodyId: custody.kitCustodyId,
+          },
+        });
+      }
+
       /** Step 5: Validate the release quantity does not exceed custodied amount */
       if (quantity > custody.quantity) {
         throw new ShelfError({
@@ -5347,6 +5400,26 @@ export async function releaseQuantity({
           data: {
             quantity: { decrement: quantity },
           },
+        });
+      }
+
+      /**
+       * Step 6b: If this release removed the last Custody row on the asset,
+       * flip Asset.status back to AVAILABLE. Without this, the asset stays
+       * stuck at IN_CUSTODY even after every unit has been returned —
+       * matching the conditional-flip pattern used by the kit-custody
+       * flows (`releaseCustody` / `bulkRemoveAssetsFromKits` /
+       * `updateKitAssets` removal). We only flip when zero rows remain so
+       * an asset that still has other operator or kit-allocated custody
+       * keeps its IN_CUSTODY status.
+       */
+      const remainingCustodyCount = await tx.custody.count({
+        where: { assetId },
+      });
+      if (remainingCustodyCount === 0) {
+        await tx.asset.update({
+          where: { id: assetId },
+          data: { status: AssetStatus.AVAILABLE },
         });
       }
 

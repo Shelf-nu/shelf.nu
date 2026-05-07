@@ -800,6 +800,15 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 
+  // When this custody row was created because the asset's kit is in
+  // custody, this points to the KitCustody row that triggered it. Null
+  // for operator-assigned custody. ON DELETE CASCADE so releasing kit
+  // custody automatically removes the asset-side rows that were
+  // inherited from the kit, while leaving operator-assigned rows
+  // (kitCustodyId = null) untouched.
+  kitCustody    KitCustody? @relation(fields: [kitCustodyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitCustodyId  String?
+
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
   // DateTime
@@ -810,6 +819,7 @@ model Custody {
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])
+  @@index([kitCustodyId])
 }
 
 model Organization {
@@ -1511,6 +1521,12 @@ model KitCustody {
 
   kit   Kit    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   kitId String @unique
+
+  // Asset-side Custody rows inherited from this kit. Cascade-deleted
+  // when the KitCustody row is removed (e.g. kit-level custody
+  // released, or kit deleted), so operator-assigned custody on the
+  // same asset stays untouched.
+  inheritedCustody Custody[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

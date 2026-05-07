@@ -32,6 +32,7 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
@@ -425,6 +426,11 @@ const ListAssetContent = ({
                 >
                   {item.title}
                 </Button>
+                {isQuantityTracked(item) && item.quantity != null ? (
+                  <span className="ml-2 text-xs font-normal text-gray-500">
+                    · {item.quantity} {item.unitOfMeasure || "units"}
+                  </span>
+                ) : null}
               </span>
               <AssetStatusBadge
                 id={item.id}

@@ -1,4 +1,9 @@
-import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import {
+  data,
+  useRouteLoaderData,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+} from "react-router";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -17,6 +22,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -150,6 +156,13 @@ export default function KitAssets() {
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
+  // Read the parent kits.$kitId loader's kit data so we know whether the kit
+  // is in custody and which KitCustody row to filter custody rows by.
+  const parentData = useRouteLoaderData("routes/_layout+/kits.$kitId") as
+    | { kit?: { custody?: { id: string } | null } }
+    | undefined;
+  const kitCustodyId = parentData?.kit?.custody?.id ?? null;
+
   const { roles } = useUserRoleHelper();
   return (
     <>
@@ -180,6 +193,36 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 >
                   {item.title}
                 </Button>
+                {isQuantityTracked(item) && item.quantity != null
+                  ? (() => {
+                      // why: when the kit is in custody, the row should show
+                      // how many units the *kit* holds (sum of Custody rows
+                      // tagged with this KitCustody.id) rather than the
+                      // asset's full stock — they can differ once Option B
+                      // subtracts operator-allocated units. Format:
+                      // `46 / 80 units` (kit / total) so users can see both.
+                      const unit = item.unitOfMeasure || "units";
+                      if (kitCustodyId) {
+                        const inKit = item.custody.reduce(
+                          (sum, c) =>
+                            c.kitCustodyId === kitCustodyId
+                              ? sum + (c.quantity ?? 0)
+                              : sum,
+                          0
+                        );
+                        return (
+                          <span className="ml-2 text-xs text-gray-500">
+                            · {inKit} / {item.quantity} {unit} in kit
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="ml-2 text-xs text-gray-500">
+                          · {item.quantity} {unit}
+                        </span>
+                      );
+                    })()
+                  : null}
               </span>
               <AssetStatusBadge
                 id={item.id}

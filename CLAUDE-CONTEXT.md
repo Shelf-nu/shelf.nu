@@ -356,6 +356,148 @@ row refactor).
   `AssetRowActionsDropdown`.
 - 5 contract tests added for `fulfilModelRequestsAndCheckout`.
 
+### Sub-phase 3d-Polish-2: Kit Custody Correctness + UX (COMPLETED, NOT YET COMMITTED)
+
+Resolves the three "Known Issues" that had been open since Phase 2/3a
+shipped, plus a cluster of folded-in fixes caught during manual
+testing. Tracking doc: `TESTING-KIT-CUSTODY-CORRECTNESS.md` at the
+worktree root.
+
+**Headline correctness fixes:**
+
+- **Issue A — Asset-index duplicate rows.** Multi-custodian qty-tracked
+  assets used to render N rows where N = custodian count. Replaced the
+  per-custody `LEFT JOIN` in `asset/query.server.ts` with a
+  `LEFT JOIN LATERAL` + `jsonb_agg(...) AS custody` exposing a single
+  jsonb array per asset. Dropped `cu.id, tm.name, u.*` from the
+  `GROUP BY` in `asset/service.server.ts`. The custody column now
+  renders the primary custodian inline + a `+N more` chip whose
+  tooltip lists every custodian with their `(qty)` suffix. Same
+  multi-custodian rendering ported to the simple asset index too.
+- **Issue B — Kit-custody quantity = 1 regardless of asset qty.**
+  `buildKitCustodyInheritData` now reads existing custody for each
+  asset inside the tx and writes
+  `quantity = asset.quantity − Σ(existing custody)` for qty-tracked,
+  `quantity = 1` for INDIVIDUAL. Fully-allocated assets are silently
+  skipped (no kit row created — `remaining ≤ 0` branch). Refactored
+  three call sites: `updateKitAssets`, `bulkAssignKitCustody`,
+  `kits.$kitId.assets.assign-custody.tsx`.
+- **Issue C — Kit removal wipes ALL custody.** Filter every kit→asset
+  custody `deleteMany` by `{ kitCustodyId }` so operator-assigned rows
+  on the same asset survive. `bulkReleaseKitCustody` /
+  `releaseCustody` (kit) / `deleteKit` use **emit-first-then-cascade**:
+  query the kit-allocated rows, emit `CUSTODY_RELEASED` events, then
+  delete the parent `KitCustody` (FK cascade removes children). Asset
+  status flip is **conditional** — only flips to AVAILABLE when zero
+  remaining Custody rows exist after the kit-allocated removal.
+
+**Schema change:** new column on `Custody`:
+
+```prisma
+kitCustody   KitCustody? @relation(fields: [kitCustodyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+kitCustodyId String?
+@@index([kitCustodyId])
+```
+
+Plus inverse `inheritedCustody Custody[]` on `KitCustody`. Migration:
+`20260430100759_add_kit_custody_id_to_custody`. Includes a one-shot
+backfill UPDATE that walks `KitCustody → Kit → Asset` and matches
+`Custody.teamMemberId = KitCustody.custodianId` to tag pre-existing
+kit-allocated rows on prod (628 KitCustody parents at time of
+writing). Schema bits verified in dev DB; backfill correctness
+requires a staging or prod-snapshot test (path B in the testing doc).
+
+**Folded-in fixes that landed in the same scope:**
+
+- **Picker-filter visibility.** `?status=AVAILABLE` on the
+  manage-assets pickers (kit + location) now includes qty-tracked
+  rows. Pre-fix, qty-tracked assets whose row.status flipped to
+  IN*CUSTODY (because \_any* unit was allocated) were excluded
+  entirely. Fix in `asset/service.server.ts:638` and
+  `asset/utils.server.ts:478` — when `status === AVAILABLE`, build a
+  qty-aware `OR` clause; INDIVIDUAL still uses strict status, qty-tracked
+  is included regardless. IN_CUSTODY / CHECKED_OUT semantics unchanged.
+- **Custody filter SQL** (`Custody is in-custody / without-custody`).
+  Replacing the LEFT JOIN with the lateral broke the seven `cu.id IS
+NULL` / `cu.id IS NOT NULL` clauses in `addCustodyFilter`. Now use
+  `jsonb_array_length(custody_agg.custody) > 0 / = 0`. The `EXISTS
+(SELECT 1 FROM "Custody" cu WHERE …)` subqueries are unaffected
+  (their `cu` is locally scoped).
+- **Kit-aware qty display on kit detail page.** When the kit is in
+  custody, qty-tracked rows show `· N / M units in kit` where N =
+  kit-allocated (sum of `Custody.quantity` for the kit's
+  `KitCustody.id`) and M = `asset.quantity`. When kit not in custody,
+  falls back to `· M units`. INDIVIDUAL rows are unaffected. Threaded
+  via `useRouteLoaderData("routes/_layout+/kits.$kitId")` so the
+  asset-list child route reads the parent's kit context.
+- **Qty display on lists** outside the kit page — Location detail and
+  the add-to-kit scanner drawer show `· N units` (or `<unitOfMeasure>`).
+- **Status flip on last release.** `releaseQuantity` was deleting the
+  Custody row but never updating `Asset.status`. Now counts remaining
+  custody rows after the delete; if zero, flips status to AVAILABLE.
+  Mirrors the kit-flow conditional-flip pattern.
+- **"Via kit" badge in Custody Breakdown.** On the asset overview's
+  Custody Breakdown card, kit-allocated rows now render a blue "Via
+  kit" badge with a tooltip linking to the parent kit, instead of the
+  Release button. Releasing a kit-allocated row directly would
+  corrupt state (orphan parent KitCustody). Server-side guard added
+  in `releaseQuantity` for defense in depth: throws 400 if
+  `custody.kitCustodyId` is set.
+- **Informational note in `QuantityCustodyDialog`.** When the asset
+  is in any kit, a soft blue note tells the user operator custody is
+  tracked separately from the kit's allocation. **Important:** this
+  note's copy must be revised once Phase 4 ships the rebalance
+  feature — see the Phase-4 bullet about reviewing this note.
+- **Filter-UI infinite-loop fix** (unrelated but caught during
+  testing). `value-field.tsx` was calling `setFilter("")` on enum
+  fields with no default, retriggering its own effect on every
+  parent re-render → "Maximum update depth exceeded". Fixed by
+  removing the no-op `setFilter("")` and gating the `cf_` branch on
+  a non-empty default.
+- **Picker chip wrap** in custody column on both indexes — outer
+  wrapper switched to `flex flex-wrap items-center gap-x-2 gap-y-1`
+  so the `+N more` chip drops to a second line on narrow columns
+  instead of being cropped.
+
+**Tests added:**
+
+- `kit/service.server.test.ts`: 4 new tests (Option B subtraction
+  with operator custody, fully-allocated → skip branch, kit-custody
+  threading on inherit, dual-custody preservation on removal).
+- `asset/service.server.test.ts`: 2 new `releaseQuantity` tests
+  (status flips on last release; doesn't flip when other rows
+  remain) + the existing 1.
+- `kits.$kitId.assets.assign-custody.test.tsx`: Option B route-level
+  assertion (Bob/96 not Bob/100 when Pleb already has 4).
+- `query.server.test.ts`: assertion strings updated from `cu.id IS
+NULL` to `jsonb_array_length(custody_agg.custody) = 0`.
+- `advanced-asset-columns` exported `CustodyColumn` for testability.
+- `kits.$kitId.test.tsx` (new file): basic route smoke.
+
+**Final state at session end:** `pnpm webapp:validate` green —
+**138 / 1930** tests passing across all suites. Lint + typecheck +
+tests all clean. Manual testing checklist in
+`TESTING-KIT-CUSTODY-CORRECTNESS.md` is current and reflects the
+implemented behavior; section 4a's "boxed Open Question" was
+removed (Option B resolved it).
+
+**Known follow-ups documented in PRD Phase 4:**
+
+- **Rebalance kit allocation when assigning operator custody on a
+  fully-allocated qty-tracked asset.** Today the Assign button is
+  disabled when free pool = 0; the user must release kit custody
+  first. Phase 4 should re-enable Assign with confirmation, decrement
+  the kit row, emit paired `CUSTODY_RELEASED` (kit) +
+  `CUSTODY_ASSIGNED` (operator) events.
+- **Review the in-kit informational note in `QuantityCustodyDialog`**
+  once the rebalance feature ships — the current copy ("the kit's
+  'in kit' count is unaffected") will be wrong once kit-decrement
+  behavior exists. Update to a yellow warning describing the kit
+  reduction.
+
+Both bullets are inline in `docs/proposals/quantitative-assets.md` →
+"Phase 4: Kit, Location, and Auxiliary Features".
+
 ### Sub-phase 3d follow-ups (NOT STARTED)
 
 Found during manual testing of 3d — worth a dedicated sub-phase
@@ -441,6 +583,8 @@ kits), then index grouping (last because it's the most UX-heavy).
 6. `20260421125426_add_booking_model_request` — Phase 3d: model-request pivot table
 7. `20260423120457_track_fulfilled_quantity_on_booking_model_request` — Phase 3d-Polish: audit-trail columns (`fulfilledQuantity`, `fulfilledAt`)
 8. `20260421123609_add_activity_events_model` — main (PR #2495): structured `ActivityEvent` table for reports
+9. `20260430100759_add_kit_custody_id_to_custody` — Phase 3d-Polish-2: discriminator FK + one-shot backfill UPDATE for kit-allocated rows
+10. `20260504132547_enable_rls_for_booking_model_request` — RLS policy for `BookingModelRequest` (auto-generated alongside session work)
 
 ---
 
@@ -530,6 +674,8 @@ seed scripts won't run until ported; tracking under "Reports port".
 - `app/components/asset-model/form.test.ts`
 - `app/components/assets/form.test.ts`
 - `test/factories/assetModel.ts`
+- `app/components/assets/assets-index/custody-column.test.tsx` — Phase 3d-Polish-2: multi-custodian rendering
+- `test/routes-tests/kits.$kitId.test.tsx` — Phase 3d-Polish-2: route smoke test
 
 ---
 
@@ -540,11 +686,24 @@ seed scripts won't run until ported; tracking under "Reports port".
 Phase 3c/3d/3d-Polish unit-test additions). `TESTING-PHASE-3D.md`
 manual checklist is current.
 
-**Post-merge at `a64d8c22e` (pending):** typecheck has ~60 errors in
-main's reports + seed scripts (Phase-3a/Phase-2 incompatibility — see
-"Last sync with main"). Custody / booking / drawer / activity-event
-paths are clean. Test count and validate status will be re-baselined
-once the reports port lands.
+**Post-merge at `a64d8c22e`:** Phase 3a/Phase 2 incompatibility errors
+in main's reports + scripts were resolved in commit `12f2e8257`. Lint
+warnings cleared in `c4316b0ca`. ActivityEvent flows wired in
+`e97bb85db`.
+
+**Current baseline (Phase 3d-Polish-2 work, NOT YET COMMITTED):**
+`pnpm webapp:validate` green — **138 / 1930** tests passing across all
+suites. Lint + typecheck + tests all clean. New tests added: 4 in
+`kit/service.server.test.ts` (Option B), 2 in
+`asset/service.server.test.ts` (releaseQuantity status flip), 1 new
+in `kits.$kitId.assets.assign-custody.test.tsx` (Option B route),
+
+- updated `query.server.test.ts` assertions.
+
+`TESTING-KIT-CUSTODY-CORRECTNESS.md` is the active manual checklist.
+Sections 0, 1, 2, 3 (a/b/c) ticked off. Section 4a is in-progress —
+tester reached it and verified Option B numbers in the DB. Sections
+4b–13 remain to walk through.
 
 Phase 2 was browser-tested and verified working:
 
@@ -562,51 +721,24 @@ Phase 2 was browser-tested and verified working:
 
 ## Known Issues
 
-### Duplicate rows in advanced asset index for multi-custodian quantity assets
+All three previously-tracked correctness bugs (duplicate rows on
+advanced index, kit custody = 1 unit, kit removal wipes ALL custody)
+were resolved in **Sub-phase 3d-Polish-2**. See that section above
+for the details. No outstanding correctness issues at session end.
 
-**Problem:** When a quantity-tracked asset has multiple custody records (multiple
-custodians), it shows as duplicate rows in the advanced index view. This is because
-the raw SQL query in `asset/query.server.ts` does a `LEFT JOIN` on `Custody` and
-the `GROUP BY` includes `cu.id`, so each custody record produces a separate row.
+**Open follow-up work** (not bugs, deferred features):
 
-**Root cause:** `assetQueryJoins` (line 1866) joins custody 1:1 per row, and the
-`GROUP BY` in `service.server.ts` (line 907) groups by `cu.id, tm.name, u.id, ...`
-— grouping per custody record instead of per asset.
-
-**Fix needed:** Replace the direct custody LEFT JOIN with a lateral subquery or
-correlated subquery that aggregates all custody records into a single JSON array
-per asset. This way each asset produces exactly one row regardless of how many
-custodians it has. The custody column in the index should show multiple custodians
-(e.g., "Project Engineer (4), Self Service (7)") rather than duplicating the row.
-
-**Files to change:**
-
-- `app/modules/asset/query.server.ts` — `assetQueryJoins` and custody CASE block
-- `app/modules/asset/service.server.ts` — GROUP BY clause (remove `cu.id`, `tm.name`, `u.id`, etc.)
-- Asset index UI components — custody column renderer to handle multiple custodians
-
-### Kit custody assigns only 1 unit for quantity-tracked assets
-
-**Problem:** When a quantity-tracked asset is added to a kit that already
-has custody, the inherited custody record is created with `quantity: 1`
-(the default) instead of the asset's full tracked quantity. The asset
-gets marked `IN_CUSTODY` while only 1 unit is actually assigned.
-
-**Files to change:**
-
-- `app/modules/kit/service.server.ts` — the `custody.create` inside
-  `assetsToInheritStatus` map (~line 2256) needs to set `quantity`
-  from the asset's tracked amount
-
-### Kit removal wipes all custody for quantity-tracked assets
-
-**Problem:** Removing a quantity-tracked asset from an in-custody kit
-deletes ALL custody rows via `custody: { deleteMany: {} }` and forces
-`AVAILABLE` status. This erases unrelated quantity custody allocations
-that have nothing to do with the kit.
-
-**Files to change:**
-
-- `app/routes/_layout+/kits.$kitId.tsx` (~line 297) — needs a
-  quantity-aware release path that only removes the kit-related
-  custody record, not all of them
+- **Reports port** — main's `reports/helpers.server.ts` (~1500
+  lines) and `scripts/seed-reporting-demo/*` were ported in commit
+  `12f2e8257` for compile cleanliness, but reports haven't been
+  end-to-end verified against the new BookingAsset / Custody[] /
+  ActivityEvent schema. Tracked as task #68 in the in-session task
+  list.
+- **Phase 4 rebalance** — assigning operator custody on a fully
+  kit-allocated qty-tracked asset is currently blocked (`Assign`
+  button disabled). Phase 4 should auto-decrement the kit row.
+  Bullet inline in `docs/proposals/quantitative-assets.md`.
+- **Backfill verification on production snapshot** — the migration's
+  one-shot UPDATE was vacuously verified locally (0 KitCustody on
+  dev DB). Path B in `TESTING-KIT-CUSTODY-CORRECTNESS.md` covers
+  staging/prod-snapshot validation of the 628 prod KitCustody rows.

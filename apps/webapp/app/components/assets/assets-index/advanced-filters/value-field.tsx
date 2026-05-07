@@ -190,12 +190,23 @@ export function ValueField({
         const options =
           customFields.find((field) => field?.name === filter.name.slice(3))
             ?.options || [];
-        setFilter(options[0] || ""); // Set default value to first option when enum field is selected
-      } else {
-        // Non-custom enum fields (category, location, kit, assetModel, etc.)
-        // default to empty string — user must pick a value from the selector
-        setFilter("");
+        // why: only call setFilter when there's an actual default to apply.
+        // Non-empty `options[0]` is a real default; falsy means there's no
+        // default and the user must pick — calling setFilter("") here would
+        // be a no-op that thrashes parent state and triggers an infinite
+        // render loop (parent rebuilds the filters array on every call,
+        // setFilter gets a new identity, effect re-runs, setFilter("") is
+        // called again, repeat).
+        if (options[0]) {
+          setFilter(options[0]);
+        }
       }
+      // Non-custom enum fields (category, location, kit, assetModel, etc.)
+      // default to empty string — the user must pick a value from the
+      // selector. We deliberately do not call setFilter("") here because
+      // the value is already "" (it would be a no-op that creates a new
+      // filters array, retriggering this effect via setFilter's unstable
+      // identity → infinite loop).
     }
   }, [customFields, filter.name, filter.type, filter.value, setFilter]);
 

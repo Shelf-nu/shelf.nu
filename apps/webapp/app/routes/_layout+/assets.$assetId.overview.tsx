@@ -789,6 +789,9 @@ export default function AssetOverview() {
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}
+              inKit={
+                asset.kit ? { id: asset.kit.id, name: asset.kit.name } : null
+              }
             />
           ) : null}
 

@@ -47,7 +47,7 @@ import type {
   ColumnLabelKey,
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
-import { getPrimaryCustody } from "~/modules/custody/utils";
+import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
@@ -507,13 +507,25 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   );
 }
 
-function CustodyColumn({
+/**
+ * Renders the custody column for the advanced asset index.
+ *
+ * Single custodian: renders just the badge (with `(qty)` suffix when
+ * the custody row tracks more than one unit, hiding the suffix on
+ * INDIVIDUAL assets to keep the row clean).
+ *
+ * Multiple custodians: renders the primary custodian's badge plus a
+ * `+N more` chip; hovering the chip reveals a tooltip listing every
+ * custodian on its own line so the full custody breakdown stays one
+ * hover away without inflating row height.
+ */
+export function CustodyColumn({
   custody,
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
-  const primaryCustody = getPrimaryCustody(custody);
+  const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
     <When
@@ -524,13 +536,79 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {primaryCustody?.custodian ? (
-          <TeamMemberBadge teamMember={primaryCustody.custodian} />
-        ) : (
+        {!primary || total === 0 ? (
           <EmptyTableValue />
+        ) : (
+          <CustodyColumnContent primary={primary} others={others} />
         )}
       </Td>
     </When>
+  );
+}
+
+/** Quantity suffix is intentionally omitted for `quantity <= 1` so
+ * INDIVIDUAL assets and qty-tracked rows that hold a single unit stay
+ * visually identical to today's rendering. */
+function CustodyQuantitySuffix({ quantity }: { quantity?: number }) {
+  if (!quantity || quantity <= 1) return null;
+  return <span className="ml-1 text-gray-500">({quantity})</span>;
+}
+
+/** Renders the badge + optional `+N more` chip. Split out so the empty
+ * state can short-circuit before the tooltip provider mounts. */
+function CustodyColumnContent({
+  primary,
+  others,
+}: {
+  primary: NonNullable<AdvancedIndexAsset["custody"]>[number];
+  others: NonNullable<AdvancedIndexAsset["custody"]>[number][];
+}) {
+  const hasOthers = others.length > 0;
+
+  const primaryBadge = (
+    <span className="inline-flex min-w-0 items-center">
+      <TeamMemberBadge teamMember={primary.custodian} />
+      <CustodyQuantitySuffix quantity={primary.quantity} />
+    </span>
+  );
+
+  if (!hasOthers) {
+    return primaryBadge;
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {primaryBadge}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+              data-testid="custody-more-chip"
+            >
+              +{others.length} more
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            className="max-w-xs"
+            data-testid="custody-more-tooltip"
+          >
+            <ul className="flex flex-col gap-1 text-sm">
+              {[primary, ...others].map((entry, index) => {
+                const name = entry.custodian?.name ?? entry.name ?? "Unknown";
+                const qty = entry.quantity;
+                return (
+                  <li key={`${name}-${index}`}>
+                    {name}
+                    {qty && qty > 1 ? ` (${qty})` : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
   );
 }
 

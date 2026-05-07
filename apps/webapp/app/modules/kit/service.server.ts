@@ -13,6 +13,7 @@ import type {
 } from "@prisma/client";
 import {
   AssetStatus,
+  AssetType,
   BookingStatus,
   ErrorCorrection,
   KitStatus,
@@ -76,6 +77,115 @@ import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
+
+/**
+ * Build per-asset Custody rows that inherit a KitCustody assignment.
+ *
+ * When a kit is in custody, every asset in the kit gets a child Custody row
+ * tagged with `kitCustodyId` so the row's origin is traceable. The rule for
+ * `quantity`:
+ * - INDIVIDUAL assets always inherit `quantity: 1`.
+ * - QUANTITY_TRACKED assets inherit only the **remaining** pool — the asset's
+ *   total `quantity` minus any already-allocated Custody rows (operator
+ *   custody and pre-existing kit-allocated custody are both subtracted; the
+ *   helper does not distinguish — what matters is "how many units are not
+ *   already spoken for"). When remaining <= 0 the asset is silently skipped
+ *   (no child row created), so the kit-custody flow degrades gracefully when
+ *   an asset is fully allocated to operators.
+ *
+ * Tagging the child rows with `kitCustodyId` is what allows us to delete only
+ * kit-allocated custody (filter by `kitCustodyId`) without disturbing
+ * operator-assigned per-unit custody on the same asset, and lets the FK
+ * cascade clean them up automatically when the parent KitCustody is deleted.
+ *
+ * @param args.tx - Transactional Prisma client (so the existing-custody read
+ *   sees rows written earlier in the same tx).
+ * @param args.kitCustodyId - The parent KitCustody row this inheritance points back to.
+ * @param args.teamMemberId - The custodian team member, copied to every child row.
+ * @param args.assetIds - Assets in the kit that should receive inherited custody.
+ * @returns A flat array suitable for `tx.custody.createMany({ data })`. Empty
+ *   when every asset is fully operator-allocated.
+ */
+/**
+ * Structural type for the only Prisma surface we need from the tx. Typed this
+ * way (rather than `Prisma.TransactionClient`) because the project uses an
+ * extended Prisma client, and the extended tx is not directly assignable to
+ * the generated `Prisma.TransactionClient`. Mirrors the `RecordEventTxClient`
+ * pattern used in `activity-event/service.server.ts`.
+ */
+type KitCustodyInheritTxClient = {
+  asset: {
+    findMany: (args: {
+      where: { id: { in: string[] } };
+      select: {
+        id: true;
+        type: true;
+        quantity: true;
+        custody: { select: { quantity: true } };
+      };
+    }) => Promise<
+      Array<{
+        id: string;
+        type: AssetType;
+        quantity: number | null;
+        custody: Array<{ quantity: number }>;
+      }>
+    >;
+  };
+};
+
+export async function buildKitCustodyInheritData({
+  tx,
+  kitCustodyId,
+  teamMemberId,
+  assetIds,
+}: {
+  tx: KitCustodyInheritTxClient;
+  kitCustodyId: string;
+  teamMemberId: string;
+  assetIds: string[];
+}): Promise<Prisma.CustodyCreateManyInput[]> {
+  if (assetIds.length === 0) return [];
+
+  const assets = await tx.asset.findMany({
+    where: { id: { in: assetIds } },
+    select: {
+      id: true,
+      type: true,
+      quantity: true,
+      custody: { select: { quantity: true } },
+    },
+  });
+
+  const rows: Prisma.CustodyCreateManyInput[] = [];
+  for (const asset of assets) {
+    if (asset.type !== AssetType.QUANTITY_TRACKED) {
+      rows.push({
+        teamMemberId,
+        assetId: asset.id,
+        kitCustodyId,
+        quantity: 1,
+      });
+      continue;
+    }
+    // why: subtract every existing Custody row's quantity (operator AND
+    // pre-existing kit-allocated) so we never over-allocate the asset's
+    // tracked pool. Pleb already holds 4 of 80 → kit row claims 76, not 80.
+    const allocated = asset.custody.reduce(
+      (sum, row) => sum + (row.quantity ?? 0),
+      0
+    );
+    const remaining = (asset.quantity ?? 0) - allocated;
+    if (remaining <= 0) continue;
+    rows.push({
+      teamMemberId,
+      assetId: asset.id,
+      kitCustodyId,
+      quantity: remaining,
+    });
+  }
+  return rows;
+}
 
 export async function createKit({
   name,
@@ -802,7 +912,12 @@ export async function releaseCustody({
               displayName: true,
             },
           },
-          custody: { select: { custodian: { include: { user: true } } } },
+          custody: {
+            select: {
+              id: true,
+              custodian: { include: { user: true } },
+            },
+          },
         },
       }),
       getUserByID(userId, {
@@ -827,7 +942,45 @@ export async function releaseCustody({
     // Use transaction for atomicity - prevents orphaned custody records on partial failure
     // Activity events must be inside to ensure audit trail consistency
     await db.$transaction(async (tx) => {
-      // Delete kit custody and update kit status
+      // Capture the kit-allocated Custody rows BEFORE the cascade so we can
+      // emit `CUSTODY_RELEASED` events for them. Filtering by `kitCustodyId`
+      // means operator-assigned custody on the same assets is left untouched
+      // when the FK cascade fires.
+      const kitCustodyId = kit.custody?.id;
+      const inheritedCustodyRows = kitCustodyId
+        ? await tx.custody.findMany({
+            where: { kitCustodyId },
+            select: {
+              assetId: true,
+              teamMemberId: true,
+              kitCustodyId: true,
+            },
+          })
+        : [];
+
+      // Activity events emitted FIRST — recordEvents runs inside the tx so
+      // they roll back atomically if the kit-update below fails.
+      if (inheritedCustodyRows.length > 0) {
+        await recordEvents(
+          inheritedCustodyRows.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: kit.id,
+            teamMemberId: row.teamMemberId,
+            targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+      }
+
+      // Delete kit custody and update kit status. Deleting the KitCustody
+      // row cascades to its child Custody rows (kitCustodyId FK) — no
+      // explicit `tx.custody.deleteMany` is needed any more.
       await tx.kit.update({
         where: { id: kitId, organizationId },
         data: {
@@ -836,35 +989,25 @@ export async function releaseCustody({
         },
       });
 
-      // Delete asset custody records first, then update asset status
+      // Only mark assets AVAILABLE if no operator-assigned custody remains.
+      // If an asset still has direct (non-kit) custody, it keeps IN_CUSTODY.
       const assetIds = kit.assets.map((a) => a.id);
-
-      await tx.custody.deleteMany({
+      const assetsWithRemainingCustody = await tx.custody.findMany({
         where: { assetId: { in: assetIds } },
+        select: { assetId: true },
       });
-
-      await tx.asset.updateMany({
-        where: { id: { in: assetIds }, organizationId },
-        data: { status: AssetStatus.AVAILABLE },
-      });
-
-      // Activity events — one CUSTODY_RELEASED per asset in the kit.
-      // Must be inside transaction to ensure atomicity with custody release
-      await recordEvents(
-        kit.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: kit.id,
-          teamMemberId: kit.custody?.custodian?.id ?? undefined,
-          targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
+      const stillCustodiedAssetIds = new Set(
+        assetsWithRemainingCustody.map((c) => c.assetId)
       );
+      const assetsToFlipAvailable = assetIds.filter(
+        (id) => !stillCustodiedAssetIds.has(id)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable }, organizationId },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
     });
 
     // Notes can be created outside transaction (not critical for consistency)
@@ -1118,7 +1261,10 @@ export async function bulkAssignKitCustody({
       : { id: { in: kitIds }, organizationId };
 
     /**
-     * We have to make notes and assign custody to all assets of a kit so we have to make this query
+     * We have to make notes and assign custody to all assets of a kit so we have to make this query.
+     * `type` and `quantity` are needed so qty-tracked assets get the asset's
+     * full tracked quantity on the inherited Custody row (Site 3 of the kit
+     * custody correctness fixes).
      */
     const [kits, user, custodianTeamMember] = await Promise.all([
       db.kit.findMany({
@@ -1132,6 +1278,8 @@ export async function bulkAssignKitCustody({
               id: true,
               title: true,
               status: true,
+              type: true,
+              quantity: true,
               kit: { select: { id: true, name: true } }, // we need this so that we can create notes
             },
           },
@@ -1207,15 +1355,39 @@ export async function bulkAssignKitCustody({
         data: { status: KitStatus.IN_CUSTODY },
       });
 
+      /**
+       * `createMany` doesn't return rows, so re-query the just-created
+       * KitCustody rows to get their IDs. Each child Custody row is tagged
+       * with its parent's `kitCustodyId` so the kit→assets relationship is
+       * traceable and FK cascade can clean up on release.
+       */
+      const kitCustodyRows = await tx.kitCustody.findMany({
+        where: { kitId: { in: kits.map((kit) => kit.id) } },
+        select: { id: true, kitId: true },
+      });
+      const kitCustodyByKitId = new Map(
+        kitCustodyRows.map((kc) => [kc.kitId, kc.id])
+      );
+
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
 
-      /** Creating custodies over assets of kits */
-      await tx.custody.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          teamMemberId: custodianId,
-          assetId: asset.id,
-        })),
-      });
+      /** Creating custodies over assets of kits — one row per (asset, kit-custody) */
+      const inheritDataPerKit = await Promise.all(
+        kits.map(async (kit) => {
+          const kitCustodyId = kitCustodyByKitId.get(kit.id);
+          if (!kitCustodyId) return [];
+          return buildKitCustodyInheritData({
+            tx,
+            kitCustodyId,
+            teamMemberId: custodianId,
+            assetIds: kit.assets.map((a) => a.id),
+          });
+        })
+      );
+      const inheritData = inheritDataPerKit.flat();
+      if (inheritData.length > 0) {
+        await tx.custody.createMany({ data: inheritData });
+      }
 
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
@@ -1247,6 +1419,8 @@ export async function bulkAssignKitCustody({
       });
 
       // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      // `meta.quantity` mirrors the quantity persisted on the child Custody
+      // row so reports can aggregate by units, not just rows.
       await recordEvents(
         allAssetsOfAllKits.map((asset) => ({
           organizationId,
@@ -1258,7 +1432,13 @@ export async function bulkAssignKitCustody({
           kitId: asset.kit?.id ?? undefined,
           teamMemberId: custodianId,
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: { viaKit: true },
+          meta: {
+            viaKit: true,
+            quantity:
+              asset.type === AssetType.QUANTITY_TRACKED
+                ? asset.quantity ?? 1
+                : 1,
+          },
         })),
         tx
       );
@@ -1350,7 +1530,66 @@ export async function bulkReleaseKitCustody({
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
     return await db.$transaction(async (tx) => {
-      /** Deleting all custodies of kits */
+      /**
+       * Capture the kit-allocated Custody rows BEFORE the cascade fires so we
+       * can emit one `CUSTODY_RELEASED` event per row. Filtering by the
+       * KitCustody IDs (rather than just `assetId`) keeps operator-assigned
+       * custody on the same assets safe — it has `kitCustodyId IS NULL` and
+       * is not affected by the cascade.
+       */
+      const kitCustodyRows = await tx.kitCustody.findMany({
+        where: { kitId: { in: kits.map((kit) => kit.id) } },
+        select: { id: true, kitId: true, custodianId: true },
+      });
+      const releasedCustodyRows =
+        kitCustodyRows.length > 0
+          ? await tx.custody.findMany({
+              where: {
+                kitCustodyId: { in: kitCustodyRows.map((kc) => kc.id) },
+              },
+              select: {
+                assetId: true,
+                teamMemberId: true,
+                kitCustodyId: true,
+              },
+            })
+          : [];
+
+      // Map each released asset back to its kit (for the kitId field on the
+      // event). This is one tiny lookup map; we already have everything in
+      // memory.
+      const kitIdByKitCustodyId = new Map(
+        kitCustodyRows.map((kc) => [kc.id, kc.kitId])
+      );
+
+      // Activity events emitted FIRST so they roll back atomically with the
+      // mutation if anything below fails. Cascade-driven deletes happen
+      // after this point.
+      if (releasedCustodyRows.length > 0) {
+        await recordEvents(
+          releasedCustodyRows.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: row.kitCustodyId
+              ? kitIdByKitCustodyId.get(row.kitCustodyId)
+              : undefined,
+            teamMemberId: row.teamMemberId,
+            targetUserId: custodian?.user?.id ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+      }
+
+      /**
+       * Deleting all custodies of kits — FK cascade (kitCustodyId on Custody)
+       * removes the child Custody rows automatically, so no explicit
+       * `tx.custody.deleteMany` is needed any more.
+       */
       await tx.kitCustody.deleteMany({
         where: {
           kitId: { in: kits.map((kit) => kit.id) },
@@ -1363,18 +1602,26 @@ export async function bulkReleaseKitCustody({
         data: { status: KitStatus.AVAILABLE },
       });
 
-      /** Deleting all custodies of all assets of kits */
-      await tx.custody.deleteMany({
-        where: {
-          assetId: { in: allAssetsOfAllKits.map((asset) => asset.id) },
-        },
+      /**
+       * Only flip assets to AVAILABLE if no operator-assigned custody
+       * remains. Direct per-unit custody (kitCustodyId IS NULL) keeps the
+       * asset IN_CUSTODY for that custodian.
+       */
+      const allAssetIds = allAssetsOfAllKits.map((asset) => asset.id);
+      const stillCustodied = await tx.custody.findMany({
+        where: { assetId: { in: allAssetIds } },
+        select: { assetId: true },
       });
-
-      /** Making all the assets of the kit AVAILABLE */
-      await tx.asset.updateMany({
-        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
+      const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+      const assetsToFlipAvailable = allAssetIds.filter(
+        (id) => !stillCustodiedIds.has(id)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({
@@ -1398,22 +1645,6 @@ export async function bulkReleaseKitCustody({
           };
         }),
       });
-
-      // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
-      await recordEvents(
-        allAssetsOfAllKits.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: asset.kit?.id ?? undefined,
-          teamMemberId: custodian?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
-      );
     });
   } catch (cause) {
     const message =
@@ -2126,6 +2357,7 @@ export async function updateKitAssets({
           },
           custody: {
             select: {
+              id: true,
               custodian: {
                 select: {
                   id: true,
@@ -2197,13 +2429,18 @@ export async function updateKitAssets({
       ];
     }
 
-    // Get all assets that should be in the kit (based on assetIds) with organization scoping
+    // Get all assets that should be in the kit (based on assetIds) with organization scoping.
+    // `type` and `quantity` are required so that inheriting kit-custody on
+    // qty-tracked assets writes the asset's full tracked quantity into the
+    // child Custody row instead of defaulting to 1.
     const allAssetsForKit = await db.asset
       .findMany({
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
           title: true,
+          type: true,
+          quantity: true,
           kit: true,
           custody: true,
           location: { select: { id: true, name: true } },
@@ -2387,36 +2624,68 @@ export async function updateKitAssets({
 
     if (
       kit.custody &&
+      kit.custody.id &&
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
-      // Update custody for all assets to inherit kit's custody
-      await Promise.all(
-        assetsToInheritStatus.map((asset) =>
-          db.asset.update({
-            where: { id: asset.id, organizationId },
-            data: {
-              status: AssetStatus.IN_CUSTODY,
-              custody: {
-                create: [
-                  {
-                    custodian: { connect: { id: kit.custody?.custodian.id } },
-                  },
-                ],
-              },
-            },
-          })
-        )
-      );
+      const kitCustodyId = kit.custody.id;
+      const teamMemberId = kit.custody.custodian.id;
 
-      // Create notes for all assets that inherited custody
-      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
-      await createNotes({
-        content: `${actor} granted ${custodianDisplay} custody.`,
-        type: NoteType.UPDATE,
-        userId,
-        assetIds: assetsToInheritStatus.map((asset) => asset.id),
+      // Build child Custody rows tagged with `kitCustodyId` and threaded with
+      // the asset's *remaining* tracked quantity (qty-tracked) or 1
+      // (individual). The helper subtracts already-allocated custody so the
+      // kit-allocated row never over-allocates the asset's pool. See
+      // `buildKitCustodyInheritData`. Must run inside the tx — its read of
+      // existing custody must see rows written earlier in this tx.
+      const inheritedAssetIds = await db.$transaction(async (tx) => {
+        const inheritData = await buildKitCustodyInheritData({
+          tx,
+          kitCustodyId,
+          teamMemberId,
+          assetIds: assetsToInheritStatus.map((a) => a.id),
+        });
+
+        if (inheritData.length === 0) return [];
+
+        await tx.custody.createMany({ data: inheritData });
+
+        const inheritedIds = inheritData.map((row) => row.assetId);
+        await tx.asset.updateMany({
+          where: { id: { in: inheritedIds }, organizationId },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        // Activity events — one CUSTODY_ASSIGNED per asset that inherited custody.
+        await recordEvents(
+          inheritData.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_ASSIGNED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: kit.id,
+            teamMemberId,
+            targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+            meta: { viaKit: true, quantity: row.quantity },
+          })),
+          tx
+        );
+        return inheritedIds;
       });
+
+      // Create notes only for assets that actually received an inherited
+      // custody row. Fully operator-allocated qty-tracked assets are skipped
+      // (no kit-custody row → no "granted custody" note for that asset).
+      if (inheritedAssetIds.length > 0) {
+        const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+        await createNotes({
+          content: `${actor} granted ${custodianDisplay} custody.`,
+          type: NoteType.UPDATE,
+          userId,
+          assetIds: inheritedAssetIds,
+        });
+      }
     }
 
     /**
@@ -2424,20 +2693,65 @@ export async function updateKitAssets({
      * then we have to make the removed assets Available
      * Only apply this when not in addOnly mode
      */
-    if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
+    if (
+      !addOnly &&
+      removedAssets.length &&
+      kit.custody?.id &&
+      kit.custody.custodian.id
+    ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
+      const kitCustodyId = kit.custody.id;
 
-      // Use transaction for atomicity - prevents orphaned custody records
+      // Use transaction for atomicity - prevents orphaned custody records.
+      // Filter the deleteMany by `kitCustodyId` so only kit-allocated rows
+      // are removed. Operator-assigned per-unit custody on the same asset
+      // (`kitCustodyId IS NULL`) stays — that's separate ownership.
       await db.$transaction(async (tx) => {
-        await tx.custody.deleteMany({
-          where: { assetId: { in: assetIds } },
+        // Capture the kit-allocated rows before deletion to emit events.
+        const removedKitCustodyRows = await tx.custody.findMany({
+          where: { assetId: { in: assetIds }, kitCustodyId },
+          select: { assetId: true, teamMemberId: true },
         });
 
-        await tx.asset.updateMany({
-          where: { id: { in: assetIds }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
+        if (removedKitCustodyRows.length > 0) {
+          await recordEvents(
+            removedKitCustodyRows.map((row) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: kit.id,
+              teamMemberId: row.teamMemberId,
+              targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
+
+        await tx.custody.deleteMany({
+          where: { assetId: { in: assetIds }, kitCustodyId },
         });
+
+        // Only flip to AVAILABLE for assets that have no remaining custody
+        // (an operator-assigned per-unit row would keep them IN_CUSTODY).
+        const stillCustodied = await tx.custody.findMany({
+          where: { assetId: { in: assetIds } },
+          select: { assetId: true },
+        });
+        const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+        const assetsToFlipAvailable = assetIds.filter(
+          (id) => !stillCustodiedIds.has(id)
+        );
+        if (assetsToFlipAvailable.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: assetsToFlipAvailable }, organizationId },
+            data: { status: AssetStatus.AVAILABLE },
+          });
+        }
       });
 
       // Notes can be created outside transaction (not critical for consistency)
@@ -2565,6 +2879,8 @@ export async function bulkRemoveAssetsFromKits({
         custody: {
           select: {
             id: true,
+            teamMemberId: true,
+            kitCustodyId: true,
             custodian: {
               select: {
                 name: true,
@@ -2585,29 +2901,89 @@ export async function bulkRemoveAssetsFromKits({
 
     await db.$transaction(async (tx) => {
       /**
-       * If there are assets whose kits were in custody, then we have to remove the custody FIRST
-       * to avoid orphaned custody records when status is set to AVAILABLE
+       * If there are assets whose kits were in custody, then we have to remove
+       * the custody FIRST to avoid orphaned custody records when status is set
+       * to AVAILABLE.
+       *
+       * Important: only the Custody rows whose `kitCustodyId` matches the
+       * asset's kit's KitCustody.id are kit-allocated. Operator-assigned
+       * per-unit custody (`kitCustodyId IS NULL`, or pointing to a different
+       * kit) must be left alone — that's separate ownership and not part of
+       * this kit-removal.
        */
       const assetsWhoseKitsInCustody = assets.filter(
         (asset) => !!asset.kit?.custody && hasCustody(asset.custody)
       );
 
-      /** Collect all custody record IDs from assets whose kits are in custody */
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.flatMap((a) =>
-        (a.custody ?? []).map((c) => c.id)
+      /** Pairs of (asset, kit-allocated custody row) to delete */
+      const kitAllocatedCustodyToDelete = assetsWhoseKitsInCustody.flatMap(
+        (asset) => {
+          const kitCustodyId = asset.kit?.custody?.id;
+          if (!kitCustodyId) return [];
+          return (asset.custody ?? [])
+            .filter((c) => c.kitCustodyId === kitCustodyId)
+            .map((c) => ({
+              custodyId: c.id,
+              assetId: asset.id,
+              kitId: asset.kit?.id,
+              teamMemberId: c.teamMemberId,
+              targetUserId: c.custodian?.user?.id,
+            }));
+        }
       );
 
-      if (custodyIdsToDelete.length > 0) {
+      if (kitAllocatedCustodyToDelete.length > 0) {
+        // Emit CUSTODY_RELEASED events BEFORE deletion so they roll back
+        // atomically with the mutation if anything fails.
+        await recordEvents(
+          kitAllocatedCustodyToDelete.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: row.kitId ?? undefined,
+            teamMemberId: row.teamMemberId,
+            targetUserId: row.targetUserId ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+
         await tx.custody.deleteMany({
-          where: { id: { in: custodyIdsToDelete } },
+          where: {
+            id: { in: kitAllocatedCustodyToDelete.map((r) => r.custodyId) },
+          },
         });
       }
 
-      /** Removing assets from kits - AFTER custody is deleted */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((a) => a.id) } },
-        data: { kitId: null, status: AssetStatus.AVAILABLE },
+      /**
+       * Removing assets from kits — AFTER custody is deleted. Only flip
+       * status to AVAILABLE when no remaining custody exists for the asset
+       * (operator-assigned per-unit custody keeps it IN_CUSTODY).
+       */
+      const allRemovedAssetIds = assets.map((a) => a.id);
+      const stillCustodied = await tx.custody.findMany({
+        where: { assetId: { in: allRemovedAssetIds } },
+        select: { assetId: true },
       });
+      const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+      const assetsToFlipAvailable = allRemovedAssetIds.filter(
+        (id) => !stillCustodiedIds.has(id)
+      );
+
+      // Detach all from the kit regardless of remaining custody.
+      await tx.asset.updateMany({
+        where: { id: { in: allRemovedAssetIds } },
+        data: { kitId: null },
+      });
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {

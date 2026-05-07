@@ -48,6 +48,16 @@ export const getAssetOverviewFields = (
       select: {
         createdAt: true,
         quantity: true,
+        // why: kit-allocated custody rows must not be released directly
+        // from the asset's custody-breakdown card. The UI uses
+        // `kitCustodyId` to swap the Release button for a "held via kit"
+        // badge — releasing the parent kit is the only correct path.
+        kitCustodyId: true,
+        kitCustody: {
+          select: {
+            kit: { select: { id: true, name: true } },
+          },
+        },
         custodian: {
           include: {
             user: true,

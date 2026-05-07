@@ -14,7 +14,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFetcher } from "react-router";
+import { Link, useFetcher } from "react-router";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -46,6 +46,11 @@ export interface QuantityCustodyDialogProps {
   open?: boolean;
   /** Callback when the dialog open state changes (controlled mode) */
   onOpenChange?: (open: boolean) => void;
+  /** When the asset is part of a kit (whether or not the kit is in
+   * custody), surface an informational note so the user understands the
+   * operator assignment they're about to make is tracked separately from
+   * the kit's allocation. */
+  inKit?: { id: string; name: string } | null;
 }
 
 /**
@@ -71,6 +76,7 @@ export function QuantityCustodyDialog({
   availableQuantity,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  inKit,
 }: QuantityCustodyDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -119,6 +125,19 @@ export function QuantityCustodyDialog({
             receives custody and how many {unitLabel} to assign.
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {inKit ? (
+          <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            <p>
+              This asset is part of kit{" "}
+              <Link to={`/kits/${inKit.id}`} className="font-medium underline">
+                {inKit.name}
+              </Link>
+              . Operator custody you assign here is tracked separately from the
+              kit's allocation — the kit's "in kit" count is unaffected.
+            </p>
+          </div>
+        ) : null}
 
         <fetcher.Form
           ref={formRef}

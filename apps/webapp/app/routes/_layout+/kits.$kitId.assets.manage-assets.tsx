@@ -54,6 +54,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -495,6 +496,11 @@ const RowComponent = ({
             <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
+                {isQuantityTracked(item) && item.quantity != null ? (
+                  <span className="ml-2 text-xs font-normal text-gray-500">
+                    · {item.quantity} {item.unitOfMeasure || "units"}
+                  </span>
+                ) : null}
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

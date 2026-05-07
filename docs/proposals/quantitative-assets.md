@@ -716,6 +716,8 @@ All phases ship together as one release. This ordering reflects build dependenci
 - Asset list: group-by-model view
 - Import/export with quantity columns
 - Bulk operations awareness of asset types
+- **Rebalance kit allocation when assigning operator custody on a kit-allocated qty-tracked asset.** Today (Phase 3d-Polish): if all units of a qty-tracked asset are kit-allocated, the asset's Custody Breakdown Assign button is disabled (no free pool). Once the rebalance flow is built, assigning N units to an operator while units are kit-allocated should automatically decrement the kit's `Custody.quantity` by N, emit a `CUSTODY_RELEASED` event for the kit row, and emit `CUSTODY_ASSIGNED` for the new operator row in a single transaction. Edge case to design: kit row hits 0 — delete the row vs. keep at 0 (probably delete + emit a final `CUSTODY_RELEASED` for the residual).
+- **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
 
 > **Deferred post-launch:** Consumption dashboard (consumption rate, top consumed items, cost tracking) — see Decision #3.
 

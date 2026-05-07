@@ -475,7 +475,26 @@ export function getAssetsWhereInput({
   }
 
   if (status) {
-    where.status = status;
+    // why: see asset/service.server.ts — qty-tracked rows whose row-level
+    // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
+    // units, so AVAILABLE filter must include them.
+    if (status === "AVAILABLE") {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [
+            { type: "INDIVIDUAL", status: "AVAILABLE" },
+            { type: "QUANTITY_TRACKED" },
+          ],
+        },
+      ];
+    } else {
+      where.status = status;
+    }
   }
 
   if (categoriesIds && categoriesIds.length > 0) {

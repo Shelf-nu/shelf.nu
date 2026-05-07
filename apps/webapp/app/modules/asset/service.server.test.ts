@@ -39,13 +39,19 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
     },
     // why: checkOutQuantity upserts custody rows and aggregates custody/booking totals;
-    // releaseQuantity additionally reads / decrements / deletes them
+    // releaseQuantity additionally reads / decrements / deletes them, and
+    // counts remaining rows after a release to decide whether to flip
+    // Asset.status back to AVAILABLE.
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       upsert: vitest.fn().mockResolvedValue({}),
       findUnique: vitest.fn().mockResolvedValue(null),
       delete: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
+      // Default: pretend other custody rows still exist so the
+      // status-flip branch doesn't fire — tests that exercise the
+      // "last release" branch override this.
+      count: vitest.fn().mockResolvedValue(1),
     },
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
@@ -760,6 +766,62 @@ describe("releaseQuantity — activity events", () => {
         meta: { quantity: 4, viaQuantity: true },
       }),
       expect.anything()
+    );
+  });
+
+  it("flips Asset.status to AVAILABLE when the last custody row is removed", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    // Full release of the existing 10-unit custody row.
+    mockCustodyFindUnique.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+    });
+    // After delete, no rows remain → status should flip.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+    mockAssetUpdate.mockResolvedValue({});
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-1" },
+      data: { status: "AVAILABLE" },
+    });
+  });
+
+  it("does NOT flip Asset.status when other custody rows remain", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    mockCustodyFindUnique.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+    });
+    // Partial release: 4 of 10 → row decremented, not deleted; count is 1.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+    mockAssetUpdate.mockResolvedValue({});
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 4,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "AVAILABLE" }),
+      })
     );
   });
 });

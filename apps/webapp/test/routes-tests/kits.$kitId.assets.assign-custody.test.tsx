@@ -14,6 +14,12 @@ const dbMocks = vi.hoisted(() => {
     },
     asset: {
       update: vi.fn(),
+      // Helper now reads existing custody to compute remaining-pool.
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    custody: {
+      createMany: vi.fn(),
     },
     note: {
       createMany: vi.fn(),
@@ -33,15 +39,27 @@ vi.mock("~/database/db.server", () => ({
     },
     asset: {
       update: dbMocks.asset.update,
+      findMany: dbMocks.asset.findMany,
+      updateMany: dbMocks.asset.updateMany,
+    },
+    custody: {
+      createMany: dbMocks.custody.createMany,
     },
     note: {
       createMany: dbMocks.note.createMany,
     },
-    // why: action wraps all operations in a transaction
+    // why: action wraps all operations in a transaction. The kit-custody
+    // inherit helper reads existing custody via tx.asset.findMany and writes
+    // via tx.custody.createMany + tx.asset.updateMany.
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         kit: { update: dbMocks.kit.update },
-        asset: { update: dbMocks.asset.update },
+        asset: {
+          update: dbMocks.asset.update,
+          findMany: dbMocks.asset.findMany,
+          updateMany: dbMocks.asset.updateMany,
+        },
+        custody: { createMany: dbMocks.custody.createMany },
       })
     ),
   },
@@ -218,6 +236,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     mockKitUpdate.mockResolvedValue({
       id: "kit-123",
       name: "Test Kit",
+      custody: { id: "kc-1" },
       assets: [],
     } as any);
 
@@ -326,6 +345,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     mockKitUpdate.mockResolvedValue({
       id: "kit-123",
       name: "Test Kit",
+      custody: { id: "kc-1" },
       assets: [],
     } as any);
 
@@ -351,5 +371,159 @@ describe("kits/$kitId/assets/assign-custody", () => {
     expect((response as Response).status).toBe(302); // Redirect on success
 
     expect(mockKitUpdate).toHaveBeenCalled();
+  });
+
+  it("threads quantity and kitCustodyId onto each per-asset Custody row for mixed asset kits", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    } as any);
+
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+      name: "Valid Team Member",
+      user: {
+        id: "user-456",
+        firstName: "Valid",
+        lastName: "Member",
+      },
+    });
+
+    // Kit with one INDIVIDUAL asset (quantity should default to 1) and
+    // one QUANTITY_TRACKED asset with quantity 50 (full remaining-pool
+    // should be threaded to the kit-allocated Custody row — no operator
+    // custody exists, so remaining = full quantity).
+    mockKitUpdate.mockResolvedValue({
+      id: "kit-123",
+      name: "Mixed Kit",
+      custody: { id: "kc-99" },
+      assets: [{ id: "asset-individual" }, { id: "asset-qty" }],
+    } as any);
+
+    // The helper reads existing custody via tx.asset.findMany.
+    dbMocks.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-individual",
+        type: "INDIVIDUAL",
+        quantity: null,
+        custody: [],
+      },
+      {
+        id: "asset-qty",
+        type: "QUANTITY_TRACKED",
+        quantity: 50,
+        custody: [],
+      },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({
+        id: "team-member-123",
+        name: "Valid Team Member",
+      })
+    );
+
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    await action(createActionArgs({ request }));
+
+    // Custody rows are created via createMany (one row per asset that
+    // received an inheritance).
+    expect(dbMocks.custody.createMany).toHaveBeenCalledTimes(1);
+    const createManyArgs = dbMocks.custody.createMany.mock.calls[0]?.[0] as {
+      data: Array<{
+        teamMemberId: string;
+        assetId: string;
+        kitCustodyId: string;
+        quantity: number;
+      }>;
+    };
+
+    expect(createManyArgs.data).toEqual([
+      {
+        teamMemberId: "team-member-123",
+        assetId: "asset-individual",
+        kitCustodyId: "kc-99",
+        quantity: 1,
+      },
+      {
+        teamMemberId: "team-member-123",
+        assetId: "asset-qty",
+        kitCustodyId: "kc-99",
+        quantity: 50,
+      },
+    ]);
+  });
+
+  it("subtracts already-allocated custody from kit row's quantity (Option B)", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    } as any);
+
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-nikolay",
+      userId: "user-niko",
+      name: "Nikolay",
+      user: { id: "user-niko", firstName: "Nikolay", lastName: "Bonev" },
+    });
+
+    // Pens (qty-tracked, 80 total, 4 already with operator Pleb) + Drill.
+    // Kit row should claim 76 for Pens (not 80) and 1 for Drill.
+    mockKitUpdate.mockResolvedValue({
+      id: "kit-123",
+      name: "Camera Kit",
+      custody: { id: "kc-camera" },
+      assets: [{ id: "drill" }, { id: "pens" }],
+    } as any);
+
+    dbMocks.asset.findMany.mockResolvedValue([
+      { id: "drill", type: "INDIVIDUAL", quantity: null, custody: [] },
+      {
+        id: "pens",
+        type: "QUANTITY_TRACKED",
+        quantity: 80,
+        custody: [{ quantity: 4 }],
+      },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({
+        id: "team-member-nikolay",
+        name: "Nikolay",
+      })
+    );
+
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    await action(createActionArgs({ request }));
+
+    expect(dbMocks.custody.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamMemberId: "team-member-nikolay",
+          assetId: "drill",
+          kitCustodyId: "kc-camera",
+          quantity: 1,
+        },
+        {
+          teamMemberId: "team-member-nikolay",
+          assetId: "pens",
+          kitCustodyId: "kc-camera",
+          quantity: 76,
+        },
+      ],
+    });
   });
 });

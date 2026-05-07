@@ -26,7 +26,10 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
-import { getKit } from "~/modules/kit/service.server";
+import {
+  buildKitCustodyInheritData,
+  getKit,
+} from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -252,43 +255,69 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custody: { create: { custodian: { connect: { id: custodianId } } } },
         },
         include: {
-          assets: true,
+          // Pull the freshly-created KitCustody row so we can stamp its
+          // id onto every asset-side Custody row as `kitCustodyId`. That
+          // discriminator distinguishes kit-allocated custody from
+          // operator-assigned custody on the same asset.
+          custody: { select: { id: true } },
+          assets: { select: { id: true } },
         },
       });
 
-      // Update custody for all assets
-      await Promise.all(
-        updatedKit.assets.map((asset) =>
-          tx.asset.update({
-            where: { id: asset.id, organizationId },
-            data: {
-              status: AssetStatus.IN_CUSTODY,
-              custody: {
-                create: { custodian: { connect: { id: custodianId } } },
-              },
-            },
-          })
-        )
-      );
+      if (!updatedKit.custody) {
+        throw new ShelfError({
+          cause: null,
+          message: "Failed to create kit custody record.",
+          additionalData: { userId, kitId, custodianId },
+          label: "Kit",
+        });
+      }
 
-      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx
-      await recordEvents(
-        updatedKit.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_ASSIGNED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: updatedKit.id,
-          teamMemberId: custodianId,
-          targetUserId: custodianTeamMember.user?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
-      );
+      const kitCustodyId = updatedKit.custody.id;
 
-      return updatedKit;
+      // Build child Custody rows via the shared helper so the
+      // remaining-pool rule (qty-tracked rows claim `asset.quantity − already
+      // allocated`, fully-allocated assets are skipped) is applied
+      // consistently with `updateKitAssets` and `bulkAssignKitCustody`.
+      const inheritData = await buildKitCustodyInheritData({
+        tx,
+        kitCustodyId,
+        teamMemberId: custodianId,
+        assetIds: updatedKit.assets.map((a) => a.id),
+      });
+
+      if (inheritData.length > 0) {
+        await tx.custody.createMany({ data: inheritData });
+
+        const inheritedAssetIds = inheritData.map((row) => row.assetId);
+        await tx.asset.updateMany({
+          where: { id: { in: inheritedAssetIds }, organizationId },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        // Activity events — one CUSTODY_ASSIGNED per asset that received a
+        // kit-allocated row. Fully-allocated qty-tracked assets are skipped.
+        await recordEvents(
+          inheritData.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_ASSIGNED",
+            entityType: "ASSET",
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: updatedKit.id,
+            teamMemberId: custodianId,
+            targetUserId: custodianTeamMember.user?.id ?? undefined,
+            meta: { viaKit: true, quantity: row.quantity },
+          })),
+          tx
+        );
+      }
+
+      return {
+        ...updatedKit,
+        inheritedAssetIds: inheritData.map((r) => r.assetId),
+      };
     });
 
     // Create notes for all assets using markdoc wrappers (not critical for atomicity)
@@ -304,12 +333,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
 
-    await createNotes({
-      content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
-      type: NoteType.UPDATE,
-      userId,
-      assetIds: kit.assets.map((asset) => asset.id),
-    });
+    // Only notes for assets that actually received a kit-allocated Custody
+    // row. Fully operator-allocated qty-tracked assets are skipped.
+    if (kit.inheritedAssetIds.length > 0) {
+      await createNotes({
+        content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds: kit.inheritedAssetIds,
+      });
+    }
 
     sendNotification({
       title: `‘${kit.name}’ is now in custody of ${custodianName}`,

@@ -169,6 +169,14 @@ export type AdvancedIndexAsset = Pick<
     | null;
   custody:
     | {
+        /** Custodian display name; mirrored at the top level so callers
+         * can read it without descending into `custodian`. */
+        name?: string;
+        /** Per-custody quantity; meaningful for QUANTITY_TRACKED assets
+         * where the same asset can be split across multiple custodians.
+         * Optional because the booking-derived synthetic custody case
+         * does not project a quantity. */
+        quantity?: number;
         custodian: {
           name: string;
           user: {

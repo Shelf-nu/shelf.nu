@@ -85,9 +85,14 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   availableToBook: true,
   type: true,
   quantity: true,
+  unitOfMeasure: true,
   custody: {
     select: {
       quantity: true,
+      // why: kit-page row needs to filter to kit-allocated rows only when
+      // the parent kit is in custody, so it can show "kit holds N of M
+      // units" instead of the asset's total stock.
+      kitCustodyId: true,
     },
   },
   category: {

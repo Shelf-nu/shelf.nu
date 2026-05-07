@@ -36,3 +36,27 @@ export function hasCustody(
 ): boolean {
   return !!custody && custody.length > 0;
 }
+
+/**
+ * Splits a custody array into the primary custodian (first entry) and
+ * any additional custodians, for the multi-custodian rendering used in
+ * the advanced asset index. Keeps the column body declarative and
+ * avoids inline slicing logic at the call site.
+ *
+ * @param custody - Array of custody records from the Asset relation
+ * @returns `{ primary, others, total }` where `primary` is the first
+ *   entry (or null if the array is empty/missing), `others` is every
+ *   subsequent entry, and `total` is the full count.
+ */
+export function formatCustodyList<T extends Record<string, unknown>>(
+  custody: T[] | null | undefined
+): { primary: T | null; others: T[]; total: number } {
+  if (!custody || custody.length === 0) {
+    return { primary: null, others: [], total: 0 };
+  }
+  return {
+    primary: custody[0],
+    others: custody.slice(1),
+    total: custody.length,
+  };
+}
