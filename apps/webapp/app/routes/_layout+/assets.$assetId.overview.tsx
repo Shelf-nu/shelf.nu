@@ -33,13 +33,14 @@ import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
-import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
+  getActiveCustomFieldsForAsset,
   getAllEntriesForCreateAndEdit,
   getAsset,
+  parseAssetValuation,
   updateAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
@@ -339,20 +340,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
         case "valuation": {
           const rawVal = formData.get("fieldValue") as string | null;
-          let valuation: number | null = null;
-          if (rawVal && rawVal.trim() !== "") {
-            const parsed = Number(rawVal);
-            if (!Number.isFinite(parsed)) {
-              throw new ShelfError({
-                cause: null,
-                message: "Value must be a valid number",
-                label: "Assets",
-                shouldBeCaptured: false,
-                status: 400,
-              });
-            }
-            valuation = parsed;
-          }
+          const valuation = parseAssetValuation(rawVal);
           await updateAsset({
             id,
             valuation,
@@ -365,21 +353,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         case "customField": {
           const customFieldId = formData.get("customFieldId") as string;
 
-          /** Fetch the asset to get its current category for scoping */
-          const currentAsset = await db.asset.findFirst({
-            where: { id, organizationId },
-            select: { categoryId: true },
-          });
-
           /**
-           * Scope custom field lookup to the asset's category — NOT
-           * includeAllCategories. This prevents crafted POSTs from
-           * writing values for fields that don't belong to this
-           * asset's category.
+           * Org+category scoped lookup. Throws 404 if the asset does not belong
+           * to this organization, blocking cross-org writes. The asset's category
+           * is what gates which custom-field defs are returned, preventing crafted
+           * POSTs from writing values for fields outside this asset's category.
            */
-          const customFields = await getActiveCustomFields({
+          const customFields = await getActiveCustomFieldsForAsset({
+            id,
             organizationId,
-            category: currentAsset?.categoryId,
           });
           const fieldDef = customFields.find((cf) => cf.id === customFieldId);
           if (!fieldDef) {
