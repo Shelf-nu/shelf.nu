@@ -50,7 +50,6 @@ import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
-import { buildTagsSet } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -279,7 +278,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "description",
             "category",
             "location",
-            "tags",
             "valuation",
             "customField",
           ]),
@@ -320,18 +318,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             id,
             newLocationId,
             currentLocationId,
-            userId,
-            organizationId,
-            request,
-          });
-          break;
-        }
-        case "tags": {
-          const tagsValue = formData.get("tags") as string | null;
-          const tags = buildTagsSet(tagsValue ?? undefined);
-          await updateAsset({
-            id,
-            tags,
             userId,
             organizationId,
             request,
