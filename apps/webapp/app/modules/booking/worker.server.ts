@@ -5,7 +5,7 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
-import { ShelfError } from "~/utils/error";
+import { isNotFoundError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
@@ -39,6 +39,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         message: "Booking not found",
         additionalData: { data, work: data.eventType },
         label: "Booking",
+        shouldBeCaptured: !isNotFoundError(cause),
       });
     });
 
@@ -106,6 +107,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
         message: "Booking not found",
         additionalData: { data, work: data.eventType },
         label: "Booking",
+        shouldBeCaptured: !isNotFoundError(cause),
       });
     });
 
@@ -173,6 +175,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
   await createSystemBookingNote({
     bookingId: booking.id,
+    organizationId: booking.organizationId,
     content: `Booking became overdue. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
   });
 
@@ -288,6 +291,7 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
     // Create system note for the status transition
     await createStatusTransitionNote({
       bookingId: booking.id,
+      organizationId: booking.organizationId,
       fromStatus: BookingStatus.COMPLETE,
       toStatus: BookingStatus.ARCHIVED,
       custodianUserId: booking.custodianUserId || undefined,

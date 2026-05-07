@@ -27,3 +27,7 @@ export const PUBLIC_BUCKET = "files";
 
 export const ONE_HOUR = 1000 * 60 * 60;
 export const ONE_DAY = ONE_HOUR * 24;
+
+/** Max number of characters a user-authored note can contain. Shared between
+ * the webapp form and the mobile API to keep parity. */
+export const NOTE_MAX_CONTENT_LENGTH = 5000;

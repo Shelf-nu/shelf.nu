@@ -6,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
@@ -68,6 +69,7 @@ interface Props {
   excludeLocationId?: Location["id"];
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export const LocationForm = ({
   className,
   name,
@@ -97,6 +99,12 @@ export const LocationForm = ({
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
+
+  // Focus the name input on mount. Replaces `autoFocus` to satisfy
+  // jsx-a11y/no-autofocus. When the form is rendered inside a dialog,
+  // the dialog's `data-dialog-initial-focus` handler typically wins;
+  // otherwise this provides the intentional initial focus.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
 
   useEffect(() => {
     if (!hasOnSuccessFunc) return;
@@ -168,12 +176,12 @@ export const LocationForm = ({
               required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
             >
               <Input
+                ref={nameInputRef}
                 label="Name"
                 hideLabel
                 name={zo.fields.name()}
                 disabled={disabled}
                 error={nameError}
-                autoFocus
                 data-dialog-initial-focus
                 onChange={hasOnSuccessFunc ? undefined : updateName}
                 className="w-full"
@@ -185,12 +193,12 @@ export const LocationForm = ({
           }
         >
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
             error={nameError}
-            autoFocus
             data-dialog-initial-focus
             onChange={hasOnSuccessFunc ? undefined : updateName}
             className="w-full"

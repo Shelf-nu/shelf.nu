@@ -73,16 +73,12 @@ export function BookingAssetsColumn() {
     // searchParams,
   ]);
 
-  const manageAssetsUrl = useMemo(
-    () =>
-      `manage-assets?${new URLSearchParams({
-        bookingFrom: new Date(booking.from).toISOString(),
-        bookingTo: new Date(booking.to).toISOString(),
-        hideUnavailable: "true",
-        unhideAssetsBookigIds: booking.id,
-      })}`,
-    [booking.from, booking.to, booking.id]
-  );
+  const manageAssetsUrl = `manage-assets?${new URLSearchParams({
+    bookingFrom: new Date(booking.from).toISOString(),
+    bookingTo: new Date(booking.to).toISOString(),
+    hideUnavailable: "true",
+    unhideAssetsBookigIds: booking.id,
+  })}`;
 
   // Self service can only manage assets for bookings that are DRAFT
   const cantManageAssetsAsBase =

@@ -398,6 +398,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,
+          organizationId,
           kitIds: newlyAddedKitIds,
           kits: newlyAddedKits.map((kit) => ({ id: kit.id, name: kit.name })),
           userId,
@@ -490,32 +491,33 @@ export default function AddKitsToBooking() {
     [bookingKitIds, selectedBulkItems]
   );
 
-  const manageAssetsUrl = useMemo(
-    () =>
-      `/bookings/${booking.id}/overview/manage-assets?${new URLSearchParams({
-        // This button wouldnt be available at all if there is no booking.from and booking.to
-        bookingFrom: booking.from.toISOString(),
-        bookingTo: booking.to.toISOString(),
-        hideUnavailable: "true",
-        unhideAssetsBookigIds: booking.id,
-      })}`,
-    [booking]
-  );
+  const manageAssetsUrl = `/bookings/${
+    booking.id
+  }/overview/manage-assets?${new URLSearchParams({
+    // This button wouldnt be available at all if there is no booking.from and booking.to
+    bookingFrom: booking.from.toISOString(),
+    bookingTo: booking.to.toISOString(),
+    hideUnavailable: "true",
+    unhideAssetsBookigIds: booking.id,
+  })}`;
 
   const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
 
   /**
-   * Set selected items for kit based on the route data
+   * Set selected items for kit based on the route data.
+   *
+   * Initialized synchronously during the first render (guarded by a ref) instead
+   * of a mount effect to avoid the empty-first-frame hydration flicker flagged
+   * by `rendering-hydration-no-flicker`. `AtomsResetHandler` performs its
+   * pathname-change reset during render too, so it runs before this init and
+   * does not clobber the selection.
    */
-  useEffect(() => {
-    /**
-     * We are setting the default items here from the server data. This runs only once on mount
-     */
+  const didInitializeSelectedItemsRef = useRef(false);
+  if (!didInitializeSelectedItemsRef.current) {
+    didInitializeSelectedItemsRef.current = true;
     setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
 
   /**
    * Set disabled items for kit

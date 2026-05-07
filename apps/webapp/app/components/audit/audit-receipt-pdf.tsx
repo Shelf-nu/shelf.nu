@@ -43,7 +43,6 @@ export const AuditReceiptPDF = ({
 }: AuditReceiptPDFProps) => {
   const componentRef = useRef<HTMLDivElement>(null);
   const [pdfMeta, setPdfMeta] = useState<AuditPdfDbResult | null>(null);
-  const [isFetchingReceipt, setIsFetchingReceipt] = useState(false);
 
   // Configure print handler with sanitized filename
   const handlePrint = useReactToPrint({
@@ -53,7 +52,7 @@ export const AuditReceiptPDF = ({
     )}-${Date.now()}`,
   });
 
-  const { data, error } = useApiQuery<{ pdfMeta?: AuditPdfDbResult }>({
+  const { error } = useApiQuery<{ pdfMeta?: AuditPdfDbResult }>({
     api: `/api/audits/${audit.id}/generate-pdf`,
     // Avoid refetching on re-renders once the preview data is loaded.
     enabled: open && !pdfMeta,
@@ -65,28 +64,28 @@ export const AuditReceiptPDF = ({
     },
   });
 
+  // Derive the loading state at render time from the query's inputs/outputs
+  // instead of mirroring it into a setState chained inside a useEffect.
+  // This removes the previous cascading setState pair (and the
+  // effect-event-handler it lived in) — dialog close now only resets the
+  // cached meta; loading visibility falls out of this expression.
+  const isFetchingReceipt = open && !pdfMeta && !error;
+
+  // When the dialog closes we still need to discard the cached meta so the
+  // next open refetches. This effect performs exactly one state transition
+  // (never cascading) and only runs on a genuine open→closed boundary.
   useEffect(() => {
-    if (open) {
-      // Track loading state for dialog feedback while the query runs.
-      setIsFetchingReceipt(true);
-    } else {
+    if (!open) {
       setPdfMeta(null);
-      setIsFetchingReceipt(false);
     }
   }, [open]);
-
-  useEffect(() => {
-    if (data || error) {
-      setIsFetchingReceipt(false);
-    }
-  }, [data, error]);
 
   return (
     <DialogPortal>
       <Dialog
         open={open}
         onClose={onClose}
-        className="h-[90vh] w-full py-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+        className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
         title={
           <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
             <h3>Generate audit receipt for "{audit.name}"</h3>
@@ -147,6 +146,7 @@ export const AuditReceiptPDF = ({
  * @param componentRef - Ref to the printable content container
  * @param pdfMeta - All audit data needed for the PDF (note content is already sanitized server-side)
  */
+// react-doctor:no-giant-component — deferred for follow-up refactor
 const AuditPDFContent = ({
   componentRef,
   pdfMeta,

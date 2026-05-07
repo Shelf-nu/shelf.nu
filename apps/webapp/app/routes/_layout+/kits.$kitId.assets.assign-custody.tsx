@@ -24,6 +24,7 @@ import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { recordEvents } from "~/modules/activity-event/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { getKit } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -236,33 +237,55 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    const kit = await db.kit.update({
-      where: { id: kitId, organizationId },
-      data: {
-        status: KitStatus.IN_CUSTODY,
-        custody: { create: { custodian: { connect: { id: custodianId } } } },
-      },
-      include: {
-        assets: true,
-      },
+    // Use transaction to ensure kit custody assignment and activity events are atomic
+    const kit = await db.$transaction(async (tx) => {
+      const updatedKit = await tx.kit.update({
+        where: { id: kitId, organizationId },
+        data: {
+          status: KitStatus.IN_CUSTODY,
+          custody: { create: { custodian: { connect: { id: custodianId } } } },
+        },
+        include: {
+          assets: true,
+        },
+      });
+
+      // Update custody for all assets
+      await Promise.all(
+        updatedKit.assets.map((asset) =>
+          tx.asset.update({
+            where: { id: asset.id, organizationId },
+            data: {
+              status: AssetStatus.IN_CUSTODY,
+              custody: {
+                create: { custodian: { connect: { id: custodianId } } },
+              },
+            },
+          })
+        )
+      );
+
+      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx
+      await recordEvents(
+        updatedKit.assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: updatedKit.id,
+          teamMemberId: custodianId,
+          targetUserId: custodianTeamMember.user?.id ?? undefined,
+          meta: { viaKit: true },
+        })),
+        tx
+      );
+
+      return updatedKit;
     });
 
-    // Update custody for all assets
-    await Promise.all(
-      kit.assets.map((asset) =>
-        db.asset.update({
-          where: { id: asset.id, organizationId },
-          data: {
-            status: AssetStatus.IN_CUSTODY,
-            custody: {
-              create: { custodian: { connect: { id: custodianId } } },
-            },
-          },
-        })
-      )
-    );
-
-    // Create notes for all assets using markdoc wrappers
+    // Create notes for all assets using markdoc wrappers (not critical for atomicity)
     const actor = wrapUserLinkForNote({
       id: userId,
       firstName: user.firstName,

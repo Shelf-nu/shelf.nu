@@ -82,8 +82,8 @@ export function ClientValidationFeedback({
       </div>
       {validation.warnings.length > 0 && (
         <div className="mt-2 space-y-1">
-          {validation.warnings.map((w, i) => (
-            <p key={i} className="text-amber-600">
+          {validation.warnings.map((w) => (
+            <p key={w} className="text-amber-600">
               <AlertIcon className="inline-block size-4" /> {w}
             </p>
           ))}
@@ -121,12 +121,20 @@ export function DefectedHeadersTable({
         </tr>
       </thead>
       <tbody>
-        {data.map((row, index) => (
-          <tr key={`${row.incorrectHeader}-${index}`}>
-            <td className="px-2 py-1">{row.incorrectHeader}</td>
-            <td className="px-2 py-1">{row.errorMessage}</td>
-          </tr>
-        ))}
+        {data.map((row, i, arr) => {
+          // why: the server builds defectedHeaders by iterating the raw CSV
+          // headers, so the same incorrectHeader can appear more than once.
+          // Disambiguate with an occurrence counter so keys stay unique.
+          const occurrence = arr
+            .slice(0, i)
+            .filter((r) => r.incorrectHeader === row.incorrectHeader).length;
+          return (
+            <tr key={`${row.incorrectHeader}#${occurrence}`}>
+              <td className="px-2 py-1">{row.incorrectHeader}</td>
+              <td className="px-2 py-1">{row.errorMessage}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

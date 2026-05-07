@@ -34,6 +34,17 @@ if (!existsSync(prismaClientIndexBrowser)) {
   );
 }
 
+// Use HTTPS when cert files are present (mkcert / local dev).
+// Skip HTTPS with DISABLE_HTTPS=true (e.g. mobile companion testing over LAN).
+const certKeyPath = resolve(__dirname, ".cert/key.pem");
+const certPath = resolve(__dirname, ".cert/cert.pem");
+const httpsConfig =
+  process.env.DISABLE_HTTPS !== "true" &&
+  existsSync(certKeyPath) &&
+  existsSync(certPath)
+    ? { key: certKeyPath, cert: certPath }
+    : undefined;
+
 export default defineConfig({
   envDir: "../..",
   ssr: {
@@ -41,10 +52,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    https: {
-      key: "./.cert/key.pem",
-      cert: "./.cert/cert.pem",
-    },
+    https: httpsConfig,
     warmup: {
       clientFiles: [
         "./app/entry.client.tsx",

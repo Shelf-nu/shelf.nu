@@ -37,6 +37,54 @@ export interface CodeType {
   };
 }
 
+/**
+ * Module-scope default for the `barcodes` prop. Using a fresh `[]` as the
+ * default value triggers identity churn through `useMemo`/`useEffect` dep
+ * arrays on every render, so we share a single frozen reference instead.
+ */
+const EMPTY_BARCODES: Array<{
+  id: string;
+  type: BarcodeType;
+  value: string;
+}> = [];
+
+/** Shared frame/container style for QR + barcode labels (rendered for export/print). */
+const LABEL_CONTAINER_STYLE: CSSProperties = {
+  width: "300px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexDirection: "column",
+  gap: "12px",
+  borderRadius: "4px",
+  border: "5px solid #E3E4E8",
+  padding: "24px 17px 24px 17px",
+  backgroundColor: "white",
+};
+
+/** QR labels are square; barcode labels have a minimum height instead. */
+const QR_LABEL_STYLE: CSSProperties = {
+  ...LABEL_CONTAINER_STYLE,
+  aspectRatio: "1 / 1",
+};
+
+const BARCODE_LABEL_STYLE: CSSProperties = {
+  ...LABEL_CONTAINER_STYLE,
+  minHeight: "300px",
+};
+
+/** Title text at the top of a QR/barcode label — truncated, bold, centered. */
+const LABEL_TITLE_STYLE: CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 600,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  maxWidth: "100%",
+  color: "black",
+  textAlign: "center",
+};
+
 interface CodePreviewProps {
   className?: string;
   style?: CSSProperties;
@@ -65,11 +113,12 @@ interface CodePreviewProps {
   showShelfBranding?: boolean;
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export const CodePreview = ({
   className,
   style,
   qrObj,
-  barcodes = [],
+  barcodes = EMPTY_BARCODES,
   item,
   hideButton = false,
   onCodeChange,
@@ -397,44 +446,16 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
       showShelfBranding = true,
     } = props ?? {};
     return (
-      <div
-        style={{
-          width: "300px",
-          aspectRatio: 1 / 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "12px",
-          borderRadius: "4px",
-          border: "5px solid #E3E4E8",
-          padding: "24px 17px 24px 17px",
-          backgroundColor: "white",
-        }}
-        ref={ref}
-      >
-        <div
-          style={{
-            fontSize: "12px",
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            maxWidth: "100%",
-            color: "black",
-            textAlign: "center",
-          }}
-        >
-          {title}
-        </div>
+      <div style={QR_LABEL_STYLE} ref={ref}>
+        <div style={LABEL_TITLE_STYLE}>{title}</div>
         <figure className="qr-code flex justify-center">
           <img
             src={data?.qr?.src}
             alt={`${data?.qr?.size}-shelf-qr-code.png`}
           />
         </figure>
-        <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
-          <div style={{ fontWeight: 600 }}>
+        <div className="w-full text-center text-[12px]">
+          <div className="font-semibold">
             {qrIdDisplayPreference === "SAM_ID" && sequentialId
               ? sequentialId
               : data?.qr?.id}
@@ -442,7 +463,7 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
           {showShelfBranding ? (
             <div>
               Powered by{" "}
-              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+              <span className="font-semibold text-black">shelf.nu</span>
             </div>
           ) : null}
         </div>
@@ -468,60 +489,19 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
     if (!data) return null;
 
     return (
-      <div
-        style={{
-          width: "300px",
-          minHeight: "300px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "12px",
-          borderRadius: "4px",
-          border: "5px solid #E3E4E8",
-          padding: "24px 17px 24px 17px",
-          backgroundColor: "white",
-        }}
-        ref={ref}
-      >
-        <div
-          style={{
-            fontSize: "12px",
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            maxWidth: "100%",
-            color: "black",
-            textAlign: "center",
-          }}
-        >
-          {title}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            flexGrow: 1,
-          }}
-        >
+      <div style={BARCODE_LABEL_STYLE} ref={ref}>
+        <div style={LABEL_TITLE_STYLE}>{title}</div>
+        <div className="flex flex-1 items-center justify-center">
           <BarcodeDisplay
             type={data.type}
             value={data.value}
             maxWidth="250px"
           />
         </div>
-        <div style={{ width: "100%", textAlign: "center", fontSize: "12px" }}>
-          <div style={{ fontWeight: 600 }}>
+        <div className="w-full text-center text-[12px]">
+          <div className="font-semibold">
             {data.type}:{" "}
-            <div
-              style={{
-                wordBreak: "break-all",
-                overflowWrap: "break-word",
-                lineHeight: "1.2",
-              }}
-            >
+            <div className="break-all leading-tight [overflow-wrap:break-word]">
               {data.type === "EAN13" ? (
                 <Ean13LookupLink
                   value={data.value}
@@ -536,7 +516,7 @@ export const BarcodeLabel = React.forwardRef<HTMLDivElement, BarcodeLabelProps>(
           {showShelfBranding ? (
             <div>
               Powered by{" "}
-              <span style={{ fontWeight: 600, color: "black" }}>shelf.nu</span>
+              <span className="font-semibold text-black">shelf.nu</span>
             </div>
           ) : null}
         </div>

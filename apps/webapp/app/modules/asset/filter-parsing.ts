@@ -3,6 +3,7 @@ import type {
   Filter,
   FilterOperator,
 } from "~/components/assets/assets-index/advanced-filters/schema";
+import { isSafeSqlIdentifier } from "~/utils/sql";
 import { getQueryFieldType } from "./field-type-mapping";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -37,6 +38,12 @@ export function parseFilters(
     if (column) {
       const [operator, filterValue] = value.split(":");
       const dbKey = API_TO_DB_FIELD_MAP[key] || key;
+
+      // Non-custom-field names are used in Prisma.raw() as SQL identifiers,
+      // so reject names with unsafe characters to prevent SQL syntax errors
+      if (!key.startsWith("cf_") && !isSafeSqlIdentifier(dbKey)) {
+        return;
+      }
 
       const filter: Filter = {
         name: dbKey,

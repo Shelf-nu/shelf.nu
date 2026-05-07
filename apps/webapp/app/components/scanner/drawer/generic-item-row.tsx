@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { useSetAtom } from "jotai";
 import type { ScanListItem } from "~/atoms/qr-scanner";
 import { updateScannedItemAtom } from "~/atoms/qr-scanner";
@@ -121,69 +121,70 @@ export function GenericItemRow<T>({
     ? `/api/get-scanned-barcode/${encodeURIComponent(qrId)}`
     : `/api/get-scanned-item/${qrId}`;
 
-  // Use the API hook to fetch item data
-  const { data: response, error: fetchError } = useApiQuery<ApiResponse>({
-    api: apiEndpoint,
-    searchParams,
-    enabled: shouldFetch,
-  });
+  // Keep codeType in a ref so onSuccess doesn't need to re-run when item changes.
+  const codeTypeRef = useRef(item?.codeType);
+  codeTypeRef.current = item?.codeType;
 
-  // Process the response when it changes
-  useEffect(() => {
-    if (response) {
-      // If the server returns an error, add it to the item and return
-      if (response.error) {
+  /**
+   * Handle the API response. Runs directly from useApiQuery's onSuccess
+   * callback instead of a useEffect so it fires exactly once per fetch.
+   */
+  const handleApiSuccess = useCallback(
+    (apiResponse: ApiResponse) => {
+      if (apiResponse.error) {
         setItem({
           qrId,
-          item: { error: response.error.message },
+          item: { error: apiResponse.error.message },
         });
         return;
       }
 
-      // Handle both QR and barcode responses
       const dataSource = isBarcode
-        ? (response as BarcodeApiResponse).barcode
-        : (response as QrApiResponse).qr;
+        ? (apiResponse as BarcodeApiResponse).barcode
+        : (apiResponse as QrApiResponse).qr;
 
-      // Determine item type (asset or kit) and update accordingly
       if (dataSource && dataSource.type === "asset") {
         const itemWithType: ScanListItem = {
           data: dataSource.asset,
           type: "asset",
-          codeType: item?.codeType,
+          codeType: codeTypeRef.current,
         };
         if (itemWithType.data) {
-          setItem({
-            qrId,
-            item: itemWithType,
-          });
+          setItem({ qrId, item: itemWithType });
         }
       } else if (dataSource && dataSource.type === "kit") {
         const itemWithType: ScanListItem = {
           data: dataSource.kit,
           type: "kit",
-          codeType: item?.codeType,
+          codeType: codeTypeRef.current,
         };
         if (itemWithType.data) {
-          setItem({
-            qrId,
-            item: itemWithType,
-          });
+          setItem({ qrId, item: itemWithType });
         }
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [response, qrId, setItem]);
+    },
+    [isBarcode, qrId, setItem]
+  );
 
-  // Handle fetch errors
-  useEffect(() => {
-    if (fetchError) {
-      setItem({
-        qrId,
-        item: { error: "Failed to fetch item" },
-      });
-    }
-  }, [fetchError, qrId, setItem]);
+  /**
+   * Handle fetch errors via the hook's onError callback rather than a
+   * follow-up useEffect that would otherwise fire as a reactive listener.
+   */
+  const handleApiError = useCallback(() => {
+    setItem({
+      qrId,
+      item: { error: "Failed to fetch item" },
+    });
+  }, [qrId, setItem]);
+
+  // Use the API hook to fetch item data
+  const { error: fetchError } = useApiQuery<ApiResponse>({
+    api: apiEndpoint,
+    searchParams,
+    enabled: shouldFetch,
+    onSuccess: handleApiSuccess,
+    onError: handleApiError,
+  });
 
   // Determine if we should show the item or loading state
   // Only show the item if we have both data and type (complete item)
@@ -222,6 +223,15 @@ export function GenericItemRow<T>({
   );
 }
 
+/**
+ * Base style for the animated row. Kept at module scope so the reference
+ * is stable across renders.
+ */
+const TR_BASE_STYLE = {
+  transform: "translateZ(0)",
+  backgroundAttachment: "initial",
+} as const;
+
 // Animation wrapper for rows
 export function Tr({
   children,
@@ -233,24 +243,31 @@ export function Tr({
   skipEntrance?: boolean;
   className?: string;
 }) {
+  // Only hint the compositor to promote this row while the entrance/exit
+  // animation is actually running, so we don't leave will-change set
+  // permanently (which wastes GPU memory and can degrade performance).
+  const [isAnimating, setIsAnimating] = useState(!skipEntrance);
+
+  const style = isAnimating
+    ? { ...TR_BASE_STYLE, willChange: "transform" }
+    : TR_BASE_STYLE;
+
   return (
-    <motion.tr
+    <m.tr
       initial={skipEntrance ? false : { opacity: 0, y: -80 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       exit={{ opacity: 0 }}
+      onAnimationStart={() => setIsAnimating(true)}
+      onAnimationComplete={() => setIsAnimating(false)}
       className={tw(
         "h-[80px] items-center border-b hover:bg-gray-50 [&_td]:border-b-0",
         className
       )}
-      style={{
-        transform: "translateZ(0)",
-        willChange: "transform",
-        backgroundAttachment: "initial",
-      }}
+      style={style}
     >
       {children}
-    </motion.tr>
+    </m.tr>
   );
 }
 

@@ -1,5 +1,10 @@
 node_modules
 
+# This is a pnpm workspace; pnpm-lock.yaml is authoritative
+# Reject npm/yarn lockfiles to prevent accidental package-manager mixing
+package-lock.json
+yarn.lock
+
 # Build outputs
 **/build
 **/dist
@@ -22,7 +27,14 @@ tsconfig.tsbuildinfo
 # Claude Code development notes (local only)
 .claude-notes/
 
+# Claude Code — personal settings (project-shared settings and skills are committed)
+.claude/settings.local.json
+.claude/.credentials*
+
 **/coverage
+
+# Benchmark results (regenerated on each run)
+**/benchmarks/results.json
 
 # Supabase
 **/supabase/.branches
@@ -61,4 +73,10 @@ apps/docs/.vitepress/dist
 # Lefthook local overrides
 lefthook-local.yml
 .worktrees/
+# Local binaries
+.bin/
+
+# Certificate backups
+*.cert.bak/
+
 node-compile-cache/

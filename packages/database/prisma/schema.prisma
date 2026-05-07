@@ -753,6 +753,7 @@ model Organization {
   usersWithLastSelected User[] @relation("lastSelectedOrg")
   roleChangeLogs      RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
+  activityEvents      ActivityEvent[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1375,7 +1376,9 @@ model WorkingHours {
   // Weekly schedule stored as JSON for better performance
   // Format: { "0": { "isOpen": true, "openTime": "09:00", "closeTime": "17:00" }, ... }
   // Keys are day numbers (0=Sunday, 1=Monday, etc.)
-  // Times are stored in "HH:MM" format (24-hour) in UTC
+  // Times are wall-clock "HH:MM" (24-hour) — no timezone conversion. These
+  // describe when the physical location is open, so they are interpreted as
+  // local wall time, not UTC.
   weeklySchedule Json @default("{\"0\":{\"isOpen\":false},\"1\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"2\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"3\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"4\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"5\":{\"isOpen\":true,\"openTime\":\"09:00\",\"closeTime\":\"17:00\"},\"6\":{\"isOpen\":false}}")
 
   // Relationships
@@ -1400,7 +1403,7 @@ model WorkingHoursOverride {
   date   DateTime @db.Date
   isOpen Boolean  @default(false)
 
-  // Times stored in "HH:MM" format (24-hour) in UTC
+  // Wall-clock "HH:MM" (24-hour) — no timezone conversion (see WorkingHours).
   openTime  String? // Format: "09:00"
   closeTime String? // Format: "17:00"
   reason    String?
@@ -1714,4 +1717,125 @@ model RoleChangeLog {
 
   @@index([userId, organizationId])
   @@index([organizationId, createdAt])
+}
+
+// Structured, append-only stream of state-change events.
+// Written in parallel with the legacy system-notes (`type = UPDATE`) so the
+// existing activity-feed UI keeps working unchanged; reports read only from
+// this table. See `.claude/rules/use-record-event.md` for usage rules.
+model ActivityEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  occurredAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  // Who
+  actorUserId   String?
+  // Snapshot of the actor at write time — robust against user deletion / rename
+  // for historical reports. Shape: { firstName, lastName, displayName }.
+  actorSnapshot Json?
+
+  // What
+  action     ActivityAction
+  entityType ActivityEntity
+  entityId   String
+
+  // Sparse cross-refs — populate whichever apply to the event. Plain FKs (no
+  // relation blocks) keep this table independent of source-entity cascade rules.
+  assetId        String?
+  bookingId      String?
+  auditSessionId String?
+  auditAssetId   String?
+  kitId          String?
+  locationId     String?
+  teamMemberId   String?
+  targetUserId   String?
+
+  // Typed field-change payload — used by `*_CHANGED` actions.
+  // One event per changed field; see `record-event-payload-shapes` rule.
+  field     String?
+  fromValue Json?
+  toValue   Json?
+
+  // Action-specific extras (e.g. { isExpected } for AUDIT_ASSET_SCANNED).
+  meta Json?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  // Reports-oriented indexes. Kept tight; expand only when a real report needs it.
+  @@index([organizationId, occurredAt])
+  @@index([organizationId, action, occurredAt])
+  @@index([organizationId, entityType, entityId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([assetId, occurredAt])
+  @@index([bookingId, occurredAt])
+  @@index([auditSessionId, occurredAt])
+}
+
+enum ActivityEntity {
+  ASSET
+  BOOKING
+  AUDIT
+  KIT
+  LOCATION
+  TEAM_MEMBER
+  CUSTODY
+  USER
+  ORGANIZATION
+}
+
+// Additive-only. Never rename or remove values — query compatibility depends
+// on historical events keeping their original action name.
+enum ActivityAction {
+  // Asset
+  ASSET_CREATED
+  ASSET_NAME_CHANGED
+  ASSET_DESCRIPTION_CHANGED
+  ASSET_CATEGORY_CHANGED
+  ASSET_KIT_CHANGED
+  ASSET_LOCATION_CHANGED
+  ASSET_TAGS_CHANGED
+  ASSET_STATUS_CHANGED
+  ASSET_VALUATION_CHANGED
+  ASSET_CUSTOM_FIELD_CHANGED
+  ASSET_ARCHIVED
+  ASSET_DELETED
+
+  // Custody
+  CUSTODY_ASSIGNED
+  CUSTODY_RELEASED
+
+  // Booking
+  BOOKING_CREATED
+  BOOKING_STATUS_CHANGED
+  BOOKING_DATES_CHANGED
+  BOOKING_ASSETS_ADDED
+  BOOKING_ASSETS_REMOVED
+  BOOKING_CHECKED_OUT
+  BOOKING_CHECKED_IN
+  BOOKING_PARTIAL_CHECKIN
+  BOOKING_CANCELLED
+  BOOKING_ARCHIVED
+
+  // Audit
+  AUDIT_CREATED
+  AUDIT_STARTED
+  AUDIT_ASSETS_ADDED
+  AUDIT_ASSETS_REMOVED
+  AUDIT_ASSET_SCANNED
+  AUDIT_ASSET_SCAN_REMOVED
+  AUDIT_DUE_DATE_CHANGED
+  AUDIT_ASSIGNEE_ADDED
+  AUDIT_ASSIGNEE_REMOVED
+  AUDIT_UPDATED
+  AUDIT_COMPLETED
+  AUDIT_CANCELLED
+  AUDIT_ARCHIVED
+
+  // Location
+  LOCATION_CREATED
+  LOCATION_UPDATED
+
+  // Kit
+  KIT_CREATED
+  KIT_UPDATED
 }

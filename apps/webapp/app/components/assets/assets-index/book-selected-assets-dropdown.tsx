@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -167,21 +168,7 @@ function ConditionalActionsDropdown() {
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }} // is a hack to fix the dropdown menu not being in the right place on mobile
-            // can not target [data-radix-popper-content-wrapper] for this file only with css
-            // so we have to use dangerouslySetInnerHTML
-            // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           ref={dropdownRef}

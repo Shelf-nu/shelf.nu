@@ -19,7 +19,7 @@ export default function BlockInteractions({
   icon,
 }: Props) {
   return (
-    <div className="fixed z-[9999999] h-screen w-screen px-4 py-16 md:p-16">
+    <div className="fixed z-[9999999] h-dvh w-screen px-4 py-16 md:p-16">
       <img
         src="/static/images/bg-overlay1.png"
         alt="background"

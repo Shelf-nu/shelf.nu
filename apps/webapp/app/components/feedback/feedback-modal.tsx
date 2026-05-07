@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { Crisp } from "crisp-sdk-web";
 import {
   AlertCircleIcon,
@@ -26,15 +26,67 @@ type FeedbackModalProps = {
   onClose: () => void;
 };
 
+/** Local state for the feedback modal. Grouped in a reducer to keep
+ * related UI transitions (type toggle, screenshot pick, success view)
+ * expressed as explicit actions. */
+type FeedbackState = {
+  feedbackType: "issue" | "idea";
+  screenshot: File | null;
+  previewUrl: string | null;
+  showSuccess: boolean;
+  fileError: string | null;
+};
+
+type FeedbackAction =
+  | { type: "set_feedback_type"; value: "issue" | "idea" }
+  | { type: "set_screenshot"; file: File | null; previewUrl: string | null }
+  | { type: "clear_screenshot" }
+  | { type: "set_file_error"; message: string | null }
+  | { type: "show_success" }
+  | { type: "reset" };
+
+const INITIAL_FEEDBACK_STATE: FeedbackState = {
+  feedbackType: "issue",
+  screenshot: null,
+  previewUrl: null,
+  showSuccess: false,
+  fileError: null,
+};
+
+function feedbackReducer(
+  state: FeedbackState,
+  action: FeedbackAction
+): FeedbackState {
+  switch (action.type) {
+    case "set_feedback_type":
+      return { ...state, feedbackType: action.value };
+    case "set_screenshot":
+      return {
+        ...state,
+        screenshot: action.file,
+        previewUrl: action.previewUrl,
+        fileError: null,
+      };
+    case "clear_screenshot":
+      return { ...state, screenshot: null, previewUrl: null };
+    case "set_file_error":
+      return { ...state, fileError: action.message };
+    case "show_success":
+      return { ...state, showSuccess: true };
+    case "reset":
+      return INITIAL_FEEDBACK_STATE;
+    default:
+      return state;
+  }
+}
+
 export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
   const fetcher = useFetcher<DataOrErrorResponse>();
   const disabled = useDisabled(fetcher);
   const zo = useZorm("Feedback", feedbackSchema);
-  const [feedbackType, setFeedbackType] = useState<"issue" | "idea">("issue");
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(feedbackReducer, INITIAL_FEEDBACK_STATE);
+  const { feedbackType, screenshot, previewUrl, showSuccess, fileError } =
+    state;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -52,18 +104,14 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
       clearTimeout(autoCloseTimerRef.current);
       autoCloseTimerRef.current = null;
     }
-    setFeedbackType("issue");
-    setScreenshot(null);
-    setPreviewUrl(null);
-    setShowSuccess(false);
-    setFileError(null);
+    dispatch({ type: "reset" });
     onClose();
   }, [onClose]);
 
   useEffect(
     function handleSuccess() {
       if (fetcher.data && !fetcher.data.error && fetcher.state === "idle") {
-        setShowSuccess(true);
+        dispatch({ type: "show_success" });
         autoCloseTimerRef.current = setTimeout(() => {
           autoCloseTimerRef.current = null;
           handleClose();
@@ -92,36 +140,35 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] || null;
-    setFileError(null);
 
     if (file && file.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
       const maxMB = DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024);
-      setFileError(`File size exceeds the ${maxMB}MB limit`);
+      dispatch({
+        type: "set_file_error",
+        message: `File size exceeds the ${maxMB}MB limit`,
+      });
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       return;
     }
 
-    setScreenshot(file);
-
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
 
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    } else {
-      setPreviewUrl(null);
-    }
+    dispatch({
+      type: "set_screenshot",
+      file,
+      previewUrl: file ? URL.createObjectURL(file) : null,
+    });
   }
 
   function removeScreenshot() {
-    setScreenshot(null);
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
-    setPreviewUrl(null);
+    dispatch({ type: "clear_screenshot" });
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -193,7 +240,9 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setFeedbackType("issue")}
+                      onClick={() =>
+                        dispatch({ type: "set_feedback_type", value: "issue" })
+                      }
                       className={tw(
                         "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
                         feedbackType === "issue"
@@ -207,7 +256,9 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFeedbackType("idea")}
+                      onClick={() =>
+                        dispatch({ type: "set_feedback_type", value: "idea" })
+                      }
                       className={tw(
                         "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
                         feedbackType === "idea"

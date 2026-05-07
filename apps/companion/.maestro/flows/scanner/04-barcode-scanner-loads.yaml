@@ -1,0 +1,33 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Barcode Scanner Loads"
+tags:
+  - scanner
+  - barcode
+
+---
+# Test: Scanner screen loads with barcode support
+# Verifies the scanner tab renders without errors after barcode
+# scanning was added (expanded barcodeTypes: QR, Code128, Code39,
+# DataMatrix, EAN-13). Camera won't work on simulator but the UI
+# should render the permission prompt or camera view cleanly.
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+
+# Handle iOS camera permission dialog if it appears
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Verify the scanner page loaded (permission prompt or camera view)
+# The key assertion: no crash after adding barcode types
+- assertVisible:
+    text: "Scan"
+
+- takeScreenshot: scanner-barcode-loads

@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
+import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
@@ -17,6 +18,8 @@ import { GrayBadge } from "../shared/gray-badge";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
+type PdfApiResponse = { pdfMeta: PdfDbResult };
+
 export const BookingOverviewPDF = ({
   booking,
   timeStamp,
@@ -31,8 +34,7 @@ export const BookingOverviewPDF = ({
   const totalAssets = booking.assets.length;
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [pdfMeta, setPdfMeta] = useState<PdfDbResult | null>(null);
-  const [isFetchingBookings, setIsFetchingBookings] = useState(true);
+  const fetcher = useFetcher<PdfApiResponse>();
   const [searchParams] = useSearchParams();
 
   // Get sorting params from URL search params
@@ -42,21 +44,8 @@ export const BookingOverviewPDF = ({
     !rawOrderBy || rawOrderBy === "createdAt" ? "status" : rawOrderBy;
   const orderDirection = searchParams.get("orderDirection") || "desc";
 
-  useEffect(() => {
-    if (isDialogOpen) {
-      // Pass current sorting params to ensure PDF matches UI order
-      void fetch(
-        `/api/bookings/${booking.id}/generate-pdf?orderBy=${orderBy}&orderDirection=${orderDirection}`
-      )
-        .then((response) => response.json())
-        .then((data) => {
-          setPdfMeta(data.pdfMeta);
-        })
-        .finally(() => {
-          setIsFetchingBookings(false);
-        });
-    }
-  }, [booking, isDialogOpen, orderBy, orderDirection]);
+  const pdfMeta = fetcher.data?.pdfMeta ?? null;
+  const isFetchingBookings = fetcher.state !== "idle" || pdfMeta === null;
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
@@ -65,6 +54,9 @@ export const BookingOverviewPDF = ({
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
+    void fetcher.load(
+      `/api/bookings/${booking.id}/generate-pdf?orderBy=${orderBy}&orderDirection=${orderDirection}`
+    );
   };
 
   const handleCloseDialog = () => {
@@ -91,7 +83,7 @@ export const BookingOverviewPDF = ({
         <Dialog
           open={isDialogOpen}
           onClose={handleCloseDialog}
-          className="h-[90vh] w-full py-0 md:h-[calc(100vh-4rem)]  md:w-[90%]"
+          className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
           title={
             <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
               <h3>Generate booking checklist for "{booking?.name}"</h3>

@@ -82,6 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function SelectPlan() {
   const { prices, auditPrices, barcodePrices } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
@@ -144,28 +145,19 @@ export default function SelectPlan() {
     price: (typeof prices)[number]
   ): { label: string; price: string; footnote: string } => {
     const interval = price.recurring?.interval;
-    const amount =
-      price.unit_amount != null
-        ? interval === "year"
-          ? price.unit_amount / 10
-          : price.unit_amount
-        : 0;
-
+    const amount = price.unit_amount ?? 0;
     const formattedPrice = amount > 0 ? fmtPrice(amount, price.currency) : "$0";
 
     let footnote = "";
     if (interval === "year") {
-      footnote = `Billed annually ${fmtPrice(
-        amount / 10,
-        price.currency
-      )} per workspace`;
+      footnote = "Billed annually per workspace";
     } else if (interval === "month") {
       footnote = "Billed monthly per workspace";
     }
 
     return {
       label: interval === "year" ? "Annual" : "Monthly",
-      price: `${formattedPrice}/mo`,
+      price: `${formattedPrice}/${interval === "year" ? "yr" : "mo"}`,
       footnote,
     };
   };
@@ -181,9 +173,6 @@ export default function SelectPlan() {
       : 0;
   const totalAmount = teamPriceAmount + auditPriceAmount + barcodePriceAmount;
   const isYearly = selectedPlan === "year";
-
-  const fmtPerMonth = (cents: number, currency: string) =>
-    fmtPrice(isYearly ? Math.round(cents / 12) : cents, currency);
 
   const billingLabel = isYearly ? "yr" : "mo";
 
@@ -349,21 +338,15 @@ export default function SelectPlan() {
                     {activeAuditPrice ? (
                       <div className="mt-1">
                         <span className="text-lg font-semibold text-gray-900">
-                          {fmtPerMonth(
+                          {fmtPrice(
                             activeAuditPrice.unit_amount || 0,
                             activeAuditPrice.currency
                           )}
-                          /mo
+                          /{isYearly ? "yr" : "mo"}
                         </span>
                         <p className="text-xs text-gray-500">
-                          Billed{" "}
-                          {isYearly
-                            ? `annually ${fmtPrice(
-                                activeAuditPrice.unit_amount || 0,
-                                activeAuditPrice.currency
-                              )}`
-                            : "monthly"}{" "}
-                          per workspace
+                          Billed {isYearly ? "annually" : "monthly"} per
+                          workspace
                         </p>
                       </div>
                     ) : null}
@@ -435,21 +418,15 @@ export default function SelectPlan() {
                     {activeBarcodePrice ? (
                       <div className="mt-1">
                         <span className="text-lg font-semibold text-gray-900">
-                          {fmtPerMonth(
+                          {fmtPrice(
                             activeBarcodePrice.unit_amount || 0,
                             activeBarcodePrice.currency
                           )}
-                          /mo
+                          /{isYearly ? "yr" : "mo"}
                         </span>
                         <p className="text-xs text-gray-500">
-                          Billed{" "}
-                          {isYearly
-                            ? `annually ${fmtPrice(
-                                activeBarcodePrice.unit_amount || 0,
-                                activeBarcodePrice.currency
-                              )}`
-                            : "monthly"}{" "}
-                          per workspace
+                          Billed {isYearly ? "annually" : "monthly"} per
+                          workspace
                         </p>
                       </div>
                     ) : null}

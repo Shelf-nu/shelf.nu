@@ -2,7 +2,11 @@ import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  isNotFoundError,
+  ShelfError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -197,6 +201,10 @@ export async function getCategory({
         "The category you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
+      status: 404,
+      // Suppress only true Prisma not-found (P2025); let DB / connectivity
+      // failures bubble up to Sentry so we can detect real incidents.
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }

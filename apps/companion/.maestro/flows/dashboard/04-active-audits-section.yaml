@@ -1,0 +1,26 @@
+appId: com.shelf.companion.carlos
+name: "Dashboard - Active Audits Section"
+tags:
+  - dashboard
+  - audits
+
+---
+# Test: Active Audits section on dashboard
+# Verifies audit cards render (if any active audits exist)
+# Note: This test is lenient — the Personal workspace may not have active audits
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Scroll down to find Active Audits section (optional — may not exist)
+- scrollUntilVisible:
+    element:
+      text: "Active Audits"
+    direction: DOWN
+    timeout: 8000
+    optional: true
+
+- takeScreenshot: dashboard-active-audits

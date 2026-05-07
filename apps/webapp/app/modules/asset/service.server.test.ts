@@ -2,12 +2,14 @@ import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getCategory } from "~/modules/category/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   refreshExpiredAssetImages,
   relinkAssetQrCode,
+  updateAsset,
   uploadDuplicateAssetMainImage,
 } from "./service.server";
 
@@ -16,13 +18,29 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     asset: {
       findFirst: vitest.fn().mockResolvedValue(null),
+      findUnique: vitest.fn().mockResolvedValue(null),
       update: vitest.fn().mockResolvedValue({}),
+    },
+    location: {
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
   },
 }));
+
+// why: control category lookup so we can simulate a cross-org category id
+// being rejected by the org-scoped guard inside updateAsset.
+vitest.mock("~/modules/category/service.server", async () => {
+  const actual = await vitest.importActual<Record<string, unknown>>(
+    "~/modules/category/service.server"
+  );
+  return {
+    ...actual,
+    getCategory: vitest.fn(),
+  };
+});
 
 // why: avoid real QR lookup during relink tests
 vitest.mock("~/modules/qr/service.server", () => ({
@@ -373,5 +391,71 @@ describe("refreshExpiredAssetImages", () => {
 
     // Should return original asset (refresh failed gracefully)
     expect(result[0].mainImage).toBe("https://old-signed-url.com");
+  });
+});
+
+describe("updateAsset cross-org guards", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Asset itself is in-org so kit-block lookup and assetBeforeUpdate succeed.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce({ kit: null }) // kit-block check
+      .mockResolvedValueOnce({
+        id: "asset-1",
+        title: "Asset 1",
+        description: null,
+        valuation: null,
+        category: null,
+        tags: [],
+      });
+  });
+
+  it("rejects categoryId from a different organization", async () => {
+    (getCategory as ReturnType<typeof vitest.fn>).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        title: "Category not found",
+        message:
+          "The category you are trying to access does not exist or you do not have permission to access it.",
+        label: "Category",
+        status: 404,
+      })
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        categoryId: "category-from-org-B",
+      } as any)
+    ).rejects.toThrow();
+
+    expect(getCategory).toHaveBeenCalledWith({
+      id: "category-from-org-B",
+      organizationId: "org-A",
+    });
+  });
+
+  it("rejects newLocationId from a different organization", async () => {
+    // location.findFirst returns null when scoped by org → guard throws
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        newLocationId: "location-from-org-B",
+        currentLocationId: "current-loc-A",
+      } as any)
+    ).rejects.toThrow();
+
+    expect(db.location.findFirst).toHaveBeenCalledWith({
+      where: { id: "location-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
   });
 });

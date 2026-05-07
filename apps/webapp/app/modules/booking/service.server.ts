@@ -99,6 +99,7 @@ import {
   getBookingWhereInput,
   isBookingExpired,
 } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
@@ -198,6 +199,7 @@ async function cancelScheduler(
  * Creates a consistent status transition note for booking activity logs
  *
  * @param bookingId - The booking ID to add the note to
+ * @param organizationId - Organization the booking belongs to (enforced at note-service layer)
  * @param fromStatus - The previous booking status
  * @param toStatus - The new booking status
  * @param userId - ID of the user who performed the action (if manual)
@@ -206,6 +208,7 @@ async function cancelScheduler(
  */
 export async function createStatusTransitionNote({
   bookingId,
+  organizationId,
   fromStatus,
   toStatus,
   userId,
@@ -213,6 +216,7 @@ export async function createStatusTransitionNote({
   custodianUserId,
 }: {
   bookingId: string;
+  organizationId: string;
   fromStatus: BookingStatus;
   toStatus: BookingStatus;
   userId?: string;
@@ -251,8 +255,34 @@ export async function createStatusTransitionNote({
 
   await createSystemBookingNote({
     bookingId,
+    organizationId,
     content,
   });
+
+  // Activity event — records the canonical status transition for reports.
+  // Best-effort: don't fail the note creation if event recording fails.
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
 }
 
 /**
@@ -452,10 +482,47 @@ export async function createBooking({
       };
     }
 
-    return await db.booking.create({
-      data: dataToCreate,
-      include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+    // Use transaction to ensure booking creation and activity events are atomic
+    const createdBooking = await db.$transaction(async (tx) => {
+      const created = await tx.booking.create({
+        data: dataToCreate,
+        include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+      });
+
+      // Activity event for booking creation - must be inside transaction
+      await recordEvent(
+        {
+          organizationId: booking.organizationId,
+          actorUserId: booking.creatorId,
+          action: "BOOKING_CREATED",
+          entityType: "BOOKING",
+          entityId: created.id,
+          bookingId: created.id,
+          meta: { assetCount: assetIds.length },
+        },
+        tx
+      );
+
+      // One BOOKING_ASSETS_ADDED event per asset attached at creation.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: created.id,
+            bookingId: created.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
+      return created;
     });
+
+    return createdBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -682,6 +749,7 @@ export async function updateBasicBooking({
     if (name && name !== booking.name) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking name from **${booking.name}** to **${name}**.`,
       });
       changes.push(`Booking name changed from "${booking.name}" to "${name}"`);
@@ -696,6 +764,7 @@ export async function updateBasicBooking({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking description from ${descriptionChange}.`,
       });
       changes.push("Booking description was updated");
@@ -705,6 +774,7 @@ export async function updateBasicBooking({
     if (from && booking.from && from.getTime() !== booking.from.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking start date from ${wrapDateForNote(
           booking.from
         )} to ${wrapDateForNote(from)}.`,
@@ -720,6 +790,7 @@ export async function updateBasicBooking({
     if (to && booking.to && to.getTime() !== booking.to.getTime()) {
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking end date from ${wrapDateForNote(
           booking.to
         )} to ${wrapDateForNote(to)}.`,
@@ -778,6 +849,7 @@ export async function updateBasicBooking({
 
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: custodianChangeMessage,
           });
 
@@ -792,6 +864,7 @@ export async function updateBasicBooking({
         // If we can't fetch custodian details (e.g., in tests), fall back to generic message
         await createSystemBookingNote({
           bookingId: booking.id,
+          organizationId,
           content: `${userLink} changed booking custodian assignment.`,
         });
         changes.push("Custodian assignment was changed");
@@ -816,6 +889,7 @@ export async function updateBasicBooking({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${userLink} changed booking tags from **${oldTagNames}** to **${newTagNames}**.`,
       });
       changes.push(`Tags changed from "${oldTagNames}" to "${newTagNames}"`);
@@ -912,6 +986,7 @@ export async function reserveBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1096,6 +1171,7 @@ export async function reserveBooking({
     // Add activity log for status change to RESERVED
     await createStatusTransitionNote({
       bookingId: updatedBooking.id,
+      organizationId,
       fromStatus: bookingFound.status,
       toStatus: updatedBooking.status,
       userId,
@@ -1152,6 +1228,7 @@ export async function checkoutBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1247,31 +1324,43 @@ export async function checkoutBooking({
      * timeout. The heavy read for the return payload is done after commit.
      * This prevents P2028 timeouts on bookings with many assets.
      *
-     * Prisma's array-form $transaction executes queries sequentially
-     * within a single DB transaction — it doesn't parallelize, but keeps
-     * the transaction fast by avoiding heavy includes/reads. */
-    const txOps = [
-      db.asset.updateMany({
+     * Using callback-form transaction to include activity events atomically. */
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
         where: { id: { in: bookingFound.assets.map((a) => a.id) } },
         data: { status: AssetStatus.CHECKED_OUT },
-      }),
-      db.booking.update({
+      });
+
+      await tx.booking.update({
         where: { id: bookingFound.id },
         data: dataToUpdate,
         select: { id: true },
-      }),
-    ];
+      });
 
-    if (hasKits) {
-      txOps.push(
-        db.kit.updateMany({
+      if (hasKits) {
+        await tx.kit.updateMany({
           where: { id: { in: kitIds } },
           data: { status: KitStatus.CHECKED_OUT },
-        })
-      );
-    }
+        });
+      }
 
-    await db.$transaction(txOps);
+      // Activity events — one BOOKING_CHECKED_OUT per asset, inside the tx.
+      // Must be atomic with checkout for audit trail consistency.
+      if (bookingFound.assets.length > 0) {
+        await recordEvents(
+          bookingFound.assets.map((asset) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "BOOKING_CHECKED_OUT",
+            entityType: "BOOKING",
+            entityId: bookingFound.id,
+            bookingId: bookingFound.id,
+            assetId: asset.id,
+          })),
+          tx
+        );
+      }
+    });
 
     /** Build an effective snapshot by merging bookingFound with any fields
      * modified by dataToUpdate (adjusted dates, status). This avoids
@@ -1294,6 +1383,7 @@ export async function checkoutBooking({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: bookingFound.id,
+        organizationId,
         fromStatus: bookingFound.status,
         toStatus: effectiveStatus,
         userId,
@@ -1420,6 +1510,7 @@ export async function checkinBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1575,6 +1666,23 @@ export async function checkinBooking({
           }
         }
 
+        // Activity events — one BOOKING_CHECKED_IN per asset, inside the tx.
+        // Must be atomic with booking status update for audit trail consistency.
+        if (bookingFound.assets.length > 0) {
+          await recordEvents(
+            bookingFound.assets.map((asset) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_CHECKED_IN",
+              entityType: "BOOKING",
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              assetId: asset.id,
+            })),
+            tx
+          );
+        }
+
         /** Finally update the booking */
         return tx.booking.update({
           where: { id: bookingFound.id },
@@ -1673,14 +1781,50 @@ export async function checkinBooking({
 
         await createSystemBookingNote({
           bookingId: updatedBooking.id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
+
+        // Record the canonical status transition event for reports.
+        // The custom system note above replaces the standard transition note,
+        // but downstream consumers (Booking Compliance report) still need the
+        // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
+        // booking was actually checked in. Best-effort, mirroring the pattern
+        // inside createStatusTransitionNote.
+        try {
+          await recordEvent({
+            organizationId,
+            // We're inside `if (userId)` — `userId` is a string here.
+            actorUserId: userId,
+            action: "BOOKING_STATUS_CHANGED",
+            entityType: "BOOKING",
+            entityId: updatedBooking.id,
+            bookingId: updatedBooking.id,
+            field: "status",
+            fromValue: bookingFound.status,
+            toValue: BookingStatus.COMPLETE,
+          });
+        } catch (err) {
+          Logger.error(
+            new ShelfError({
+              cause: err,
+              message:
+                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
+              additionalData: {
+                bookingId: updatedBooking.id,
+                fromStatus: bookingFound.status,
+              },
+              label,
+            })
+          );
+        }
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
           bookingId: updatedBooking.id,
+          organizationId,
           fromStatus: bookingFound.status,
           toStatus: BookingStatus.COMPLETE,
           userId,
@@ -1805,6 +1949,7 @@ export async function partialCheckinBooking({
           label,
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -1940,6 +2085,20 @@ export async function partialCheckinBooking({
         assetIds,
       });
 
+      // Activity events — one BOOKING_PARTIAL_CHECKIN per asset, inside the tx.
+      await recordEvents(
+        assetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_PARTIAL_CHECKIN",
+          entityType: "BOOKING",
+          entityId: id,
+          bookingId: id,
+          assetId,
+        })),
+        tx
+      );
+
       // BOOKING ACTIVITY LOG: Log partial check-in activity
       // Get the kit and standalone asset data for consistent formatting
       const assetsWithKitInfo = await tx.asset.findMany({
@@ -2031,6 +2190,7 @@ export async function partialCheckinBooking({
 
         await createSystemBookingNote({
           bookingId: id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
@@ -2048,6 +2208,7 @@ export async function partialCheckinBooking({
 
         await createSystemBookingNote({
           bookingId: id,
+          organizationId,
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
@@ -2171,6 +2332,24 @@ export async function updateBookingAssets({
           });
         }
       }
+
+      // Activity events — one BOOKING_ASSETS_ADDED per asset added, inside the tx.
+      // Must be atomic with asset addition for audit trail consistency.
+      if (assetIds.length > 0) {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId ?? null,
+            action: "BOOKING_ASSETS_ADDED",
+            entityType: "BOOKING",
+            entityId: b.id,
+            bookingId: b.id,
+            assetId,
+          })),
+          tx
+        );
+      }
+
       return b;
     });
 
@@ -2199,6 +2378,7 @@ export async function updateBookingAssets({
           });
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: `${wrapUserLinkForNote(
               user
             )} added ${assetContent} to the booking.`,
@@ -2206,6 +2386,7 @@ export async function updateBookingAssets({
         } else {
           await createSystemBookingNote({
             bookingId: booking.id,
+            organizationId,
             content: `${assetContent} added to the booking.`,
           });
         }
@@ -2235,12 +2416,14 @@ export async function updateBookingAssets({
 
 export async function createKitBookingNote({
   bookingId,
+  organizationId,
   kitIds,
   kits = [],
   userId,
   action = "added",
 }: {
   bookingId: string;
+  organizationId: string;
   kitIds: string[];
   kits?: Array<{ id: string; name: string }>;
   userId?: string;
@@ -2262,6 +2445,7 @@ export async function createKitBookingNote({
     });
     await createSystemBookingNote({
       bookingId,
+      organizationId,
       content: `${wrapUserLinkForNote(
         user
       )} ${action} ${kitContent} to the booking.`,
@@ -2269,6 +2453,7 @@ export async function createKitBookingNote({
   } else {
     await createSystemBookingNote({
       bookingId,
+      organizationId,
       content: `${kitContent} ${action} to the booking.`,
     });
   }
@@ -2294,6 +2479,7 @@ export async function archiveBooking({
           title: "Not found",
           message:
             "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2317,10 +2503,21 @@ export async function archiveBooking({
     // Add activity log for booking archival
     await createStatusTransitionNote({
       bookingId: updatedBooking.id,
+      organizationId,
       fromStatus: booking.status,
       toStatus: BookingStatus.ARCHIVED,
       userId,
       custodianUserId: updatedBooking.custodianUserId || undefined,
+    });
+
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_ARCHIVED",
+      entityType: "BOOKING",
+      entityId: updatedBooking.id,
+      bookingId: updatedBooking.id,
     });
 
     return updatedBooking;
@@ -2362,6 +2559,7 @@ export async function cancelBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2453,10 +2651,22 @@ export async function cancelBooking({
     // Add activity log for booking cancellation
     await createStatusTransitionNote({
       bookingId: booking.id,
+      organizationId,
       fromStatus: bookingFound.status,
       toStatus: BookingStatus.CANCELLED,
       userId,
       custodianUserId: booking.custodianUserId || undefined,
+    });
+
+    // Semantic event — complements BOOKING_STATUS_CHANGED for filtered queries.
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_CANCELLED",
+      entityType: "BOOKING",
+      entityId: booking.id,
+      bookingId: booking.id,
+      meta: cancellationReason ? { cancellationReason } : undefined,
     });
 
     return booking;
@@ -2490,6 +2700,7 @@ export async function revertBookingToDraft({
           label,
           message:
             "Booking not found, are you sure the booking exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2511,6 +2722,7 @@ export async function revertBookingToDraft({
     if (userId) {
       await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
+        organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         userId,
@@ -2520,6 +2732,7 @@ export async function revertBookingToDraft({
       // System-initiated revert (fallback)
       await createStatusTransitionNote({
         bookingId: cancelledBooking.id,
+        organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         custodianUserId: cancelledBooking.custodianUserId || undefined,
@@ -2576,6 +2789,7 @@ export async function extendBooking({
           label,
           message:
             "Booking not found. Are you sure it exists in the current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
         });
       });
 
@@ -2685,6 +2899,7 @@ export async function extendBooking({
     });
     await createSystemBookingNote({
       bookingId: updatedBooking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         user
       )} extended the booking from **${wrapDateForNote(
@@ -3249,6 +3464,33 @@ export async function removeAssets({
       assetIds,
     });
 
+    // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
+    // Best-effort: don't fail the removal if event recording fails.
+    if (assetIds.length > 0) {
+      try {
+        await recordEvents(
+          assetIds.map((assetId) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_ASSETS_REMOVED",
+            entityType: "BOOKING",
+            entityId: booking.id,
+            bookingId: booking.id,
+            assetId,
+          }))
+        );
+      } catch (err) {
+        Logger.error(
+          new ShelfError({
+            cause: err,
+            message: "Failed to record BOOKING_ASSETS_REMOVED events",
+            additionalData: { bookingId: booking.id, assetIds },
+            label,
+          })
+        );
+      }
+    }
+
     // BOOKING ACTIVITY LOG: Log removal activity
     // Creates system note when assets/kits are removed from a booking
     // Handles three cases: kits only, assets only, or both combined
@@ -3267,6 +3509,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${kitContent} and ${assetContent} from booking.`,
@@ -3280,6 +3523,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${kitContent} from booking.`,
@@ -3290,6 +3534,7 @@ export async function removeAssets({
 
       await createSystemBookingNote({
         bookingId: booking.id,
+        organizationId,
         content: `${wrapUserLinkForNote(
           userForNotes
         )} removed ${assetContent} from booking.`,
@@ -4017,6 +4262,7 @@ export async function bulkArchiveBookings({
       for (const booking of bookings) {
         await createStatusTransitionNote({
           bookingId: booking.id,
+          organizationId,
           fromStatus: booking.status,
           toStatus: BookingStatus.ARCHIVED,
           custodianUserId: booking.custodianUserId || undefined,
@@ -4172,6 +4418,7 @@ export async function bulkCancelBookings({
       for (const booking of bookings) {
         await createStatusTransitionNote({
           bookingId: booking.id,
+          organizationId,
           fromStatus: booking.status,
           toStatus: BookingStatus.CANCELLED,
           userId,
@@ -4310,6 +4557,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${kitContent} and ${assetContent} to booking.`,
@@ -4323,6 +4571,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${kitContent} to booking.`,
@@ -4333,6 +4582,7 @@ async function createNotesForScannedAssetsAndKits({
 
     await createSystemBookingNote({
       bookingId: booking.id,
+      organizationId,
       content: `${wrapUserLinkForNote(
         userForNotes
       )} added ${assetContent} to booking.`,

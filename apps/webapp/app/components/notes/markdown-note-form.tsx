@@ -8,9 +8,17 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 
 export const MarkdownNoteSchema = z.object({
-  content: z.string().min(3, "Content is required"),
+  content: z
+    .string()
+    .min(3, "Content is required")
+    .max(
+      NOTE_MAX_CONTENT_LENGTH,
+      `Note must be ${NOTE_MAX_CONTENT_LENGTH} characters or fewer`
+    ),
 });
 
 interface MarkdownNoteFormProps {
@@ -52,7 +60,11 @@ export function MarkdownNoteForm({
   const zo = useZorm(formId, MarkdownNoteSchema);
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(editingAtom);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Auto-focus the editor when entering edit mode for better UX.
+   * Defers focus to the next animation frame so the textarea is mounted.
+   */
+  const editorRef = useAutoFocus<HTMLTextAreaElement>({ when: isEditing });
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
   const isDone = fetcher.state === "idle" && fetcher.data != null;
 
@@ -129,33 +141,20 @@ export function MarkdownNoteForm({
   );
 
   /**
-   * Auto-focus the editor when entering edit mode for better UX.
-   *
-   * Uses requestAnimationFrame to ensure the DOM has been updated
-   * before attempting to focus (prevents race conditions).
-   */
-  useEffect(() => {
-    if (!isEditing) {
-      return;
-    }
-    const frame = requestAnimationFrame(() => {
-      editorRef.current?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [isEditing]);
-
-  /**
    * Ensure editor is closed when form submission completes successfully.
    *
-   * This acts as a backup to the optimistic close in handleSubmit.
-   * isDone is true when fetcher returns to idle state with data,
-   * indicating the note was created successfully.
+   * Acts as a backup to the optimistic close in handleSubmit: we watch the
+   * fetcher's idle+data transition and collapse the editor then. Implemented
+   * with a ref-tracked previous value (instead of a useEffect) so the close
+   * is applied during render without an extra commit phase.
    */
-  useEffect(() => {
-    if (isDone) {
-      setIsEditing(false);
-    }
-  }, [isDone, setIsEditing]);
+  const prevIsDone = useRef(isDone);
+  if (isDone && !prevIsDone.current) {
+    prevIsDone.current = true;
+    setIsEditing(false);
+  } else if (!isDone && prevIsDone.current) {
+    prevIsDone.current = false;
+  }
 
   /**
    * Re-enable form controls when fetcher completes.

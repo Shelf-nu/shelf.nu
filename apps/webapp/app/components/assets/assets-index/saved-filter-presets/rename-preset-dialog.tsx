@@ -5,6 +5,7 @@ import { useZorm } from "react-zorm";
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { RenamePresetFormSchema } from "~/modules/asset-filter-presets/schemas";
 
 /**
@@ -37,6 +38,9 @@ export function RenamePresetDialog({
 }) {
   const zo = useZorm("rename-preset", RenamePresetFormSchema);
 
+  /** Ref for the rename input — focuses the field whenever the dialog opens. */
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
+
   // Combine client-side and server-side validation errors
   const nameError =
     validationErrors?.name?.message ?? zo.errors.name()?.message;
@@ -61,13 +65,13 @@ export function RenamePresetDialog({
             <input type="hidden" name="intent" value="rename-preset" />
             <input type="hidden" name="presetId" value={presetId} />
             <Input
+              ref={nameInputRef}
               label="New name"
               name="name"
               value={name}
               onChange={onNameChange}
               placeholder="Enter new name"
               maxLength={60}
-              autoFocus
               error={nameError}
             />
             <div className="mt-4 flex justify-end gap-2">

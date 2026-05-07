@@ -10,6 +10,18 @@ import { Button } from "../shared/button";
 
 import { Td, Table, Tr } from "../table";
 
+/**
+ * Stable keys for empty placeholder rows rendered when there are fewer than 5
+ * newest assets. Used instead of array index to satisfy React's stable-key rule.
+ */
+const PLACEHOLDER_ROW_KEYS = [
+  "placeholder-0",
+  "placeholder-1",
+  "placeholder-2",
+  "placeholder-3",
+  "placeholder-4",
+] as const;
+
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
   return (
@@ -53,13 +65,13 @@ export default function NewestAssets() {
               </ClickableTr>
             ))}
             {newAssets.length < 5 &&
-              Array(5 - newAssets.length)
-                .fill(null)
-                .map((_d, i) => (
-                  <Tr key={i} className="h-[72px]">
+              PLACEHOLDER_ROW_KEYS.slice(0, 5 - newAssets.length).map(
+                (placeholderKey) => (
+                  <Tr key={placeholderKey} className="h-[72px]">
                     {""}
                   </Tr>
-                ))}
+                )
+              )}
           </tbody>
         </Table>
       ) : (

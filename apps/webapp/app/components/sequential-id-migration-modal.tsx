@@ -14,51 +14,65 @@ import { Spinner } from "~/components/shared/spinner";
 import type { action } from "~/routes/api+/generate-sequential-ids";
 
 interface SequentialIdMigrationModalProps {
+  /** Active organization id. Parent should pass this as `key` to remount the
+   *  modal (and reset its state) when the active organization changes. */
   organizationId: string;
 }
 
 type MigrationState = "starting" | "running" | "completed" | "error";
 
-export function SequentialIdMigrationModal({
-  organizationId,
-}: SequentialIdMigrationModalProps) {
-  const fetcher = useFetcher<typeof action>();
-  const [state, setState] = useState<MigrationState>("starting");
-  const [message, setMessage] = useState(
-    "Setting up sequential IDs for your organization..."
-  );
+/** Combined migration state — keeps the status and user-facing message in a
+ *  single atom so they cannot drift and we avoid cascading setState calls. */
+type MigrationStatus = {
+  state: MigrationState;
+  message: string;
+};
 
-  // Reset state when organization changes
-  useEffect(() => {
-    setState("starting");
-    setMessage("Setting up sequential IDs for your organization...");
-  }, [organizationId]);
+const INITIAL_STATUS: MigrationStatus = {
+  state: "starting",
+  message: "Setting up sequential IDs for your organization...",
+};
+
+export function SequentialIdMigrationModal(
+  // `organizationId` is consumed by the parent as `key` to remount this modal
+  // when the organization changes; no internal read is required.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _: SequentialIdMigrationModalProps
+) {
+  const fetcher = useFetcher<typeof action>();
+  // Status is stored as a single object so each transition is one setState.
+  const [status, setStatus] = useState<MigrationStatus>(INITIAL_STATUS);
 
   // Auto-start migration when modal opens
   useEffect(() => {
-    if (state === "starting") {
-      setState("running");
-      setMessage("Setting up sequential IDs for your organization...");
+    if (status.state === "starting") {
+      setStatus({
+        state: "running",
+        message: "Setting up sequential IDs for your organization...",
+      });
       void fetcher.submit(
         {},
         { action: "/api/generate-sequential-ids", method: "post" }
       );
     }
-  }, [state, fetcher]);
+  }, [status.state, fetcher]);
 
-  // Handle fetcher response
+  // Handle fetcher response — single setState per branch avoids cascading updates.
   useEffect(() => {
-    if (fetcher.data) {
-      if ("success" in fetcher.data && fetcher.data.success) {
-        setState("completed");
-        setMessage(fetcher.data.message);
-        // Modal will close automatically when loader revalidates and hasSequentialIdsMigrated becomes true
-      } else {
-        setState("error");
-        setMessage(fetcher.data.message || "Failed to generate sequential IDs");
-      }
+    if (!fetcher.data) return;
+    if ("success" in fetcher.data && fetcher.data.success) {
+      // Modal will close automatically when loader revalidates and
+      // hasSequentialIdsMigrated becomes true.
+      setStatus({ state: "completed", message: fetcher.data.message });
+    } else {
+      setStatus({
+        state: "error",
+        message: fetcher.data.message || "Failed to generate sequential IDs",
+      });
     }
   }, [fetcher.data]);
+
+  const { state, message } = status;
 
   return (
     <AlertDialog open={true}>

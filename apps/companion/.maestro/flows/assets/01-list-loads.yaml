@@ -1,0 +1,31 @@
+appId: com.shelf.companion.carlos
+name: "Assets - List Loads"
+tags:
+  - assets
+  - smoke
+
+---
+# Test: Assets list screen loads correctly
+# Verifies search bar, filter pills, and asset cards render
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Assets tab
+- tapOn:
+    text: "Assets"
+    index: 1
+
+# Wait for Assets screen to load — use extendedWaitUntil on a unique element
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+# Verify assets screen filter pills
+- assertVisible: "Filter: Available"
+- assertVisible: "Filter: In Custody"
+
+- takeScreenshot: assets-list-loaded

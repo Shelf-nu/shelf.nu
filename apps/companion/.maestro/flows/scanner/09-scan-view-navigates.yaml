@@ -1,0 +1,41 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Dev Scan Navigates to Asset Detail"
+tags:
+  - scanner
+  - high-impact
+
+---
+# Test: Scan in View mode navigates to asset detail screen
+# Uses dev scan injection — same pipeline as real camera scan
+
+- runFlow: ../../shared/login.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Ensure View mode (default)
+- tapOn:
+    text: "View"
+    optional: true
+
+# Open dev scan input and inject QR
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+# View mode navigates to asset detail after ~1s delay
+# Wait for navigation to complete — "Created" is always on asset detail
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 20000
+
+- takeScreenshot: scanner-view-asset-detail

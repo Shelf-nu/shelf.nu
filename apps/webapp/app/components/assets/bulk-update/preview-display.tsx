@@ -8,6 +8,7 @@
  * @see {@link file://./../../../utils/import-update.server.ts} Server-side preview logic
  */
 import type React from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/assets.import-update";
 import type { UpdatePreview } from "~/utils/import-update.server";
@@ -38,6 +39,7 @@ import { Table, Td, Th, Tr } from "../../table";
  * Shows summary statistics, validation warnings, unrecognized columns, new entity warnings,
  * failed rows, a spreadsheet-style change grid, and the "I AGREE" confirmation dialog.
  */
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export function PreviewDisplay({
   preview,
   formRef,
@@ -148,8 +150,11 @@ export function PreviewDisplay({
                 </Tr>
               </thead>
               <tbody>
-                {allWarnings.map((w, i) => (
-                  <Tr key={i}>
+                {allWarnings.map((w) => (
+                  // Composite key: one asset can have multiple warnings across
+                  // different fields, so `assetId + field` uniquely identifies
+                  // the row.
+                  <Tr key={`${w.assetId}:${w.field}`}>
                     <Td className="font-medium">{w.assetTitle}</Td>
                     <Td>{w.field}</Td>
                     <Td className="text-red-600">{w.warning}</Td>
@@ -237,7 +242,9 @@ export function PreviewDisplay({
               <p>
                 <strong>New categories:</strong>{" "}
                 {preview.newEntities.categories.map((name, i) => (
-                  <span key={i}>
+                  // The entity name is unique within its own list (dedup'd on
+                  // the server), so it's a stable key here.
+                  <span key={name}>
                     {i > 0 && ", "}
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
                       {name}
@@ -250,7 +257,7 @@ export function PreviewDisplay({
               <p>
                 <strong>New locations:</strong>{" "}
                 {preview.newEntities.locations.map((name, i) => (
-                  <span key={i}>
+                  <span key={name}>
                     {i > 0 && ", "}
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
                       {name}
@@ -263,7 +270,7 @@ export function PreviewDisplay({
               <p>
                 <strong>New tags:</strong>{" "}
                 {preview.newEntities.tags.map((name, i) => (
-                  <span key={i}>
+                  <span key={name}>
                     {i > 0 && ", "}
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
                       {name}
@@ -292,8 +299,10 @@ export function PreviewDisplay({
                 </Tr>
               </thead>
               <tbody>
-                {preview.failedRows.map((row, i) => (
-                  <Tr key={i}>
+                {preview.failedRows.map((row) => (
+                  // `rowNumber` is the 1-based CSV line number and is unique
+                  // per row in the uploaded file.
+                  <Tr key={row.rowNumber}>
                     <Td>{row.rowNumber}</Td>
                     <Td className="font-mono text-xs">{row.id || "(empty)"}</Td>
                     <Td className="text-red-600">{row.reason}</Td>
@@ -334,8 +343,10 @@ export function PreviewDisplay({
                 </Tr>
               </thead>
               <tbody>
-                {preview.skippedAssets.map((asset, i) => (
-                  <Tr key={i}>
+                {preview.skippedAssets.map((asset) => (
+                  // Asset `id` here is the CSV sequential identifier
+                  // (e.g. "SAM-0022"), unique within the uploaded file.
+                  <Tr key={asset.id}>
                     <Td>{asset.title}</Td>
                     <Td className="text-gray-500">{asset.reason}</Td>
                   </Tr>
@@ -418,26 +429,11 @@ export function PreviewDisplay({
                       "An error occurred while applying changes."}
                   </div>
                 )}
-                <Input
-                  type="text"
-                  label="Confirmation"
-                  autoFocus
-                  name="agree"
-                  value={agreed}
-                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
-                  placeholder="I AGREE"
-                  pattern="^I AGREE$"
-                  required
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      agreed === "I AGREE" &&
-                      !isApplyLoading
-                    ) {
-                      e.preventDefault();
-                      submitApply();
-                    }
-                  }}
+                <ConfirmationInput
+                  agreed={agreed}
+                  setAgreed={setAgreed}
+                  isApplyLoading={isApplyLoading}
+                  submitApply={submitApply}
                 />
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -473,5 +469,51 @@ export function PreviewDisplay({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * Confirmation input for the "I AGREE" apply dialog.
+ *
+ * Extracted into its own component so we can focus the input on mount via
+ * `useAutoFocus` instead of the `autoFocus` attribute (flagged by
+ * `jsx-a11y/no-autofocus` — autofocus hurts screen-reader and keyboard users).
+ * The component is only mounted when the AlertDialog opens, so the focus
+ * fires exactly when the user actually needs the input focused.
+ */
+function ConfirmationInput({
+  agreed,
+  setAgreed,
+  isApplyLoading,
+  submitApply,
+}: {
+  agreed: string;
+  setAgreed: (v: string) => void;
+  isApplyLoading: boolean;
+  submitApply: () => void;
+}) {
+  // Focus once when the dialog opens so the user can start typing "I AGREE"
+  // immediately. Safe because this component only mounts inside the open
+  // AlertDialog, never ambiently.
+  const inputRef = useAutoFocus<HTMLInputElement>();
+
+  return (
+    <Input
+      ref={inputRef}
+      type="text"
+      label="Confirmation"
+      name="agree"
+      value={agreed}
+      onChange={(e) => setAgreed(e.target.value.toUpperCase())}
+      placeholder="I AGREE"
+      pattern="^I AGREE$"
+      required
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && agreed === "I AGREE" && !isApplyLoading) {
+          e.preventDefault();
+          submitApply();
+        }
+      }}
+    />
   );
 }

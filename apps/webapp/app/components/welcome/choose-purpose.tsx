@@ -1,5 +1,5 @@
 import type React from "react";
-import { useState } from "react";
+import { useReducer } from "react";
 import type { Currency } from "@prisma/client";
 import { CheckIcon, UserIcon, UsersIcon } from "lucide-react";
 import { useNavigation } from "react-router";
@@ -18,6 +18,56 @@ import { Tag } from "../shared/tag";
 
 type SignupPlan = "personal" | "team";
 type AuditBillingInterval = "month" | "year";
+
+/** Consolidated state for the onboarding plan picker. */
+type ChoosePurposeState = {
+  selectedPlan: SignupPlan | null;
+  wantsAudits: boolean;
+  wantsBarcodes: boolean;
+  auditBillingInterval: AuditBillingInterval;
+  barcodeBillingInterval: AuditBillingInterval;
+};
+
+type ChoosePurposeAction =
+  | { type: "select_plan"; plan: SignupPlan }
+  | { type: "toggle_audits" }
+  | { type: "toggle_barcodes" }
+  | { type: "set_audit_interval"; interval: AuditBillingInterval }
+  | { type: "set_barcode_interval"; interval: AuditBillingInterval };
+
+const INITIAL_CHOOSE_PURPOSE_STATE: ChoosePurposeState = {
+  selectedPlan: null,
+  wantsAudits: false,
+  wantsBarcodes: false,
+  auditBillingInterval: "year",
+  barcodeBillingInterval: "year",
+};
+
+function choosePurposeReducer(
+  state: ChoosePurposeState,
+  action: ChoosePurposeAction
+): ChoosePurposeState {
+  switch (action.type) {
+    case "select_plan":
+      // Selecting/changing a plan resets the addon toggles
+      return {
+        ...state,
+        selectedPlan: action.plan,
+        wantsAudits: false,
+        wantsBarcodes: false,
+      };
+    case "toggle_audits":
+      return { ...state, wantsAudits: !state.wantsAudits };
+    case "toggle_barcodes":
+      return { ...state, wantsBarcodes: !state.wantsBarcodes };
+    case "set_audit_interval":
+      return { ...state, auditBillingInterval: action.interval };
+    case "set_barcode_interval":
+      return { ...state, barcodeBillingInterval: action.interval };
+    default:
+      return state;
+  }
+}
 
 const fmtPrice = (amountInCents: number, currency: string) =>
   formatCurrency({
@@ -89,13 +139,17 @@ export function ChoosePurpose({
   usedAuditTrial: boolean;
   usedBarcodeTrial: boolean;
 }) {
-  const [selectedPlan, setSelectedPlan] = useState<SignupPlan | null>(null);
-  const [wantsAudits, setWantsAudits] = useState(false);
-  const [wantsBarcodes, setWantsBarcodes] = useState(false);
-  const [auditBillingInterval, setAuditBillingInterval] =
-    useState<AuditBillingInterval>("year");
-  const [barcodeBillingInterval, setBarcodeBillingInterval] =
-    useState<AuditBillingInterval>("year");
+  const [state, dispatch] = useReducer(
+    choosePurposeReducer,
+    INITIAL_CHOOSE_PURPOSE_STATE
+  );
+  const {
+    selectedPlan,
+    wantsAudits,
+    wantsBarcodes,
+    auditBillingInterval,
+    barcodeBillingInterval,
+  } = state;
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state) || !selectedPlan;
 
@@ -173,10 +227,8 @@ export function ChoosePurpose({
                 key={planKey}
                 planKey={planKey}
                 onSelect={(key) => {
-                  setSelectedPlan(key);
-                  // Reset addon toggles when switching plans
-                  setWantsAudits(false);
-                  setWantsBarcodes(false);
+                  // Reducer also resets addon toggles when plan changes
+                  dispatch({ type: "select_plan", plan: key });
                 }}
                 selected={isSelected}
                 description={plan.description}
@@ -204,10 +256,12 @@ export function ChoosePurpose({
                 label={AUDIT_ADDON.label}
                 description={AUDIT_ADDON.description}
                 selected={wantsAudits}
-                onToggle={() => setWantsAudits((prev) => !prev)}
+                onToggle={() => dispatch({ type: "toggle_audits" })}
                 prices={auditPrices}
                 billingInterval={auditBillingInterval}
-                onBillingIntervalChange={setAuditBillingInterval}
+                onBillingIntervalChange={(interval) =>
+                  dispatch({ type: "set_audit_interval", interval })
+                }
                 showBillingToggle={selectedPlan === "personal"}
               />
             ) : null}
@@ -216,10 +270,12 @@ export function ChoosePurpose({
                 label={BARCODE_ADDON.label}
                 description={BARCODE_ADDON.description}
                 selected={wantsBarcodes}
-                onToggle={() => setWantsBarcodes((prev) => !prev)}
+                onToggle={() => dispatch({ type: "toggle_barcodes" })}
                 prices={barcodePrices}
                 billingInterval={barcodeBillingInterval}
-                onBillingIntervalChange={setBarcodeBillingInterval}
+                onBillingIntervalChange={(interval) =>
+                  dispatch({ type: "set_barcode_interval", interval })
+                }
                 showBillingToggle={selectedPlan === "personal"}
               />
             ) : null}

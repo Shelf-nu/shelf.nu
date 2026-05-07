@@ -232,7 +232,11 @@ function Item({
     subscription?.trial_end &&
     subscription?.trial_end * 1000 > Date.now();
 
-  const detailsArray = useMemo<(string | ReactNode)[]>(() => {
+  // Each detail entry has a stable domain id so the list can be keyed by
+  // `id` instead of the array index (avoids `no-array-index-as-key`).
+  const detailsArray = useMemo<
+    { id: string; content: string | ReactNode }[]
+  >(() => {
     // Determine the display name based on tier or product name
     const displayName =
       planTier === "tier_2"
@@ -241,20 +245,29 @@ function Item({
         ? "Plus plan"
         : productName;
 
-    const arr: (string | ReactNode)[] = [
-      displayName,
-      formatSubscriptionStatus(subscription.status),
-      interval === "year" ? "Yearly billing" : "Monthly billing",
+    const arr: { id: string; content: string | ReactNode }[] = [
+      { id: "displayName", content: displayName },
+      {
+        id: "status",
+        content: formatSubscriptionStatus(subscription.status),
+      },
+      {
+        id: "billing",
+        content: interval === "year" ? "Yearly billing" : "Monthly billing",
+      },
     ];
     if (workspaceName) {
-      arr.push(`Workspace: ${workspaceName}`);
+      arr.push({ id: "workspace", content: `Workspace: ${workspaceName}` });
     }
     if (isLegacyPricing) {
-      arr.unshift(
-        <div className="flex items-center gap-1">
-          <span>Legacy pricing</span> <LegacyPricingTooltip />
-        </div>
-      );
+      arr.unshift({
+        id: "legacyPricing",
+        content: (
+          <div className="flex items-center gap-1">
+            <span>Legacy pricing</span> <LegacyPricingTooltip />
+          </div>
+        ),
+      });
     }
     return arr;
   }, [
@@ -266,46 +279,6 @@ function Item({
     workspaceName,
   ]);
 
-  function renderSubscriptionCost() {
-    /** Cost for singular price. To get the total we still need to multiply by quantity */
-    if (trialEnded)
-      return (
-        <>
-          <div>Trial ended</div>
-
-          <div className="text-gray-500">
-            <CustomerPortalForm
-              buttonText="Add payment"
-              buttonProps={{
-                variant: "link",
-                className: tw("font-normal underline"),
-              }}
-              className="inline"
-            />{" "}
-            information to start subscription.
-          </div>
-        </>
-      );
-    if (isPaused) return "Paused";
-    return (
-      <>
-        <div>
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(costPerPrice)}{" "}
-          / {interval}
-        </div>
-
-        {isTrial && (
-          <div className="text-gray-500">
-            after trial ends <TrialPaymentTooltip />
-          </div>
-        )}
-      </>
-    );
-  }
-
   return (
     <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
       <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -315,9 +288,11 @@ function Item({
       <div className="flex w-full items-center justify-between" key={item.id}>
         <div>
           <div className="flex gap-2">
-            {detailsArray.map((content, index, array) => (
-              <span key={index} className="flex items-center gap-2">
-                <span className="font-semibold uppercase">{content}</span>
+            {detailsArray.map((detail, index, array) => (
+              <span key={detail.id} className="flex items-center gap-2">
+                <span className="font-semibold uppercase">
+                  {detail.content}
+                </span>
                 {index < array.length - 1 && " - "}
               </span>
             ))}
@@ -355,9 +330,85 @@ function Item({
             </div>
           </div>
         </div>
-        <div className="text-right">{renderSubscriptionCost()}</div>
+        <div className="text-right">
+          <SubscriptionCost
+            costPerPrice={costPerPrice}
+            interval={interval}
+            isPaused={Boolean(isPaused)}
+            isTrial={Boolean(isTrial)}
+            trialEnded={Boolean(trialEnded)}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Props for {@link SubscriptionCost}. */
+type SubscriptionCostProps = {
+  /** Subscription cost per price (already accounts for quantity). */
+  costPerPrice: number;
+  /** Billing interval (e.g. "month", "year"). */
+  interval: string | undefined;
+  /** Whether the subscription is paused. */
+  isPaused: boolean;
+  /** Whether the subscription is in a trial. */
+  isTrial: boolean;
+  /** Whether the trial has ended but not yet converted to paid. */
+  trialEnded: boolean;
+};
+
+/**
+ * Renders the right-hand cost column of a subscription row.
+ *
+ * Extracted to a module-scope component (rather than an inline render helper
+ * inside `Item`) so React can reconcile it independently and to satisfy the
+ * `no-render-in-render` diagnostic.
+ */
+function SubscriptionCost({
+  costPerPrice,
+  interval,
+  isPaused,
+  isTrial,
+  trialEnded,
+}: SubscriptionCostProps) {
+  /** Cost for singular price. To get the total we still need to multiply by quantity */
+  if (trialEnded) {
+    return (
+      <>
+        <div>Trial ended</div>
+
+        <div className="text-gray-500">
+          <CustomerPortalForm
+            buttonText="Add payment"
+            buttonProps={{
+              variant: "link",
+              className: tw("font-normal underline"),
+            }}
+            className="inline"
+          />{" "}
+          information to start subscription.
+        </div>
+      </>
+    );
+  }
+  if (isPaused) return <>Paused</>;
+  return (
+    <>
+      <div>
+        {new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+        }).format(costPerPrice)}{" "}
+        / {interval}
+      </div>
+
+      {isTrial && (
+        <div className="text-gray-500">
+          after trial ends <TrialPaymentTooltip />
+        </div>
+      )}
+    </>
   );
 }
 

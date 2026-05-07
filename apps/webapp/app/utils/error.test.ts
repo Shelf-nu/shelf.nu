@@ -3,6 +3,7 @@ import {
   isLikeShelfError,
   isPrismaTransientError,
   makeShelfError,
+  notAllowedMethod,
 } from "./error";
 
 // @vitest-environment node
@@ -428,5 +429,44 @@ describe(isPrismaTransientError.name, () => {
   ])("should detect transient error by message: %s", (message) => {
     const error = new Error(message);
     expect(isPrismaTransientError(error)).toBe(true);
+  });
+
+  it("should return false for an Error whose message has been overwritten to undefined", () => {
+    // Guards against a regression where a ShelfError built with
+    // `message: undefined` would crash `cause.message.toLowerCase()`.
+    const error = new Error("original");
+    // @ts-expect-error — simulate the bad ShelfError construction path
+    error.message = undefined;
+    expect(() => isPrismaTransientError(error)).not.toThrow();
+    expect(isPrismaTransientError(error)).toBe(false);
+  });
+});
+
+describe(notAllowedMethod.name, () => {
+  it("uses the default message when no options are provided", () => {
+    const error = notAllowedMethod("POST");
+    expect(error.message).toBe(`"POST" method is not allowed.`);
+    expect(error.status).toBe(405);
+  });
+
+  it("uses the default message when options.message is explicitly undefined", () => {
+    // Reproduces the historical bug where `assertIsPost(request)` (no message
+    // argument) called `notAllowedMethod("POST", { message: undefined })` and
+    // clobbered the default via spread semantics, producing a message-less
+    // ShelfError that later crashed `isPrismaTransientError`.
+    const error = notAllowedMethod("POST", { message: undefined });
+    expect(error.message).toBe(`"POST" method is not allowed.`);
+  });
+
+  it("respects a caller-provided message override", () => {
+    const error = notAllowedMethod("POST", {
+      message: "Only POST is accepted here.",
+    });
+    expect(error.message).toBe("Only POST is accepted here.");
+  });
+
+  it("produces an error that flows through makeShelfError without throwing", () => {
+    const error = notAllowedMethod("POST");
+    expect(() => makeShelfError(error)).not.toThrow();
   });
 });

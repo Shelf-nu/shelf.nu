@@ -46,7 +46,7 @@ function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
         {options.map((op, i) => (
           <div
             className="mt-2 flex items-center justify-between rounded border px-5 py-3 text-[14px] text-gray-600"
-            key={`${i}${op}`}
+            key={op}
           >
             <span>{op}</span>
             <div
