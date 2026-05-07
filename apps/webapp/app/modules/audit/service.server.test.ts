@@ -12,6 +12,7 @@ import {
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
+  cancelAuditSession,
   deleteAuditSession,
   bulkDeleteAudits,
 } from "./service.server";
@@ -41,6 +42,18 @@ vi.mock("~/utils/markdoc-wrappers", () => ({
 vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn().mockResolvedValue(undefined),
   recordEvents: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: cancellation triggers email + scheduler side effects we don't exercise in service unit tests
+vi.mock("./email-helpers", () => ({
+  sendAuditCancelledEmails: vi.fn(),
+  sendAuditCompletedEmail: vi.fn(),
+}));
+
+// why: cancelAuditReminders calls scheduler.cancel via QueueNames; mock the whole module to avoid pg-boss
+vi.mock("~/utils/scheduler.server", () => ({
+  scheduler: { cancel: vi.fn().mockResolvedValue(undefined) },
+  QueueNames: { auditReminder: "audit-reminder" },
 }));
 
 vi.mock("~/database/db.server", () => {
@@ -1347,6 +1360,115 @@ describe("audit service", () => {
           message: expect.stringMatching(/Failed to bulk delete audits/),
         });
       });
+    });
+  });
+
+  describe("cancelAuditSession permission", () => {
+    const auditSessionId = "audit-1";
+    const organizationId = "org-1";
+    const creatorId = "user-creator";
+    const adminId = "user-admin";
+    const stranger = "user-stranger";
+    const hints = {
+      timeZone: "UTC",
+      hourFormat: "24",
+      locale: "en-US",
+    } as unknown as Parameters<typeof cancelAuditSession>[0]["hints"];
+
+    const baseAudit = {
+      id: auditSessionId,
+      name: "Floor 2 PC Audit",
+      organizationId,
+      createdById: creatorId,
+      status: AuditStatus.PENDING,
+      activeSchedulerReference: null,
+      createdBy: {
+        email: "creator@example.com",
+        firstName: "Created",
+        lastName: "By",
+        displayName: "Created By",
+      },
+      organization: { owner: { email: "owner@example.com" } },
+      assignments: [],
+      _count: { assets: 5 },
+    };
+
+    beforeEach(() => {
+      // Default: audit exists, has no scheduler ref so cancelAuditReminders no-ops.
+      mockDb.auditSession.findUnique.mockResolvedValue(baseAudit);
+      mockDb.auditSession.update.mockResolvedValue({
+        ...baseAudit,
+        status: AuditStatus.CANCELLED,
+        cancelledAt: new Date(),
+      });
+      mockDb.user.findFirst.mockResolvedValue({
+        firstName: "Acting",
+        lastName: "User",
+      });
+      mockDb.auditNote.create.mockResolvedValue({ id: "note-1" });
+    });
+
+    it("lets the creator cancel their own audit (legacy behavior)", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: creatorId,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
+
+      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
+        where: { id: auditSessionId },
+        data: { status: AuditStatus.CANCELLED, cancelledAt: expect.any(Date) },
+      });
+    });
+
+    it("lets an admin/owner cancel an audit they did not create", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: adminId,
+          isAdminOrOwner: true,
+          hints,
+        })
+      ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
+    });
+
+    it("rejects a non-creator non-admin with 403", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: stranger,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).rejects.toMatchObject({
+        status: 403,
+        message: expect.stringMatching(/creator or a workspace admin/),
+      });
+
+      expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+    });
+
+    it("still rejects when the audit is already COMPLETED, even for an admin", async () => {
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        status: AuditStatus.COMPLETED,
+      });
+
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: adminId,
+          isAdminOrOwner: true,
+          hints,
+        })
+      ).rejects.toMatchObject({ status: 400 });
     });
   });
 });

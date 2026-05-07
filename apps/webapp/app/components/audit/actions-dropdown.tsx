@@ -87,9 +87,14 @@ const ConditionalActionsDropdown = () => {
   // Admin/owner can delete archived audits (archive-first safety contract).
   const canDeleteAudit = isAdminOrOwner && isArchived;
 
-  // Only the creator can cancel an audit, and only if it's not already completed or cancelled
+  // The audit's creator can always cancel it. Workspace admins/owners can
+  // also cancel any audit in the org so team-managed audits don't get stuck
+  // when the creator is unavailable — matches archive/delete permissions.
   const canCancelAudit =
-    isCreator && !isCompleted && !isCancelled && !isArchived;
+    (isCreator || isAdminOrOwner) &&
+    !isCompleted &&
+    !isCancelled &&
+    !isArchived;
 
   function handleMenuClose() {
     setOpen(false);

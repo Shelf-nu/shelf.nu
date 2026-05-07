@@ -1825,19 +1825,33 @@ export function requireAuditAssigneeForBaseSelfService({
 }
 
 /**
- * Cancels an audit session
- * Only the creator can cancel an audit
- * Cannot cancel if audit is already COMPLETED or CANCELLED
+ * Cancels an audit session.
+ *
+ * The creator of an audit can always cancel it. Workspace admins and owners
+ * can also cancel any audit in their org (regardless of who created it) so
+ * that team-managed audits don't get stuck when the creator is unavailable
+ * or no longer responsible — this matches archive/delete permissions.
+ *
+ * Cannot cancel an audit that is already COMPLETED, CANCELLED, or ARCHIVED.
+ *
+ * @param isAdminOrOwner - Whether the acting user is admin/owner in the
+ *   audit's organization. The route layer derives this from the workspace
+ *   role and passes it in; the service trusts it.
+ * @throws {ShelfError} 404 if the audit isn't found, 403 if the user is
+ *   neither the creator nor an admin/owner, 400 if the audit is in a
+ *   terminal status that can't be cancelled.
  */
 export async function cancelAuditSession({
   auditSessionId,
   organizationId,
   userId,
+  isAdminOrOwner,
   hints,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
+  isAdminOrOwner: boolean;
   hints: ClientHint;
 }) {
   try {
@@ -1893,11 +1907,14 @@ export async function cancelAuditSession({
       organizationId,
     });
 
-    // Check if user is the creator
-    if (auditSession.createdById !== userId) {
+    // Allow the creator to cancel their own audit. Also allow workspace
+    // admins/owners to cancel any audit in the org — needed when team
+    // members create audits the supervisor needs to clean up later.
+    if (auditSession.createdById !== userId && !isAdminOrOwner) {
       throw new ShelfError({
         cause: null,
-        message: "Only the audit creator can cancel the audit",
+        message:
+          "Only the audit creator or a workspace admin/owner can cancel the audit",
         additionalData: {
           auditSessionId,
           userId,
