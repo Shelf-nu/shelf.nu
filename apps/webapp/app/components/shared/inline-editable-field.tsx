@@ -16,6 +16,17 @@ import { tw } from "~/utils/tw";
 import { Button } from "./button";
 import Icon from "../icons/icon";
 
+/**
+ * Shape of the data returned by the asset overview's `updateField` action,
+ * as observed by the fetcher. The action returns either `payload(null)`,
+ * `payload({ success: true })` on success, or an error envelope produced by
+ * the route's error handler when a ShelfError is thrown.
+ */
+type InlineEditFetcherData =
+  | { success?: boolean }
+  | { error?: { message?: string } }
+  | null;
+
 /** Props for the InlineEditableField component */
 type InlineEditableFieldProps = {
   /** The field name sent as a hidden input to identify which field is being updated */
@@ -28,7 +39,7 @@ type InlineEditableFieldProps = {
   renderDisplay: () => ReactNode;
   /** Renders the editor input; receives the fetcher and a cancel callback */
   renderEditor: (props: {
-    fetcher: FetcherWithComponents<any>;
+    fetcher: FetcherWithComponents<InlineEditFetcherData>;
     onCancel: () => void;
   }) => ReactNode;
   /** Additional class names for the outer `<li>` element */
@@ -65,7 +76,9 @@ export function InlineEditableField({
   isEmpty,
 }: InlineEditableFieldProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const fetcher = useFetcher<any>({ key: `inline-edit-${fieldName}` });
+  const fetcher = useFetcher<InlineEditFetcherData>({
+    key: `inline-edit-${fieldName}`,
+  });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   /** Track if a server error has been "acknowledged" (cleared on re-open) */
@@ -73,7 +86,11 @@ export function InlineEditableField({
 
   /** Exit edit mode on successful submission */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data?.error) {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data &&
+      !("error" in fetcher.data && fetcher.data.error)
+    ) {
       setIsEditing(false);
     }
   }, [fetcher.state, fetcher.data]);
@@ -152,7 +169,10 @@ export function InlineEditableField({
   }, []);
 
   const errorMessage =
-    showError && fetcher.data?.error?.message
+    showError &&
+    fetcher.data &&
+    "error" in fetcher.data &&
+    fetcher.data.error?.message
       ? fetcher.data.error.message
       : null;
 
