@@ -356,7 +356,7 @@ row refactor).
   `AssetRowActionsDropdown`.
 - 5 contract tests added for `fulfilModelRequestsAndCheckout`.
 
-### Sub-phase 3d-Polish-2: Kit Custody Correctness + UX (COMPLETED, NOT YET COMMITTED)
+### Sub-phase 3d-Polish-2: Kit Custody Correctness + UX (COMPLETED, shipped in `4f0d9d69b`)
 
 Resolves the three "Known Issues" that had been open since Phase 2/3a
 shipped, plus a cluster of folded-in fixes caught during manual
@@ -498,6 +498,150 @@ removed (Option B resolved it).
 Both bullets are inline in `docs/proposals/quantitative-assets.md` →
 "Phase 4: Kit, Location, and Auxiliary Features".
 
+### Sub-phase 3d-Polish-3: Hex Security Round + Manual-Testing Bug Bash (COMPLETED, 2026-05-07)
+
+Came out of two unrelated streams running into each other on the
+same day:
+
+1. **hex-security-app[bot] reviews on PR #2337.** Four medium-severity
+   findings dropped during this session, all surfacing the same
+   pattern — `booking:update` / `asset:custody` permissions are
+   granted to SELF_SERVICE and BASE roles, so any endpoint that
+   gates on permission alone (without ownership/custodian checks)
+   leaks cross-user IDOR within an org.
+2. **`TESTING-KIT-CUSTODY-CORRECTNESS.md` manual walkthrough.**
+   Working through sections 4 → 13 surfaced two correctness bugs
+   plus a cluster of UX gaps that didn't fit Phase 3d-Polish-2 but
+   were in the same neighbourhood.
+
+Shipped commits (in order, all on `feat-quantities`):
+
+- `4c340063d` — fix(security) IDOR on phase-3 booking endpoints
+  (hex r3199039007 + r3199039448).
+- `197b51c8c` — merge main (mobile companion app + reports
+  review fixes).
+- `d66b6cd34` — second small merge picking up `ddb104b98`
+  (mobile path-to-regexp wildcard fix that landed on main mid-merge).
+- `7226f8ab0` — fix(kits) polish kit detail sub-page titles + qty
+  display.
+- `116e4c60f` — fix(custody+kits) close status-sync, kit-deletion,
+  and scan-drawer gaps.
+- `d5b280824` — fix(security) centralize SELF_SERVICE bulk-custody
+  guards in service layer (hex r3202161632 + r3202162994).
+
+Headline correctness fixes:
+
+- **Cross-user IDOR on Phase 3 booking endpoints.** The two
+  Phase-3-only mutating endpoints (`api+/bookings.$bookingId.model-
+requests.ts` and `api+/bookings.$bookingId.adjust-asset-quantity.ts`)
+  only called `requirePermission(booking:update)`. SELF_SERVICE /
+  BASE users could hit any bookingId in their org and manipulate
+  another user's model-level reservations or shrink/inflate booked
+  quantities. Fix: after `requirePermission`, branch on
+  `isSelfServiceOrBase` and call `validateBookingOwnership` against
+  the booking's `creatorId`/`custodianUserId`. The model-requests
+  route adds an extra `db.booking.findFirst` (org-scoped, returns
+  404 to avoid existence leak); the adjust-quantity route reuses
+  the existing `bookingAsset.findFirst` and just expands its
+  `booking` select. 15 regression tests across two new files.
+- **`checkOutQuantity` missing `Asset.status` flip to `IN_CUSTODY`.**
+  Symmetric counterpart of the conditional flip-back-to-AVAILABLE
+  added in `releaseQuantity` during Phase 3d-Polish-2 was never
+  shipped on the assign side. Operator-side qty-custody assignments
+  wrote the Custody row + emitted `CUSTODY_ASSIGNED` but left
+  `Asset.status` stuck at AVAILABLE. Visible failure: a qty-tracked
+  asset with 100/100 in operator custody still read as AVAILABLE
+  to the kit-assign route's "all assets must be AVAILABLE" guard,
+  which then quietly let `buildKitCustodyInheritData` skip the
+  asset via Option B and produce a kit-in-custody whose
+  presumed-allocated asset was actually fully held elsewhere.
+  Fix: write `Asset.status = IN_CUSTODY` after upserting the
+  Custody row (Step 6b in `checkOutQuantity`). Constant write
+  (no-op when already IN_CUSTODY) but covers the AVAILABLE →
+  IN_CUSTODY transition.
+- **`deleteKit` / `bulkDeleteKits` skipped application logic.**
+  Both were one-line `db.kit.delete()` / `deleteMany()` relying
+  entirely on FK cascade for cleanup. The cascade correctly removed
+  KitCustody → child Custody, but bypassed: `Asset.status`
+  conditional flip, `CUSTODY_RELEASED` activity events, and asset
+  notes. Visible failure (5c testing): deleting an in-custody kit
+  left assets stuck at IN_CUSTODY with zero remaining custody rows.
+  Fix: extracted shared helper `performKitDeletion` mirroring the
+  `releaseCustody` (kit) pattern — pre-reads inherited custody
+  rows, emits `CUSTODY_RELEASED` events with `meta: { viaKit: true,
+viaKitDelete: true }` (the new `viaKitDelete` flag distinguishes
+  delete-flow from release-flow), runs the kit deletion (cascade
+  handles row cleanup), conditionally flips `Asset.status` to
+  AVAILABLE for assets with zero remaining custody (preserving
+  operator custody), then writes asset notes outside the tx.
+  `deleteKit` and `bulkDeleteKits` reduce to "fetch kits → call
+  helper". 5 new unit tests on the helper.
+- **SELF_SERVICE bulk-custody guards missing on mobile routes.**
+  Main's mobile companion merge introduced
+  `mobile+/bulk-assign-custody.ts` and `mobile+/bulk-release-
+custody.ts` calling the same service functions as the web
+  routes — but the SELF_SERVICE check (web: inline guard for
+  assign, service-internal guard for release) wasn't ported and
+  `role` wasn't passed through. SELF_SERVICE could bulk-assign
+  custody to any team member or bulk-release any org custody
+  through the mobile API. Fix: centralised the guards inside
+  the service. `bulkCheckOutAssets` (assign) now accepts `role`
+  and runs the "assign-to-self" guard internally, mirroring
+  `bulkCheckInAssets` (release)'s existing self-service guard.
+  Both web and mobile routes simply pass `role` through. The
+  web `bulk-assign-custody` route's inline guard removed
+  (redundant); related route test refactored to assert the route
+  forwards `role` (behaviour assertions moved to the service
+  layer). Mobile route tests gain a "forwards SELF_SERVICE role
+  through" assertion as the regression guard.
+
+Folded-in UX fixes:
+
+- **Kit detail sub-page titles.** `/kits/:id/assets` and
+  `/kits/:id/bookings` hardcoded their headers to "Kit assets" /
+  "Kit Bookings" regardless of which kit was being viewed. Both
+  now follow the sibling overview route's pattern and render
+  `${kit.name}'s assets` / `${kit.name}'s bookings`. Each loader
+  runs the existing data fetch in parallel with a tiny org-scoped
+  `db.kit.findFirst` lookup for the name; falls back to the old
+  literal if the kit isn't found.
+- **Kit detail page qty display always shows the fraction.**
+  Pre-fix the qty-tracked row only showed `· N / M units in kit`
+  when the kit was in custody; otherwise it fell back to
+  `· {total} units`, which was misleading once the asset had
+  operator-allocated units (the kit won't actually receive all
+  units when later assigned — Option B will only flow
+  `asset.quantity − sum(operator custody)` into the kit row).
+  Both branches now always render `· N / M units in kit`. When
+  kit IS in custody, N is the kit-allocated count. When kit IS
+  NOT in custody, N is the units that would flow into the kit on
+  assign.
+- **Location scan drawer missing qty suffix.** The kit scan drawer
+  shows `· N units` on qty-tracked rows; the location scan drawer
+  showed just the title. Same `AssetFromQr` shape feeds both, so
+  the fix was a 6-line render addition + import.
+
+PR-review activity (all 4 hex-security threads now resolved):
+
+- **r3199039007** — model-requests IDOR — RESOLVED
+- **r3199039448** — adjust-asset-quantity IDOR — RESOLVED
+- **r3202161632** — mobile bulk-release SELF_SERVICE — RESOLVED
+- **r3202162994** — mobile bulk-assign SELF_SERVICE — RESOLVED
+
+Final state: `pnpm webapp:validate` green at **164 files / 2103
+tests** (+173 tests vs the Phase 3d-Polish-2 baseline of 1930,
+mostly mobile route tests inherited from main + new SELF_SERVICE
+guard coverage). Lint + typecheck + tests clean. Branch is up to
+date with `origin/feat-quantities` after push.
+
+Manual checklist updates committed alongside the code:
+`TESTING-KIT-CUSTODY-CORRECTNESS.md` 6b and 11a marked as
+"covered by unit test + DB constraint, not manually testable" with
+explanations of the fence guards that block the manual flow; 4d's
+wording corrected to point at the assets index (where
+`bulkRemoveAssetsFromKits` actually surfaces); section 13 final
+checks ticked.
+
 ### Sub-phase 3d follow-ups (NOT STARTED)
 
 Found during manual testing of 3d — worth a dedicated sub-phase
@@ -610,6 +754,8 @@ All review threads resolved on the PR.
 | -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------- |
 | 2026-04-29 (earlier) | `a613f4231`  | Misc churn pre-PR-2495                                                                                                         | `1a5a12ffe`    |
 | 2026-04-29 (later)   | `a64d8c22e`  | **PR #2495 — Activity Events / Reports system** + React Doctor integration + audit bulk-actions + 4 new `.claude/rules/` files | `a613f4231`    |
+| 2026-05-07 (earlier) | `197b51c8c`  | **PR #2412 — Mobile companion app** (Expo + Maestro flows) + reports review-feedback fixes (main tip `5afc116833`)             | `4c340063d`    |
+| 2026-05-07 (later)   | `d66b6cd34`  | Tiny pickup of `ddb104b98` — mobile path-to-regexp wildcard fix that landed on main mid-merge                                  | `197b51c8c`    |
 
 Conflicted files in the `a64d8c22e` merge: `utils/error.ts`,
 `assets/form.tsx`, `booking/availability-label.tsx`,
@@ -625,6 +771,33 @@ pre-Phase-2 `custody.custodian` (singular). ~60 typecheck errors. The
 ActivityEvent migration + service + types compile fine and are wired
 into checkout / checkin / partialCheckin. The report _renderers_ and
 seed scripts won't run until ported; tracking under "Reports port".
+
+**Conflicted files in the `197b51c8c` merge** (mobile companion app
+
+- reports review fixes): `apps/webapp/app/modules/asset/service.server.ts`,
+  `apps/webapp/app/modules/asset/service.server.test.ts`,
+  `apps/webapp/app/modules/reports/helpers.server.ts`,
+  `apps/webapp/app/routes/_layout+/reports.tsx`,
+  `apps/webapp/app/routes/api+/assets.bulk-{assign,release}-custody.ts`,
+  `apps/webapp/test/routes-tests/api.assets.bulk-assign-custody.test.ts`.
+  Plus 4 mobile-route fix-ups (no conflict markers but Phase-2/3a
+  schema-incompatible code came in from main):
+  `apps/webapp/app/routes/api+/mobile+/bookings.{,$bookingId}.ts`,
+  `mobile+/dashboard.ts`, plus three sed-renames of
+  `bulkAssignCustody`/`bulkReleaseCustody` →
+  `bulkCheckOutAssets`/`bulkCheckInAssets` across `mobile+/bulk-{assign,
+release}-custody.ts`, `mobile+/custody.assign.ts`, and their three
+  matching test files. Notable resolution decisions documented in the
+  body of `197b51c8c`. **Highest-risk merged region:**
+  `reports/helpers.server.ts` overdue-items KPI math — combined HEAD's
+  BookingAsset pivot walk with main's partial-checkin-intersection +
+  outstanding-only `valueAtRisk` redesign; numerics differ from
+  pre-merge HEAD (semantic change main intended), no integration tests
+  cover this path so the change is validate-only. Other resolutions
+  documented inline; main's `bulkAssignCustody`/`bulkReleaseCustody`
+  function bodies were dropped wholesale in favour of HEAD's renamed
+  `bulkCheckOutAssets`/`bulkCheckInAssets` (which carry the qty-tracked
+  skip + activity events Phase 2 introduced).
 
 ---
 
@@ -691,19 +864,32 @@ in main's reports + scripts were resolved in commit `12f2e8257`. Lint
 warnings cleared in `c4316b0ca`. ActivityEvent flows wired in
 `e97bb85db`.
 
-**Current baseline (Phase 3d-Polish-2 work, NOT YET COMMITTED):**
-`pnpm webapp:validate` green — **138 / 1930** tests passing across all
-suites. Lint + typecheck + tests all clean. New tests added: 4 in
+**Phase 3d-Polish-2 baseline at `4f0d9d69b`:** `pnpm webapp:validate`
+green — **138 / 1930** tests passing across all suites. Lint +
+typecheck + tests all clean. New tests added: 4 in
 `kit/service.server.test.ts` (Option B), 2 in
 `asset/service.server.test.ts` (releaseQuantity status flip), 1 new
 in `kits.$kitId.assets.assign-custody.test.tsx` (Option B route),
+plus updated `query.server.test.ts` assertions.
 
-- updated `query.server.test.ts` assertions.
+**Current baseline (Phase 3d-Polish-3 + main merge, all shipped):**
+`pnpm webapp:validate` green — **164 / 2103** tests passing across
+all suites. Lint + typecheck + tests all clean. The +173 vs
+Phase 3d-Polish-2 baseline breaks down as: ~150 mobile-companion-
+related route + utility tests inherited from main's PR #2412, plus
+new Phase 3d-Polish-3 coverage (15 IDOR-guard regression tests on
+booking phase-3 endpoints, 5 SELF_SERVICE-bulk-custody guard tests
+on the centralised service, 5 `performKitDeletion` helper tests, 4
+mobile route role-forwarding regression tests).
 
-`TESTING-KIT-CUSTODY-CORRECTNESS.md` is the active manual checklist.
-Sections 0, 1, 2, 3 (a/b/c) ticked off. Section 4a is in-progress —
-tester reached it and verified Option B numbers in the DB. Sections
-4b–13 remain to walk through.
+`TESTING-KIT-CUSTODY-CORRECTNESS.md` manual walkthrough complete —
+all sections ticked off or marked as covered-by-unit-test (6b: kit
+helpers' Option-B-skip branch is unreachable via UI, fenced by
+route + picker guards; 11a: `@@unique([assetId, teamMemberId])` is
+unreachable via UI, fenced by custody-assignment guards). 4d's
+wording was corrected to point at the assets-index "Remove from
+kit" bulk action (the bulk function isn't surfaced on the kits
+listing). Section 13 final checks ticked.
 
 Phase 2 was browser-tested and verified working:
 
@@ -724,7 +910,14 @@ Phase 2 was browser-tested and verified working:
 All three previously-tracked correctness bugs (duplicate rows on
 advanced index, kit custody = 1 unit, kit removal wipes ALL custody)
 were resolved in **Sub-phase 3d-Polish-2**. See that section above
-for the details. No outstanding correctness issues at session end.
+for the details.
+
+The four hex-security findings on PR #2337 + the two correctness
+bugs surfaced during the Polish-2 manual testing pass (operator-side
+`checkOutQuantity` missing status flip, `deleteKit` /
+`bulkDeleteKits` skipping app logic) were all closed in
+**Sub-phase 3d-Polish-3**. No outstanding correctness issues at
+session end.
 
 **Open follow-up work** (not bugs, deferred features):
 
