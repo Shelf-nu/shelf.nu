@@ -4650,6 +4650,21 @@ export async function getEntitiesWithSelectedValues({
  * @returns A finite number, or null when the input is blank
  * @throws {ShelfError} 400 when the input is non-empty but not a finite number
  */
+export function parseAssetValuation(raw: string | null): number | null {
+  if (!raw || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Value must be a valid number",
+      label: "Assets",
+      shouldBeCaptured: false,
+      status: 400,
+    });
+  }
+  return parsed;
+}
+
 /**
  * Returns the active custom field definitions scoped to the given asset's
  * category. Throws a 404 ShelfError when the asset does not exist in the
@@ -4688,21 +4703,6 @@ export async function getActiveCustomFieldsForAsset({
     organizationId,
     category: asset.categoryId,
   });
-}
-
-export function parseAssetValuation(raw: string | null): number | null {
-  if (!raw || raw.trim() === "") return null;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    throw new ShelfError({
-      cause: null,
-      message: "Value must be a valid number",
-      label: "Assets",
-      shouldBeCaptured: false,
-      status: 400,
-    });
-  }
-  return parsed;
 }
 
 export async function getCategoriesForCreateAndEdit({
