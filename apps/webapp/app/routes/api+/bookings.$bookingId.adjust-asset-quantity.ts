@@ -18,6 +18,7 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -53,12 +54,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const formData = await request.formData();
     const { assetId, quantity } = parseData(
@@ -69,7 +71,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /**
      * Verify the booking belongs to the organization and the asset is part
      * of it. We also pull the booking's id+name so we can produce a linkable
-     * booking reference in activity notes.
+     * booking reference in activity notes, plus `creatorId`/`custodianUserId`
+     * for the SELF_SERVICE/BASE ownership check below.
      */
     const bookingAsset = await db.bookingAsset.findFirst({
       where: {
@@ -79,7 +82,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
       include: {
         asset: { select: { id: true, title: true, type: true } },
-        booking: { select: { id: true, name: true } },
+        booking: {
+          select: {
+            id: true,
+            name: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
+        },
       },
     });
 
@@ -91,6 +101,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         label: "Booking",
         status: 404,
         shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * `booking:update` is granted to SELF_SERVICE / BASE roles in
+     * `Role2PermissionMap`. Without this guard those roles can hit any
+     * `bookingId` in the org and inflate or shrink the booked quantity
+     * of another user's reservation (cross-user IDOR within the org).
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: {
+          creatorId: bookingAsset.booking.creatorId,
+          custodianUserId: bookingAsset.booking.custodianUserId,
+        },
+        userId,
+        role,
+        action: "adjust asset quantity on",
       });
     }
 

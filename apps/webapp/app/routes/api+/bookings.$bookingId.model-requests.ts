@@ -20,12 +20,14 @@
 
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   removeBookingModelRequest,
   upsertBookingModelRequest,
 } from "~/modules/booking-model-request/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   error,
   getParams,
@@ -74,12 +76,48 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * service layer enforces the additional constraint that only
      * DRAFT / RESERVED bookings accept edits.
      */
-    const { organizationId } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
+
+    /**
+     * `booking:update` is granted to SELF_SERVICE / BASE roles in
+     * `Role2PermissionMap`, so the permission check alone lets any user
+     * in the org reach this endpoint for any bookingId. Without an
+     * additional ownership check those roles could manipulate other
+     * users' model reservations (cross-user IDOR within the org).
+     *
+     * Mirrors the guard pattern used on the page-level booking routes
+     * (see `bookings.$bookingId.overview.tsx` and the calendar export).
+     */
+    if (isSelfServiceOrBase) {
+      const booking = await db.booking.findFirst({
+        where: { id: bookingId, organizationId },
+        select: { creatorId: true, custodianUserId: true },
+      });
+
+      if (!booking) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not found",
+          message: "Booking not found.",
+          label: "Booking",
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "manage model reservations on",
+      });
+    }
 
     const formData = await request.formData();
 
