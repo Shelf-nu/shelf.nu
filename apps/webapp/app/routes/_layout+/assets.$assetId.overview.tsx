@@ -38,8 +38,9 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
   getActiveCustomFieldsForAsset,
-  getAllEntriesForCreateAndEdit,
   getAsset,
+  getCategoriesForCreateAndEdit,
+  getLocationsForCreateAndEdit,
   parseAssetValuation,
   updateAsset,
   updateAssetBookingAvailability,
@@ -142,6 +143,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
+    /**
+     * Derive edit permission once in the loader so we can conditionally
+     * skip the heavy categories/locations/custom-field-defs queries for
+     * users who are view-only. Uses the same roles list that
+     * `requirePermission` already resolved above.
+     */
+    const roles = userOrganizations.find(
+      (o) => o.organization.id === organizationId
+    )?.roles;
+
+    const canEditAsset = userHasPermission({
+      roles,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
     const reminders = await getRemindersForOverviewPage({
       assetId: id,
       organizationId,
@@ -164,35 +181,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : asset.customFields;
 
     /**
-     * Fetch ALL active custom field definitions for the asset's category
-     * so the overview page can show empty-state rows for fields that have
-     * never been set on this asset (letting edit users add values inline
-     * without navigating to the full edit form).
+     * Editor data is only needed for users who can update the asset. View-only
+     * users see static display rows and never enter edit mode, so we skip the
+     * categories/locations/custom-fields-definitions queries entirely. We also
+     * skip tags — they are read-only on the overview page in this iteration.
      */
-    const allCustomFieldDefs = await getActiveCustomFields({
-      organizationId,
-      category: asset.categoryId,
-    });
+    const [allCustomFieldDefs, categoriesData, locationsData] = canEditAsset
+      ? await Promise.all([
+          getActiveCustomFields({
+            organizationId,
+            category: asset.categoryId,
+          }),
+          getCategoriesForCreateAndEdit({
+            request,
+            organizationId,
+            defaultCategory: asset.categoryId,
+          }),
+          getLocationsForCreateAndEdit({
+            request,
+            organizationId,
+            defaultLocation: asset.locationId,
+          }),
+        ])
+      : [
+          [],
+          { categories: [], totalCategories: 0 },
+          { locations: [], totalLocations: 0 },
+        ];
 
-    /**
-     * Fetch categories, tags, and locations for inline editing dropdowns.
-     * Uses the same helper as the full edit page so DynamicSelect/LocationSelect
-     * have initial data when the popover opens (instead of empty until search).
-     */
-    const {
-      categories,
-      totalCategories,
-      tags: _rawTags,
-      locations,
-      totalLocations,
-    } = await getAllEntriesForCreateAndEdit({
-      request,
-      organizationId,
-      defaults: {
-        category: asset.categoryId,
-        location: asset.locationId,
-      },
-    });
+    const { categories, totalCategories } = categoriesData;
+    const { locations, totalLocations } = locationsData;
     const header: HeaderData = {
       title: `${asset.title}'s overview`,
     };
