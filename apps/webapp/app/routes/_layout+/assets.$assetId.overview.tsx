@@ -1076,7 +1076,13 @@ function BooleanCustomFieldEditor({
       <span className="text-sm text-gray-600">
         {isUnset ? `${label} (not set)` : label}
       </span>
-      {!isUnset && !defaultIsUnset ? null : !isUnset ? (
+      {/*
+       * Clear is only offered when the field originally had a value
+       * (defaultIsUnset was false) and the user has not yet cleared it. Once
+       * cleared, the only way back is to flip the Switch — which automatically
+       * un-sets isUnset via the onCheckedChange handler above.
+       */}
+      {!isUnset && !defaultIsUnset && (
         <button
           type="button"
           onClick={() => setIsUnset(true)}
@@ -1084,7 +1090,7 @@ function BooleanCustomFieldEditor({
         >
           Clear
         </button>
-      ) : null}
+      )}
     </div>
   );
 }
