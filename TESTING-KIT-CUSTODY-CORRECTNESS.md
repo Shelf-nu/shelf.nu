@@ -403,27 +403,29 @@ exercise.**
 
 ### 4c. Remove last kit-allocated row, no operator custody → status flips
 
-- [ ] Reset Pens. Add Pens to Drone Kit. Assign Drone Kit to Bob.
+- [x] Reset Pens. Add Pens to Drone Kit. Assign Drone Kit to Bob.
       Pens has ONE Custody row, `Bob / 100 / kitCustody = kcDrone`.
-- [ ] Remove Pens from Drone Kit.
-- [ ] **Expectation:** Pens has zero Custody rows. Pens.status →
+- [x] Remove Pens from Drone Kit.
+- [x] **Expectation:** Pens has zero Custody rows. Pens.status →
       `AVAILABLE`. (Old behaviour matched, but new code is now
       conditional rather than unconditional.)
 
 ### 4d. `bulkRemoveAssetsFromKits` — dual custody preserved
 
-- [ ] Setup: Pens in Camera Kit (in custody to Bob, 96 units — kit
+- [x] Setup: Pens in Camera Kit (in custody to Bob, 96 units — kit
       row reflects Option B's remaining-pool subtraction), Drill in
       Camera Kit (kit custody to Bob, 1 unit). Pens also has operator
       custody to Alice (4 units, NULL kitCustodyId).
-- [ ] From kits listing, bulk-select Camera Kit. Bulk-remove all
-      assets from kit (the bulk action that uses
-      `bulkRemoveAssetsFromKits`).
-- [ ] **Expectation:** Pens row for Bob gone (kit-allocated), Pens
-      row for Alice intact, Drill back to AVAILABLE (no
-      operator custody, kit custody removed).
-- [ ] If your UI doesn't expose this action, exercise it via the
-      relevant API route.
+- [x] Go to `/assets` (the asset index, **not** `/kits`). Multi-select
+      Pens + Drill, open the bulk-actions dropdown, click
+      **"Remove from kit"**. (`bulkRemoveAssetsFromKits` is wired only
+      to the assets index — it removes each selected asset from
+      whichever kit it's currently in. There is no equivalent action
+      on the kits listing.)
+- [x] **Expectation:** Pens row for Bob gone (kit-allocated), Pens
+      row for Alice intact, Drill back to AVAILABLE (no operator
+      custody, kit custody removed). Camera Kit still has KitCustody
+      to Bob but contains 0 assets after the action.
 
 ---
 
@@ -431,14 +433,14 @@ exercise.**
 
 ### 5a. `releaseCustody` (single kit) — emit-before-cascade
 
-- [ ] Setup: Pens has Alice / 4 / NULL (operator) + Bob / 96 / kc.id
+- [x] Setup: Pens has Alice / 4 / NULL (operator) + Bob / 96 / kc.id
       (Camera Kit kc, custodian Bob — Option B subtracts the 4
       already with Alice from the 100-unit pool). The kit's
       custodian must be Bob, not Alice — the unique constraint
       `@@unique([assetId, teamMemberId])` prevents one team member
       from holding both an operator and a kit row on the same asset.
-- [ ] Release Camera Kit's custody (whole-kit release).
-- [ ] **Expectation:**
+- [x] Release Camera Kit's custody (whole-kit release).
+- [x] **Expectation:**
   - `recordEvents("CUSTODY_RELEASED", …)` fires with rows that
     INCLUDE the kit-allocated Pens row (verify via Activity feed
     or DB query on `ActivityEvent` table).
@@ -454,12 +456,12 @@ exercise.**
 
 ### 5b. `bulkReleaseKitCustody` — same emit-before-cascade
 
-- [ ] Setup: Camera Kit + Drone Kit both in custody (Bob and Carol
+- [x] Setup: Camera Kit + Drone Kit both in custody (Bob and Carol
       respectively). Drill is in Camera Kit; Pens is in Drone Kit;
       Pens additionally has operator custody to Alice.
-- [ ] From kits listing, bulk-select both kits, bulk-release
+- [x] From kits listing, bulk-select both kits, bulk-release
       custody.
-- [ ] **Expectation:** activity events fire for the kit-released
+- [x] **Expectation:** activity events fire for the kit-released
       assets, KitCustody rows for both kits deleted, FK cascades
       remove the kit-allocated Custody rows. Operator-assigned Pens
       row for Alice intact. Pens stays `IN_CUSTODY`. Drill status

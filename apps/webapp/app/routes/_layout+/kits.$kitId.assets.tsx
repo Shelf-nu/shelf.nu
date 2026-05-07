@@ -21,6 +21,7 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsForKits } from "~/modules/kit/service.server";
@@ -53,14 +54,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const isManageAssetsUrl = request.url.includes("manage-assets");
 
-    const assets = await getAssetsForKits({
-      request,
-      organizationId,
-      kitId,
-      ignoreFilters: isManageAssetsUrl,
-    });
+    /**
+     * Run the assets query and a tiny kit-name lookup in parallel so the
+     * page can render `${kit.name}'s assets` (matches the sibling overview
+     * route's title pattern) without an extra round-trip.
+     */
+    const [assets, kit] = await Promise.all([
+      getAssetsForKits({
+        request,
+        organizationId,
+        kitId,
+        ignoreFilters: isManageAssetsUrl,
+      }),
+      db.kit.findFirst({
+        where: { id: kitId, organizationId },
+        select: { name: true },
+      }),
+    ]);
 
-    const header: HeaderData = { title: "Kit assets" };
+    const header: HeaderData = {
+      title: kit ? `${kit.name}'s assets` : "Kit assets",
+    };
 
     const modelName = {
       singular: "asset",
@@ -195,30 +209,47 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 </Button>
                 {isQuantityTracked(item) && item.quantity != null
                   ? (() => {
-                      // why: when the kit is in custody, the row should show
-                      // how many units the *kit* holds (sum of Custody rows
-                      // tagged with this KitCustody.id) rather than the
-                      // asset's full stock — they can differ once Option B
-                      // subtracts operator-allocated units. Format:
-                      // `46 / 80 units` (kit / total) so users can see both.
+                      /**
+                       * Always render `· N / M units in kit` for qty-tracked
+                       * rows so users can see how the asset's stock is
+                       * split — whether the kit is in custody or not.
+                       *
+                       * - Kit IS in custody: N is the kit-allocated count
+                       *   (sum of Custody rows tagged with this
+                       *   KitCustody.id). N can be < total once Option B
+                       *   subtracted operator-allocated units at assign
+                       *   time.
+                       * - Kit IS NOT in custody: N is the units that
+                       *   *would* flow into the kit if it were assigned
+                       *   right now. An asset belongs to at most one kit,
+                       *   so when this kit has no KitCustody row, every
+                       *   Custody row on the asset is operator-allocated;
+                       *   N = asset.quantity − sum(operator custody).
+                       *
+                       * In the "no operator custody" case both branches
+                       * naturally produce `M / M units in kit`, which is
+                       * accurate (all units are part of the kit).
+                       */
                       const unit = item.unitOfMeasure || "units";
-                      if (kitCustodyId) {
-                        const inKit = item.custody.reduce(
-                          (sum, c) =>
-                            c.kitCustodyId === kitCustodyId
-                              ? sum + (c.quantity ?? 0)
-                              : sum,
-                          0
-                        );
-                        return (
-                          <span className="ml-2 text-xs text-gray-500">
-                            · {inKit} / {item.quantity} {unit} in kit
-                          </span>
-                        );
-                      }
+                      const inKit = kitCustodyId
+                        ? item.custody.reduce(
+                            (sum, c) =>
+                              c.kitCustodyId === kitCustodyId
+                                ? sum + (c.quantity ?? 0)
+                                : sum,
+                            0
+                          )
+                        : Math.max(
+                            0,
+                            item.quantity -
+                              item.custody.reduce(
+                                (sum, c) => sum + (c.quantity ?? 0),
+                                0
+                              )
+                          );
                       return (
                         <span className="ml-2 text-xs text-gray-500">
-                          · {item.quantity} {unit}
+                          · {inKit} / {item.quantity} {unit} in kit
                         </span>
                       );
                     })()
