@@ -1,0 +1,31 @@
+appId: com.shelf.companion.carlos
+name: "Audits - Detail View"
+tags:
+  - audits
+
+---
+# Test: Audit detail screen
+# Navigates to Audits list and opens first audit card
+# Note: Data-dependent — audit cards may not exist on Personal workspace
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Audits via Quick Action
+- tapOn:
+    text: "Audits"
+    index: 0
+
+# Use tapOn on page title for tree refresh
+- tapOn:
+    text: "Audits"
+
+# Tap the first audit card (if any exist) — "Tap to scan" is the card CTA
+- tapOn:
+    text: "Tap to scan"
+    optional: true
+
+- takeScreenshot: audits-detail-view

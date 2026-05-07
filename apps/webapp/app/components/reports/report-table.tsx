@@ -26,6 +26,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
+import { AssetImage } from "~/components/assets/asset-image";
 import { tw } from "~/utils/tw";
 
 export interface ReportTableProps<TData> {
@@ -362,19 +363,26 @@ export function BooleanCell({
 /**
  * Asset name cell with thumbnail image.
  * Provides consistent asset display across all reports.
+ *
+ * Uses AssetImage for automatic Supabase token refresh and placeholder handling.
  */
 export function AssetCell({
   name,
   thumbnailImage,
+  assetId,
 }: {
   name: string;
   thumbnailImage: string | null;
+  assetId: string;
 }) {
   return (
     <div className="flex items-center gap-3">
-      <img
-        src={thumbnailImage || "/static/images/asset-placeholder.jpg"}
-        alt=""
+      <AssetImage
+        asset={{
+          id: assetId,
+          thumbnailImage,
+        }}
+        alt="" // Decorative - asset name is displayed in adjacent text
         className="size-8 shrink-0 rounded object-cover"
       />
       <span className="font-medium">{name}</span>

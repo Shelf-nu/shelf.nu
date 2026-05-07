@@ -1,0 +1,47 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Batch Scan Deduplication"
+tags:
+  - scanner
+  - high-impact
+
+---
+# Test: Scanning same QR twice in batch mode deduplicates
+# Verifies batch drawer shows "1 asset scanned" not "2 asset scanned"
+
+- runFlow: ../../shared/login.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Switch to Assign Custody mode (batch mode)
+- tapOn: "Scanner action: Assign"
+
+# First scan
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+- extendedWaitUntil:
+    visible: "1 asset scanned"
+    timeout: 15000
+
+# Second scan of same QR — should deduplicate
+- tapOn:
+    id: "dev-scan-input"
+    optional: true
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+# Should still show 1, not 2 (dedup)
+- assertVisible: "1 asset scanned"
+
+- takeScreenshot: scanner-batch-dedup

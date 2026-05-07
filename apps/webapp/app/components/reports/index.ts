@@ -100,3 +100,31 @@ export type {
   ReportEmptyReason,
 } from "./report-empty-state";
 export type { ReportSkeletonProps } from "./report-skeleton";
+
+// Filter / range UI helpers used by the reports route
+export { TimeframeRangeIndicator } from "./timeframe-range-indicator";
+export { IdleThresholdSelector } from "./idle-threshold-selector";
+
+// Per-report Content components — each owns its own table columns,
+// hero, and KPI extraction. Used by ReportContentSwitch (below).
+export { BookingComplianceContent } from "./booking-compliance-content";
+export { OverdueItemsContent } from "./overdue-items-content";
+export { IdleAssetsContent } from "./idle-assets-content";
+export { CustodySnapshotContent } from "./custody-snapshot-content";
+export { TopBookedAssetsContent } from "./top-booked-assets-content";
+export { AssetDistributionContent } from "./asset-distribution-content";
+export { AssetInventoryContent } from "./asset-inventory-content";
+export { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
+export { AssetUtilizationContent } from "./asset-utilization-content";
+export { AssetActivityContent } from "./asset-activity-content";
+
+// Route-level page composition pieces — these are the chunks the
+// reports.$reportId route stitches together.
+export { ReportExportActions } from "./report-export-actions";
+export { ReportFilterBar } from "./report-filter-bar";
+export { ReportContentSwitch } from "./report-content-switch";
+
+// Reports route hooks
+export { useReportRowHandlers } from "./use-report-row-handlers";
+export type { ReportRowHandlers } from "./use-report-row-handlers";
+export { useCsvExport } from "./use-csv-export";

@@ -397,10 +397,7 @@ const SidebarInset = forwardRef<HTMLDivElement, ComponentProps<"main">>(
       <main
         ref={ref}
         className={tw(
-          // `flex flex-col` lets pages opt into a viewport-bounded layout
-          // (e.g. reports) by adding `flex-1` to a child. Pages without
-          // `flex-1` children continue to render at natural height.
-          "flex h-dvh w-full flex-col overflow-auto bg-gray-25 px-4",
+          "h-dvh w-full overflow-auto bg-gray-25 px-4",
           isAvailabilityView ? (isKitIndex ? "pb-0" : "pb-[46px]") : "pb-10",
           className
         )}

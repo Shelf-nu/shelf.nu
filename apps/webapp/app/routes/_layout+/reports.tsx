@@ -7,8 +7,7 @@
  * @see {@link file://./reports.$reportId.tsx}
  */
 
-import type { MetaFunction } from "react-router";
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, type MetaFunction } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 

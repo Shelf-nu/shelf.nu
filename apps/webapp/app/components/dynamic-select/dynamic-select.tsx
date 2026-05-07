@@ -462,7 +462,7 @@ export default function DynamicSelect({
                     <div
                       key={item.id}
                       className={tw(
-                        "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                        "flex cursor-pointer touch-manipulation select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
                         item.id === selectedValue && "bg-gray-100"
                       )}
                       role="option"

@@ -9,9 +9,16 @@ import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 
 export const MarkdownNoteSchema = z.object({
-  content: z.string().min(3, "Content is required"),
+  content: z
+    .string()
+    .min(3, "Content is required")
+    .max(
+      NOTE_MAX_CONTENT_LENGTH,
+      `Note must be ${NOTE_MAX_CONTENT_LENGTH} characters or fewer`
+    ),
 });
 
 interface MarkdownNoteFormProps {

@@ -167,8 +167,9 @@ export function ComplianceHero({
               How it's calculated:
             </span>{" "}
             {onTime} on-time ÷ {total} total = {rate}% (rounded to nearest whole
-            number). A booking is "on-time" if checked in within 15 minutes of
-            the scheduled end time.
+            number). Bookings with a due date in this period are counted:
+            completed and archived bookings are "on-time" if returned within 15
+            minutes of the scheduled end; overdue bookings always count as late.
           </p>
         </div>
       )}
