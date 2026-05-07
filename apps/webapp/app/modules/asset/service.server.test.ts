@@ -7,6 +7,7 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  parseAssetValuation,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
   updateAsset,
@@ -457,5 +458,49 @@ describe("updateAsset cross-org guards", () => {
       where: { id: "location-from-org-B", organizationId: "org-A" },
       select: { id: true },
     });
+  });
+});
+
+describe("parseAssetValuation", () => {
+  it("returns null for null input", () => {
+    expect(parseAssetValuation(null)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseAssetValuation("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(parseAssetValuation("   ")).toBeNull();
+  });
+
+  it("parses a valid integer", () => {
+    expect(parseAssetValuation("42")).toBe(42);
+  });
+
+  it("parses a valid decimal", () => {
+    expect(parseAssetValuation("1234.56")).toBe(1234.56);
+  });
+
+  it("parses a negative number", () => {
+    expect(parseAssetValuation("-10")).toBe(-10);
+  });
+
+  it("throws ShelfError 400 for non-numeric input", () => {
+    expect(() => parseAssetValuation("abc")).toThrow(ShelfError);
+    try {
+      parseAssetValuation("abc");
+    } catch (e) {
+      expect((e as any).status).toBe(400);
+      expect((e as any).message).toBe("Value must be a valid number");
+    }
+  });
+
+  it("throws ShelfError 400 for NaN-producing input", () => {
+    expect(() => parseAssetValuation("not a number")).toThrow(ShelfError);
+  });
+
+  it("throws ShelfError 400 for Infinity", () => {
+    expect(() => parseAssetValuation("Infinity")).toThrow(ShelfError);
   });
 });
