@@ -111,6 +111,18 @@ export default function KitImage({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
+          onKeyDown={
+            withPreview
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleOpenDialog();
+                  }
+                }
+              : undefined
+          }
+          role={withPreview ? "button" : undefined}
+          tabIndex={withPreview ? 0 : undefined}
           src={url}
           className={tw(
             "size-full object-cover",
@@ -128,7 +140,7 @@ export default function KitImage({
           <Dialog
             open={isDialogOpen}
             onClose={handleCloseDialog}
-            className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+            className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
             title={
               <div>
                 <div className=" text-lg font-semibold text-gray-900">

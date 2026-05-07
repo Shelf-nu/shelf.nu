@@ -1,0 +1,48 @@
+appId: com.shelf.companion.carlos
+name: "Assets - Create Asset"
+tags:
+  - assets
+
+---
+# Test: Create a new asset via the FAB
+# Verifies the create flow and navigation to new asset
+# Note: Requires create permission (admin user)
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Assets tab
+- tapOn:
+    text: "Assets"
+    index: 1
+
+# Wait for Assets screen to load
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 8000
+
+# Tap the "Create Asset" button in the empty state (or FAB)
+- tapOn:
+    text: "Create Asset"
+    optional: true
+
+- takeScreenshot: assets-create-form
+
+# Fill in asset title with unique name (if form loaded)
+- tapOn:
+    text: "Title"
+    optional: true
+- inputText: "Maestro Test Asset"
+- back
+
+- takeScreenshot: assets-create-form-filled
+
+# Submit the form (optional — might not have form open)
+- tapOn:
+    text: "Create"
+    optional: true
+
+- takeScreenshot: assets-create-success

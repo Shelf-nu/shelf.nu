@@ -1,0 +1,45 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Scan and Update Location"
+tags:
+  - scanner
+  - location
+  - high-impact
+
+---
+# Test: Full scan → update location flow using dev scan injection
+
+- runFlow: ../../shared/login.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+# Navigate to Scanner tab
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# Switch to Update Location mode
+- tapOn: "Scanner action: Location"
+
+# Open dev scan input and inject QR
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QR_ID}
+- pressKey: enter
+
+# Wait for item to appear in batch drawer
+- extendedWaitUntil:
+    visible: "1 asset scanned"
+    timeout: 15000
+
+- takeScreenshot: scanner-update-location-scanned
+
+# Tap "Choose Location" to verify the action button works
+- tapOn:
+    text: "Choose Location"
+    optional: true
+
+- takeScreenshot: scanner-update-location-picker

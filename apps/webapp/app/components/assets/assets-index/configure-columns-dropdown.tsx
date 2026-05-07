@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -32,10 +32,15 @@ export function ConfigureColumnsDropdown() {
   );
 
   const [currentColumns, setCurrentColumns] = useState(initialColumns);
-
-  useEffect(() => {
+  // Re-sync with loader-provided columns when they change (e.g. after a server save
+  // from another source). We compare against the previously-seen reference so we
+  // only reset on actual prop change. This avoids the useEffect derived-state anti-pattern.
+  // See https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevInitialColumns, setPrevInitialColumns] = useState(initialColumns);
+  if (initialColumns !== prevInitialColumns) {
+    setPrevInitialColumns(initialColumns);
     setCurrentColumns(initialColumns);
-  }, [initialColumns]);
+  }
 
   // Initialize keyboard reordering hook
   const { handleKeyDown, announcement, itemRefs } = useKeyboardReorder({

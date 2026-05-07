@@ -6,6 +6,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -60,6 +61,9 @@ export default function SetOrEditReminderDialog({
 
   const isEdit = !!reminder;
 
+  /** Ref for the first field so we can focus it on open without autoFocus. */
+  const nameInputRef = useAutoFocus<HTMLInputElement>({ when: open });
+
   useEffect(
     function handleOnSuccess() {
       if (searchParams.get("success") === "true") {
@@ -111,6 +115,7 @@ export default function SetOrEditReminderDialog({
             )}
 
             <Input
+              ref={nameInputRef}
               defaultValue={reminder?.name ?? ""}
               name={zo.fields.name()}
               error={
@@ -118,7 +123,6 @@ export default function SetOrEditReminderDialog({
               }
               label="Name"
               disabled={disabled}
-              autoFocus
               required
               placeholder="Enter name of reminder"
               className="mb-4"
@@ -134,7 +138,6 @@ export default function SetOrEditReminderDialog({
                 }
                 label="Message"
                 disabled={disabled}
-                autoFocus
                 required
                 placeholder="Enter description..."
                 inputType="textarea"
@@ -171,7 +174,6 @@ export default function SetOrEditReminderDialog({
                 }
                 label="Reminder Date"
                 disabled={disabled}
-                autoFocus
                 required
                 placeholder="Enter description..."
                 className="mb-2"

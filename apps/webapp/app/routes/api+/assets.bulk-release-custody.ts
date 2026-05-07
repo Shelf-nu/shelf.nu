@@ -2,7 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
-import { bulkCheckInAssets } from "~/modules/asset/service.server";
+import { bulkReleaseCustody } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -66,7 +66,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     }
 
-    await bulkCheckInAssets({
+    await bulkReleaseCustody({
       userId,
       assetIds,
       organizationId,

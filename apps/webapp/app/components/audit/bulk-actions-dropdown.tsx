@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -96,18 +97,7 @@ function ConditionalDropdown() {
           <span className="flex items-center gap-2">Actions</span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }}
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           asChild

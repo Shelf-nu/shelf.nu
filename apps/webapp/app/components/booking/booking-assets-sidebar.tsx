@@ -130,7 +130,7 @@ export function BookingAssetsSidebar({
       {trigger || defaultTrigger}
 
       <SheetContent className="w-full border-l-0 bg-white p-0 md:w-[85vw] md:max-w-[85vw]">
-        <div className="flex h-screen w-full flex-col">
+        <div className="flex h-dvh w-full flex-col">
           <SheetHeader className="border-color-200 border-b px-6 py-3">
             <SheetTitle className="text-left">
               Assets in "{booking.name}"

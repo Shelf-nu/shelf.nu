@@ -15,6 +15,16 @@ type CategoriesInputProps = {
   error: (index: number) => string | undefined;
 };
 
+/**
+ * Internal row shape carrying a stable React key alongside the selected
+ * category value. The `clientKey` survives add/remove/reorder operations so
+ * React can preserve component state for untouched rows.
+ */
+type CategoryRow = { clientKey: string; value: string };
+
+/** Generate a stable key for a new/incoming category row. */
+const makeCategoryKey = (): string => crypto.randomUUID();
+
 export default function CategoriesInput({
   className,
   style,
@@ -23,17 +33,24 @@ export default function CategoriesInput({
   categories: incomingCategories,
   error,
 }: CategoriesInputProps) {
-  const [categories, setCategories] = useState<string[]>(
-    incomingCategories.length === 0 ? [""] : incomingCategories
-  );
+  const [rows, setRows] = useState<CategoryRow[]>(() => {
+    const source = incomingCategories.length === 0 ? [""] : incomingCategories;
+    return source.map((value) => ({ clientKey: makeCategoryKey(), value }));
+  });
 
   return (
     <div className={tw("w-full", className)} style={style}>
-      {categories.map((category, i) => {
+      {rows.map((row, i) => {
+        const category = row.value;
         const errorMessage = error(i);
 
+        /** Values of sibling rows (used to exclude already-selected categories). */
+        const siblingValues = rows
+          .filter((_, index) => index !== i)
+          .map((r) => r.value);
+
         return (
-          <div key={i} className="mb-3">
+          <div key={row.clientKey} className="mb-3">
             <div className="flex items-center gap-x-2">
               <DynamicSelect
                 disabled={disabled}
@@ -45,11 +62,12 @@ export default function CategoriesInput({
                 countKey="totalCategories"
                 placeholder="Select Category"
                 className="flex-1"
-                excludeItems={categories.filter((_, index) => index !== i)}
+                excludeItems={siblingValues}
                 onChange={(value) => {
                   if (value !== undefined) {
-                    categories[i] = value;
-                    setCategories([...categories]);
+                    setRows((prev) =>
+                      prev.map((r, idx) => (idx === i ? { ...r, value } : r))
+                    );
                   }
                 }}
                 extraContent={({ onItemCreated, closePopover }) => (
@@ -61,8 +79,11 @@ export default function CategoriesInput({
                       if (created?.type !== "category") return;
 
                       const newId = created.entity.id;
-                      categories[i] = newId;
-                      setCategories([...categories]);
+                      setRows((prev) =>
+                        prev.map((r, idx) =>
+                          idx === i ? { ...r, value: newId } : r
+                        )
+                      );
                       onItemCreated({
                         id: newId,
                         name: created.entity.name,
@@ -80,10 +101,9 @@ export default function CategoriesInput({
                 className="py-2"
                 variant="outline"
                 type="button"
-                disabled={categories.length === 1}
+                disabled={rows.length === 1}
                 onClick={() => {
-                  categories.splice(i, 1);
-                  setCategories([...categories]);
+                  setRows((prev) => prev.filter((_, idx) => idx !== i));
                 }}
               />
             </div>
@@ -101,7 +121,10 @@ export default function CategoriesInput({
         variant="link"
         type="button"
         onClick={() => {
-          setCategories((prev) => [...prev, ""]);
+          setRows((prev) => [
+            ...prev,
+            { clientKey: makeCategoryKey(), value: "" },
+          ]);
         }}
       >
         Add another category

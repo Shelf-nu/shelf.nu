@@ -163,6 +163,13 @@
         "beforeAll": "readonly",
         "afterAll": "readonly"
       }
+    },
+    {
+      "files": ["scripts/**/*.ts"],
+      "rules": {
+        "no-console": "off",
+        "@typescript-eslint/require-await": "off"
+      }
     }
   ]
 }

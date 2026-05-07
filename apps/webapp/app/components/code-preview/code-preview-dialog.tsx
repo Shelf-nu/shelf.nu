@@ -106,7 +106,7 @@ export function CodePreviewDialog({
           open={isDialogOpen}
           onClose={closeDialog}
           className={tw(
-            "h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-1/2",
+            "h-dvh w-full md:h-[calc(100vh-4rem)] md:w-1/2 md:p-0",
             className
           )}
           title={dialogTitle}

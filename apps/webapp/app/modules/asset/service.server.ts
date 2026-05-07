@@ -38,7 +38,10 @@ import {
   parseBarcodesFromImportData,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
-import { createCategoriesIfNotExists } from "~/modules/category/service.server";
+import {
+  createCategoriesIfNotExists,
+  getCategory,
+} from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
@@ -133,6 +136,7 @@ import {
   detectCustomFieldChanges,
   type CustomFieldChangeInfo,
 } from "./utils.server";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -1153,13 +1157,31 @@ export async function createAsset({
         }
       }
 
-      const asset = await db.asset.create({
-        data,
-        include: {
-          location: true,
-          user: true,
-          custody: true,
-        },
+      // Use transaction to ensure asset creation and activity event are atomic
+      const asset = await db.$transaction(async (tx) => {
+        const created = await tx.asset.create({
+          data,
+          include: {
+            location: true,
+            user: true,
+            custody: true,
+          },
+        });
+
+        // Activity event must be inside transaction for atomicity
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_CREATED",
+            entityType: "ASSET",
+            entityId: created.id,
+            assetId: created.id,
+          },
+          tx
+        );
+
+        return created;
       });
 
       // Successfully created asset, exit the retry loop
@@ -1306,6 +1328,10 @@ export async function updateAsset({
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
+      // why: connect: { id } is unscoped — verify the category belongs to this
+      // org before connecting, otherwise an attacker who knows a foreign-org
+      // category id could attach it to their asset (cross-org IDOR).
+      await getCategory({ id: categoryId, organizationId });
       Object.assign(data, {
         category: {
           connect: {
@@ -1317,6 +1343,25 @@ export async function updateAsset({
 
     /** Connect the new location id */
     if (newLocationId) {
+      // why: same IDOR concern as category — verify the location is in this
+      // org before connecting. Lightweight findFirst, getLocation() loads
+      // paginated assets and is too heavy here.
+      const orgLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+        select: { id: true },
+      });
+      if (!orgLocation) {
+        throw new ShelfError({
+          cause: null,
+          title: "Location not found",
+          message:
+            "The selected location does not exist or you don't have access to it.",
+          additionalData: { newLocationId, organizationId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
       Object.assign(data, {
         location: {
           connect: {
@@ -1457,6 +1502,20 @@ export async function updateAsset({
         isRemoving: newLocationId === null,
       });
 
+      // Activity event for the asset-level location change.
+      await recordEvent({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_LOCATION_CHANGED",
+        entityType: "ASSET",
+        entityId: asset.id,
+        assetId: asset.id,
+        locationId: newLocation?.id ?? undefined,
+        field: "locationId",
+        fromValue: currentLocation?.id ?? null,
+        toValue: newLocation?.id ?? null,
+      });
+
       // Create location activity notes
       const userLink = wrapUserLinkForNote({
         id: userId,
@@ -1543,6 +1602,78 @@ export async function updateAsset({
           loadUserForNotes,
         }),
       ]);
+
+      // Activity events — one per logical field that actually changed.
+      // See `.claude/rules/record-event-payload-shapes.md`.
+      const fieldChangeEvents: Parameters<typeof recordEvents>[0] = [];
+      if (
+        typeof title !== "undefined" &&
+        assetBeforeUpdate.title !== asset.title
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_NAME_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "title",
+          fromValue: assetBeforeUpdate.title ?? null,
+          toValue: asset.title ?? null,
+        });
+      }
+      if (
+        typeof description !== "undefined" &&
+        (assetBeforeUpdate.description ?? null) !== (asset.description ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_DESCRIPTION_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "description",
+          fromValue: assetBeforeUpdate.description ?? null,
+          toValue: asset.description ?? null,
+        });
+      }
+      if (
+        typeof categoryId !== "undefined" &&
+        (assetBeforeUpdate.category?.id ?? null) !==
+          (asset.category?.id ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_CATEGORY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "categoryId",
+          fromValue: assetBeforeUpdate.category?.id ?? null,
+          toValue: asset.category?.id ?? null,
+        });
+      }
+      if (
+        typeof valuation !== "undefined" &&
+        (assetBeforeUpdate.valuation ?? null) !== (asset.valuation ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_VALUATION_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "valuation",
+          fromValue: assetBeforeUpdate.valuation ?? null,
+          toValue: asset.valuation ?? null,
+        });
+      }
+      if (fieldChangeEvents.length > 0) {
+        await recordEvents(fieldChangeEvents);
+      }
     }
 
     if (isTagUpdate) {
@@ -1553,6 +1684,26 @@ export async function updateAsset({
         currentTags: asset.tags ?? [],
         loadUserForNotes,
       });
+
+      // Activity event for tag changes — compare the before/after tag-id sets.
+      const previousTagIds = new Set(previousTags.map((t) => t.id));
+      const currentTagIds = new Set((asset.tags ?? []).map((t) => t.id));
+      const setsDiffer =
+        previousTagIds.size !== currentTagIds.size ||
+        [...previousTagIds].some((t) => !currentTagIds.has(t));
+      if (setsDiffer) {
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_TAGS_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "tags",
+          fromValue: [...previousTagIds],
+          toValue: [...currentTagIds],
+        });
+      }
     }
 
     /** If custom fields were processed, create notes for any changes */
@@ -1603,6 +1754,22 @@ export async function updateAsset({
           );
 
           await Promise.all(notePromises);
+
+          // Activity events — one per custom field that changed.
+          await recordEvents(
+            changes.map((change: CustomFieldChangeInfo) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_CUSTOM_FIELD_CHANGED",
+              entityType: "ASSET",
+              entityId: asset.id,
+              assetId: asset.id,
+              field: change.customFieldName,
+              fromValue: (change.previousValue ?? null) as any,
+              toValue: (change.newValue ?? null) as any,
+              meta: { isFirstTimeSet: change.isFirstTimeSet },
+            }))
+          );
         }
       }
     }
@@ -1626,17 +1793,41 @@ export async function updateAsset({
 export async function deleteAsset({
   id,
   organizationId,
-}: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
+  actorUserId,
+}: Pick<Asset, "id"> & {
+  organizationId: Organization["id"];
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+}) {
   try {
-    const deletedAsset = await db.asset.delete({
-      where: { id, organizationId },
-      select: {
-        reminders: {
-          select: { alertDateTime: true, activeSchedulerReference: true },
+    // Use transaction to ensure delete and activity event are atomic
+    const deletedAsset = await db.$transaction(async (tx) => {
+      const deleted = await tx.asset.delete({
+        where: { id, organizationId },
+        select: {
+          reminders: {
+            select: { alertDateTime: true, activeSchedulerReference: true },
+          },
         },
-      },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_DELETED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+
+      return deleted;
     });
 
+    // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
     throw new ShelfError({
@@ -2934,6 +3125,19 @@ export async function createAssetsFromBackupImport({
         /** Create the Asset */
         const { id: assetId } = await db.asset.create(d);
 
+        // Activity event: ASSET_CREATED at the moment of creation.
+        // The per-note createMany below restores HISTORICAL notes with
+        // their original timestamps — those are not events.
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_CREATED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          meta: { source: "backup_import" },
+        });
+
         /** Create notes */
         if (asset?.notes?.length > 0) {
           await db.note.createMany({
@@ -3429,7 +3633,17 @@ export async function bulkDeleteAssets({
   }
 }
 
-export async function bulkCheckOutAssets({
+/**
+ * Assigns custody of multiple assets to a team member.
+ *
+ * Sets each asset's status to IN_CUSTODY, creates custody records linking
+ * them to the custodian, and logs activity notes. Only AVAILABLE assets
+ * can be assigned — throws if any selected asset is unavailable.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkAssignCustody({
   userId,
   assetIds,
   custodianId,
@@ -3551,6 +3765,21 @@ export async function bulkCheckOutAssets({
           assetId: asset.id,
         })),
       });
+
+      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      await recordEvents(
+        assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          teamMemberId: custodianId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+        })),
+        tx
+      );
     });
 
     return true;
@@ -3558,7 +3787,7 @@ export async function bulkCheckOutAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking out assets.";
+        : "Something went wrong while assigning custody.";
 
     throw new ShelfError({
       cause,
@@ -3569,7 +3798,17 @@ export async function bulkCheckOutAssets({
   }
 }
 
-export async function bulkCheckInAssets({
+/**
+ * Releases custody of multiple assets, returning them to AVAILABLE status.
+ *
+ * Deletes custody records, sets each asset's status to AVAILABLE, and logs
+ * activity notes. Only assets that currently have custody can be released —
+ * throws if any selected asset has no custody.
+ *
+ * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
+ * (via `currentSearchParams` + `settings`).
+ */
+export async function bulkReleaseCustody({
   userId,
   assetIds,
   organizationId,
@@ -3676,6 +3915,20 @@ export async function bulkCheckInAssets({
           assetId: asset.id,
         })),
       });
+
+      // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
+      await recordEvents(
+        assets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          teamMemberId: asset.custody!.custodian.id,
+        })),
+        tx
+      );
     });
 
     return true;
@@ -3683,7 +3936,7 @@ export async function bulkCheckInAssets({
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while bulk checking in assSets.";
+        : "Something went wrong while releasing custody.";
 
     throw new ShelfError({
       cause,
@@ -3804,6 +4057,23 @@ export async function bulkUpdateAssetLocation({
             };
           }),
         });
+
+        // Activity events — one ASSET_LOCATION_CHANGED per asset, inside the tx.
+        await recordEvents(
+          assetsToUpdate.map((asset) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: asset.id,
+            assetId: asset.id,
+            locationId: newLocation?.id ?? undefined,
+            field: "locationId",
+            fromValue: asset.location?.id ?? null,
+            toValue: newLocation?.id ?? null,
+          })),
+          tx
+        );
       }
     });
 

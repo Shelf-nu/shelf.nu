@@ -15,6 +15,7 @@ import { Button } from "~/components/shared/button";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { tw } from "~/utils/tw";
 import type { IconType } from "./icons-map";
+import { MobileDropdownStyles } from "./mobile-dropdown-styles";
 import When from "../when/when";
 
 type IndexType = "kit" | "asset";
@@ -81,21 +82,7 @@ const ConditionalActionsDropdown = ({
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }} // is a hack to fix the popover not being in the right place on mobile
-            // can not target [data-radix-popper-content-wrapper] for this file only with css
-            // so we have to use dangerouslySetInnerHTML
-            // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
             ref={popoverContentRef}

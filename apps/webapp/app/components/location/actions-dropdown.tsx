@@ -21,6 +21,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { DeleteLocation } from "./delete-location";
 import { Button } from "../shared/button";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 interface Props {
   location: {
@@ -89,18 +90,7 @@ const ConditionalActionsDropdown = ({
           </span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
-                [data-radix-popper-content-wrapper] {
-                  transform: none !important;
-                  will-change: auto !important;
-                }
-              }`,
-            }}
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <PopoverPortal>
           <PopoverContent

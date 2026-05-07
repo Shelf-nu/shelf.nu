@@ -1,11 +1,70 @@
 import type { HTMLProps, KeyboardEvent } from "react";
-import { useState, useCallback } from "react";
+import { useCallback, useReducer } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { ChevronRight } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
+
+/**
+ * Consolidated UI state for ImageWithPreview. A reducer is used here
+ * because several transitions update two fields together (e.g. `retry`
+ * clears the error flag while bumping the cache-buster key), and grouping
+ * them behind explicit actions keeps the dispatch sites readable.
+ */
+type PreviewState = {
+  isLoading: boolean;
+  isImageError: boolean;
+  retryKey: number;
+  open: boolean;
+  currentIndex: number;
+};
+
+type PreviewAction =
+  | { type: "load_success" }
+  | { type: "load_error" }
+  | { type: "retry" }
+  | { type: "open"; index: number }
+  | { type: "close" }
+  | { type: "set_index"; index: number };
+
+const INITIAL_PREVIEW_STATE: PreviewState = {
+  isLoading: true,
+  isImageError: false,
+  retryKey: 0,
+  open: false,
+  currentIndex: 0,
+};
+
+function previewReducer(
+  state: PreviewState,
+  action: PreviewAction
+): PreviewState {
+  switch (action.type) {
+    case "load_success":
+      return { ...state, isLoading: false, isImageError: false };
+    case "load_error":
+      return { ...state, isLoading: false, isImageError: true };
+    case "retry":
+      // Force the underlying <img> to remount by bumping `retryKey` —
+      // this re-triggers the browser's image fetch.
+      return {
+        ...state,
+        isImageError: false,
+        isLoading: true,
+        retryKey: state.retryKey + 1,
+      };
+    case "open":
+      return { ...state, open: true, currentIndex: action.index };
+    case "close":
+      return { ...state, open: false };
+    case "set_index":
+      return { ...state, currentIndex: action.index };
+    default:
+      return state;
+  }
+}
 
 type ImageItem = {
   id: string;
@@ -42,12 +101,9 @@ export default function ImageWithPreview({
   disablePortal = false,
   ...restProps
 }: ImageWithPreviewProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isImageError, setIsImageError] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
+  const [state, dispatch] = useReducer(previewReducer, INITIAL_PREVIEW_STATE);
+  const { isLoading, isImageError, retryKey, open, currentIndex } = state;
 
-  const [open, setOpen] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
   // Determine if navigation is enabled
   const hasNavigation = Boolean(images && images.length > 1);
 
@@ -62,7 +118,7 @@ export default function ImageWithPreview({
   const handlePrevious = useCallback(() => {
     if (canGoPrevious) {
       const newIndex = currentIndex - 1;
-      setCurrentIndex(newIndex);
+      dispatch({ type: "set_index", index: newIndex });
       if (onNavigate && images) {
         onNavigate(images[newIndex].id);
       }
@@ -72,7 +128,7 @@ export default function ImageWithPreview({
   const handleNext = useCallback(() => {
     if (canGoNext) {
       const newIndex = currentIndex + 1;
-      setCurrentIndex(newIndex);
+      dispatch({ type: "set_index", index: newIndex });
       if (onNavigate && images) {
         onNavigate(images[newIndex].id);
       }
@@ -94,19 +150,20 @@ export default function ImageWithPreview({
     if (!imageUrl) {
       return;
     }
-    // Set current index when opening if navigation enabled
+    // Default to the first image; override with `currentImageId` if navigable
+    let nextIndex = 0;
     if (images && currentImageId) {
-      const index = images.findIndex((img) => img.id === currentImageId);
-      if (index !== -1) {
-        setCurrentIndex(index);
+      const found = images.findIndex((img) => img.id === currentImageId);
+      if (found !== -1) {
+        nextIndex = found;
       }
     }
 
-    setOpen(true);
+    dispatch({ type: "open", index: nextIndex });
   }
 
   function handleCloseDialog() {
-    setOpen(false);
+    dispatch({ type: "close" });
   }
 
   function handleDialogContentMount(node: HTMLDivElement | null) {
@@ -116,25 +173,15 @@ export default function ImageWithPreview({
   }
 
   function handleImageLoad() {
-    setIsLoading(false);
-    if (isImageError) {
-      setIsImageError(false);
-    }
+    dispatch({ type: "load_success" });
   }
 
   function handleImageError() {
-    setIsLoading(false);
-
-    if (!isImageError) {
-      setIsImageError(true);
-    }
+    dispatch({ type: "load_error" });
   }
 
   function handleRetry() {
-    setIsImageError(false);
-    setIsLoading(true);
-    // Force image reload by changing key
-    setRetryKey((prev) => prev + 1);
+    dispatch({ type: "retry" });
   }
 
   return (
@@ -178,6 +225,21 @@ export default function ImageWithPreview({
 
         <img
           onClick={withPreview ? handleOpenDialog : undefined}
+          // When the image acts as a preview trigger, make it keyboard
+          // reachable and activatable with Enter or Space.
+          onKeyDown={
+            withPreview
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleOpenDialog();
+                  }
+                }
+              : undefined
+          }
+          role={withPreview ? "button" : undefined}
+          tabIndex={withPreview ? 0 : undefined}
+          aria-label={withPreview ? `Open preview for ${alt}` : undefined}
           key={retryKey}
           src={
             thumbnailUrl ?? imageUrl ?? "/static/images/asset-placeholder.jpg"
@@ -200,7 +262,7 @@ export default function ImageWithPreview({
             <Dialog
               open={open}
               onClose={handleCloseDialog}
-              className="h-[90vh] w-full p-0 md:h-[calc(100vh-4rem)] md:w-[90%]"
+              className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
               wrapperClassName="z-[100]"
               title={
                 <div>

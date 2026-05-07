@@ -1,0 +1,116 @@
+name: 🩺 React Doctor
+
+# Runs on every PR that touches webapp source. Two outcomes:
+#   1. Always posts (or updates) a sticky PR comment summarising findings on
+#      the files changed by this PR.
+#   2. Fails the check if NEW errors are introduced — warnings stay advisory.
+
+on:
+  pull_request_target:
+    paths:
+      - "apps/webapp/**/*.ts"
+      - "apps/webapp/**/*.tsx"
+      - "apps/webapp/package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/react-doctor.yml"
+      - ".github/scripts/react-doctor-pr-comment.mjs"
+
+jobs:
+  authorize:
+    environment: ${{ github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      'external' || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ✓
+
+  doctor:
+    needs: authorize
+    name: 🩺 React Doctor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 🛑 Cancel previous runs
+        uses: styfle/cancel-workflow-action@0.11.0
+
+      - name: ⬇️ Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          fetch-depth: 0
+
+      - name: 🪢 Re-attach HEAD to a named branch
+        # actions/checkout leaves us on a DETACHED HEAD when given a sha.
+        # react-doctor's --diff path calls `git rev-parse --abbrev-ref HEAD`
+        # to find the current branch; in detached state that returns the
+        # literal "HEAD", which the CLI interprets as "no branch" and silently
+        # falls back to scanning the FULL codebase. Re-attaching HEAD to a
+        # named ref restores the diff path.
+        run: git switch -C react-doctor-pr-head
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: 🩺 Run react-doctor (diff vs base)
+        id: doctor
+        working-directory: apps/webapp
+        # Notes:
+        #   --diff origin/<base>     — only files changed vs the PR target
+        #   --no-dead-code           — knip findings are out of scope here
+        #   --annotations            — emits GitHub Actions annotations so
+        #                              findings show inline on the PR diff
+        #   --fail-on error          — exit non-zero only when an error-level
+        #                              finding is present (warnings advisory)
+        # We DON'T fail this step — the dedicated "Fail if errors" step below
+        # owns that, so the comment can post even when the gate fails.
+        # All untrusted PR inputs go through env: instead of inline ${{ }}
+        # interpolation to avoid shell injection.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set +e
+          pnpm exec react-doctor . \
+            --diff "origin/${BASE_REF}" \
+            --no-dead-code \
+            --verbose \
+            --annotations \
+            --fail-on error \
+            2>&1 | tee "$RUNNER_TEMP/doctor.log"
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          # The CLI prints "Full diagnostics written to /tmp/react-doctor-..."
+          DIAG_PATH=$(grep -oE '/tmp/react-doctor-[a-f0-9-]+' "$RUNNER_TEMP/doctor.log" | head -1)
+          echo "diag_path=$DIAG_PATH" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: 📝 Build PR comment body
+        if: always()
+        env:
+          DIAG_PATH: ${{ steps.doctor.outputs.diag_path }}
+        run: |
+          node .github/scripts/react-doctor-pr-comment.mjs "$DIAG_PATH" \
+            > "$RUNNER_TEMP/comment.md"
+          echo "--- comment preview ---"
+          cat "$RUNNER_TEMP/comment.md"
+
+      - name: 💬 Post or update PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: react-doctor
+          path: ${{ runner.temp }}/comment.md
+
+      - name: ❌ Fail if errors introduced
+        if: steps.doctor.outputs.exit_code != '0'
+        run: |
+          echo "react-doctor introduced new errors on this PR — see the comment for details."
+          exit 1

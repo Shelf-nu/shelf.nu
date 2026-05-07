@@ -26,6 +26,7 @@ export const BulkPartialCheckinSchema = z.object({
     .array(z.string())
     .min(1, "Please select at least one asset to check in."),
 });
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function BulkPartialCheckinDialog({
   open,
   setOpen,

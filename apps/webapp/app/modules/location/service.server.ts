@@ -42,6 +42,7 @@ import {
   buildAssetListMarkup,
   buildKitListMarkup,
 } from "./utils";
+import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import {
   getAssetsWhereInput,
@@ -55,6 +56,86 @@ import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Location";
 const MAX_LOCATION_DEPTH = 12;
+
+/**
+ * SECURITY: Asserts that every supplied asset ID belongs to `organizationId`.
+ *
+ * Service-layer defense-in-depth guard for the location ↔ asset mutation
+ * helpers (`updateLocationAssets`). Without this check, Prisma's 1:N
+ * `connect`/`disconnect` on `Location.assets` happily accepts cross-org
+ * `assetId`s supplied via the form payload — silently reparenting a victim's
+ * asset out of their workspace (CWE-862 / IDOR).
+ *
+ * @throws {ShelfError} 403 if any of `ids` does not belong to `organizationId`
+ */
+async function assertAssetsInOrganization({
+  ids,
+  organizationId,
+  additionalData,
+}: {
+  ids: Asset["id"][];
+  organizationId: Organization["id"];
+  additionalData?: Record<string, unknown>;
+}): Promise<void> {
+  if (ids.length === 0) return;
+
+  const authorizedCount = await db.asset.count({
+    where: { id: { in: ids }, organizationId },
+  });
+
+  if (authorizedCount !== ids.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Unauthorized",
+      message:
+        "You are not authorized to modify one or more of the selected assets.",
+      additionalData: { ...additionalData, organizationId, ids },
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * SECURITY: Asserts that every supplied kit ID belongs to `organizationId`.
+ *
+ * Service-layer defense-in-depth guard for the location ↔ kit mutation
+ * helpers (`updateLocationKits`). Without this check, Prisma's 1:N
+ * `connect`/`disconnect` on `Location.kits` happily accepts cross-org
+ * `kitId`s supplied via the form payload — silently reparenting a victim's
+ * kit (and its cascading assets) out of their workspace (CWE-862 / IDOR).
+ *
+ * @throws {ShelfError} 403 if any of `ids` does not belong to `organizationId`
+ */
+async function assertKitsInOrganization({
+  ids,
+  organizationId,
+  additionalData,
+}: {
+  ids: Kit["id"][];
+  organizationId: Organization["id"];
+  additionalData?: Record<string, unknown>;
+}): Promise<void> {
+  if (ids.length === 0) return;
+
+  const authorizedCount = await db.kit.count({
+    where: { id: { in: ids }, organizationId },
+  });
+
+  if (authorizedCount !== ids.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Unauthorized",
+      message:
+        "You are not authorized to modify one or more of the selected kits.",
+      additionalData: { ...additionalData, organizationId, ids },
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
 
 export async function getLocation(
   params: Pick<Location, "id"> & {
@@ -606,32 +687,52 @@ export async function createLocation({
       parentId,
     });
 
-    return await db.location.create({
-      data: {
-        name: name.trim(),
-        description,
-        address,
-        latitude: coordinates?.lat || null,
-        longitude: coordinates?.lon || null,
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-        organization: {
-          connect: {
-            id: organizationId,
-          },
-        },
-        ...(validatedParentId && {
-          parent: {
+    // Use transaction to ensure location creation and activity event are atomic
+    const created = await db.$transaction(async (tx) => {
+      const location = await tx.location.create({
+        data: {
+          name: name.trim(),
+          description,
+          address,
+          latitude: coordinates?.lat || null,
+          longitude: coordinates?.lon || null,
+          user: {
             connect: {
-              id: validatedParentId,
+              id: userId,
             },
           },
-        }),
-      },
+          organization: {
+            connect: {
+              id: organizationId,
+            },
+          },
+          ...(validatedParentId && {
+            parent: {
+              connect: {
+                id: validatedParentId,
+              },
+            },
+          }),
+        },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "LOCATION_CREATED",
+          entityType: "LOCATION",
+          entityId: location.id,
+          locationId: location.id,
+        },
+        tx
+      );
+
+      return location;
     });
+
+    return created;
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -718,29 +819,47 @@ export async function updateLocation(payload: {
             currentLocationId: id,
           });
 
-    const updatedLocation = await db.location.update({
-      where: { id, organizationId },
-      data: {
-        name: name?.trim(),
-        description,
-        address,
-        ...(shouldUpdateCoordinates && {
-          latitude: coordinates?.lat || null,
-          longitude: coordinates?.lon || null,
-        }),
-        ...(validatedParentId !== undefined && {
-          parent: validatedParentId
-            ? {
-                connect: {
-                  id: validatedParentId,
-                },
-              }
-            : { disconnect: true },
-        }),
-      },
+    // Use transaction to ensure location update and activity event are atomic
+    const updatedLocation = await db.$transaction(async (tx) => {
+      const location = await tx.location.update({
+        where: { id, organizationId },
+        data: {
+          name: name?.trim(),
+          description,
+          address,
+          ...(shouldUpdateCoordinates && {
+            latitude: coordinates?.lat || null,
+            longitude: coordinates?.lon || null,
+          }),
+          ...(validatedParentId !== undefined && {
+            parent: validatedParentId
+              ? {
+                  connect: {
+                    id: validatedParentId,
+                  },
+                }
+              : { disconnect: true },
+          }),
+        },
+      });
+
+      // Activity event must be inside transaction for atomicity
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "LOCATION_UPDATED",
+          entityType: "LOCATION",
+          entityId: id,
+          locationId: id,
+        },
+        tx
+      );
+
+      return location;
     });
 
-    // Create location activity notes for changed fields
+    // Create location activity notes for changed fields (not critical for atomicity)
     await createLocationEditNotes({
       locationId: id,
       userId,
@@ -1543,6 +1662,18 @@ export async function updateLocationAssets({
     }
 
     /**
+     * SECURITY: every submitted asset ID (add or remove) must belong to the
+     * caller's organization. Without this guard, Prisma's `connect`/`disconnect`
+     * on `Location.assets` accepts cross-org IDs, silently reparenting another
+     * workspace's asset to the caller's location (CWE-862).
+     */
+    await assertAssetsInOrganization({
+      ids: Array.from(new Set([...assetIds, ...removedAssetIds])),
+      organizationId,
+      additionalData: { userId, locationId },
+    });
+
+    /**
      * Filter out assets already at this location - they don't need notes
      * since no actual change is happening for them.
      */
@@ -1592,10 +1723,11 @@ export async function updateLocationAssets({
         });
       });
 
-    if (assetIds.length > 0) {
-      /** We update the location with the new assets */
-      await db.location
-        .update({
+    // Use transaction to ensure all location updates and activity events are atomic
+    await db.$transaction(async (tx) => {
+      if (assetIds.length > 0) {
+        /** We update the location with the new assets */
+        await tx.location.update({
           where: {
             id: locationId,
             organizationId,
@@ -1607,22 +1739,12 @@ export async function updateLocationAssets({
               })),
             },
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while adding the assets to the location. Please try again or contact support.",
-            additionalData: { assetIds, userId, locationId },
-            label: "Location",
-          });
         });
-    }
+      }
 
-    /** If some assets were removed, we also need to handle those */
-    if (removedAssetIds.length > 0) {
-      await db.location
-        .update({
+      /** If some assets were removed, we also need to handle those */
+      if (removedAssetIds.length > 0) {
+        await tx.location.update({
           where: {
             organizationId,
             id: locationId,
@@ -1634,19 +1756,41 @@ export async function updateLocationAssets({
               })),
             },
           },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message:
-              "Something went wrong while removing the assets from the location. Please try again or contact support.",
-            additionalData: { removedAssetIds, userId, locationId },
-            label: "Location",
-          });
         });
-    }
+      }
 
-    /** Creates the relevant notes for all the changed assets */
+      // Activity events — one ASSET_LOCATION_CHANGED per affected asset, inside tx.
+      const locEvents: Parameters<typeof recordEvents>[0] = [
+        ...actuallyNewAssetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          locationId,
+          field: "locationId",
+          fromValue: null,
+          toValue: locationId,
+        })),
+        ...removedAssetIds.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          field: "locationId",
+          fromValue: locationId,
+          toValue: null,
+        })),
+      ];
+      if (locEvents.length > 0) {
+        await recordEvents(locEvents, tx);
+      }
+    });
+
+    /** Creates the relevant notes for all the changed assets (not critical for atomicity) */
     await createBulkLocationChangeNotes({
       modifiedAssets,
       assetIds: actuallyNewAssetIds,
@@ -1655,6 +1799,9 @@ export async function updateLocationAssets({
       location,
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while updating the location assets.",
@@ -1742,6 +1889,19 @@ export async function updateLocationKits({
         ]),
       ];
     }
+
+    /**
+     * SECURITY: every submitted kit ID (add or remove) must belong to the
+     * caller's organization. Without this guard, Prisma's `connect`/`disconnect`
+     * on `Location.kits` accepts cross-org IDs, silently reparenting another
+     * workspace's kit (and its cascading assets) to the caller's location
+     * (CWE-862).
+     */
+    await assertKitsInOrganization({
+      ids: Array.from(new Set([...kitIds, ...removedKitIds])),
+      organizationId,
+      additionalData: { userId, locationId },
+    });
 
     /**
      * Filter out kits already at this location - they don't need notes
@@ -2025,6 +2185,9 @@ export async function updateLocationKits({
       }
     }
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while updating the location kits.",

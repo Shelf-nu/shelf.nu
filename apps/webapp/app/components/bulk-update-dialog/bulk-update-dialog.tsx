@@ -69,6 +69,48 @@ type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
       };
 };
 
+type BulkUpdateTriggerButtonProps = {
+  disabled?: boolean;
+  type: BulkDialogType;
+  label: string;
+  onClick?: () => void;
+  onOpen: () => void;
+};
+
+/**
+ * The actual trigger button for {@link BulkUpdateDialogTrigger}.
+ *
+ * Hoisted to module scope (instead of nested inside the parent) so React
+ * treats it as a stable component identity across renders.
+ */
+function BulkUpdateTriggerButton({
+  disabled,
+  type,
+  label,
+  onClick,
+  onOpen,
+}: BulkUpdateTriggerButtonProps) {
+  return (
+    <Button
+      type="button"
+      variant="link"
+      className={tw(
+        "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
+      )}
+      width="full"
+      onClick={() => {
+        onClick && onClick();
+        onOpen();
+      }}
+      disabled={disabled}
+    >
+      <span className="flex items-center gap-2">
+        <Icon icon={type} /> {label}
+      </span>
+    </Button>
+  );
+}
+
 /** This component is going to trigger the open state of dialog */
 function BulkUpdateDialogTrigger({
   type,
@@ -90,36 +132,19 @@ function BulkUpdateDialogTrigger({
     openBulkDialog(type);
   }
 
-  /** The actual button */
-  function ClickMe({ disabled }: { disabled?: boolean }) {
-    return (
-      <Button
-        type="button"
-        variant="link"
-        className={tw(
-          "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
-        )}
-        width="full"
-        onClick={() => {
-          onClick && onClick();
-          handleOpenDialog();
-        }}
-        disabled={disabled}
-      >
-        <span className="flex items-center gap-2">
-          <Icon icon={type} /> {label}
-        </span>
-      </Button>
-    );
-  }
-
   if (disabled) {
     return (
       <HoverCard openDelay={50} closeDelay={50}>
         <HoverCardTrigger
           className={tw("disabled inline-flex w-full cursor-not-allowed ")}
         >
-          <ClickMe disabled={isDisabled} />
+          <BulkUpdateTriggerButton
+            disabled={isDisabled}
+            type={type}
+            label={label}
+            onClick={onClick}
+            onOpen={handleOpenDialog}
+          />
         </HoverCardTrigger>
         {reason && (
           <HoverCardContent side="left">
@@ -131,7 +156,14 @@ function BulkUpdateDialogTrigger({
     );
   }
 
-  return <ClickMe />;
+  return (
+    <BulkUpdateTriggerButton
+      type={type}
+      label={label}
+      onClick={onClick}
+      onOpen={handleOpenDialog}
+    />
+  );
 }
 
 type DialogContentChildrenProps = {

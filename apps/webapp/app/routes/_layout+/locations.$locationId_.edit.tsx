@@ -64,6 +64,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       orderBy: "createdAt",
     });
 
+    // why: getLocationsForCreateAndEdit uses location.parentId as the
+    // defaultLocation fallback, so it must run after getLocation resolves.
     const { locations, totalLocations } = await getLocationsForCreateAndEdit({
       organizationId,
       request,

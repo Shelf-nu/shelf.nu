@@ -338,7 +338,10 @@ export default function App() {
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (
+            // `key` remounts the modal when the active organization changes,
+            // resetting its internal state without needing a derived-state effect.
             <SequentialIdMigrationModal
+              key={currentOrganizationId}
               organizationId={currentOrganizationId}
             />
           ) : null}

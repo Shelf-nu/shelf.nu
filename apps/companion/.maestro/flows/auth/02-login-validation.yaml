@@ -1,0 +1,47 @@
+appId: com.shelf.companion.carlos
+name: "Auth - Login Validation"
+tags:
+  - auth
+
+---
+# Test: Login form validation errors
+# Verifies empty fields and wrong credentials show proper errors
+
+- runFlow: ../../shared/launch-to-login.yaml
+
+# Test 1: Tap sign-in button with empty fields
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible: "Please enter both email and password."
+    timeout: 3000
+- takeScreenshot: auth-validation-empty-fields
+
+# Test 2: Enter email only, no password
+- tapOn:
+    id: "email-input"
+- inputText: "test@invalid.com"
+- tapOn: "Welcome back"
+- tapOn:
+    id: "sign-in-button"
+- extendedWaitUntil:
+    visible: "Please enter both email and password."
+    timeout: 3000
+- takeScreenshot: auth-validation-email-only
+
+# Test 3: Enter password with wrong credentials
+# Note: email field already has "test@invalid.com" from previous step
+- tapOn:
+    id: "password-input"
+- inputText: "wrongpassword123"
+# Note: onSubmitEditing may auto-submit; also tap sign-in as fallback
+- tapOn: "Welcome back"
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for Supabase error response
+- extendedWaitUntil:
+    visible: "Invalid login credentials"
+    timeout: 10000
+- takeScreenshot: auth-validation-wrong-creds

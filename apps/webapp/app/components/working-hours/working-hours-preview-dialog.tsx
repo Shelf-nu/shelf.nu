@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { format } from "date-fns";
 import { CalendarDays, Clock, AlertCircle, Info } from "lucide-react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { DateS } from "~/components/shared/date";
@@ -9,15 +10,23 @@ import {
   DAY_NAMES,
 } from "~/modules/working-hours/constants";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
+import { getOverrideDateKey } from "~/modules/working-hours/utils";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 
-// Check if date is upcoming (within next 30 days)
-const isUpcoming = (dateString: string | Date): boolean => {
-  const date = new Date(dateString);
+// Overrides are absolute calendar dates, so compare them as YYYY-MM-DD strings
+// against today's local calendar day. `new Date("YYYY-MM-DD")` would parse as
+// UTC midnight and incorrectly include/exclude dates near the boundary for
+// users west of UTC.
+const isUpcoming = (dateInput: string | Date): boolean => {
+  const overrideKey = getOverrideDateKey(dateInput);
   const now = new Date();
-  const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  return date >= now && date <= thirtyDaysFromNow;
+  const todayKey = format(now, "yyyy-MM-dd");
+  const thirtyDaysOutKey = format(
+    new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+    "yyyy-MM-dd"
+  );
+  return overrideKey >= todayKey && overrideKey <= thirtyDaysOutKey;
 };
 
 interface WeeklyScheduleGridProps {
@@ -96,7 +105,11 @@ interface OverridesSectionProps {
 const OverridesSection = ({ overrides }: OverridesSectionProps) => {
   const upcomingOverrides = overrides
     .filter((override) => isUpcoming(override.date))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    // YYYY-MM-DD strings sort lexicographically in calendar order, avoiding
+    // the UTC parsing pitfall above.
+    .sort((a, b) =>
+      getOverrideDateKey(a.date).localeCompare(getOverrideDateKey(b.date))
+    )
     .slice(0, 5); // Show only next 5
 
   if (upcomingOverrides.length === 0) {

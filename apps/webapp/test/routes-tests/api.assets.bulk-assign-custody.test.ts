@@ -44,7 +44,7 @@ vi.mock("~/utils/roles.server", () => ({
 
 // why: testing custody assignment validation without executing actual bulk checkout operations
 vi.mock("~/modules/asset/service.server", () => ({
-  bulkCheckOutAssets: vi.fn().mockResolvedValue(undefined),
+  bulkAssignCustody: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: testing team member organization validation without database lookups

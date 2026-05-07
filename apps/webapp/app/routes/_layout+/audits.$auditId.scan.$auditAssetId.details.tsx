@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { MessageSquare, Paperclip } from "lucide-react";
 import type {
@@ -485,6 +485,83 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Initial note transform used both for the initial state seed and for
+ * re-seeding whenever the loader returns a fresh `initialNotes` array.
+ */
+function notesFromLoader(
+  initialNotes: ReturnType<typeof useLoaderData<typeof loader>>["notes"]
+): NoteData[] {
+  return initialNotes.map((note) => ({
+    id: note.id,
+    content: note.content,
+    createdAt: note.createdAt,
+    userId: note.userId ?? "",
+    type: note.type,
+    user: {
+      id: note.user?.id ?? "",
+      name: resolveUserDisplayName(note.user) || note.user?.email || "",
+      img: note.user?.profilePicture ?? null,
+    },
+    needsServerSync: false,
+  }));
+}
+
+/** Coalesced state for AuditAssetDetails — replaces multiple useStates with a useReducer. */
+type AuditDetailsState = {
+  isUploadInProgress: boolean;
+  dialogOpen: boolean;
+  selectedImages: SelectedImage[];
+  clearTrigger: number;
+  attachingToNoteId: string | null;
+};
+
+type AuditDetailsAction =
+  | { type: "SET_UPLOAD_IN_PROGRESS"; payload: boolean }
+  | { type: "OPEN_DIALOG"; payload: SelectedImage[] }
+  | { type: "CLOSE_DIALOG" }
+  | { type: "SET_SELECTED_IMAGES"; payload: SelectedImage[] }
+  | { type: "START_ATTACHING"; payload: string };
+
+function auditDetailsReducer(
+  state: AuditDetailsState,
+  action: AuditDetailsAction
+): AuditDetailsState {
+  switch (action.type) {
+    case "SET_UPLOAD_IN_PROGRESS":
+      return { ...state, isUploadInProgress: action.payload };
+    case "OPEN_DIALOG":
+      return { ...state, selectedImages: action.payload, dialogOpen: true };
+    case "CLOSE_DIALOG":
+      return {
+        ...state,
+        dialogOpen: false,
+        attachingToNoteId: null,
+        selectedImages: [],
+        clearTrigger: state.clearTrigger + 1,
+      };
+    case "SET_SELECTED_IMAGES":
+      return { ...state, selectedImages: action.payload };
+    case "START_ATTACHING":
+      return {
+        ...state,
+        attachingToNoteId: action.payload,
+        selectedImages: [],
+      };
+    default:
+      return state;
+  }
+}
+
+const INITIAL_AUDIT_DETAILS_STATE: AuditDetailsState = {
+  isUploadInProgress: false,
+  dialogOpen: false,
+  selectedImages: [],
+  clearTrigger: 0,
+  attachingToNoteId: null,
+};
+
+// react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AuditAssetDetails() {
   const {
     notes: initialNotes,
@@ -496,69 +573,62 @@ export default function AuditAssetDetails() {
   const imageUploadFetcher = useFetcher<typeof action>();
   const incrementMeta = useSetAtom(incrementAuditAssetMetaAtom);
 
-  const [isUploadInProgress, setIsUploadInProgress] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
-  const [portalContainer, setPortalContainer] = useState<
-    HTMLElement | undefined
-  >();
-  const [clearTrigger, setClearTrigger] = useState(0);
+  const [state, dispatch] = useReducer(
+    auditDetailsReducer,
+    INITIAL_AUDIT_DETAILS_STATE
+  );
+  const {
+    isUploadInProgress,
+    dialogOpen,
+    selectedImages,
+    clearTrigger,
+    attachingToNoteId,
+  } = state;
   const filePickerTriggerRef = useRef<
     ((currentSelectedCount?: number) => void) | null
   >(null);
   const imageRemovalRef = useRef<((id: string) => void) | null>(null);
   const noteFormRef = useRef<HTMLFormElement | null>(null);
-  const [attachingToNoteId, setAttachingToNoteId] = useState<string | null>(
-    null
-  );
   const disabled = useDisabled();
-
-  // Set portal container on mount
-  useEffect(() => {
-    setPortalContainer(document.body);
-  }, []);
 
   useEffect(() => {
     if (
       imageUploadFetcher.state === "submitting" ||
       imageUploadFetcher.state === "loading"
     ) {
-      setIsUploadInProgress(true);
+      dispatch({ type: "SET_UPLOAD_IN_PROGRESS", payload: true });
     } else if (imageUploadFetcher.state === "idle") {
-      setIsUploadInProgress(false);
+      dispatch({ type: "SET_UPLOAD_IN_PROGRESS", payload: false });
     }
   }, [imageUploadFetcher.state]);
 
   /**
-   * Local state for notes - starts with server notes, gets temp notes added optimistically.
-   * Each AuditAssetNoteItem handles its own server submission with unique fetcher.
+   * Local state for notes — seeded from the loader but then mutated
+   * optimistically. We re-seed via the "sync on prop change" pattern
+   * (ref + setState during render) rather than a useEffect so the UI
+   * never shows a stale frame after the loader revalidates.
    */
-  const [localNotes, setLocalNotes] = useState<NoteData[]>([]);
-  const [localImages, setLocalImages] = useState<typeof images>([]);
+  const [localNotes, setLocalNotes] = useState<NoteData[]>(() =>
+    notesFromLoader(initialNotes)
+  );
+  const lastInitialNotesRef = useRef(initialNotes);
+  if (lastInitialNotesRef.current !== initialNotes) {
+    lastInitialNotesRef.current = initialNotes;
+    setLocalNotes(notesFromLoader(initialNotes));
+  }
 
-  // Sync local state with server data when revalidation happens
-  useEffect(() => {
-    setLocalNotes(
-      initialNotes.map((note) => ({
-        id: note.id,
-        content: note.content,
-        createdAt: note.createdAt,
-        userId: note.userId ?? "",
-        type: note.type,
-        user: {
-          id: note.user?.id ?? "",
-          name: resolveUserDisplayName(note.user) || note.user?.email || "",
-          img: note.user?.profilePicture ?? null,
-        },
-        needsServerSync: false,
-      }))
-    );
-  }, [initialNotes]);
-
-  // Sync local images with server data when loader runs
-  useEffect(() => {
+  /**
+   * Local state for images — seeded from the loader, then mutated
+   * optimistically on upload/delete. Same sync-on-prop-change pattern as
+   * localNotes above: the loader's `images` array is the source of truth,
+   * but we allow local tweaks between revalidations.
+   */
+  const [localImages, setLocalImages] = useState<typeof images>(images);
+  const lastImagesRef = useRef(images);
+  if (lastImagesRef.current !== images) {
+    lastImagesRef.current = images;
     setLocalImages(images);
-  }, [images]);
+  }
 
   // Handle successful image upload from fetcher
   useEffect(() => {
@@ -604,31 +674,20 @@ export default function AuditAssetDetails() {
    * Opens the dialog to allow adding a note.
    */
   const handleImagesSelected = (images: SelectedImage[]) => {
-    setSelectedImages(images);
-    setDialogOpen(true);
+    dispatch({ type: "OPEN_DIALOG", payload: images });
   };
-
-  /**
-   * Called when images are selected while attaching to existing note.
-   * The images parameter comes from handleImagesSelected callback.
-   */
-  useEffect(() => {
-    // If we have attachingToNoteId and images were just selected, open dialog
-    if (attachingToNoteId && selectedImages.length > 0 && !dialogOpen) {
-      setDialogOpen(true);
-    }
-  }, [attachingToNoteId, selectedImages.length, dialogOpen]);
 
   /**
    * Handle removing an image from the selection
    */
   const handleRemoveImage = (id: string) => {
-    setSelectedImages((prev) => {
-      const image = prev.find((img) => img.id === id);
-      if (image) {
-        URL.revokeObjectURL(image.previewUrl);
-      }
-      return prev.filter((img) => img.id !== id);
+    const image = selectedImages.find((img) => img.id === id);
+    if (image) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+    dispatch({
+      type: "SET_SELECTED_IMAGES",
+      payload: selectedImages.filter((img) => img.id !== id),
     });
     // Also remove from AuditImageUploadSection's local state
     if (imageRemovalRef.current) {
@@ -640,13 +699,9 @@ export default function AuditAssetDetails() {
    * Handle dialog close - cleanup preview URLs
    */
   const handleDialogClose = () => {
-    setDialogOpen(false);
-    setAttachingToNoteId(null);
-    // Cleanup preview URLs
+    // Cleanup preview URLs before the reducer clears them.
     selectedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-    setSelectedImages([]);
-    // Trigger cleanup in AuditImageUploadSection
-    setClearTrigger((prev) => prev + 1);
+    dispatch({ type: "CLOSE_DIALOG" });
   };
 
   /**
@@ -686,8 +741,7 @@ export default function AuditAssetDetails() {
 
   const handleAttachImages = useCallback(
     (noteId: string) => {
-      setAttachingToNoteId(noteId);
-      setSelectedImages([]);
+      dispatch({ type: "START_ATTACHING", payload: noteId });
       // Trigger file picker immediately when attaching to note
       if (filePickerTriggerRef.current) {
         filePickerTriggerRef.current(localImages.length);
@@ -817,7 +871,13 @@ export default function AuditAssetDetails() {
           onRemoveImage={handleRemoveImage}
           onChangeImages={handleAddMoreImages}
           fetcher={imageUploadFetcher}
-          portalContainer={portalContainer}
+          // The dialog is only mounted after a user interaction, which
+          // means hydration has already completed — we can safely read
+          // `document.body` inline instead of syncing it in a useEffect
+          // (which would otherwise produce a first-paint flash).
+          portalContainer={
+            typeof document !== "undefined" ? document.body : undefined
+          }
           maxCount={3}
           existingImagesCount={localImages.length}
         />

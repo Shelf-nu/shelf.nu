@@ -1,0 +1,46 @@
+appId: com.shelf.companion.carlos
+name: "Settings - Theme Toggle and Scan Sound"
+tags:
+  - settings
+
+---
+# Test: Theme toggle between Light, Dark, and System
+# Verifies theme switching works without crashes
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+# Navigate to Settings tab
+- tapOn: "Settings"
+
+# Wait for Settings screen to load
+- extendedWaitUntil:
+    visible: "APPEARANCE"
+    timeout: 8000
+
+# Tap Dark theme (a11y: "Theme: Dark")
+- tapOn: "Theme: Dark"
+- takeScreenshot: settings-theme-dark
+
+# Tap Light theme (a11y: "Theme: Light")
+- tapOn: "Theme: Light.*"
+- takeScreenshot: settings-theme-light
+
+# Tap System theme (a11y: "Theme: System")
+- tapOn: "Theme: System.*"
+- takeScreenshot: settings-theme-system
+
+# Scroll down to Scanner section
+- scrollUntilVisible:
+    element:
+      text: "SCANNER"
+    direction: DOWN
+    timeout: 5000
+
+# Verify scan sound toggle exists (a11y: "Toggle scan sound")
+- assertVisible: "Scan sound"
+- assertVisible: "Toggle scan sound"
+- takeScreenshot: settings-scan-sound

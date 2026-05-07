@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.shelf.nu",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nmmqcuiasekdacmhwsxk.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_PUBLIC": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tbXFjdWlhc2VrZGFjbWh3c3hrIiwicm9sZSI6ImFub24iLCJpYXQiOjE2ODQ3NjY5NzcsImV4cCI6MjAwMDM0Mjk3N30.oJgybPmL8Y2naFbCABPAL9-sWF3cm6FFJETeyHu1hTc"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "cv@shelf.nu",
+        "ascAppId": "6765639874",
+        "appleTeamId": "27Q4MHFB8K"
+      }
+    }
+  }
+}
