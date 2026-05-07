@@ -87,6 +87,11 @@ const ConditionalActionsDropdown = () => {
   // Admin/owner can delete archived audits (archive-first safety contract).
   const canDeleteAudit = isAdminOrOwner && isArchived;
 
+  // Admin/owner can duplicate completed, cancelled, or archived audits — i.e.
+  // any terminal state. Pending/active audits should be edited instead.
+  const canDuplicateAudit =
+    isAdminOrOwner && (isCompleted || isCancelled || isArchived);
+
   // Only the creator can cancel an audit, and only if it's not already completed or cancelled
   const canCancelAudit =
     isCreator && !isCompleted && !isCancelled && !isArchived;
@@ -218,6 +223,22 @@ const ConditionalActionsDropdown = () => {
                     }}
                   >
                     Archive
+                  </Button>
+                </div>
+              </When>
+
+              <When truthy={canDuplicateAudit}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    to={`/audits/${session.id}/duplicate`}
+                    onClick={handleMenuClose}
+                  >
+                    <span className="flex items-center gap-2">
+                      Duplicate audit
+                    </span>
                   </Button>
                 </div>
               </When>
