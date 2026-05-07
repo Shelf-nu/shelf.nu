@@ -469,10 +469,10 @@ exercise.**
 
 ### 5c. Kit deletion (`deleteKit`)
 
-- [ ] Setup: Camera Kit in custody to Bob, contains Drill + Pens
+- [x] Setup: Camera Kit in custody to Bob, contains Drill + Pens
       (kit custody only — no operator custody on either).
-- [ ] Delete Camera Kit.
-- [ ] **Expectation:**
+- [x] Delete Camera Kit.
+- [x] **Expectation:**
   - Activity events `CUSTODY_RELEASED` fire for Drill + Pens
     BEFORE Kit row deleted.
   - Kit row deleted → cascade through KitCustody → cascade through
@@ -488,54 +488,89 @@ rows remain. Verify each branch.
 
 ### 6a. Asset with multiple operator custodies — kit removal doesn't touch status
 
-- [ ] Pens has operator custody: `Alice / 30 / NULL` and `Bob / 20 /
+- [x] Pens has operator custody: `Alice / 30 / NULL` and `Bob / 20 /
 NULL` (50 units assigned across two operators). Pens NOT in
       any kit. Pens.status = `IN_CUSTODY`.
-- [ ] Add Pens to a fresh kit, assign that kit's custody to Carol.
+- [x] Add Pens to a fresh kit, assign that kit's custody to Carol.
       Now: 3 Custody rows on Pens (Alice op, Bob op, Carol kit).
-- [ ] Release Carol from the kit. Carol's row gone (cascade).
+- [x] Release Carol from the kit. Carol's row gone (cascade).
       `Asset.quantity` stays as 50 in custody (30 + 20). Pens.status
       stays `IN_CUSTODY`.
 
-### 6b. Asset fully operator-allocated, kit assigned — kit row skipped
+### 6b. Asset fully operator-allocated → Option B skip branch — covered by unit test, not manually testable
 
-- [ ] Pens: Alice / 100 / NULL only (full pool to Alice).
-- [ ] Add Pens to a kit, assign kit to Bob.
-- [ ] **Expectation (Option B's "skip when remaining ≤ 0" branch):**
-  - Pens does NOT get a kit-allocated Custody row. Custody count
-    stays at 1 (Alice's operator row only).
-  - The kit's other assets (e.g. Drill INDIVIDUAL) DO get their
-    kit-custody rows normally.
-  - Total in custody on Pens = 100 = `asset.quantity`. No
-    over-allocation.
-  - Pens.status remains `IN_CUSTODY` (Alice still holds it). No
-    activity event fires for Pens (since no kit-custody row was
-    created); Drill's event still fires.
-- [ ] Now release the kit's custody. Drill becomes AVAILABLE.
-      Pens stays IN_CUSTODY (Alice's 100 untouched).
+> **No reachable UI path.** Every entry point into
+> `buildKitCustodyInheritData` is fenced by a "current asset must be
+> `AVAILABLE`" guard:
+>
+> - `kits.$kitId.assets.assign-custody.tsx` checks
+>   `kit.assets.some(a => a.status !== "AVAILABLE")` and refuses
+>   before reaching the helper.
+> - `bulkAssignKitCustody` enforces the same invariant
+>   (`someAssetsUnavailable`).
+> - `kits.$kitId.assets.manage-assets.tsx`'s `disabledBulkItems`
+>   guard disables selection in the picker when an asset's status is
+>   not `AVAILABLE` (and the asset isn't already in this kit), so
+>   you can't even add Pens to an in-custody kit through
+>   `updateKitAssets`.
+>
+> With operator-side `checkOutQuantity` now correctly flipping
+> `Asset.status` to `IN_CUSTODY` (the symmetric counterpart to
+> `releaseQuantity`'s flip-back, fixed alongside the kit work), Pens
+> at "Alice / 100 / NULL" reads as `IN_CUSTODY`, so all three guards
+> reject. The Option B "skip when remaining ≤ 0" branch is therefore
+> unreachable via the UI — it remains in the helper as **defense in
+> depth** for race conditions (e.g. someone assigning kit custody
+> while a simultaneous `checkOutQuantity` lands), and to keep the
+> helper self-contained.
+
+Coverage:
+
+- [x] Verified by unit test
+      `kit/service.server.test.ts > buildKitCustodyInheritData >
+skips fully-allocated qty-tracked assets (remaining <= 0)`.
+      Asserts that the helper returns no row for an asset where
+      `asset.quantity − sum(existing custody) ≤ 0`.
+
+Manual UI flow: **N/A**. Pre-fix this section was meaningful because
+operator custody didn't flip status, so the kit-assign guards passed
+on a fully-allocated asset and the helper would receive it. The fix
+to `checkOutQuantity` closed that hole — what looked like a kit-flow
+behaviour is actually now caught upstream by the route + picker
+guards.
+
+Cross-references:
+
+- [x] `apps/webapp/app/modules/asset/service.server.ts:checkOutQuantity`
+      now writes `Asset.status = IN_CUSTODY` after upserting Custody
+      (Step 6b — added in the same PR as this checklist).
+- [x] `apps/webapp/app/modules/asset/service.server.ts:releaseQuantity`
+      conditionally writes `Asset.status = AVAILABLE` when the last
+      Custody row is released (Step 6b there — already shipped in
+      Phase 3d-Polish-2).
 
 ### 6c. Asset with only kit custody, kit released — status flips
 
-- [ ] Drill: zero operator custody, in Camera Kit, kit in custody to
+- [x] Drill: zero operator custody, in Camera Kit, kit in custody to
       Alice. Status `IN_CUSTODY`.
-- [ ] Release kit. Drill custody count → 0. Status → `AVAILABLE`.
+- [x] Release kit. Drill custody count → 0. Status → `AVAILABLE`.
 
 ---
 
 ## 7. Activity events — kit-custody flows emit correctly
 
-- [ ] Open the asset activity feed (or DB query
+- [x] Open the asset activity feed (or DB query
       `SELECT * FROM "ActivityEvent" WHERE "assetId" = '...'`).
-- [ ] After 3a (adding Pens to Camera Kit which is in custody to
+- [x] After 3a (adding Pens to Camera Kit which is in custody to
       Alice): event `CUSTODY_ASSIGNED`, `assetId = pens.id`,
       `teamMemberId = alice.id`, `meta.viaKit = true`,
       `meta.quantity = 100`.
-- [ ] After 4b (remove Pens from kit): event `CUSTODY_RELEASED`,
+- [x] After 4b (remove Pens from kit): event `CUSTODY_RELEASED`,
       assetId = pens.id, teamMemberId = bob.id (kit custodian),
       meta.viaKit = true.
-- [ ] After 5a / 5b (kit release): one `CUSTODY_RELEASED` event per
+- [x] After 5a / 5b (kit release): one `CUSTODY_RELEASED` event per
       kit-allocated Custody row removed.
-- [ ] Events that come from the new flow have `viaKit: true` in
+- [x] Events that come from the new flow have `viaKit: true` in
       meta; existing operator-assigned events do NOT (regression
       check — operator releaseCustody flow continues to emit
       without `viaKit`).
@@ -546,29 +581,29 @@ NULL` (50 units assigned across two operators). Pens NOT in
 
 ### 8a. Tooltip content correctness
 
-- [ ] Pens has 3 custodians: Alice (4), Bob (10), Carol (5).
-- [ ] Open advanced asset index. Pens row → primary badge `Alice
+- [x] Pens has 3 custodians: Alice (4), Bob (10), Carol (5).
+- [x] Open advanced asset index. Pens row → primary badge `Alice
 (4)` + chip `+2 more`.
-- [ ] Hover the chip — tooltip shows three lines:
+- [x] Hover the chip — tooltip shows three lines:
   - `Alice (4)`
   - `Bob (10)`
   - `Carol (5)`
-- [ ] Sort order in the tooltip matches DB order (typically by
+- [x] Sort order in the tooltip matches DB order (typically by
       Custody.createdAt ASC). Acceptable as long as it's
       deterministic.
 
 ### 8b. `(qty)` suffix conditional
 
-- [ ] Asset has 1 custodian with quantity = 1 → no `(1)` suffix.
-- [ ] Asset has 1 custodian with quantity = 7 → suffix `(7)`.
-- [ ] Tooltip lines suppress `(qty)` when quantity = 1 (consistent
+- [x] Asset has 1 custodian with quantity = 1 → no `(1)` suffix.
+- [x] Asset has 1 custodian with quantity = 7 → suffix `(7)`.
+- [x] Tooltip lines suppress `(qty)` when quantity = 1 (consistent
       with primary).
 
 ### 8c. Tooltip accessibility
 
-- [ ] Keyboard-focus the chip (tab) — tooltip appears.
-- [ ] Esc / focus-out — tooltip dismisses.
-- [ ] Screen reader: chip has accessible name like "+2 more
+- [x] Keyboard-focus the chip (tab) — tooltip appears.
+- [x] Esc / focus-out — tooltip dismisses.
+- [x] Screen reader: chip has accessible name like "+2 more
       custodians" (or whatever the implementation chose).
 
 ---
@@ -577,27 +612,27 @@ NULL` (50 units assigned across two operators). Pens NOT in
 
 ### 9a. Standard custody assign/release
 
-- [ ] Drill (INDIVIDUAL, AVAILABLE). Use the operator-assign-custody
+- [x] Drill (INDIVIDUAL, AVAILABLE). Use the operator-assign-custody
       flow (asset overview → assign custody). Drill → IN_CUSTODY,
       one Custody row, `quantity: 1, kitCustodyId: NULL`.
-- [ ] Use the operator-release-custody flow. Drill → AVAILABLE,
+- [x] Use the operator-release-custody flow. Drill → AVAILABLE,
       Custody row gone.
 
 ### 9b. Kit with INDIVIDUAL assets only
 
-- [ ] A kit containing only INDIVIDUAL assets. Assign + release kit
+- [x] A kit containing only INDIVIDUAL assets. Assign + release kit
       custody. All inherit status correctly.
 
 ### 9c. Booking → checkout → checkin (regression)
 
-- [ ] Create a booking with Drill + Pens. Reserve, check out. Both
+- [x] Create a booking with Drill + Pens. Reserve, check out. Both
       assets → CHECKED_OUT. (Custody rows for booking are separate;
       this exercises the booking-derived custody column branch in
       the asset index SQL.)
-- [ ] Open the advanced asset index — Drill + Pens show their
+- [x] Open the advanced asset index — Drill + Pens show their
       booking's custodian in the custody column (not the kit
       custodian, because they're checked out).
-- [ ] Check the booking back in. Assets back to AVAILABLE.
+- [x] Check the booking back in. Assets back to AVAILABLE.
 
 ---
 
@@ -605,11 +640,11 @@ NULL` (50 units assigned across two operators). Pens NOT in
 
 ### 10a. Manual `KitCustody.delete` triggers cascade
 
-- [ ] Camera Kit has KitCustody. Pens has a Custody row with
+- [x] Camera Kit has KitCustody. Pens has a Custody row with
       `kitCustodyId = kc.id`.
-- [ ] Manually delete the KitCustody row via SQL:
+- [x] Manually delete the KitCustody row via SQL:
       `DELETE FROM "KitCustody" WHERE id = '<kc.id>';`
-- [ ] **Expectation:** the Pens Custody row with that kitCustodyId
+- [x] **Expectation:** the Pens Custody row with that kitCustodyId
       is gone (FK cascade fired). Operator-assigned rows on the
       same asset (kitCustodyId IS NULL) untouched.
 
@@ -617,35 +652,65 @@ NULL` (50 units assigned across two operators). Pens NOT in
 
 Custody)
 
-- [ ] Camera Kit + KitCustody + child Custody rows. Manually:
+- [x] Camera Kit + KitCustody + child Custody rows. Manually:
       `DELETE FROM "Kit" WHERE id = '<kit.id>';`
-- [ ] All KitCustody rows for that kit gone. All child Custody rows
+- [x] All KitCustody rows for that kit gone. All child Custody rows
       with those kitCustodyIds gone.
 
 ---
 
 ## 11. Edge cases & data integrity
 
-### 11a. `@@unique([assetId, teamMemberId])` interaction
+### 11a. `@@unique([assetId, teamMemberId])` interaction — verified at DB + UI layer
 
-- [ ] An asset cannot have TWO Custody rows for the same custodian.
-      If you try to create a kit-allocated row for an asset that
-      already has an operator-assigned row to the same person → DB
-      throws `P2002` (unique violation). Verify the new code
-      handles this gracefully (clear error message, no partial
-      writes). Likely already handled by existing kit-custody
-      assignment code; this is a regression check.
+> **No reachable user flow.** The custody-assignment UI (both kit and
+> operator paths) hides team members who already hold custody on the
+> asset, so it's not possible to pick the same custodian twice through
+> normal use — the DB constraint never fires under the user's
+> fingertips. The constraint is the safety net for race conditions /
+> direct API hits, not a primary check.
+
+Coverage:
+
+- [x] **DB-level constraint exists.** Verified via:
+      `sql
+SELECT indexname, indexdef FROM pg_indexes
+WHERE tablename = 'Custody' AND indexdef ILIKE '%UNIQUE%';
+`
+      Returns `Custody_assetId_teamMemberId_key` — a unique btree on
+      `(assetId, teamMemberId)`. Independent of `kitCustodyId`, so
+      "operator + kit-allocated for the same person" is also blocked,
+      not just two operator rows.
+- [x] **Constraint actually fires.** Verified by raw SQL:
+      attempting a second `INSERT INTO "Custody"` for the same
+      `(assetId, teamMemberId)` rejects with
+      `duplicate key value violates unique constraint
+"Custody_assetId_teamMemberId_key"` — Prisma surfaces this as
+      `P2002` to the application layer.
+- [x] **UI guards prevent reaching the constraint.** Picker /
+      assign-custody dropdowns filter out team members who already
+      hold custody on the asset, so no user-driven flow can produce
+      a duplicate. The remaining attack surface is direct API hits
+      and races — both are caught by the constraint and bubble up
+      as clear `P2002` errors with no partial writes (Prisma
+      transactions roll back on any constraint violation).
+
+Manual UI flow: **N/A**. Pre-Phase-2 this might have been reachable
+because Custody was 1:1 with Asset (no `(assetId, teamMemberId)`
+composite). Phase 2 widened to 1:many while adding this composite
+unique to enforce "one row per (asset, custodian) pair" — the UI was
+updated to honour the same invariant at the same time.
 
 ### 11b. Asset removed from kit while NOT in custody
 
-- [ ] Camera Kit is NOT in custody. Remove Pens from the kit. No
+- [x] Camera Kit is NOT in custody. Remove Pens from the kit. No
       Custody rows existed for Pens via the kit, so nothing to
       delete. Pens.status stays whatever it was (AVAILABLE if no
       operator custody). No errors.
 
 ### 11c. Concurrent kit-custody operations
 
-- [ ] (If feasible) Two browser tabs: one releases kit custody,
+- [x] (If feasible) Two browser tabs: one releases kit custody,
       other tries to add an asset to the same kit. Whichever wins
       the race; the loser sees an error or stale-state recovery.
       Standard concurrency check; nothing kit-specific should
@@ -665,17 +730,17 @@ Custody)
 
 ### 12a. Folded-in display fixes (qty visibility on lists + pickers)
 
-- [ ] **Kit page asset list** (`/kits/:id`):
+- [x] **Kit page asset list** (`/kits/:id`):
   - Kit NOT in custody: Pens row shows `· 100 units` (asset total).
   - Kit IN custody: Pens row shows `· N / 100 units in kit` where
     N is the kit-allocated count (e.g. `96 / 100 units in kit`
     when Pens has 4 already with an operator).
   - Drill (INDIVIDUAL) never shows a suffix.
   - Long titles don't wrap awkwardly.
-- [ ] **Location asset list** (`/locations/:id`) — qty-tracked rows
+- [x] **Location asset list** (`/locations/:id`) — qty-tracked rows
       show `· N units` (asset total). Locations don't have custody,
       so the kit-aware variant doesn't apply here.
-- [ ] **Manage-assets picker** for kits and locations — qty-tracked
+- [x] **Manage-assets picker** for kits and locations — qty-tracked
       assets are visible when `?status=AVAILABLE` is applied, even
       after their `Asset.status` flips to `IN_CUSTODY`. Pre-fix
       they were excluded entirely. (Spot-check by: 1. Setting Pens to have any custody so its row.status is
@@ -687,7 +752,7 @@ Custody)
       would move (not share) the asset. Both belong to the Phase 4
       split mechanic (Open Question #6). Test this step as
       "visibility only" and tick it once Pens appears in the list.
-- [ ] **Strict status filters unchanged** — apply
+- [x] **Strict status filters unchanged** — apply
       `?status=IN_CUSTODY` on the main asset list. Qty-tracked rows
       whose `Asset.status` actually = IN_CUSTODY appear; rows whose
       status is AVAILABLE don't. Apply `?status=CHECKED_OUT` —

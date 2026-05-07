@@ -829,20 +829,241 @@ export async function getAssetsForKits({
   }
 }
 
+/**
+ * Pre-fetched kit shape consumed by `performKitDeletion`. Kept loose
+ * (just the fields the helper actually reads) so both single + bulk
+ * call sites can share the same pipeline.
+ */
+type KitForDeletion = {
+  id: Kit["id"];
+  name: Kit["name"];
+  image: Kit["image"];
+  assets: Array<{ id: string; title: string }>;
+  custody: {
+    id: string;
+    custodian: {
+      id: string;
+      name: string;
+      user: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        displayName: string | null;
+      } | null;
+    };
+  } | null;
+};
+
+/**
+ * Shared deletion pipeline for `deleteKit` + `bulkDeleteKits`.
+ *
+ * Whether you're deleting one kit or many, the steps are identical:
+ *   1. Pre-read inherited Custody rows (so we can emit
+ *      `CUSTODY_RELEASED` events before the FK cascade wipes them).
+ *   2. Inside a transaction:
+ *      a. Emit one `CUSTODY_RELEASED` event per inherited row, tagged
+ *         with the source kit + custodian for audit.
+ *      b. Delete the kits — FK cascades clean up
+ *         `Kit → KitCustody → Custody` and `Asset.kitId` is set null.
+ *      c. Conditional status flip: only assets with **zero** remaining
+ *         Custody rows after the cascade drop to `AVAILABLE`. Assets
+ *         with surviving operator custody (Phase 2 multi-custodian)
+ *         keep `IN_CUSTODY` so we don't lie about state.
+ *   3. Outside the tx (best-effort, audit-only):
+ *      a. Write asset notes — one `createNotes` call per in-custody
+ *        kit so each group gets its kit's correct custodian.
+ *      b. Delete kit images.
+ *
+ * @param args.kits - Pre-fetched kits with the shape above. Caller is
+ *   responsible for org-scoping the read.
+ * @param args.organizationId - Used for status-flip scoping + event meta.
+ * @param args.userId - Actor for events + note attribution.
+ */
+async function performKitDeletion({
+  kits,
+  organizationId,
+  userId,
+}: {
+  kits: KitForDeletion[];
+  organizationId: Kit["organizationId"];
+  userId: string;
+}) {
+  if (kits.length === 0) return;
+
+  const kitIdsToDelete = kits.map((k) => k.id);
+  const inCustodyKits = kits.filter((k) => !!k.custody);
+  const allAssetIds = kits.flatMap((k) => k.assets.map((a) => a.id));
+
+  // Resolve the actor once for note text — only needed when at least
+  // one kit was in custody (an AVAILABLE kit emits nothing).
+  let actorLink = "";
+  if (inCustodyKits.length > 0) {
+    const actor = await getUserByID(userId, {
+      select: {
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    actorLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: actor?.firstName,
+      lastName: actor?.lastName,
+    });
+  }
+
+  await db.$transaction(async (tx) => {
+    const kitCustodyIds = inCustodyKits
+      .map((k) => k.custody?.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (kitCustodyIds.length > 0) {
+      const inheritedCustodyRows = await tx.custody.findMany({
+        where: { kitCustodyId: { in: kitCustodyIds } },
+        select: {
+          assetId: true,
+          teamMemberId: true,
+          kitCustodyId: true,
+        },
+      });
+
+      if (inheritedCustodyRows.length > 0) {
+        // Map each row's source kit so events carry the correct
+        // `kitId` + `targetUserId`.
+        const kitByKitCustodyId = new Map(
+          inCustodyKits.map((k) => [k.custody!.id, k])
+        );
+
+        await recordEvents(
+          inheritedCustodyRows.map((row) => {
+            const sourceKit = kitByKitCustodyId.get(row.kitCustodyId!);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: sourceKit?.id,
+              teamMemberId: row.teamMemberId,
+              targetUserId:
+                sourceKit?.custody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true, viaKitDelete: true },
+            };
+          }),
+          tx
+        );
+      }
+    }
+
+    await tx.kit.deleteMany({
+      where: { id: { in: kitIdsToDelete }, organizationId },
+    });
+
+    if (allAssetIds.length > 0) {
+      const assetsWithRemainingCustody = await tx.custody.findMany({
+        where: { assetId: { in: allAssetIds } },
+        select: { assetId: true },
+      });
+      const stillCustodiedAssetIds = new Set(
+        assetsWithRemainingCustody.map((c) => c.assetId)
+      );
+      const assetsToFlipAvailable = allAssetIds.filter(
+        (assetId) => !stillCustodiedAssetIds.has(assetId)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable }, organizationId },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
+    }
+  });
+
+  if (inCustodyKits.length > 0) {
+    await Promise.all(
+      inCustodyKits
+        .filter((k) => k.assets.length > 0)
+        .map((k) => {
+          const custodianDisplay = k.custody?.custodian
+            ? wrapCustodianForNote({ teamMember: k.custody.custodian })
+            : "**Unknown Custodian**";
+          return createNotes({
+            content: `${actorLink} released ${custodianDisplay}'s custody when kit **${k.name.trim()}** was deleted.`,
+            type: "UPDATE",
+            userId,
+            assetIds: k.assets.map((a) => a.id),
+          });
+        })
+    );
+  }
+
+  const kitWithImages = kits.filter((k) => !!k.image);
+  await Promise.all(
+    kitWithImages.map((k) => deleteKitImage({ url: k.image! }))
+  );
+}
+
 export async function deleteKit({
   id,
   organizationId,
+  userId,
 }: {
   id: Kit["id"];
   organizationId: Kit["organizationId"];
+  /**
+   * Required for the activity-events + notes that fire when a
+   * **kit-in-custody** is deleted. Treated as the actor of the
+   * implicit `CUSTODY_RELEASED` for each affected asset.
+   */
+  userId: string;
 }) {
   try {
-    return await db.kit.delete({ where: { id, organizationId } });
+    const kit = await db.kit.findUniqueOrThrow({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        assets: { select: { id: true, title: true } },
+        custody: {
+          select: {
+            id: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                // why: wrapCustodianForNote / wrapUserLinkForNote use the
+                // first/last/displayName to render the linked-text in the
+                // resulting note; without them the fallback reads
+                // "Unknown User".
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await performKitDeletion({
+      kits: [kit],
+      organizationId,
+      userId,
+    });
+
+    return kit;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting kit",
-      additionalData: { id, organizationId },
+      additionalData: { id, organizationId, userId },
       label,
     });
   }
@@ -1208,24 +1429,43 @@ export async function bulkDeleteKits({
       ? getKitsWhereInput({ organizationId, currentSearchParams })
       : { id: { in: kitIds }, organizationId };
 
-    /** We have to remove the images of the kits so we have to make this query */
     const kits = await db.kit.findMany({
       where,
-      select: { id: true, image: true },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        assets: { select: { id: true, title: true } },
+        custody: {
+          select: {
+            id: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                // why: wrapCustodianForNote / wrapUserLinkForNote use the
+                // first/last/displayName to render the linked-text in the
+                // resulting note; without them the fallback reads
+                // "Unknown User".
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
-    return await db.$transaction(async (tx) => {
-      /** Deleting all kits */
-      await tx.kit.deleteMany({
-        where: { id: { in: kits.map((kit) => kit.id) } },
-      });
-
-      /** Deleting images of the kits (if any) */
-      const kitWithImages = kits.filter((kit) => !!kit.image);
-
-      await Promise.all(
-        kitWithImages.map((kit) => deleteKitImage({ url: kit.image! }))
-      );
+    await performKitDeletion({
+      kits,
+      organizationId,
+      userId,
     });
   } catch (cause) {
     throw new ShelfError({

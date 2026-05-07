@@ -12,6 +12,7 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { LoaderData } from "~/routes/_layout+/locations.$locationId.scan-assets-kits";
 import type {
   AssetFromQr,
@@ -270,6 +271,11 @@ export function AssetRow({
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
         {asset.title}
+        {isQuantityTracked(asset) && asset.quantity != null ? (
+          <span className="ml-2 text-xs font-normal text-gray-500">
+            · {asset.quantity} {asset.unitOfMeasure || "units"}
+          </span>
+        ) : null}
       </p>
 
       <div className="flex flex-wrap items-center gap-1">

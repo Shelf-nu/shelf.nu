@@ -5239,6 +5239,24 @@ export async function checkOutQuantity({
         },
       });
 
+      /**
+       * Step 6b: Flip `Asset.status` to `IN_CUSTODY`. Symmetric counterpart
+       * to the conditional flip-to-`AVAILABLE` in `releaseQuantity` (Step
+       * 6b there). Without this the row-level status drifts away from the
+       * actual Custody table state — every kit-assign / picker filter /
+       * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
+       * the asset as available even though it has units in custody, which
+       * (e.g.) lets the kit-assign route bypass its
+       * `someUnavailableAsset` guard. Always a write because the asset
+       * status is no longer guaranteed to be `AVAILABLE` (could be a
+       * second checkout into the same asset), but the value is constant
+       * so it's a no-op in the already-`IN_CUSTODY` case.
+       */
+      await tx.asset.update({
+        where: { id: assetId },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+
       /** Step 7: Create an immutable audit log entry */
       await createConsumptionLog({
         assetId,

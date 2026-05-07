@@ -571,6 +571,12 @@ describe("checkOutQuantity — availability accounting", () => {
     mockAssetFindUniqueOrThrow.mockResolvedValue({
       ...lockedAsset,
     });
+    // why: the `refreshExpiredAssetImages` suite earlier in this file
+    // sets `db.asset.update.mockRejectedValue(P2025)`. `clearAllMocks`
+    // only resets call history — the rejection implementation persists
+    // and breaks the new symmetric `tx.asset.update` step inside
+    // `checkOutQuantity`. Restore the resolve.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {
@@ -676,6 +682,10 @@ describe("checkOutQuantity — activity events", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     mockLock.mockResolvedValue(lockedAsset);
+    // See note on the sibling availability-accounting suite — the
+    // `refreshExpiredAssetImages` test earlier rejects `asset.update`
+    // and that implementation survives `clearAllMocks`.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
   });
 
   it("emits CUSTODY_ASSIGNED with quantity + viaQuantity meta on successful checkout", async () => {
