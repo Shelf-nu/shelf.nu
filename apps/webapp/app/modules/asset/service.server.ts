@@ -4650,6 +4650,46 @@ export async function getEntitiesWithSelectedValues({
  * @returns A finite number, or null when the input is blank
  * @throws {ShelfError} 400 when the input is non-empty but not a finite number
  */
+/**
+ * Returns the active custom field definitions scoped to the given asset's
+ * category. Throws a 404 ShelfError when the asset does not exist in the
+ * given organization — this is the source of truth for the cross-org IDOR
+ * guard used by the asset overview inline-edit action.
+ *
+ * @param params.id - Asset id
+ * @param params.organizationId - Organization id (asset must belong to it)
+ * @returns The array of active custom-field definitions for the asset's category
+ * @throws {ShelfError} 404 when the asset is not found in the organization
+ */
+export async function getActiveCustomFieldsForAsset({
+  id,
+  organizationId,
+}: {
+  id: string;
+  organizationId: string;
+}) {
+  const asset = await db.asset.findUnique({
+    where: { id, organizationId },
+    select: { categoryId: true },
+  });
+
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Assets",
+      status: 404,
+      shouldBeCaptured: false,
+      additionalData: { id, organizationId },
+    });
+  }
+
+  return getActiveCustomFields({
+    organizationId,
+    category: asset.categoryId,
+  });
+}
+
 export function parseAssetValuation(raw: string | null): number | null {
   if (!raw || raw.trim() === "") return null;
   const parsed = Number(raw);
