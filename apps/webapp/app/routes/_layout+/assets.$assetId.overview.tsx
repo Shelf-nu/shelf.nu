@@ -71,6 +71,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
@@ -146,14 +147,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /**
      * Derive edit permission once in the loader so we can conditionally
      * skip the heavy categories/locations/custom-field-defs queries for
-     * users who are view-only. Uses the same roles list that
-     * `requirePermission` already resolved above.
+     * users who are view-only. Uses the server-side `hasPermission` because
+     * the client-side `userHasPermission` validator file has the `.client.`
+     * suffix and is stripped from the SSR bundle. Passing `roles` explicitly
+     * avoids the validator's DB fallback lookup.
      */
     const roles = userOrganizations.find(
       (o) => o.organization.id === organizationId
     )?.roles;
 
-    const canEditAsset = userHasPermission({
+    const canEditAsset = await hasPermission({
+      userId,
+      organizationId,
       roles,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
