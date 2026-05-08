@@ -3129,10 +3129,16 @@ export type DuplicateAuditResult = {
  * Duplicates an audit session into a new PENDING audit.
  *
  * Copies the original audit's name (with `" (Copy)"` suffix), description, and
- * `scopeMeta` as-is. Assets are taken from the original audit's
- * {@link AuditAsset} records and validated to still exist in the org —
- * missing assets are silently dropped and reported via `droppedAssetCount`.
- * If every asset is gone, throws so the caller can show a blocking error.
+ * `scopeMeta` as-is. Only the originally-expected assets carry over —
+ * unexpected scan records (`AuditAsset.expected: false`) are excluded so the
+ * duplicate's scope matches the source. Surviving asset IDs are validated
+ * against the org; missing ones are silently dropped and reported via
+ * `droppedAssetCount`. If every expected asset is gone, throws so the caller
+ * can show a blocking error.
+ *
+ * Refuses non-terminal audits (PENDING / ACTIVE) with a 400 — the dropdown
+ * gate is client-side, so the service enforces the contract for direct
+ * POSTs that bypass the UI.
  *
  * Assignments, notes, scans, images, and the due date are NOT copied — the
  * new audit starts clean. Creator is set to `userId`.
@@ -3141,7 +3147,8 @@ export type DuplicateAuditResult = {
  * @param organizationId - Workspace scoping
  * @param userId - User performing the duplication (becomes creator)
  * @returns The new audit session and missing-asset counts for warning UX
- * @throws {ShelfError} 404 if the audit isn't found, 400 if every asset is gone
+ * @throws {ShelfError} 404 if the audit isn't found, 400 if the source is not
+ *   in a terminal status, 400 if every original asset is gone
  */
 export async function duplicateAuditSession({
   auditSessionId,
@@ -3156,7 +3163,10 @@ export async function duplicateAuditSession({
     const originalAudit = await db.auditSession.findFirst({
       where: { id: auditSessionId, organizationId },
       include: {
-        assets: { select: { assetId: true } },
+        // Only the originally-scoped assets carry over. AuditAsset rows
+        // also include unexpected scans (`expected: false`) — those must
+        // not be promoted to expected in the duplicate.
+        assets: { where: { expected: true }, select: { assetId: true } },
       },
     });
 
@@ -3167,6 +3177,28 @@ export async function duplicateAuditSession({
         additionalData: { auditSessionId, organizationId },
         label,
         status: 404,
+      });
+    }
+
+    // Defense in depth: the dropdown gates on terminal status, but a direct
+    // POST could still hit this service for a PENDING/ACTIVE audit. Mirrors
+    // the pattern archive/delete already enforce server-side.
+    if (
+      originalAudit.status !== AuditStatus.COMPLETED &&
+      originalAudit.status !== AuditStatus.CANCELLED &&
+      originalAudit.status !== AuditStatus.ARCHIVED
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only completed, cancelled, or archived audits can be duplicated.",
+        additionalData: {
+          auditSessionId,
+          organizationId,
+          status: originalAudit.status,
+        },
+        label,
+        status: 400,
       });
     }
 

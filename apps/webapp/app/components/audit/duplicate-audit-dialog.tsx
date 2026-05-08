@@ -62,9 +62,11 @@ export function DuplicateAuditDialog() {
         </div>
       )}
 
-      {/* Server-side action errors */}
+      {/* Server-side action errors. role="alert" so screen readers announce
+          the message — this branch only renders after submit, so unlike the
+          warning/error banners above it isn't present on initial paint. */}
       {actionData?.error && (
-        <div className="mb-4 rounded-md bg-red-50 p-4">
+        <div role="alert" className="mb-4 rounded-md bg-red-50 p-4">
           <p className="text-sm text-red-500">{actionData.error.message}</p>
         </div>
       )}

@@ -12,6 +12,7 @@
  * @see {@link file://./../../modules/audit/service.server.ts} duplicateAuditSession
  * @see {@link file://./../../components/audit/duplicate-audit-dialog.tsx}
  */
+import { AuditStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 import { z } from "zod";
@@ -20,7 +21,7 @@ import { db } from "~/database/db.server";
 import { duplicateAuditSession } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -47,12 +48,39 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     const audit = await db.auditSession.findFirst({
       where: { id: auditId, organizationId },
       include: {
-        assets: { select: { assetId: true } },
+        // Mirror the service: only originally-expected assets count toward
+        // the duplicate. Unexpected scans (`expected: false`) are not part
+        // of the source's scope.
+        assets: { where: { expected: true }, select: { assetId: true } },
       },
     });
 
     if (!audit) {
-      throw new Error("Audit not found.");
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found.",
+        additionalData: { auditId },
+        label: "Audit",
+        status: 404,
+      });
+    }
+
+    // Mirror the service-side terminal-status guard so navigating directly
+    // to the duplicate route for a PENDING/ACTIVE audit shows a clean error
+    // instead of the dialog.
+    if (
+      audit.status !== AuditStatus.COMPLETED &&
+      audit.status !== AuditStatus.CANCELLED &&
+      audit.status !== AuditStatus.ARCHIVED
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only completed, cancelled, or archived audits can be duplicated.",
+        additionalData: { auditId, status: audit.status },
+        label: "Audit",
+        status: 400,
+      });
     }
 
     const originalAssetCount = audit.assets.length;

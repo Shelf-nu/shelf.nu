@@ -1367,6 +1367,8 @@ describe("audit service", () => {
       status: AuditStatus.COMPLETED,
       scopeMeta: { contextType: "tag", contextName: "Canary PCs" },
       targetId: null,
+      // Prisma's `where: { expected: true }` filter is applied at query time;
+      // the mock returns only the expected rows the service is meant to see.
       assets: [
         { assetId: "asset-1" },
         { assetId: "asset-2" },
@@ -1436,9 +1438,13 @@ describe("audit service", () => {
     it("creates a (Copy) audit and reports zero dropped assets when all assets still exist", async () => {
       const result = await duplicateAuditSession(baseInput);
 
+      // The include must filter to expected:true so unexpected scan rows
+      // don't get promoted into the duplicate's scope.
       expect(mockDb.auditSession.findFirst).toHaveBeenCalledWith({
         where: { id: "audit-original", organizationId: "org-1" },
-        include: { assets: { select: { assetId: true } } },
+        include: {
+          assets: { where: { expected: true }, select: { assetId: true } },
+        },
       });
 
       // The validateExistingAssetIds query — drives dropped-asset counting.
@@ -1537,6 +1543,43 @@ describe("audit service", () => {
       await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
         status: 500,
         message: expect.stringMatching(/Something went wrong/),
+      });
+    });
+
+    it.each([
+      ["PENDING", AuditStatus.PENDING],
+      ["ACTIVE", AuditStatus.ACTIVE],
+    ])(
+      "rejects duplication of a %s audit with a 400 (server-side guard)",
+      async (_label, status) => {
+        mockDb.auditSession.findFirst.mockResolvedValueOnce({
+          ...originalAudit,
+          status,
+        });
+
+        await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /completed, cancelled, or archived audits can be duplicated/
+          ),
+        });
+
+        expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      ["COMPLETED", AuditStatus.COMPLETED],
+      ["CANCELLED", AuditStatus.CANCELLED],
+      ["ARCHIVED", AuditStatus.ARCHIVED],
+    ])("allows duplication of a %s audit", async (_label, status) => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce({
+        ...originalAudit,
+        status,
+      });
+
+      await expect(duplicateAuditSession(baseInput)).resolves.toMatchObject({
+        newSession: expect.objectContaining({ id: "audit-copy" }),
       });
     });
   });
