@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAuditSession,
   addAssetsToAudit,
@@ -1404,6 +1405,7 @@ describe("audit service", () => {
       mockDb.user.findFirst.mockResolvedValue({
         firstName: "Acting",
         lastName: "User",
+        displayName: null,
       });
       mockDb.auditNote.create.mockResolvedValue({ id: "note-1" });
     });
@@ -1469,6 +1471,103 @@ describe("audit service", () => {
           hints,
         })
       ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("attributes the cancellation email to the actual canceller, not the creator", async () => {
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "Acting User" })
+      );
+    });
+
+    it("notifies the creator when an admin cancels their audit", async () => {
+      // Audit has one assignee (other than the admin or creator) so we can
+      // assert both the assignee and the creator end up in the notify list.
+      const assigneeUser = {
+        email: "assignee@example.com",
+        firstName: "Assigned",
+        lastName: "Person",
+        displayName: null,
+      };
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        assignments: [{ userId: "user-assignee", user: assigneeUser }],
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const recipientIds = call.assigneesToNotify.map(
+        (a: { userId: string }) => a.userId
+      );
+
+      expect(recipientIds).toContain("user-assignee");
+      expect(recipientIds).toContain(creatorId);
+      expect(recipientIds).not.toContain(adminId);
+    });
+
+    it("does not double-notify the creator when they are also an assignee", async () => {
+      const creatorAsAssignee = {
+        email: "creator@example.com",
+        firstName: "Created",
+        lastName: "By",
+        displayName: "Created By",
+      };
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        assignments: [{ userId: creatorId, user: creatorAsAssignee }],
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const creatorEntries = call.assigneesToNotify.filter(
+        (a: { userId: string }) => a.userId === creatorId
+      );
+
+      expect(creatorEntries).toHaveLength(1);
+    });
+
+    it("does not notify the creator when the creator cancels their own audit", async () => {
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: creatorId,
+        isAdminOrOwner: false,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const recipientIds = call.assigneesToNotify.map(
+        (a: { userId: string }) => a.userId
+      );
+
+      expect(recipientIds).not.toContain(creatorId);
     });
   });
 });

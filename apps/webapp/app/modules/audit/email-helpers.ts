@@ -70,12 +70,18 @@ export const auditAssignedEmailContent = (args: BasicAuditEmailContentArgs) =>
   });
 
 /**
- * Email content when an audit is cancelled
+ * Email content when an audit is cancelled.
+ *
+ * `cancelledByName` is the user who actually performed the cancellation —
+ * may differ from `creatorName` (the audit's original creator) when an
+ * admin/owner cancels an audit a team member created.
  */
-export const auditCancelledEmailContent = (args: BasicAuditEmailContentArgs) =>
+export const auditCancelledEmailContent = (
+  args: BasicAuditEmailContentArgs & { cancelledByName: string }
+) =>
   baseAuditTextEmailContent({
     ...args,
-    emailContent: `The audit "${args.auditName}" has been cancelled by ${args.creatorName}. This audit is no longer active.`,
+    emailContent: `The audit "${args.auditName}" has been cancelled by ${args.cancelledByName}. This audit is no longer active.`,
   });
 
 /**
@@ -207,6 +213,7 @@ export async function sendAuditAssignedEmail({
 export function sendAuditCancelledEmails({
   audit,
   assigneesToNotify,
+  cancelledByName,
   hints,
 }: {
   audit: AuditForEmail;
@@ -219,6 +226,12 @@ export function sendAuditCancelledEmails({
       displayName?: string | null;
     };
   }>;
+  /**
+   * Display name of the user who actually cancelled the audit. May differ
+   * from the original creator when an admin/owner cancels someone else's
+   * audit — recipients see the real canceller, not the creator.
+   */
+  cancelledByName: string;
   hints: ClientHint;
 }) {
   const creatorName = resolveUserDisplayName(audit.createdBy);
@@ -244,6 +257,7 @@ export function sendAuditCancelledEmails({
           auditName: audit.name,
           assetsCount: assetCount,
           creatorName,
+          cancelledByName,
           description: audit.description,
           dueDate: audit.dueDate,
           hints,

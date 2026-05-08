@@ -24,6 +24,7 @@ import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -1945,10 +1946,11 @@ export async function cancelAuditSession({
       data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
-    // Fetch acting user's info for the activity note
+    // Fetch acting user's info for the activity note + email attribution.
+    // displayName is selected so resolveUserDisplayName picks it up.
     const actingUser = await db.user.findFirst({
       where: { id: userId },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, lastName: true, displayName: true },
     });
 
     // Create activity note for cancellation
@@ -1975,15 +1977,53 @@ export async function cancelAuditSession({
       auditSessionId,
     });
 
-    // Send cancellation email to assignees (excluding creator)
-    const assigneesToNotify = auditSession.assignments.filter(
-      (assignment) => assignment.userId !== userId && assignment.user.email
+    // Build the notify list for the cancellation email:
+    //  - All assignees other than the canceller (existing behavior)
+    //  - PLUS the audit creator when they didn't cancel themselves and
+    //    aren't already an assignee — without this branch, an admin
+    //    cancelling a team member's audit would silently fail to inform
+    //    the creator that their audit was killed.
+    const assigneesToNotify: Array<{
+      userId: string;
+      user: {
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+        displayName?: string | null;
+      };
+    }> = auditSession.assignments
+      .filter(
+        (assignment) => assignment.userId !== userId && assignment.user.email
+      )
+      .map((assignment) => ({
+        userId: assignment.userId,
+        user: assignment.user,
+      }));
+
+    const creatorAlreadyNotified = assigneesToNotify.some(
+      (a) => a.userId === auditSession.createdById
     );
+    if (
+      auditSession.createdById !== userId &&
+      !creatorAlreadyNotified &&
+      auditSession.createdBy.email
+    ) {
+      assigneesToNotify.push({
+        userId: auditSession.createdById,
+        user: {
+          email: auditSession.createdBy.email,
+          firstName: auditSession.createdBy.firstName,
+          lastName: auditSession.createdBy.lastName,
+          displayName: auditSession.createdBy.displayName,
+        },
+      });
+    }
 
     // Use email helper to send cancellation emails with HTML template
     sendAuditCancelledEmails({
       audit: auditSession,
       assigneesToNotify,
+      cancelledByName: resolveUserDisplayName(actingUser) || "an admin",
       hints,
     });
 
