@@ -792,10 +792,10 @@ export default function AssetOverview() {
                       <InlineEditableField
                         key={def.id}
                         fieldName={`customField-${def.id}`}
+                        formFieldName="customField"
                         label={def.name}
                         canEdit={canEditAsset}
                         extraHiddenInputs={{
-                          fieldName: "customField",
                           customFieldId: def.id,
                         }}
                         renderDisplay={() =>

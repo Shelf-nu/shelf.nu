@@ -29,8 +29,19 @@ type InlineEditFetcherData =
 
 /** Props for the InlineEditableField component */
 type InlineEditableFieldProps = {
-  /** The field name sent as a hidden input to identify which field is being updated */
+  /**
+   * Identifier used internally for the fetcher key (`inline-edit-${fieldName}`)
+   * and the Edit button's aria-label. Must be unique on the page.
+   */
   fieldName: string;
+  /**
+   * The value sent as `<input name="fieldName">` to the action. Defaults to
+   * `fieldName`. Set this when the action's discriminator differs from the
+   * page-unique identifier — for example, custom fields use a per-field
+   * `fieldName="customField-${id}"` for isolation but submit the literal
+   * string `"customField"` to the action.
+   */
+  formFieldName?: string;
   /** The label displayed on the left side of the row */
   label: string;
   /** Whether the current user has permission to edit this field */
@@ -67,6 +78,7 @@ type InlineEditableFieldProps = {
  */
 export function InlineEditableField({
   fieldName,
+  formFieldName,
   label,
   canEdit,
   renderDisplay,
@@ -199,10 +211,11 @@ export function InlineEditableField({
             onKeyDown={handleKeyDown}
           >
             <input type="hidden" name="intent" value="updateField" />
-            {/* Skip default fieldName if overridden via extraHiddenInputs */}
-            {!extraHiddenInputs?.fieldName && (
-              <input type="hidden" name="fieldName" value={fieldName} />
-            )}
+            <input
+              type="hidden"
+              name="fieldName"
+              value={formFieldName ?? fieldName}
+            />
             {extraHiddenInputs &&
               Object.entries(extraHiddenInputs).map(([name, value]) => (
                 <input key={name} type="hidden" name={name} value={value} />

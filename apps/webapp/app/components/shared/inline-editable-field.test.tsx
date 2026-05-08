@@ -148,19 +148,16 @@ describe("InlineEditableField", () => {
       expect(customFieldIdInput?.value).toBe("cf_123");
     });
 
-    it("when extraHiddenInputs overrides fieldName, the default fieldName input is omitted", () => {
+    it("uses formFieldName for the hidden fieldName input when provided", () => {
       const { container } = renderField({
         fieldName: "customField-cf_123",
-        extraHiddenInputs: {
-          fieldName: "customField",
-          customFieldId: "cf_123",
-        },
+        formFieldName: "customField",
+        extraHiddenInputs: { customFieldId: "cf_123" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Edit Description" }));
       const fieldNameInputs = container.querySelectorAll(
         'input[name="fieldName"]'
       );
-      // Should be exactly one (from extraHiddenInputs, not the default)
       expect(fieldNameInputs.length).toBe(1);
       expect((fieldNameInputs[0] as HTMLInputElement).value).toBe(
         "customField"
