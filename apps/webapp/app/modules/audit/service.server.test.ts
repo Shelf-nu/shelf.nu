@@ -51,10 +51,18 @@ vi.mock("./email-helpers", () => ({
   sendAuditCompletedEmail: vi.fn(),
 }));
 
-// why: cancelAuditReminders calls scheduler.cancel via QueueNames; mock the whole module to avoid pg-boss
+// why: cancelAuditReminders calls scheduler.cancel via QueueNames; mock the whole module to avoid pg-boss.
+// Keys mirror the real enum at apps/webapp/app/utils/scheduler.server.ts so tests touching
+// scheduleNextAuditJob (which references QueueNames.auditQueue) don't diverge from production shape.
 vi.mock("~/utils/scheduler.server", () => ({
   scheduler: { cancel: vi.fn().mockResolvedValue(undefined) },
-  QueueNames: { auditReminder: "audit-reminder" },
+  QueueNames: {
+    emailQueue: "email-queue",
+    bookingQueue: "booking-queue",
+    auditQueue: "audit-queue",
+    assetsQueue: "assets-queue",
+    addonTrialQueue: "addon-trial-queue",
+  },
 }));
 
 vi.mock("~/database/db.server", () => {
@@ -62,6 +70,7 @@ vi.mock("~/database/db.server", () => {
     auditSession: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
@@ -105,6 +114,7 @@ const mockDb = db as unknown as {
   auditSession: {
     create: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -1397,7 +1407,10 @@ describe("audit service", () => {
     beforeEach(() => {
       // Default: audit exists, has no scheduler ref so cancelAuditReminders no-ops.
       mockDb.auditSession.findUnique.mockResolvedValue(baseAudit);
-      mockDb.auditSession.update.mockResolvedValue({
+      // Atomic transition succeeds (count: 1) and the post-update re-fetch
+      // returns the cancelled row.
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
+      mockDb.auditSession.findUniqueOrThrow.mockResolvedValue({
         ...baseAudit,
         status: AuditStatus.CANCELLED,
         cancelledAt: new Date(),
@@ -1421,8 +1434,20 @@ describe("audit service", () => {
         })
       ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: auditSessionId },
+      // Atomic transition: status guard prevents overwriting a row that
+      // raced into a terminal state between the read-check and the write.
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: auditSessionId,
+          organizationId,
+          status: {
+            notIn: [
+              AuditStatus.COMPLETED,
+              AuditStatus.CANCELLED,
+              AuditStatus.ARCHIVED,
+            ],
+          },
+        },
         data: { status: AuditStatus.CANCELLED, cancelledAt: expect.any(Date) },
       });
     });
@@ -1453,7 +1478,7 @@ describe("audit service", () => {
         message: expect.stringMatching(/creator or a workspace admin/),
       });
 
-      expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+      expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
     });
 
     it("still rejects when the audit is already COMPLETED, even for an admin", async () => {
@@ -1568,6 +1593,30 @@ describe("audit service", () => {
       );
 
       expect(recipientIds).not.toContain(creatorId);
+    });
+
+    it("throws 409 when a concurrent transition wins the race (transition.count === 0)", async () => {
+      // Simulate: status read passed (PENDING), but between then and the
+      // updateMany call, another request flipped the audit to COMPLETED.
+      // The atomic where-clause guard refuses to overwrite, count returns 0.
+      mockDb.auditSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: creatorId,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringMatching(/Audit status changed/),
+      });
+
+      // Side effects must not fire on a failed transition.
+      expect(mockDb.auditNote.create).not.toHaveBeenCalled();
+      expect(sendAuditCancelledEmails).not.toHaveBeenCalled();
     });
 
     it("falls back to 'a workspace admin' when an admin with no resolvable name cancels", async () => {

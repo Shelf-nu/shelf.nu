@@ -1940,10 +1940,43 @@ export async function cancelAuditSession({
       });
     }
 
-    // Update audit status to CANCELLED
-    const updatedAudit = await db.auditSession.update({
+    // Atomic state transition guarded by status. The earlier read-then-check
+    // is informational only — between that read and this write, a concurrent
+    // complete/archive could land. updateMany with a status guard prevents
+    // overwriting a now-terminal audit and skips the side effects (note,
+    // event, email, reminder cancel) when nothing actually changed. Same
+    // pattern the delete path uses.
+    const cancelledAt = new Date();
+    const transition = await db.auditSession.updateMany({
+      where: {
+        id: auditSessionId,
+        organizationId,
+        status: {
+          notIn: [
+            AuditStatus.COMPLETED,
+            AuditStatus.CANCELLED,
+            AuditStatus.ARCHIVED,
+          ],
+        },
+      },
+      data: { status: AuditStatus.CANCELLED, cancelledAt },
+    });
+
+    if (transition.count !== 1) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Audit status changed before cancellation could complete. Please refresh and try again.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 409,
+      });
+    }
+
+    // Re-fetch to return the up-to-date row (preserves the previous return
+    // contract — callers expect the AuditSession back).
+    const updatedAudit = await db.auditSession.findUniqueOrThrow({
       where: { id: auditSessionId },
-      data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
     });
 
     // Fetch acting user's info for the activity note + email attribution.
