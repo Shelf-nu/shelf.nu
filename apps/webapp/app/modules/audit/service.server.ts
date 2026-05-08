@@ -2019,11 +2019,20 @@ export async function cancelAuditSession({
       });
     }
 
-    // Use email helper to send cancellation emails with HTML template
+    // Use email helper to send cancellation emails with HTML template.
+    // The fallback is role-aware: when the acting user has no resolvable
+    // display name (e.g. a freshly-created account), pick a label that
+    // matches who actually cancelled — "a workspace admin" for the
+    // admin/owner branch, "the audit creator" otherwise. Avoids the
+    // earlier hard-coded "an admin" mis-attributing creator-cancels.
+    const resolvedCancellerName = resolveUserDisplayName(actingUser);
+    const fallbackCancellerName = isAdminOrOwner
+      ? "a workspace admin"
+      : "the audit creator";
     sendAuditCancelledEmails({
       audit: auditSession,
       assigneesToNotify,
-      cancelledByName: resolveUserDisplayName(actingUser) || "an admin",
+      cancelledByName: resolvedCancellerName || fallbackCancellerName,
       hints,
     });
 

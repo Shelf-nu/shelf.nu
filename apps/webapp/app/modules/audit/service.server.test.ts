@@ -1569,5 +1569,45 @@ describe("audit service", () => {
 
       expect(recipientIds).not.toContain(creatorId);
     });
+
+    it("falls back to 'a workspace admin' when an admin with no resolvable name cancels", async () => {
+      mockDb.user.findFirst.mockResolvedValueOnce({
+        firstName: null,
+        lastName: null,
+        displayName: null,
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "a workspace admin" })
+      );
+    });
+
+    it("falls back to 'the audit creator' when the creator has no resolvable name", async () => {
+      mockDb.user.findFirst.mockResolvedValueOnce({
+        firstName: null,
+        lastName: null,
+        displayName: null,
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: creatorId,
+        isAdminOrOwner: false,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "the audit creator" })
+      );
+    });
   });
 });
