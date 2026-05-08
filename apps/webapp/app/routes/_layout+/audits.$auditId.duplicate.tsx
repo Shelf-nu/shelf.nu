@@ -12,13 +12,15 @@
  * @see {@link file://./../../modules/audit/service.server.ts} duplicateAuditSession
  * @see {@link file://./../../components/audit/duplicate-audit-dialog.tsx}
  */
-import { AuditStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 import { z } from "zod";
 import { DuplicateAuditDialog } from "~/components/audit/duplicate-audit-dialog";
 import { db } from "~/database/db.server";
-import { duplicateAuditSession } from "~/modules/audit/service.server";
+import {
+  DUPLICATE_AUDIT_ALLOWED_STATUSES,
+  duplicateAuditSession,
+} from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -85,11 +87,12 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
     // Mirror the service-side terminal-status guard so navigating directly
     // to the duplicate route for a PENDING/ACTIVE audit shows a clean error
-    // instead of the dialog.
+    // instead of the dialog. Same constant the service references — keeps
+    // the loader UX guard and the service contract from drifting.
     if (
-      audit.status !== AuditStatus.COMPLETED &&
-      audit.status !== AuditStatus.CANCELLED &&
-      audit.status !== AuditStatus.ARCHIVED
+      !DUPLICATE_AUDIT_ALLOWED_STATUSES.includes(
+        audit.status as (typeof DUPLICATE_AUDIT_ALLOWED_STATUSES)[number]
+      )
     ) {
       throw new ShelfError({
         cause: null,
@@ -177,6 +180,8 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
 /**
  * Default route component — renders the {@link DuplicateAuditDialog}
  * which reads the loader payload and posts to the action on confirm.
+ *
+ * @returns The duplicate-audit confirmation dialog route element.
  */
 export default function DuplicateAudit() {
   return <DuplicateAuditDialog />;

@@ -3115,6 +3115,19 @@ export async function bulkDeleteAudits({
   }
 }
 
+/**
+ * Audit statuses that allow duplication. Source of truth shared between
+ * the duplicate-audit route loader (UX guard so we don't render the dialog
+ * for a non-terminal audit) and {@link duplicateAuditSession} (defense in
+ * depth against direct POSTs). Keep these in sync — the loader and service
+ * both reference this constant.
+ */
+export const DUPLICATE_AUDIT_ALLOWED_STATUSES = [
+  AuditStatus.COMPLETED,
+  AuditStatus.CANCELLED,
+  AuditStatus.ARCHIVED,
+] as const satisfies readonly AuditStatus[];
+
 /** Result returned from {@link duplicateAuditSession}. */
 export type DuplicateAuditResult = {
   /** The newly created audit session. */
@@ -3184,9 +3197,9 @@ export async function duplicateAuditSession({
     // POST could still hit this service for a PENDING/ACTIVE audit. Mirrors
     // the pattern archive/delete already enforce server-side.
     if (
-      originalAudit.status !== AuditStatus.COMPLETED &&
-      originalAudit.status !== AuditStatus.CANCELLED &&
-      originalAudit.status !== AuditStatus.ARCHIVED
+      !DUPLICATE_AUDIT_ALLOWED_STATUSES.includes(
+        originalAudit.status as (typeof DUPLICATE_AUDIT_ALLOWED_STATUSES)[number]
+      )
     ) {
       throw new ShelfError({
         cause: null,
