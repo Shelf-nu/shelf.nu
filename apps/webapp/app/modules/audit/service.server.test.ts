@@ -1377,6 +1377,12 @@ describe("audit service", () => {
     };
 
     beforeEach(() => {
+      // Match the clearAllMocks pattern every other nested suite uses, so
+      // mock state can't leak in either direction. clearAllMocks resets
+      // call history; mockResolvedValue assignments below re-establish what
+      // each test relies on.
+      vi.clearAllMocks();
+
       // Original audit lookup — overridden per test for not-found cases.
       mockDb.auditSession.findFirst.mockResolvedValue(originalAudit);
 
