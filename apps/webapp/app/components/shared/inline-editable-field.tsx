@@ -268,7 +268,7 @@ export function InlineEditableField({
               title={`Edit ${label}`}
               className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
             >
-              <Icon icon="pen" disableWrap />
+              <Icon icon="pen" size="xs" />
             </button>
           ) : null}
         </div>
