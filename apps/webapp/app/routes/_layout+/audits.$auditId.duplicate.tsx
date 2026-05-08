@@ -31,8 +31,26 @@ import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ auditId: z.string() });
 
+/**
+ * Sets the document title for the duplicate-audit route.
+ *
+ * @returns React Router meta descriptor with the page title.
+ */
 export const meta = () => [{ title: appendToMetaTitle("Duplicate audit") }];
 
+/**
+ * Loader for the duplicate-audit route.
+ *
+ * Pre-checks the source audit so the dialog can render the correct state
+ * (clean / warning / blocking error) before the user submits. Enforces
+ * permission, terminal-status, and existence — counts how many of the
+ * original audit's expected assets still exist in the org.
+ *
+ * @param args - React Router loader args (request, context, params).
+ * @returns Payload with the audit name + asset counts for the dialog.
+ * @throws {ShelfError} 404 if the audit isn't found, 400 if it's not in a
+ *   terminal status, or whatever {@link requirePermission} throws on auth.
+ */
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
   const { auditId } = getParams(params, paramsSchema);
@@ -113,6 +131,17 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Action for the duplicate-audit route.
+ *
+ * Performs the duplication via {@link duplicateAuditSession}, fires a
+ * success notification, and redirects to the new audit's overview page.
+ * Errors are normalised through {@link makeShelfError} and returned as
+ * the route's `actionData.error` so the dialog can display them.
+ *
+ * @param args - React Router action args (request, context, params).
+ * @returns Redirect to the new audit on success, or an error payload.
+ */
 export async function action({ request, context, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { auditId } = getParams(params, paramsSchema);
@@ -145,6 +174,10 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Default route component — renders the {@link DuplicateAuditDialog}
+ * which reads the loader payload and posts to the action on confirm.
+ */
 export default function DuplicateAudit() {
   return <DuplicateAuditDialog />;
 }
