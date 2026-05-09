@@ -1,0 +1,92 @@
+# Shelf webapp — single-service Compose for Coolify / Docker CLI self-host.
+#
+# Build context MUST stay monorepo root (turbo prune + workspace packages).
+# See apps/webapp/Dockerfile.image and apps/docs/docker.md.
+#
+# Provide variables via process env when invoking Compose (Coolify UI secrets)
+# or a host `.env` file at repo root (Compose interpolates it for ${VAR} only —
+# do not commit secrets).
+#
+# @see apps/webapp/app/utils/env.ts — startup-required vars align with getEnv(...).
+
+services:
+  webapp:
+    build:
+      context: .
+      dockerfile: apps/webapp/Dockerfile.image
+    image: ${WEBAPP_IMAGE:-shelf-webapp:latest}
+    restart: unless-stopped
+    ports:
+      - "${WEBAPP_PUBLISH_PORT:-8080}:8080"
+    environment:
+      # --- Core database / Supabase (required at startup) ---
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for Postgres pooler URL}
+      DIRECT_URL: ${DIRECT_URL:-}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+      SUPABASE_ANON_PUBLIC: ${SUPABASE_ANON_PUBLIC:?Set SUPABASE_ANON_PUBLIC}
+      SUPABASE_SERVICE_ROLE: ${SUPABASE_SERVICE_ROLE:?Set SUPABASE_SERVICE_ROLE}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL}
+      SERVER_URL: ${SERVER_URL:?Set SERVER_URL (public origin; strip trailing slashes in app)}
+      INVITE_TOKEN_SECRET: ${INVITE_TOKEN_SECRET:?Set INVITE_TOKEN_SECRET}
+
+      # --- Email pipeline (SMTP_HOST required by ~/utils/env; use a relay if unsure) ---
+      SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PWD: ${SMTP_PWD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+
+      # --- Maps (required by ~/utils/env) ---
+      MAPTILER_TOKEN: ${MAPTILER_TOKEN:?Set MAPTILER_TOKEN}
+
+      # --- Brand / identity ---
+      APP_NAME: ${APP_NAME:-Shelf}
+      FINGERPRINT: ${FINGERPRINT:-}
+
+      # --- QR short URLs ---
+      URL_SHORTENER: ${URL_SHORTENER:-}
+
+      # --- Feature flags ---
+      ENABLE_PREMIUM_FEATURES: ${ENABLE_PREMIUM_FEATURES:-true}
+      DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      DISABLE_SSO: ${DISABLE_SSO:-false}
+      SEND_ONBOARDING_EMAIL: ${SEND_ONBOARDING_EMAIL:-false}
+
+      # --- Stripe (optional unless billing enabled) ---
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLIC_KEY: ${STRIPE_PUBLIC_KEY:-}
+      STRIPE_WEBHOOK_ENDPOINT_SECRET: ${STRIPE_WEBHOOK_ENDPOINT_SECRET:-}
+      FREE_TRIAL_DAYS: ${FREE_TRIAL_DAYS:-14}
+
+      # --- Analytics / UX ---
+      MICROSOFT_CLARITY_ID: ${MICROSOFT_CLARITY_ID:-}
+      CLOUDFLARE_WEB_ANALYTICS_TOKEN: ${CLOUDFLARE_WEB_ANALYTICS_TOKEN:-}
+      GEOCODING_USER_AGENT: ${GEOCODING_USER_AGENT:-}
+      CRISP_WEBSITE_ID: ${CRISP_WEBSITE_ID:-}
+      FORMBRICKS_ENV_ID: ${FORMBRICKS_ENV_ID:-}
+
+      # --- Ops / experiments ---
+      MAINTENANCE_MODE: ${MAINTENANCE_MODE:-}
+      SHOW_HOW_DID_YOU_FIND_US: ${SHOW_HOW_DID_YOU_FIND_US:-}
+      COLLECT_BUSINESS_INTEL: ${COLLECT_BUSINESS_INTEL:-}
+
+      # --- Webhooks / custom installs ---
+      CUSTOM_INSTALL_CUSTOMERS: ${CUSTOM_INSTALL_CUSTOMERS:-}
+
+      # --- Sentry ---
+      SENTRY_ORG: ${SENTRY_ORG:-}
+      SENTRY_PROJECT: ${SENTRY_PROJECT:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+
+      # --- Contacts ---
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+
+      # --- Product integrations ---
+      FULL_CALENDAR_LICENSE_KEY: ${FULL_CALENDAR_LICENSE_KEY:-}
+
+      # --- Cookies ---
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+
+      # --- Optional tooling ---
+      CHROME_EXECUTABLE_PATH: ${CHROME_EXECUTABLE_PATH:-}
