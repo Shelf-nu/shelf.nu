@@ -65,8 +65,12 @@ export default function PortalLayout() {
 function PortalTopBar({ user }: { user: PortalLayoutData["user"] }) {
   return (
     <header className="fixed left-0 top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[var(--portal-outline-variant)] bg-[var(--portal-surface)] px-4">
-      <Link to="/portal" className="portal-h2 text-[var(--portal-primary)]">
-        L&apos;Attrezzoteca
+      <Link
+        to="/portal"
+        className="portal-h2 text-[var(--portal-primary)]"
+        style={{ fontFamily: '"Ronzino", system-ui, sans-serif' }}
+      >
+        LUMA
       </Link>
       <div className="flex items-center gap-2">
         {user ? (
