@@ -4,8 +4,25 @@
  * Admin UI is unaffected because no global overrides happen here.
  */
 
-@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+/*@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap");
+*/
+
+@font-face {
+  font-family: "Ronzino";
+  src: url("/static/fonts/portal/ronzino/Ronzino-Regular.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Qsci";
+  src: url("/static/fonts/portal/Qsci/QSci-Regular.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 /* shelf's root sets <html class="overflow-hidden"> so its admin shell can
  * manage scroll inside the sidebar layout. The portal scrolls naturally,
@@ -54,7 +71,7 @@ html:has(.portal-theme) body {
 
   background-color: var(--portal-surface);
   color: var(--portal-on-surface);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: "Ronzino", system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -64,7 +81,7 @@ html:has(.portal-theme) body {
 .portal-theme h2,
 .portal-theme h3,
 .portal-theme .portal-display {
-  font-family: "Montserrat", system-ui, sans-serif;
+  font-family: "Qsci", system-ui, sans-serif;
   letter-spacing: -0.01em;
 }
 
