@@ -75,14 +75,14 @@ export default function PortalCatalog() {
         <div className="relative">
           <PortalIcon
             name="search"
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--portal-outline)]"
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--portal-outline)]"
           />
           <input
             type="search"
             name="q"
             defaultValue={q}
             placeholder="Cerca strumenti o postazioni…"
-            className="w-full py-3 pl-12 pr-4"
+            className="w-full py-3 pl-14 pr-4"
           />
           {categoryId && (
             <input type="hidden" name="category" value={categoryId} />

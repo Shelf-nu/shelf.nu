@@ -34,8 +34,8 @@ export default function PortalIndex() {
             L&apos;Attrezzoteca
           </h1>
           <p className="mb-8 text-lg text-[var(--portal-on-surface-variant)]">
-            Il tuo inventario condiviso di strumenti professionali per dare vita
-            a ogni progetto.
+            Qui trovi strumenti da prendere in prestito e uno spazio per
+            metterti all&rsquo;opera
           </p>
           <Form
             method="get"
@@ -45,12 +45,12 @@ export default function PortalIndex() {
             <div className="relative grow">
               <PortalIcon
                 name="search"
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--portal-outline)]"
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--portal-outline)]"
               />
               <input
                 type="search"
                 name="q"
-                className="w-full py-4 pl-12 pr-4"
+                className="w-full py-4 pl-14 pr-4"
                 placeholder="Cerca uno strumento (es. Trapano, Stampante 3D...)"
               />
             </div>
@@ -74,10 +74,13 @@ export default function PortalIndex() {
               className="transition-shadow hover:shadow-lg"
             >
               <div className="mb-3 flex items-start justify-between">
-                <PortalIcon
-                  name="handyman"
-                  className="text-4xl text-[var(--portal-primary)]"
-                />
+                <span
+                  aria-hidden="true"
+                  className="text-4xl leading-none text-[var(--portal-primary)]"
+                  style={{ fontFamily: '"QSciIcon", system-ui, sans-serif' }}
+                >
+                  z
+                </span>
                 <span className="portal-label text-[var(--portal-on-surface-variant)]">
                   Attrezzatura
                 </span>
@@ -98,10 +101,13 @@ export default function PortalIndex() {
               className="transition-shadow hover:shadow-lg"
             >
               <div className="mb-3 flex items-start justify-between">
-                <PortalIcon
-                  name="event_available"
-                  className="text-4xl text-[var(--portal-secondary)]"
-                />
+                <span
+                  aria-hidden="true"
+                  className="text-4xl leading-none text-[var(--portal-secondary)]"
+                  style={{ fontFamily: '"QSciIcon", system-ui, sans-serif' }}
+                >
+                  o
+                </span>
                 <span className="portal-label text-[var(--portal-on-surface-variant)]">
                   Prenota
                 </span>

@@ -68,7 +68,7 @@ function PortalTopBar({ user }: { user: PortalLayoutData["user"] }) {
       <Link
         to="/portal"
         className="portal-h2 text-[var(--portal-primary)]"
-        style={{ fontFamily: '"Ronzino", system-ui, sans-serif' }}
+        style={{ fontFamily: '"Qsci", system-ui, sans-serif' }}
       >
         LUMA
       </Link>
