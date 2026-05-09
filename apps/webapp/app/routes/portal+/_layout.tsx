@@ -103,26 +103,27 @@ function PortalBottomNav() {
       className="fixed bottom-0 left-0 z-40 flex w-full items-center justify-around rounded-t-xl border-t border-[var(--portal-outline-variant)] bg-[var(--portal-surface)] p-2 shadow-lg md:hidden"
       aria-label="Navigazione"
     >
-      <BottomNavLink to="/portal" icon="home" label="Home" end />
-      <BottomNavLink to="/portal/catalog" icon="handyman" label="Catalogo" />
+      <BottomNavLink to="/portal" glyph="e" label="Home" end />
+      <BottomNavLink to="/portal/catalog" glyph="q" label="Catalogo" />
       <BottomNavLink
         to="/portal/bookings"
-        icon="event_available"
+        glyph="u"
         label="Prenotazioni"
       />
-      <BottomNavLink to="/portal/profile" icon="person" label="Profilo" />
+      <BottomNavLink to="/portal/profile" glyph="d" label="Profilo" />
     </nav>
   );
 }
 
 function BottomNavLink({
   to,
-  icon,
+  glyph,
   label,
   end,
 }: {
   to: string;
-  icon: string;
+  /** Single character rendered in the Qsci display font as the icon glyph. */
+  glyph: string;
   label: string;
   /** Exact match — needed for /portal so it doesn't stay active on sub-routes. */
   end?: boolean;
@@ -139,7 +140,13 @@ function BottomNavLink({
         }`
       }
     >
-      <PortalIcon name={icon} />
+      <span
+        aria-hidden="true"
+        className="text-2xl leading-none"
+        style={{ fontFamily: '"Qsci", system-ui, sans-serif' }}
+      >
+        {glyph}
+      </span>
       <span className="text-[10px] font-semibold tracking-wide">{label}</span>
     </NavLink>
   );
