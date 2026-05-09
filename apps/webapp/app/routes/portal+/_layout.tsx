@@ -122,7 +122,7 @@ function BottomNavLink({
   end,
 }: {
   to: string;
-  /** Single character rendered in the Qsci display font as the icon glyph. */
+  /** Single character rendered in the QSciIcon font as the icon glyph. */
   glyph: string;
   label: string;
   /** Exact match — needed for /portal so it doesn't stay active on sub-routes. */
@@ -143,7 +143,7 @@ function BottomNavLink({
       <span
         aria-hidden="true"
         className="text-2xl leading-none"
-        style={{ fontFamily: '"Qsci", system-ui, sans-serif' }}
+        style={{ fontFamily: '"QSciIcon", system-ui, sans-serif' }}
       >
         {glyph}
       </span>

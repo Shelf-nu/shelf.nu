@@ -24,6 +24,14 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "QSciIcon";
+  src: url("/static/fonts/inter/QSciIcon-Regular.woff") format("woff");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* shelf's root sets <html class="overflow-hidden"> so its admin shell can
  * manage scroll inside the sidebar layout. The portal scrolls naturally,
  * so unlock the document scroll only when a portal page is mounted. */
