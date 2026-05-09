@@ -26,7 +26,7 @@
 
 @font-face {
   font-family: "QSciIcon";
-  src: url("/static/fonts/inter/QSciIcon-Regular.woff") format("woff");
+  src: url("/static/fonts/QSciIcon-Regular.woff") format("woff");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
