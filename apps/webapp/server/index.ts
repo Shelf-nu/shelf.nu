@@ -178,6 +178,8 @@ export default createHonoServer<ServerEnv>({
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
           "/api/mobile/*path", // Mobile companion app API (JWT auth, not cookie)
+          "/portal", // L'Attrezzoteca portal landing
+          "/portal/*path", // L'Attrezzoteca portal (gates auth per-route via requirePortalUser)
         ],
       })
     );

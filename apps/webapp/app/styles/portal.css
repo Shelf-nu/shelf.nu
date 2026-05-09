@@ -1,0 +1,154 @@
+/*
+ * L'Attrezzoteca portal theme — scoped to elements with .portal-theme.
+ * Variables follow the design system in ui_design/.../artisan_utility/DESIGN.md.
+ * Admin UI is unaffected because no global overrides happen here.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap");
+
+/* shelf's root sets <html class="overflow-hidden"> so its admin shell can
+ * manage scroll inside the sidebar layout. The portal scrolls naturally,
+ * so unlock the document scroll only when a portal page is mounted. */
+html:has(.portal-theme) {
+  overflow: auto !important;
+  height: auto !important;
+}
+html:has(.portal-theme) body {
+  overflow: auto !important;
+  height: auto !important;
+  min-height: 100dvh;
+}
+
+.portal-theme {
+  --portal-primary: #e73443;
+  --portal-on-primary: #ffffff;
+  --portal-secondary: #006a68;
+  --portal-on-secondary: #ffffff;
+  --portal-tertiary: #5d5f23;
+
+  --portal-surface: #f6f5ee;
+  --portal-on-surface: #201a1a;
+  --portal-on-surface-variant: #534343;
+
+  --portal-surface-container-lowest: #ffffff;
+  --portal-surface-container-low: #f7eeee;
+  --portal-surface-container: #f0e7e7;
+  --portal-surface-container-high: #efe1e1;
+  --portal-surface-container-highest: #e9dfdf;
+
+  --portal-outline: #857373;
+  --portal-outline-variant: #d8c2c2;
+
+  --portal-error: #ba1a1a;
+  --portal-on-error: #ffffff;
+  --portal-error-container: #ffdad6;
+  --portal-on-error-container: #410002;
+
+  --portal-success: #006a68;
+  --portal-warning: #755a2c;
+
+  --portal-radius-sm: 0.25rem;
+  --portal-radius: 0.5rem;
+  --portal-radius-lg: 1rem;
+
+  background-color: var(--portal-surface);
+  color: var(--portal-on-surface);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.portal-theme h1,
+.portal-theme h2,
+.portal-theme h3,
+.portal-theme .portal-display {
+  font-family: "Montserrat", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.portal-theme .portal-h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.portal-theme .portal-h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.portal-theme .portal-h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.portal-theme .portal-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.portal-theme .material-symbols-outlined {
+  font-variation-settings:
+    "FILL" 0,
+    "wght" 400,
+    "GRAD" 0,
+    "opsz" 24;
+  vertical-align: middle;
+}
+
+/* Pretty form controls without depending on @tailwindcss/forms tokens */
+.portal-theme input[type="text"],
+.portal-theme input[type="email"],
+.portal-theme input[type="password"],
+.portal-theme input[type="search"],
+.portal-theme input[type="date"],
+.portal-theme input[type="time"],
+.portal-theme input[type="datetime-local"],
+.portal-theme select,
+.portal-theme textarea {
+  background-color: var(--portal-surface-container-lowest);
+  color: var(--portal-on-surface);
+  border: 1px solid var(--portal-outline-variant);
+  border-radius: var(--portal-radius);
+  padding: 0.625rem 0.875rem;
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.portal-theme input:focus,
+.portal-theme select:focus,
+.portal-theme textarea:focus {
+  border-color: var(--portal-primary);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--portal-primary) 20%, transparent);
+}
+
+/* When user dismisses an FAQ accordion */
+.portal-theme details summary {
+  list-style: none;
+}
+.portal-theme details summary::-webkit-details-marker {
+  display: none;
+}
+.portal-theme details[open] .portal-chevron {
+  transform: rotate(180deg);
+}
+.portal-theme .portal-chevron {
+  transition: transform 200ms ease;
+}
+
+/* Reserve space for the bottom nav on mobile */
+@media (max-width: 767px) {
+  .portal-theme .portal-page {
+    padding-bottom: 5rem;
+  }
+}

@@ -810,7 +810,7 @@ export async function updateBasicBooking({
       // Build custodian name helpers for the email change description
       const oldCustodianName = booking.custodianUser
         ? resolveUserDisplayName(booking.custodianUser)
-        : (booking.custodianTeamMember?.name ?? "Unknown");
+        : booking.custodianTeamMember?.name ?? "Unknown";
 
       try {
         // Fetch new custodian details
@@ -908,7 +908,7 @@ export async function updateBasicBooking({
         changes,
         hints,
         oldCustodianEmail: custodianChanged
-          ? (oldCustodianEmail ?? undefined)
+          ? oldCustodianEmail ?? undefined
           : undefined,
       });
     }
@@ -1142,7 +1142,7 @@ export async function reserveBooking({
     if (recipients.length > 0) {
       const custodian = bookingFound?.custodianUser
         ? resolveUserDisplayName(bookingFound.custodianUser)
-        : (bookingFound.custodianTeamMember?.name ?? "");
+        : bookingFound.custodianTeamMember?.name ?? "";
 
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
@@ -1721,8 +1721,8 @@ export async function checkinBooking({
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
-          (updatedBooking.assets || []).filter((a) =>
-            specificAssetIds?.includes(a.id)
+          (updatedBooking.assets || []).filter(
+            (a) => specificAssetIds?.includes(a.id)
           )
         );
         const completeKits: Array<{ id: string; name: string }> = [];
@@ -2621,7 +2621,7 @@ export async function cancelBooking({
     if (recipients.length > 0) {
       const custodian = booking.custodianUser
         ? resolveUserDisplayName(booking.custodianUser)
-        : (booking.custodianTeamMember?.name ?? "");
+        : booking.custodianTeamMember?.name ?? "";
 
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
@@ -2918,7 +2918,7 @@ export async function extendBooking({
     if (recipients.length > 0) {
       const custodian = updatedBooking?.custodianUser
         ? resolveUserDisplayName(updatedBooking.custodianUser)
-        : (updatedBooking.custodianTeamMember?.name ?? "");
+        : updatedBooking.custodianTeamMember?.name ?? "";
 
       const text = extendBookingEmailContent({
         bookingName: updatedBooking.name,
@@ -3118,6 +3118,13 @@ export async function getBookings(params: {
   orderDirection?: SortingDirection;
   kitId?: string;
   tags?: Tag["id"][];
+  /**
+   * When true, DRAFTs from any creator are visible — used for OWNER/ADMIN
+   * (and SELF_SERVICE/BASE with the org override) so they can review and
+   * approve bookings other users put up. Defaults to false to preserve the
+   * legacy "creator-only DRAFTs" behavior for unscoped callers.
+   */
+  canSeeAllBookings?: boolean;
 }) {
   const {
     organizationId,
@@ -3138,6 +3145,7 @@ export async function getBookings(params: {
     orderDirection = "asc",
     kitId,
     tags,
+    canSeeAllBookings = false,
   } = params;
 
   try {
@@ -3147,8 +3155,12 @@ export async function getBookings(params: {
     /** Default value of where. Takes the assetss belonging to current org */
     const where: Prisma.BookingWhereInput = { organizationId };
 
-    /** The idea is that only the creator of a draft booking can see it
-     * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
+    /** DRAFT visibility:
+     *   - Non-DRAFT bookings: visible to everyone with org access
+     *   - DRAFT bookings: visible to the creator
+     *   - DRAFT bookings: ALSO visible to anyone with canSeeAllBookings
+     *     (OWNER/ADMIN, or BASE/SELF_SERVICE when the org override is set)
+     *     so they can review and reserve them
      */
     where.AND = [
       {
@@ -3168,6 +3180,7 @@ export async function getBookings(params: {
               },
             ],
           },
+          ...(canSeeAllBookings ? [{ status: "DRAFT" as const }] : []),
         ],
       },
     ];
@@ -3620,7 +3633,7 @@ export async function deleteBooking(
     if (recipients.length > 0) {
       const custodian = b.custodianUser
         ? resolveUserDisplayName(b.custodianUser)
-        : (b.custodianTeamMember?.name ?? "");
+        : b.custodianTeamMember?.name ?? "";
 
       const text = deletedBookingEmailContent({
         bookingName: b.name,

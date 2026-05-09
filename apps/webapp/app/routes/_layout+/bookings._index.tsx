@@ -139,6 +139,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         search,
         userId: userId,
+        canSeeAllBookings,
         ...(status && {
           // If status is in the params, we filter based on it
           statuses: [status],
