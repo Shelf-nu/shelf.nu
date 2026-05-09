@@ -509,8 +509,8 @@ export function ValueField({
             Array.isArray(filter.value)
               ? filter.value.join(", ")
               : typeof filter.value === "boolean"
-              ? "yes"
-              : filter.value
+                ? "yes"
+                : filter.value
           }
           onChange={(e) => {
             const newValue = e.target.value
@@ -699,12 +699,12 @@ function EnumField({
   const displayValue = disabled
     ? "Select a column first"
     : multiSelect
-    ? selectedValues
-        .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
-        .join(", ")
-    : value === ""
-    ? options[0]?.label
-    : options.find((opt) => opt.id === value)?.label ?? value;
+      ? selectedValues
+          .map((v) => options.find((opt) => opt.id === v)?.label ?? v)
+          .join(", ")
+      : value === ""
+        ? options[0]?.label
+        : (options.find((opt) => opt.id === value)?.label ?? value);
 
   function handleOptionClick(optionId: string) {
     let newValue: string;
@@ -1102,18 +1102,18 @@ function CategoryEnumField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "uncategorized") {
-                          return "Uncategorized";
-                        }
-                        const category = data.categories?.find(
-                          (cat) => cat.id === id
-                        );
-                        return category?.name || "";
-                      })
-                      .join(", ")
-                  : "Select category"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "uncategorized") {
+                            return "Uncategorized";
+                          }
+                          const category = data.categories?.find(
+                            (cat) => cat.id === id
+                          );
+                          return category?.name || "";
+                        })
+                        .join(", ")
+                    : "Select category"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1220,21 +1220,21 @@ function LocationEnumField({
                 {disabled
                   ? "Select column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "in-location") {
-                          return "In a location";
-                        }
-                        if (id === "without-location") {
-                          return "Without location";
-                        }
-                        const location = data.locations?.find(
-                          (loc) => loc.id === id
-                        );
-                        return location?.name || "";
-                      })
-                      .join(", ")
-                  : "Select location"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "in-location") {
+                            return "In a location";
+                          }
+                          if (id === "without-location") {
+                            return "Without location";
+                          }
+                          const location = data.locations?.find(
+                            (loc) => loc.id === id
+                          );
+                          return location?.name || "";
+                        })
+                        .join(", ")
+                    : "Select location"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1349,19 +1349,19 @@ function KitEnumField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0 && data.kits && data.kits.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "in-kit") {
-                          return "In a kit";
-                        }
-                        if (id === "without-kit") {
-                          return "Without kit";
-                        }
-                        const kit = data.kits?.find((kit) => kit.id === id);
-                        return kit?.name || "";
-                      })
-                      .join(", ")
-                  : "Select kit"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "in-kit") {
+                            return "In a kit";
+                          }
+                          if (id === "without-kit") {
+                            return "Without kit";
+                          }
+                          const kit = data.kits?.find((kit) => kit.id === id);
+                          return kit?.name || "";
+                        })
+                        .join(", ")
+                    : "Select kit"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1476,21 +1476,23 @@ function UpcomingBookingsEnumField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0 &&
-                    data.bookings &&
-                    data.bookings.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "has-booking") {
-                          return "Has upcoming bookings";
-                        }
-                        if (id === "without-booking") {
-                          return "No upcoming bookings";
-                        }
-                        const booking = data.bookings?.find((b) => b.id === id);
-                        return booking?.name || "";
-                      })
-                      .join(", ")
-                  : "Select booking"}
+                      data.bookings &&
+                      data.bookings.length > 0
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "has-booking") {
+                            return "Has upcoming bookings";
+                          }
+                          if (id === "without-booking") {
+                            return "No upcoming bookings";
+                          }
+                          const booking = data.bookings?.find(
+                            (b) => b.id === id
+                          );
+                          return booking?.name || "";
+                        })
+                        .join(", ")
+                    : "Select booking"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>
@@ -1597,16 +1599,16 @@ function TagsField({
                 {disabled
                   ? "Select a column first"
                   : selectedIds.length > 0
-                  ? selectedIds
-                      .map((id) => {
-                        if (id === "untagged") {
-                          return "Untagged";
-                        }
-                        const tag = data.tags?.find((t) => t.id === id);
-                        return tag?.name || "";
-                      })
-                      .join(", ")
-                  : "Select Tag"}
+                    ? selectedIds
+                        .map((id) => {
+                          if (id === "untagged") {
+                            return "Untagged";
+                          }
+                          const tag = data.tags?.find((t) => t.id === id);
+                          return tag?.name || "";
+                        })
+                        .join(", ")
+                    : "Select Tag"}
               </span>
               <ChevronRight className="mr-1 inline-block rotate-90" />
             </div>

@@ -135,13 +135,13 @@ export function SpreadsheetPreview({
                     const cellBg = hasWarning
                       ? "bg-red-50"
                       : isClearing
-                      ? "bg-amber-50"
-                      : "bg-blue-50";
+                        ? "bg-amber-50"
+                        : "bg-blue-50";
                     const textColor = hasWarning
                       ? "text-red-700"
                       : isClearing
-                      ? "text-amber-700"
-                      : "text-blue-700";
+                        ? "text-amber-700"
+                        : "text-blue-700";
                     return (
                       <td
                         key={col}

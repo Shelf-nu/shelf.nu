@@ -109,8 +109,8 @@ const TOP_BOOKED_ASSETS_COLUMNS: ColumnDef<TopBookedAssetRow>[] = [
                 avgDays >= 7
                   ? "bg-blue-600"
                   : avgDays >= 3
-                  ? "bg-blue-400"
-                  : "bg-blue-200"
+                    ? "bg-blue-400"
+                    : "bg-blue-200"
               )}
               style={{ width: `${barPercent}%` }}
             />

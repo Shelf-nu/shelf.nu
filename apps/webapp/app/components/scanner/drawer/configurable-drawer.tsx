@@ -152,10 +152,10 @@ export default function ConfigurableDrawer<T>({
                 {customRenderAllItems
                   ? customRenderAllItems()
                   : renderItem
-                  ? Object.entries(items).map(([qrId, item]) =>
-                      renderItem(qrId, item)
-                    )
-                  : null}
+                    ? Object.entries(items).map(([qrId, item]) =>
+                        renderItem(qrId, item)
+                      )
+                    : null}
               </AnimatePresence>
             </tbody>
           </Table>

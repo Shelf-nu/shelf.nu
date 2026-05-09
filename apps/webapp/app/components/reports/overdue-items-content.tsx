@@ -105,8 +105,8 @@ export function OverdueItemsContent({
               days > 7
                 ? "bg-red-100 text-red-700"
                 : days > 3
-                ? "bg-orange-100 text-orange-700"
-                : "bg-yellow-100 text-yellow-700"
+                  ? "bg-orange-100 text-orange-700"
+                  : "bg-yellow-100 text-yellow-700"
             )}
           >
             {days} days

@@ -16,16 +16,16 @@ if (window.env?.SENTRY_DSN) {
 
       // Suppress N+1 for asset image refresh — server-side batch handles this;
       // client-side individual calls are an intentional safety net
-      const imageRefreshSpans = spans.filter(
-        (s) => s.description?.includes("/api/asset/refresh-main-image")
+      const imageRefreshSpans = spans.filter((s) =>
+        s.description?.includes("/api/asset/refresh-main-image")
       );
       if (imageRefreshSpans.length > 3) {
         return null;
       }
 
       // Suppress React Router internal manifest fetching — framework behavior
-      const manifestSpans = spans.filter(
-        (s) => s.description?.includes("/__manifest")
+      const manifestSpans = spans.filter((s) =>
+        s.description?.includes("/__manifest")
       );
       if (manifestSpans.length > 3) {
         return null;
@@ -38,8 +38,8 @@ if (window.env?.SENTRY_DSN) {
       // that includes the form-data submit span — the previous threshold
       // (`> 1` matching spans) was too narrow and let most events through.
       if (event.transaction === "/assets/new") {
-        const hasAssetNewDataSpan = spans.some(
-          (s) => s.description?.includes("/assets/new.data")
+        const hasAssetNewDataSpan = spans.some((s) =>
+          s.description?.includes("/assets/new.data")
         );
         if (hasAssetNewDataSpan) {
           return null;

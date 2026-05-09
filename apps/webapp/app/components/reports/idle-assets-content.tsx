@@ -56,8 +56,8 @@ const IDLE_ASSETS_COLUMNS: ColumnDef<IdleAssetRow>[] = [
             days > 90
               ? "bg-red-100 text-red-700"
               : days > 60
-              ? "bg-orange-100 text-orange-700"
-              : "bg-yellow-100 text-yellow-700"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-yellow-100 text-yellow-700"
           )}
         >
           {days} days
@@ -157,8 +157,8 @@ export function IdleAssetsContent({
                   totalIdle > 10
                     ? "text-orange-600"
                     : totalIdle > 0
-                    ? "text-yellow-600"
-                    : "text-green-600"
+                      ? "text-yellow-600"
+                      : "text-green-600"
                 )}
               >
                 {totalIdle}

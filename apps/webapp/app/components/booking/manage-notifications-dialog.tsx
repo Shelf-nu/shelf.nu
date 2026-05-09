@@ -110,7 +110,7 @@ export default function ManageNotificationsDialog() {
         name: "",
         user: booking.custodianUser,
       })
-    : booking.custodianTeamMember?.name ?? "";
+    : (booking.custodianTeamMember?.name ?? "");
 
   /** Creator display name */
   const creatorName = booking.creator

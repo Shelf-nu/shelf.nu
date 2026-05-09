@@ -94,8 +94,8 @@ export function MonthlyBookingTrendsContent({
               change > 0
                 ? "bg-green-100 text-green-700"
                 : change < 0
-                ? "bg-red-100 text-red-700"
-                : "bg-gray-100 text-gray-700"
+                  ? "bg-red-100 text-red-700"
+                  : "bg-gray-100 text-gray-700"
             )}
           >
             {change > 0 ? "+" : ""}
@@ -166,8 +166,8 @@ export function MonthlyBookingTrendsContent({
                     trendDirection === "Increasing"
                       ? "text-green-600"
                       : trendDirection === "Decreasing"
-                      ? "text-red-600"
-                      : "text-gray-900"
+                        ? "text-red-600"
+                        : "text-gray-900"
                   )}
                 >
                   {trendDirection}

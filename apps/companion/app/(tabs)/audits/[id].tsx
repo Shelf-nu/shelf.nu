@@ -293,10 +293,10 @@ function AuditDetailContent() {
         item.status === "FOUND"
           ? "Found"
           : item.status === "PENDING"
-          ? "Pending"
-          : item.status === "MISSING"
-          ? "Missing"
-          : "Unexpected";
+            ? "Pending"
+            : item.status === "MISSING"
+              ? "Missing"
+              : "Unexpected";
 
       return (
         <TouchableOpacity
@@ -395,10 +395,10 @@ function AuditDetailContent() {
     audit.status === "PENDING"
       ? "Pending"
       : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status === "COMPLETED"
-      ? "Completed"
-      : "Cancelled";
+        ? "Active"
+        : audit.status === "COMPLETED"
+          ? "Completed"
+          : "Cancelled";
 
   const assets = filteredAssets();
 

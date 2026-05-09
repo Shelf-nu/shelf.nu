@@ -181,7 +181,7 @@ export function ChoosePurpose({
   const ctaLabel =
     selectedPlan === "personal" && wantsAnyAddon
       ? `Start with ${selectedAddons.join(" & ")} trial`
-      : selectedDetails?.ctaLabel ?? "Start using Shelf";
+      : (selectedDetails?.ctaLabel ?? "Start using Shelf");
 
   // Determine href for team flow (pass addon params)
   const teamParams = new URLSearchParams();
@@ -196,7 +196,7 @@ export function ChoosePurpose({
   const isPersonalWithAddons = selectedPlan === "personal" && wantsAnyAddon;
 
   const ctaHref =
-    selectedPlan === "team" ? teamHref : selectedDetails?.href ?? "/assets";
+    selectedPlan === "team" ? teamHref : (selectedDetails?.href ?? "/assets");
 
   return (
     <>

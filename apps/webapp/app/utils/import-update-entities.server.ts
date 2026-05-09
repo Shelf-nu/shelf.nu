@@ -56,7 +56,7 @@ export async function fetchAssetsForUpdate(
           customField: CustomField;
         }[];
       };
-      const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
+      const key = dbField === "id" ? asset.id : (asset.sequentialId ?? "");
       return [key, asset];
     })
   );

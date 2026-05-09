@@ -514,8 +514,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
         if (values.includes("uncategorized")) {
@@ -589,8 +589,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
         const hasLocation = values.includes("in-location");
@@ -682,8 +682,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           typeof filter.value === "string"
             ? filter.value.split(",").map((v) => v.trim())
             : Array.isArray(filter.value)
-            ? filter.value
-            : [filter.value]
+              ? filter.value
+              : [filter.value]
         ).filter(Boolean);
 
         const hasInKit = values.includes("in-kit");
@@ -961,8 +961,8 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-          ? filter.value
-          : [filter.value]
+            ? filter.value
+            : [filter.value]
       ).filter(Boolean);
 
       const hasInCustody = values.includes("in-custody");
@@ -1113,8 +1113,8 @@ function addUpcomingBookingsFilter(
         typeof filter.value === "string"
           ? filter.value.split(",").map((v) => v.trim())
           : Array.isArray(filter.value)
-          ? filter.value
-          : [filter.value]
+            ? filter.value
+            : [filter.value]
       ).filter(Boolean);
 
       const hasBooking = values.includes("has-booking");

@@ -325,7 +325,7 @@ function printSummary(counts: SeederCounts): void {
 main().catch((err) => {
   console.error(
     "\nSeeder failed:\n",
-    err instanceof Error ? err.stack ?? err.message : err,
+    err instanceof Error ? (err.stack ?? err.message) : err,
     "\n"
   );
   process.exit(1);

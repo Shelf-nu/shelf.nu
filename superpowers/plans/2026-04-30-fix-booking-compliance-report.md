@@ -955,8 +955,8 @@ async function computeCustodianPerformance(
           }`.trim()
         )
       : booking.custodianTeamMember
-      ? stripNameSuffix(booking.custodianTeamMember.name)
-      : "No Custodian";
+        ? stripNameSuffix(booking.custodianTeamMember.name)
+        : "No Custodian";
 
     if (!custodianMap.has(key)) {
       custodianMap.set(key, { name, onTime: 0, late: 0 });
@@ -1075,8 +1075,8 @@ async function computeComplianceTrend(
     const label = useDailyGranularity
       ? formatDayLabel(bucketStart)
       : numBuckets <= 4
-      ? formatWeekLabel(bucketStart, bucketEnd)
-      : formatWeekLabel(bucketStart, bucketEnd);
+        ? formatWeekLabel(bucketStart, bucketEnd)
+        : formatWeekLabel(bucketStart, bucketEnd);
 
     trend.push({ label, rate, onTime, late, total });
   }
@@ -1161,8 +1161,8 @@ const allRows: BookingComplianceRow[] = bookings.map((b) => {
           }`.trim()
         )
       : b.custodianTeamMember
-      ? stripNameSuffix(b.custodianTeamMember.name)
-      : null,
+        ? stripNameSuffix(b.custodianTeamMember.name)
+        : null,
     assetCount: b._count.assets,
     scheduledStart: b.from!,
     scheduledEnd: b.to!,

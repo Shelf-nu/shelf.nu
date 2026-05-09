@@ -79,8 +79,8 @@ export default function AddAssetsToExistingBookingDialog() {
                       isFetchingBookings
                         ? "Fetching bookings..."
                         : bookings.length === 0
-                        ? "No bookings available"
-                        : "Select booking"
+                          ? "No bookings available"
+                          : "Select booking"
                     }
                   />
                 </SelectTrigger>

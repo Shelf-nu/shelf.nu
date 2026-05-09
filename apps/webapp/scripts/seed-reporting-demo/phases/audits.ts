@@ -175,8 +175,8 @@ async function runAudit(
         idx < shape.foundCount
           ? "FOUND"
           : idx < shape.foundCount + shape.missingCount
-          ? "MISSING"
-          : "PENDING",
+            ? "MISSING"
+            : "PENDING",
     })),
     ...unexpectedAssets.map((assetId) => ({
       assetId,

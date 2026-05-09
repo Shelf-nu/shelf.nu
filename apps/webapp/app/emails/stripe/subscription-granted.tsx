@@ -20,8 +20,7 @@ interface SubscriptionGrantedEmailProps {
   subscriptionName: string;
 }
 
-interface SendSubscriptionGrantedEmailProps
-  extends SubscriptionGrantedEmailProps {
+interface SendSubscriptionGrantedEmailProps extends SubscriptionGrantedEmailProps {
   email: string;
 }
 

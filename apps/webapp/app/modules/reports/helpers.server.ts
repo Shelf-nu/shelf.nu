@@ -375,8 +375,8 @@ async function fetchBookingComplianceRows(
             }`.trim()
           )
         : b.custodianTeamMember
-        ? stripNameSuffix(b.custodianTeamMember.name)
-        : null,
+          ? stripNameSuffix(b.custodianTeamMember.name)
+          : null,
       assetCount: b._count.assets,
       scheduledStart: b.from!,
       scheduledEnd: b.to!,
@@ -729,8 +729,8 @@ async function computeComplianceTrend(
     const label = useDailyGranularity
       ? formatDayLabel(bucketStart)
       : numBuckets <= 4
-      ? `Week ${i + 1}`
-      : formatWeekLabel(bucketStart, bucketEnd);
+        ? `Week ${i + 1}`
+        : formatWeekLabel(bucketStart, bucketEnd);
 
     trend.push({
       label,
@@ -846,8 +846,8 @@ async function computeCustodianPerformance(
           }`.trim()
         )
       : booking.custodianTeamMember
-      ? stripNameSuffix(booking.custodianTeamMember.name)
-      : "No Custodian";
+        ? stripNameSuffix(booking.custodianTeamMember.name)
+        : "No Custodian";
 
     if (!custodianMap.has(key)) {
       custodianMap.set(key, { name, onTime: 0, late: 0 });
@@ -1072,8 +1072,8 @@ async function fetchOverdueRows(
             }`.trim()
           )
         : b.custodianTeamMember
-        ? stripNameSuffix(b.custodianTeamMember.name)
-        : null,
+          ? stripNameSuffix(b.custodianTeamMember.name)
+          : null,
       custodianId: b.custodianUserId,
       assetCount: b._count.assets,
       checkedInCount,
@@ -1203,8 +1203,8 @@ async function computeOverdueKpis(
         avgDaysOverdue > 3
           ? "negative"
           : avgDaysOverdue > 0
-          ? "neutral"
-          : "positive",
+            ? "neutral"
+            : "positive",
     },
     {
       id: "longest_overdue",
@@ -1217,8 +1217,8 @@ async function computeOverdueKpis(
         longestOverdue > 7
           ? "negative"
           : longestOverdue > 0
-          ? "neutral"
-          : "positive",
+            ? "neutral"
+            : "positive",
     },
   ];
 }
@@ -1580,8 +1580,8 @@ async function computeIdleAssetsKpis(
         idlePercentage > 20
           ? "negative"
           : idlePercentage > 10
-          ? "neutral"
-          : "positive",
+            ? "neutral"
+            : "positive",
     },
     {
       id: "total_idle_value",
@@ -1594,8 +1594,8 @@ async function computeIdleAssetsKpis(
         totalIdleValue > 10000
           ? "negative"
           : totalIdleValue > 0
-          ? "neutral"
-          : "positive",
+            ? "neutral"
+            : "positive",
     },
     {
       id: "avg_days_idle",
@@ -1608,8 +1608,8 @@ async function computeIdleAssetsKpis(
         avgDaysIdle > 60
           ? "negative"
           : avgDaysIdle > 30
-          ? "neutral"
-          : "positive",
+            ? "neutral"
+            : "positive",
     },
   ];
 }
@@ -2856,8 +2856,8 @@ export async function monthlyBookingTrendsReport(
           trendDirection === "up"
             ? "Increasing"
             : trendDirection === "down"
-            ? "Decreasing"
-            : "Stable",
+              ? "Decreasing"
+              : "Stable",
         rawValue:
           trendDirection === "up" ? 1 : trendDirection === "down" ? -1 : 0,
         format: "number",
@@ -2867,8 +2867,8 @@ export async function monthlyBookingTrendsReport(
           trendDirection === "up"
             ? "positive"
             : trendDirection === "down"
-            ? "negative"
-            : "neutral",
+              ? "negative"
+              : "neutral",
         // Add metadata for tooltip (stored in description field)
         description:
           lastTwoMonths.length === 2
@@ -3083,8 +3083,8 @@ export async function assetUtilizationReport(
           avgUtilization >= 50
             ? "positive"
             : avgUtilization >= 30
-            ? "neutral"
-            : "negative",
+              ? "neutral"
+              : "negative",
       },
       {
         id: "highly_utilized_count",

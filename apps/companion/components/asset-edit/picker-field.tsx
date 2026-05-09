@@ -102,8 +102,8 @@ export function PickerField<T extends PickerItem>({
             {renderSelected
               ? renderSelected(selectedItem)
               : renderItemIcon
-              ? renderItemIcon(selectedItem)
-              : null}
+                ? renderItemIcon(selectedItem)
+                : null}
             <Text style={styles.pickerSelectedText}>{selectedItem.name}</Text>
           </View>
         ) : (

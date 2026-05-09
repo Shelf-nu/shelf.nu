@@ -528,17 +528,17 @@ export function AuditDrawer({
                     isPending={true}
                     notesCount={
                       asset.auditAssetId
-                        ? auditAssetMeta[asset.auditAssetId]?.notesCount ??
+                        ? (auditAssetMeta[asset.auditAssetId]?.notesCount ??
                           asset.auditNotesCount ??
-                          0
-                        : asset.auditNotesCount ?? 0
+                          0)
+                        : (asset.auditNotesCount ?? 0)
                     }
                     imagesCount={
                       asset.auditAssetId
-                        ? auditAssetMeta[asset.auditAssetId]?.imagesCount ??
+                        ? (auditAssetMeta[asset.auditAssetId]?.imagesCount ??
                           asset.auditImagesCount ??
-                          0
-                        : asset.auditImagesCount ?? 0
+                          0)
+                        : (asset.auditImagesCount ?? 0)
                     }
                   />
                 )}

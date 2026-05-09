@@ -459,8 +459,8 @@ function ScannerContent() {
             asset.status === "IN_CUSTODY"
               ? "In Custody"
               : asset.status === "AVAILABLE"
-              ? "Available"
-              : asset.status.replace(/_/g, " ");
+                ? "Available"
+                : asset.status.replace(/_/g, " ");
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

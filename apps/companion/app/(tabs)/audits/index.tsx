@@ -213,10 +213,10 @@ function AuditsListContent() {
                 {item.status === "PENDING"
                   ? "Pending"
                   : item.status === "ACTIVE"
-                  ? "Active"
-                  : item.status === "COMPLETED"
-                  ? "Completed"
-                  : "Cancelled"}
+                    ? "Active"
+                    : item.status === "COMPLETED"
+                      ? "Completed"
+                      : "Cancelled"}
               </Text>
             </View>
           </View>

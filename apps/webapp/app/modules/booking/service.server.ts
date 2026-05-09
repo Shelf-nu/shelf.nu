@@ -810,7 +810,7 @@ export async function updateBasicBooking({
       // Build custodian name helpers for the email change description
       const oldCustodianName = booking.custodianUser
         ? resolveUserDisplayName(booking.custodianUser)
-        : booking.custodianTeamMember?.name ?? "Unknown";
+        : (booking.custodianTeamMember?.name ?? "Unknown");
 
       try {
         // Fetch new custodian details
@@ -908,7 +908,7 @@ export async function updateBasicBooking({
         changes,
         hints,
         oldCustodianEmail: custodianChanged
-          ? oldCustodianEmail ?? undefined
+          ? (oldCustodianEmail ?? undefined)
           : undefined,
       });
     }
@@ -1142,7 +1142,7 @@ export async function reserveBooking({
     if (recipients.length > 0) {
       const custodian = bookingFound?.custodianUser
         ? resolveUserDisplayName(bookingFound.custodianUser)
-        : bookingFound.custodianTeamMember?.name ?? "";
+        : (bookingFound.custodianTeamMember?.name ?? "");
 
       const text = assetReservedEmailContent({
         bookingName: bookingFound.name,
@@ -1721,8 +1721,8 @@ export async function checkinBooking({
 
         // Separate complete kits from individual assets
         const kitIds = getKitIdsByAssets(
-          (updatedBooking.assets || []).filter(
-            (a) => specificAssetIds?.includes(a.id)
+          (updatedBooking.assets || []).filter((a) =>
+            specificAssetIds?.includes(a.id)
           )
         );
         const completeKits: Array<{ id: string; name: string }> = [];
@@ -2621,7 +2621,7 @@ export async function cancelBooking({
     if (recipients.length > 0) {
       const custodian = booking.custodianUser
         ? resolveUserDisplayName(booking.custodianUser)
-        : booking.custodianTeamMember?.name ?? "";
+        : (booking.custodianTeamMember?.name ?? "");
 
       const text = cancelledBookingEmailContent({
         bookingName: booking.name,
@@ -2918,7 +2918,7 @@ export async function extendBooking({
     if (recipients.length > 0) {
       const custodian = updatedBooking?.custodianUser
         ? resolveUserDisplayName(updatedBooking.custodianUser)
-        : updatedBooking.custodianTeamMember?.name ?? "";
+        : (updatedBooking.custodianTeamMember?.name ?? "");
 
       const text = extendBookingEmailContent({
         bookingName: updatedBooking.name,
@@ -3620,7 +3620,7 @@ export async function deleteBooking(
     if (recipients.length > 0) {
       const custodian = b.custodianUser
         ? resolveUserDisplayName(b.custodianUser)
-        : b.custodianTeamMember?.name ?? "";
+        : (b.custodianTeamMember?.name ?? "");
 
       const text = deletedBookingEmailContent({
         bookingName: b.name,

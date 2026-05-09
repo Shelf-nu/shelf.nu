@@ -593,12 +593,12 @@ function AuditScannerContent() {
     frameHighlight === "found"
       ? "#4CAF50"
       : frameHighlight === "unexpected"
-      ? "#FF9800"
-      : frameHighlight === "duplicate"
-      ? "#FFC107"
-      : frameHighlight === "error"
-      ? "#F04438"
-      : "#fff";
+        ? "#FF9800"
+        : frameHighlight === "duplicate"
+          ? "#FFC107"
+          : frameHighlight === "error"
+            ? "#F04438"
+            : "#fff";
 
   // ── Camera view ──────────────────────────────────────
 
@@ -771,10 +771,10 @@ function AuditScannerContent() {
                 toast.type === "found"
                   ? "checkmark-circle"
                   : toast.type === "unexpected"
-                  ? "alert-circle"
-                  : toast.type === "duplicate"
-                  ? "copy-outline"
-                  : "close-circle"
+                    ? "alert-circle"
+                    : toast.type === "duplicate"
+                      ? "copy-outline"
+                      : "close-circle"
               }
               size={20}
               color="#fff"

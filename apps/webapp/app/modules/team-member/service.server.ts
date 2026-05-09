@@ -447,25 +447,25 @@ export async function getTeamMemberForForm({
             },
           })
         : custodianUserId
-        ? await db.teamMember.findFirst({
-            where: {
-              userId: custodianUserId,
-              organizationId,
-              deletedAt: null,
-            },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  email: true,
+          ? await db.teamMember.findFirst({
+              where: {
+                userId: custodianUserId,
+                organizationId,
+                deletedAt: null,
+              },
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                    email: true,
+                  },
                 },
               },
-            },
-          })
-        : null;
+            })
+          : null;
 
       await fixTeamMembersNames(
         custodianTeamMember ? [custodianTeamMember] : []

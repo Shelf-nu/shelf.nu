@@ -199,11 +199,11 @@ function ConditionalDropdown() {
                         reason: "You don't have permission to archive audits.",
                       }
                     : someNotArchivable
-                    ? {
-                        reason:
-                          "Some of the selected audits are not completed or cancelled. You can only archive audits that are completed or cancelled.",
-                      }
-                    : isLoading
+                      ? {
+                          reason:
+                            "Some of the selected audits are not completed or cancelled. You can only archive audits that are completed or cancelled.",
+                        }
+                      : isLoading
                 }
               />
             </DropdownMenuItem>
@@ -223,16 +223,16 @@ function ConditionalDropdown() {
                         reason: "You don't have permission to delete audits.",
                       }
                     : someNotArchived
-                    ? {
-                        reason:
-                          "Some of the selected audits are not archived. Only archived audits can be deleted.",
-                      }
-                    : selectAllButFilterNotArchived
-                    ? {
-                        reason:
-                          "Filter the list to status = Archived before using Select all to delete.",
-                      }
-                    : isLoading
+                      ? {
+                          reason:
+                            "Some of the selected audits are not archived. Only archived audits can be deleted.",
+                        }
+                      : selectAllButFilterNotArchived
+                        ? {
+                            reason:
+                              "Filter the list to status = Archived before using Select all to delete.",
+                          }
+                        : isLoading
                 }
               />
             </DropdownMenuItem>

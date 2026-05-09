@@ -105,14 +105,12 @@ SENTRY_PROJECT="your-project"
 To add a new third-party tracking script, follow the established pattern:
 
 1. **Register the env var** in `app/utils/env.ts`:
-
    - Add the key to the `Window.env` interface
    - Add the key to the `ProcessEnv` interface
    - Export it with `getEnv()` (`isSecret: false`, `isRequired: false`)
    - Add it to `getBrowserEnv()`
 
 2. **Create a component** in `app/components/marketing/`:
-
    - The component must return `null` (no rendered markup) to avoid hydration mismatches
    - Use a `useEffect` hook to check `window.env.YOUR_TOKEN` and programmatically inject the `<script>` element into `document.head`
    - Include cleanup in the effect's return to remove the script on unmount

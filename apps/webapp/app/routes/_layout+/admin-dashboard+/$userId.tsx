@@ -485,8 +485,8 @@ function UserFieldValue({
       return typeof value === "string"
         ? value
         : typeof value === "boolean"
-        ? String(value)
-        : null;
+          ? String(value)
+          : null;
   }
 }
 

@@ -537,8 +537,8 @@ const AuditCard = memo(function AuditCard({
     audit.status === "PENDING"
       ? "Pending"
       : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status;
+        ? "Active"
+        : audit.status;
 
   return (
     <TouchableOpacity

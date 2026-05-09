@@ -53,8 +53,8 @@ export function useTabId(): string {
         typeof input === "string"
           ? input
           : input instanceof URL
-          ? input.href
-          : input.url;
+            ? input.href
+            : input.url;
       const isSameOrigin =
         url.startsWith("/") ||
         (() => {

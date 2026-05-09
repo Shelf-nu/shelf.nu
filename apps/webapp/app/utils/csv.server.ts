@@ -957,8 +957,8 @@ export const buildCsvExportDataFromBookings = (
           value = booking.originalFrom
             ? format(booking.originalFrom).split(",")
             : booking.from
-            ? format(booking.from).split(",")
-            : "";
+              ? format(booking.from).split(",")
+              : "";
           break;
 
         case "to":
@@ -968,8 +968,8 @@ export const buildCsvExportDataFromBookings = (
           value = booking.originalTo
             ? format(booking.originalTo).split(",")
             : booking.to
-            ? format(booking.to).split(",")
-            : "";
+              ? format(booking.to).split(",")
+              : "";
           break;
         case "custodian": {
           const teamMember = {

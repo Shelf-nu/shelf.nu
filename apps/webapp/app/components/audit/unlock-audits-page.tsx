@@ -351,14 +351,14 @@ function OwnerCTAs({
             {isSubscribing
               ? "Redirecting..."
               : selectedInterval === "year"
-              ? `Subscribe yearly (${fmtPrice(
-                  selectedPrice.unit_amount || 0,
-                  selectedPrice.currency
-                )}/yr)`
-              : `Subscribe monthly (${fmtPrice(
-                  selectedPrice.unit_amount || 0,
-                  selectedPrice.currency
-                )}/mo)`}
+                ? `Subscribe yearly (${fmtPrice(
+                    selectedPrice.unit_amount || 0,
+                    selectedPrice.currency
+                  )}/yr)`
+                : `Subscribe monthly (${fmtPrice(
+                    selectedPrice.unit_amount || 0,
+                    selectedPrice.currency
+                  )}/mo)`}
           </Button>
         </subscribeFetcher.Form>
       )}

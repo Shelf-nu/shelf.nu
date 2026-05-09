@@ -422,15 +422,15 @@ function AssetsListContent() {
                 {debouncedSearch
                   ? "No results found"
                   : activeFilter > 0
-                  ? `No ${FILTERS[activeFilter].label.toLowerCase()} assets`
-                  : "No assets yet"}
+                    ? `No ${FILTERS[activeFilter].label.toLowerCase()} assets`
+                    : "No assets yet"}
               </Text>
               <Text style={styles.emptyText}>
                 {debouncedSearch
                   ? "Try a different search term or clear filters"
                   : activeFilter > 0
-                  ? "Try selecting a different status filter"
-                  : "Create your first asset to start tracking"}
+                    ? "Try selecting a different status filter"
+                    : "Create your first asset to start tracking"}
               </Text>
               {!debouncedSearch && activeFilter === 0 && (
                 <TouchableOpacity

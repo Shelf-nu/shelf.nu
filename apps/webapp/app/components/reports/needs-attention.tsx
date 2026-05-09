@@ -101,8 +101,8 @@ export function NeedsAttention({
                     custodian.rate >= 80
                       ? "text-green-600"
                       : custodian.rate >= 50
-                      ? "text-orange-600"
-                      : "text-red-600"
+                        ? "text-orange-600"
+                        : "text-red-600"
                   )}
                 >
                   {custodian.rate}%
