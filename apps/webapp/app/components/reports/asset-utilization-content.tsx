@@ -22,6 +22,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import {
   AssetCell,
+  CurrencyCell,
   NumberCell,
   ReportTable,
 } from "~/components/reports/report-table";
@@ -86,12 +87,9 @@ const ASSET_UTILIZATION_COLUMNS: ColumnDef<AssetUtilizationRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) =>
-      row.original.valuation ? (
-        `$${row.original.valuation.toLocaleString()}`
-      ) : (
-        <span className="text-gray-400">—</span>
-      ),
+    cell: ({ row }) => (
+      <CurrencyCell value={row.original.valuation} treatZeroAsEmpty />
+    ),
   },
 ];
 
