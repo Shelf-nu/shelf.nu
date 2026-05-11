@@ -708,11 +708,22 @@ All phases ship together as one release. This ordering reflects build dependenci
 
 **Goal:** Land the pivot model for `Asset → Location` and `Asset → Kit`, then build the user-facing split/merge UX on top.
 
-**Prerequisites:** Open Question #6 resolved (2026-05-11) — see the resolution row in "Remaining Open Questions" and Design Principle #3 for the rationale. This phase ships as a single production release; intermediate dev phases below are organizational, not deployable.
+**Prerequisites:** Open Question #6 resolved (2026-05-11) — see the resolution row in "Remaining Open Questions" and Design Principle #3 for the rationale.
 
-#### Schema changes (single migration)
+**Shipping plan: sequential, four sub-phases, each its own production release.** Updated 2026-05-11. An earlier draft of this section proposed a single all-of-Phase-4 release; that was retracted because the **placement axes are independent** — each axis (Location, Kit, Custody, Booking) enforces its own `sum ≤ Asset.quantity` invariant without referencing the others, so an intermediate state where Kit is pivoted and Location is still FK (or vice versa) is correctness-safe. Sequential ships make plans + PRs reviewable at a sane scope and let us validate the pivot pattern on the smaller Kit surface before tackling the larger Location surface.
 
-Two new pivot tables introduced; `Asset.locationId` and `Asset.kitId` dropped in the same migration after backfilling. **Note:** intermediate states where one relation is pivoted and the other isn't would corrupt the inventory equation; everything moves atomically.
+| Sub-phase | Scope                                                                | Notes                                                                                                                                                                                                             |
+| --------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **4a**    | Kit pivot — `AssetKit` schema + triggers + service refactor + Kit UX | First, because (1) smaller surface area, (2) Phase 3d-Polish-2 context is fresh, (3) Option B math simplifies naturally to `AssetKit.quantity`                                                                    |
+| **4b**    | Location pivot — `AssetLocation` schema + triggers + Location UX     | Larger surface (every asset has a location) but same pattern as 4a; mobile API contract change happens here                                                                                                       |
+| **4c**    | Split / merge UX — "Move N units from X to Y" flows for both pivots  | Sits on top of 4a + 4b; pure user-facing feature work                                                                                                                                                             |
+| **4d**    | Auxiliary items                                                      | Model grouping tool, group-by-model view, import/export with qty columns, bulk-op type awareness, rebalance kit allocation, `QuantityCustodyDialog` copy update. Some items may slip into Phase 5 if scope grows. |
+
+The schema, invariant layer, and service/loader/route work described below is split across 4a and 4b along the Kit vs Location boundary. The split/merge UX (formerly the headline of Phase 4) lives in 4c. Post-Phase-4 backlog items (sub-phase 3e calendar polish, sub-phase 3d follow-ups, reports verification) wait until all four sub-phases are stable.
+
+#### Schema changes (split across 4a + 4b)
+
+Each sub-phase introduces one pivot table in its own migration, backfills from the corresponding FK column, and drops that column in the same migration. The two pivots are structurally identical; only the foreign reference differs.
 
 ```prisma
 model AssetLocation {

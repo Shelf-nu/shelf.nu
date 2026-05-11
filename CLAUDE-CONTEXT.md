@@ -773,54 +773,107 @@ directly; the unplaced delta becomes the gap between `Asset.quantity`
 and `sum(AssetLocation.quantity)`. Users can optionally place new
 stock at a location afterward.
 
-### Shipping plan
+### Shipping plan: sequential, four sub-phases
 
-**Single production release.** Intermediate states where one relation
-is pivoted and the other isn't would break the inventory equation
-and the kit-custody Option B math, so the schema migration + the
-service / loader / route / UI changes ship together.
+**Updated 2026-05-11.** Earlier draft proposed a single all-of-Phase-4
+release. Retracted on closer review: the **placement axes are
+independent** — each axis (Location, Kit, Custody, Booking) enforces
+its own `sum ≤ Asset.quantity` invariant without referencing the
+others, so an intermediate state where Kit is pivoted and Location is
+still FK (or vice versa) is correctness-safe. Sequential ships keep
+plans + PRs at a sane review scope and let us validate the pivot
+pattern on the smaller Kit surface before tackling Location.
 
-Dev-order sub-phases (organisational only — single migration on
-production):
+Each sub-phase is its own PR, its own migration, its own production
+release:
 
-1. **Schema + invariant layer.** Single Prisma migration introduces
-   `AssetLocation` + `AssetKit`, backfills from existing
-   `Asset.locationId` / `Asset.kitId` FKs, then drops those columns.
-   DB triggers enforce INDIVIDUAL-single-row + `sum ≤ Asset.quantity`
-   per pivot (constraint triggers so multi-row tx updates work).
-2. **Service layer.** `asset/service.server.ts` pivot upserts;
-   kit-custody Option B math refactored to read `AssetKit.quantity`
-   directly; custody propagation re-grounded; restock unchanged.
-3. **Query / loader layer.** Location detail, kit detail, asset list
-   columns, filters, pickers, scan drawers — all sourced from pivots.
-   Multi-placement display reuses the `+N more` chip pattern from the
-   Phase 3d-Polish-2 multi-custodian column.
-4. **Mobile API.** Decide at implementation time: synthesise a
-   "primary placement" for backward compat, or ship a mobile-app PR
-   in lockstep.
-5. **User-facing split / merge UX.** "Move N units from Loc A to Loc
-   B" and "Move N units from Kit X to Kit Y" — two-row updates in a
-   single tx. Optional "Place N unplaced units at Location L" flow
-   for the gap. Gated on `Asset.type = QUANTITY_TRACKED`.
+#### Phase 4a — Kit pivot (first)
 
-### Auxiliary items (independent of pivot work)
+**Why first:**
 
-- Kit integration polish + checkout/check-in with quantity handling
-- Model grouping tool (bulk assign existing assets to a model)
-- Import/export with quantity columns
-- Bulk operations awareness of asset types
+- Smaller surface area than Location. Most assets aren't in a kit;
+  every asset has a location.
+- Phase 3d-Polish-2 + 3d-Polish-3 work on kits is fresh; we know the
+  surface well.
+- **Option B math simplifies naturally.** Today kit-allocated qty is
+  computed as `asset.quantity − sum(operator custody)`. With
+  `AssetKit.quantity` available, it collapses to just reading the
+  pivot row. Cleaner, fewer edge cases.
+- Validates the pivot pattern (schema + triggers + invariant) on a
+  smaller blast radius before applying to Location.
+
+**Scope:**
+
+- Schema: `AssetKit` Prisma model, composite unique
+  `(assetId, kitId)`, INDIVIDUAL-single-row trigger, `sum ≤
+Asset.quantity` invariant trigger (constraint-deferred so multi-row
+  tx updates work).
+- Migration: introduce `AssetKit`, backfill from `Asset.kitId`, drop
+  `Asset.kitId` column in same migration.
+- Service: `asset/service.server.ts` + `kit/service.server.ts` —
+  replace `kitId` read/write paths with pivot upserts; refactor
+  Option B math to read `AssetKit.quantity`; custody propagation
+  re-grounded.
+- Loader / route / UI: kit detail page asset list, kit manage-assets
+  picker, scan drawers, asset row's kit column. Multi-kit display
+  reuses the `+N more` chip pattern from the Phase 3d-Polish-2
+  multi-custodian column.
+- Tests: unit + route tests for the new pivot upserts; existing
+  kit-custody tests adjusted to the new shape.
+
+#### Phase 4b — Location pivot (second)
+
+**Scope:** structurally identical to 4a but for Location. Larger
+surface because every asset has a location:
+
+- Schema: `AssetLocation` Prisma model with same shape + triggers.
+- Migration: introduce, backfill from `Asset.locationId`, drop the
+  column.
+- Service / loader / UI: location detail, location manage-assets
+  picker, scan drawers, location filters, asset list location column.
+- **Mobile API contract change.** The mobile companion currently
+  returns `Asset.location` as a singular object. Either synthesise a
+  "primary placement" for backward compat or ship a mobile-app PR in
+  lockstep — decide at plan time.
+- Reports impact: location filters in reports (already deferred via
+  `TESTING-REPORTS.md`) will need re-verification once 4b is in.
+
+#### Phase 4c — Split / merge UX (third)
+
+Pure user-facing feature work on top of 4a + 4b's schema:
+
+- "Move N units of {asset} from Location A to Location B" — single
+  tx, decrement A's pivot row + increment-or-create B's pivot row.
+- "Move N units of {asset} from Kit X to Kit Y" — symmetric on
+  `AssetKit`.
+- Optional "Place N unplaced units at Location L" flow for the gap
+  between `Asset.quantity` and `sum(AssetLocation.quantity)`.
+- All flows gated on `Asset.type = QUANTITY_TRACKED`. INDIVIDUAL
+  assets keep the existing single-placement UX.
+
+#### Phase 4d — Auxiliary items
+
+Independent of the pivot work. Pick after 4a-4c are stable. Some may
+slip into Phase 5 if scope grows:
+
+- Kit integration polish + checkout/check-in with quantity handling.
+- Model grouping tool (bulk assign existing assets to a model).
+- Import/export with quantity columns.
+- Bulk operations awareness of asset types.
 - **Rebalance kit allocation** when assigning operator custody on a
   fully kit-allocated qty asset (auto-decrement kit row, paired
   events; edge case: kit row hits 0). After this lands, update the
   in-kit copy in `QuantityCustodyDialog` (currently says "kit count
   unaffected"; will be wrong post-rebalance).
 
-### Out of pivot scope (still gated)
+### Out of Phase 4 scope (still gated)
 
 - Open follow-ups (low-stock email recipient UI, backfill verification
   on prod snapshot) — independent.
 - Post-Phase-4 backlog (Sub-phase 3e calendar polish, Sub-phase 3d
-  follow-ups, reports verification) — pick up after Phase 4 lands.
+  follow-ups, reports verification) — pick up after **all** of 4a-4c
+  are stable. Reports verification specifically cares about both
+  pivots being in place.
 
 ---
 
