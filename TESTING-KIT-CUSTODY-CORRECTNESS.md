@@ -720,12 +720,12 @@ updated to honour the same invariant at the same time.
 
 ## 12. Browser-side / UI smoke for the column changes
 
-- [ ] Asset index loads with custody column visible. No
+- [x] Asset index loads with custody column visible. No
       console errors related to `formatCustodyList`,
       `TooltipProvider`, or `TeamMemberBadge`.
-- [ ] Resize the column / window → tooltip stays anchored to the
+- [x] Resize the column / window → tooltip stays anchored to the
       chip.
-- [ ] Dark mode (if the project has one) → custody column readable;
+- [x] Dark mode (if the project has one) → custody column readable;
       tooltip background contrasts with content.
 
 ### 12a. Folded-in display fixes (qty visibility on lists + pickers)

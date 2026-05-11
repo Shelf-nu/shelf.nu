@@ -921,12 +921,22 @@ session end.
 
 **Open follow-up work** (not bugs, deferred features):
 
-- **Reports port** — main's `reports/helpers.server.ts` (~1500
-  lines) and `scripts/seed-reporting-demo/*` were ported in commit
-  `12f2e8257` for compile cleanliness, but reports haven't been
-  end-to-end verified against the new BookingAsset / Custody[] /
-  ActivityEvent schema. Tracked as task #68 in the in-session task
-  list.
+- **Reports end-to-end verification — DEFERRED to post-Phase-4.**
+  Main's reports renderers + helpers + seed scripts were ported for
+  compile cleanliness in `12f2e8257` and the substantial 3-way
+  merge resolution on `helpers.server.ts` (overdue-items KPI math)
+  landed in `197b51c8c`. Phase 4 will reshape kit + location qty
+  data flows again (kit-aware utilisation, location split/merge,
+  group-by-model index), so running the full reports walkthrough
+  now would just have to be redone. The reports-testing scaffold
+  (`TESTING-REPORTS.md` at the worktree root) is ready to run
+  whenever Phase 4 schema settles. **Two seed bugs discovered during
+  the deferred-verification setup** were already fixed in `3f9a521f9`
+  so the next walkthrough can start with realistic data:
+  - `completedAt = to` exactly for COMPLETE / ARCHIVED outcomes
+    (Booking Compliance always showed 100%).
+  - `ONGOING_OVERDUE` outcome resolved to status `ONGOING` not
+    `OVERDUE` (Overdue Items report returned zero rows).
 - **Phase 4 rebalance** — assigning operator custody on a fully
   kit-allocated qty-tracked asset is currently blocked (`Assign`
   button disabled). Phase 4 should auto-decrement the kit row.
