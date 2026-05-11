@@ -376,14 +376,14 @@ These items were discussed during the team call and in Carlos's PR review. They 
 
 New questions that emerged from the review and team discussion.
 
-| #   | Question                                                 | Context                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Default scan action for quantity-tracked QR**          | When scanning a quantity-tracked asset's QR, should the default action be: View details, Quick adjust, or Start checkout? (Raised by Carlos)                                                                                                                                                                                                                                        |
-| 2   | **Communication flow when assets become unavailable** ✅ | **Resolved:** Show a warning at checkout time and let the user proceed with the reduced available quantity. The booking is not blocked — the user decides how to handle the shortfall. This may be revisited after real-world usage.                                                                                                                                                |
-| 3   | **Naming: "Asset Model" vs "Asset Type" vs other terms** | What label is clearest for users? "Model" is accurate for grouped individual assets (e.g., Dell Latitude 5550) but may confuse users who think of "model" differently.                                                                                                                                                                                                              |
-| 4   | **Concurrency strategy for quantity operations**         | Multiple users adjusting stock simultaneously (especially via QR quick-adjust) can cause race conditions. Needs a strategy: optimistic locking, database-level transactions with row locks, or serialized writes. Must be resolved before Phase 2 implementation.                                                                                                                   |
-| 5   | **BookingAsset schema for book-by-model** ✅             | **Resolved:** Option (c) — only create `BookingAsset` rows at scan-to-assign time. Model-level bookings store intent via a new `BookingModelRequest` model (assetModelId + quantity needed). Concrete `BookingAsset` rows are created when the user scans/assigns specific assets at checkout. This avoids the placeholder problem and keeps 40+ existing code locations untouched. |
-| 6   | **Split/merge data implications**                        | Splitting a quantity-tracked asset into two records requires decisions about in-flight bookings, custody records, and consumption log attribution. Needs detailed design before Phase 4.                                                                                                                                                                                            |
+| #   | Question                                                 | Context                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Default scan action for quantity-tracked QR**          | When scanning a quantity-tracked asset's QR, should the default action be: View details, Quick adjust, or Start checkout? (Raised by Carlos)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 2   | **Communication flow when assets become unavailable** ✅ | **Resolved:** Show a warning at checkout time and let the user proceed with the reduced available quantity. The booking is not blocked — the user decides how to handle the shortfall. This may be revisited after real-world usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 3   | **Naming: "Asset Model" vs "Asset Type" vs other terms** | What label is clearest for users? "Model" is accurate for grouped individual assets (e.g., Dell Latitude 5550) but may confuse users who think of "model" differently.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 4   | **Concurrency strategy for quantity operations**         | Multiple users adjusting stock simultaneously (especially via QR quick-adjust) can cause race conditions. Needs a strategy: optimistic locking, database-level transactions with row locks, or serialized writes. Must be resolved before Phase 2 implementation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 5   | **BookingAsset schema for book-by-model** ✅             | **Resolved:** Option (c) — only create `BookingAsset` rows at scan-to-assign time. Model-level bookings store intent via a new `BookingModelRequest` model (assetModelId + quantity needed). Concrete `BookingAsset` rows are created when the user scans/assigns specific assets at checkout. This avoids the placeholder problem and keeps 40+ existing code locations untouched.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 6   | **Split/merge data implications** ✅                     | **Resolved (2026-05-11):** Reject the original "split into two `Asset` rows" approach. Adopt a **pivot-table model**: `Asset → Location` and `Asset → Kit` become 1:N via new `AssetLocation` and `AssetKit` pivots, each carrying `(assetId, kitOrLocationId, quantity)`. INDIVIDUAL assets are constrained to at most one row in each pivot via a DB trigger (mirrors the Phase 2 `custody_individual_asset_check` pattern); QUANTITY_TRACKED can have many. **`Asset.quantity` stays canonical** — the total stock the org owns, independent of placements. Placement axes (Location, Kit, Custody, Booking) are **orthogonal claims**: an asset can be at Location X AND in someone's Custody AND part of Kit Y simultaneously, each describing a different facet of the same physical units. Each axis has its own `sum ≤ Asset.quantity` invariant but they don't interact. Split / merge becomes the natural user-facing flow of editing pivot rows (move N units from Loc A to Loc B = one row update + one row update in a single tx) rather than the destructive "fork an Asset" operation. Full design rationale + implementation plan in the Phase 4 section below. |
 
 ---
 
@@ -397,7 +397,7 @@ New questions that emerged from the review and team discussion.
 
 1. **Extend, don't fragment.** Add an `AssetType` enum to the existing `Asset` model rather than creating separate entity types. This preserves existing queries, filters, bulk operations, and UI patterns.
 2. **AssetModel is independent of Category.** An Asset has both a Category (broad organizational grouping like "Electronics") and an optional AssetModel (specific template like "Dell Latitude 5550"). They serve different purposes.
-3. **Quantity-tracked records are per-location.** When a quantity-tracked asset needs to exist in multiple locations, it is split into separate records. Each record has its own quantity. This keeps the `Asset → Location` relationship singular.
+3. **One Asset, many placements (pivot model).** A quantity-tracked asset that lives across multiple locations or kits stays a single `Asset` row. Its presence is described by per-placement rows in `AssetLocation` / `AssetKit` pivots, each carrying `quantity`. `Asset.quantity` stays as the canonical total the org owns. Placement axes (Location, Kit, Custody, Booking) are **orthogonal** — an asset can be at Location X **and** in Alice's Custody **and** part of Kit Y simultaneously, each describing a different facet of the same physical units. Each axis carries its own `sum ≤ Asset.quantity` invariant; the axes don't subtract from each other. INDIVIDUAL assets are constrained to at most one row per pivot via DB triggers (mirrors the Phase 2 `custody_individual_asset_check` pattern). _Updated 2026-05-11: this principle replaced the original "split into separate records" approach. Rationale + migration plan in the Phase 4 section + Open Question #6 resolution._
 4. **Custody and booking extend with quantities.** Instead of replacing the one-to-one custody model, quantity-aware custody uses a composite unique constraint. Bookings gain a quantity field on an explicit pivot table.
 5. **Permissions follow existing role model.** Quantity operations (quick-adjust, restock, custody assignment) use the same role-based permission checks as existing asset operations. No new permission types are introduced in v1.
 
@@ -706,18 +706,124 @@ All phases ship together as one release. This ordering reflects build dependenci
 
 ### Phase 4: Kit, Location, and Auxiliary Features
 
-**Goal:** Remaining integrations and polish.
+**Goal:** Land the pivot model for `Asset → Location` and `Asset → Kit`, then build the user-facing split/merge UX on top.
 
-**Prerequisites:** Open Question #6 (split/merge data implications) must be resolved before implementing the split/merge feature.
+**Prerequisites:** Open Question #6 resolved (2026-05-11) — see the resolution row in "Remaining Open Questions" and Design Principle #3 for the rationale. This phase ships as a single production release; intermediate dev phases below are organizational, not deployable.
 
-- Kit integration: quantity-tracked items in kits
-- Kit checkout/check-in with quantity handling
-- Location split and merge for quantity-tracked assets (**pending design — see Open Question #6**)
-- Model grouping tool (bulk assign existing assets to a model)
-- QR code handling for quantity-tracked assets and model groups
-- Asset list: group-by-model view
-- Import/export with quantity columns
-- Bulk operations awareness of asset types
+#### Schema changes (single migration)
+
+Two new pivot tables introduced; `Asset.locationId` and `Asset.kitId` dropped in the same migration after backfilling. **Note:** intermediate states where one relation is pivoted and the other isn't would corrupt the inventory equation; everything moves atomically.
+
+```prisma
+model AssetLocation {
+  id             String       @id @default(cuid())
+  asset          Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId        String
+  location       Location     @relation(fields: [locationId], references: [id])
+  locationId     String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String       // denormalised for cross-org isolation; trust-but-verify
+
+  /// Units of this asset physically present at this location.
+  /// For INDIVIDUAL: must be 1. For QUANTITY_TRACKED: positive integer.
+  /// Sum across rows for the same assetId must be <= Asset.quantity.
+  quantity       Int          @default(1)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([assetId, locationId])
+  @@index([locationId])
+  @@index([organizationId])
+}
+
+model AssetKit {
+  id             String       @id @default(cuid())
+  asset          Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId        String
+  kit            Kit          @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  kitId          String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  /// Units of this asset that belong to this kit (grouping/inventory claim,
+  /// not custody — see kit-custody discriminator for the custody side).
+  quantity       Int          @default(1)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([assetId, kitId])
+  @@index([kitId])
+  @@index([organizationId])
+}
+```
+
+Triggers (mirror `custody_individual_asset_check` from Phase 2):
+
+- `enforce_individual_asset_single_location` — INSERT/UPDATE on `AssetLocation`: rejects if `Asset.type = 'INDIVIDUAL'` AND a different row already exists for the same `assetId`.
+- `enforce_individual_asset_single_kit` — same for `AssetKit`.
+
+Plus a placement-invariant trigger per pivot: `sum(quantity) over rows with same assetId <= Asset.quantity`. Enforced at COMMIT-time (constraint trigger) to allow the typical "move N from Loc A to Loc B" two-row update inside a single transaction.
+
+The columns `Asset.locationId` and `Asset.kitId` are **dropped** in this migration after backfill. A pre-migration script copies the existing FK values into the new pivot rows; once the columns are gone, all queries must use the pivot.
+
+#### The inventory equation (orthogonal axes)
+
+`Asset.quantity` is canonical. Placement claims describe different facets:
+
+- **`AssetLocation`** — physical whereabouts. `sum ≤ Asset.quantity`; may be `<` for unplaced units (in transit, brand-new, lost without write-off, etc.).
+- **`AssetKit`** — kit grouping (organisational). `sum ≤ Asset.quantity`; may be `<` for units not in any kit.
+- **`Custody`** — who is responsible. `sum ≤ Asset.quantity`; subtracts from "available for new custody".
+- **`BookingAsset`** (ONGOING/OVERDUE only) — actively checked out. Subtracts from "available for new booking".
+
+**Axes are independent and may overlap on the same physical units.** Johnny holding 30 of Office 1 Floor 2's pens means `AssetLocation[Office 1 Floor 2].quantity = 100` AND `Custody[Johnny].quantity = 30`, not 100 and 70. Custody describes responsibility, not physical relocation.
+
+Available pool for new claims is the same Phase 2 formula: `Asset.quantity − sum(Custody.quantity) − sum(BookingAsset.quantity where booking is ONGOING/OVERDUE)`. Location and Kit don't subtract because they describe placement, not allocation.
+
+#### Phase 4 deliverables
+
+**Schema + invariant layer**
+
+- New `AssetLocation` and `AssetKit` pivot models + backfill migration.
+- DB triggers for INDIVIDUAL-single-row + placement-invariant `sum ≤ Asset.quantity`.
+- Drop `Asset.locationId` and `Asset.kitId` columns in the same migration.
+
+**Service layer**
+
+- `asset/service.server.ts` — replace `locationId` and `kitId` read/write paths with pivot upserts.
+- Restock continues to bump `Asset.quantity` (asset-level). Restock UX does not require a location — new units land in the unplaced pool and the user can optionally place them at a location afterward.
+- Kit-custody Option B math refactored to read `AssetKit.quantity` directly instead of inferring from `Asset.quantity − sum(operator custody)`.
+- All custody propagation (assign / release / kit-flow) re-grounded on the pivots.
+
+**Query / loader layer**
+
+- Location detail page (assets at this location → reads `AssetLocation`).
+- Kit detail page assets list (reads `AssetKit`, with the kit-aware qty display already in place).
+- Asset list location/kit columns (reads pivot, displays primary placement inline + `+N more` chip for multi-placement — mirror the multi-custodian column pattern from Phase 3d-Polish-2).
+- Filter `?location=X` and `?kit=Y` rewritten against pivot.
+- Pickers (kit manage-assets, location manage-assets, scan drawers) source from pivot.
+
+**Mobile API**
+
+- The mobile companion app (merged from main in `197b51c8c`) returns `Asset.location` and `Asset.kit` as singular objects. Decide at implementation time: (a) synthesise a "primary placement" for backward compatibility, or (b) ship a mobile-app PR alongside that consumes the new array shape. _Decision deferred to plan time._
+
+**User-facing split / merge UX**
+
+- "Move N units of Pens from Location A to Location B" → one tx that updates two `AssetLocation` rows (decrement A, increment-or-create B). UI lives on the asset detail page + the location detail page.
+- "Move N units of Pens from Kit X to Kit Y" → symmetric on `AssetKit`.
+- Optionally a `Place N units at Location L` flow for unplaced stock (filling the "asset.quantity − sum(placements)" gap).
+- All UX gated on `Asset.type = QUANTITY_TRACKED`. INDIVIDUAL assets keep the existing single-placement UX.
+
+**Auxiliary items (independent of pivot work)**
+
+- Kit integration polish for quantity-tracked items.
+- Kit checkout/check-in with quantity handling — uses Phase 3c partial-checkin plumbing.
+- Model grouping tool (bulk assign existing assets to an `AssetModel`).
+- QR code handling for quantity-tracked assets and model groups.
+- Asset list group-by-model view.
+- Import/export with quantity columns.
+- Bulk operations awareness of asset types.
 - **Rebalance kit allocation when assigning operator custody on a kit-allocated qty-tracked asset.** Today (Phase 3d-Polish): if all units of a qty-tracked asset are kit-allocated, the asset's Custody Breakdown Assign button is disabled (no free pool). Once the rebalance flow is built, assigning N units to an operator while units are kit-allocated should automatically decrement the kit's `Custody.quantity` by N, emit a `CUSTODY_RELEASED` event for the kit row, and emit `CUSTODY_ASSIGNED` for the new operator row in a single transaction. Edge case to design: kit row hits 0 — delete the row vs. keep at 0 (probably delete + emit a final `CUSTODY_RELEASED` for the residual).
 - **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
 - **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. The verification scaffold (`TESTING-REPORTS.md` at the worktree root) is ready to run once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).

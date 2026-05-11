@@ -720,10 +720,107 @@ it with the other 3e + 3d follow-up polish at the end.
 
 ## Phase 4 — Kit, Location, and Auxiliary
 
-- Kit integration with quantity-tracked items
-- Location split/merge for quantity-tracked assets (pending design)
-- Model grouping tool
+### Design decision (2026-05-11): pivot model for Asset → Location + Asset → Kit
+
+Resolves PRD Open Question #6. The original "split into two `Asset`
+rows" approach is **rejected**. Replacement: `Asset → Location` and
+`Asset → Kit` become 1:N via new `AssetLocation` and `AssetKit` pivot
+tables, each carrying `(assetId, kitOrLocationId, quantity)`.
+INDIVIDUAL assets are constrained to ≤1 row per pivot via DB triggers
+(mirrors the Phase 2 `custody_individual_asset_check` pattern);
+QUANTITY_TRACKED can have many.
+
+**Why pivot over split:**
+
+- One Asset row = one logical thing across the whole system. Reports,
+  search, history, custom fields, model membership, valuation all
+  operate on a single record. Splitting fragments identity and forces
+  every cross-cutting concern to reassemble.
+- Symmetric with Phase 2 Custody (1:1 → 1:N) and the Phase 3a
+  `BookingAsset` pivot. Same pattern, same migration shape, same
+  enforcement primitives (DB triggers + composite unique).
+- `AssetModel` returns to being a true template (default category /
+  valuation / model number) instead of a workaround for grouping
+  split children.
+
+**The inventory equation — orthogonal claim axes:**
+
+`Asset.quantity` stays canonical (total stock the org owns).
+Placement claims describe **different facets** of the same physical
+units; they don't subtract from each other:
+
+| Axis            | Question                | Constraint                                          |
+| --------------- | ----------------------- | --------------------------------------------------- |
+| `AssetLocation` | Where physically?       | `sum ≤ Asset.quantity` (may be `<`, unplaced stock) |
+| `AssetKit`      | In which kit grouping?  | `sum ≤ Asset.quantity` (may be `<`, ungrouped)      |
+| `Custody`       | Who is responsible?     | `sum ≤ Asset.quantity` (Phase 2 invariant)          |
+| `BookingAsset`  | What's reserved/active? | feeds availability formula                          |
+
+Critical correction (2026-05-11): **Custody and Location can coexist
+on the same physical units.** Johnny holding 30 of the 100 pens at
+Office 1 Floor 2 means `AssetLocation[Office 1 Floor 2].quantity =
+100` AND `Custody[Johnny].quantity = 30` — _not_ 100 and 70. Custody
+describes responsibility, not physical relocation. (Matches today's
+INDIVIDUAL behaviour where taking custody doesn't change the asset's
+location.)
+
+Available pool unchanged: `Asset.quantity − sum(Custody) −
+sum(ongoing BookingAsset)`. Location and Kit don't subtract from
+availability — they describe placement.
+
+**Restock stays asset-level.** New units bump `Asset.quantity`
+directly; the unplaced delta becomes the gap between `Asset.quantity`
+and `sum(AssetLocation.quantity)`. Users can optionally place new
+stock at a location afterward.
+
+### Shipping plan
+
+**Single production release.** Intermediate states where one relation
+is pivoted and the other isn't would break the inventory equation
+and the kit-custody Option B math, so the schema migration + the
+service / loader / route / UI changes ship together.
+
+Dev-order sub-phases (organisational only — single migration on
+production):
+
+1. **Schema + invariant layer.** Single Prisma migration introduces
+   `AssetLocation` + `AssetKit`, backfills from existing
+   `Asset.locationId` / `Asset.kitId` FKs, then drops those columns.
+   DB triggers enforce INDIVIDUAL-single-row + `sum ≤ Asset.quantity`
+   per pivot (constraint triggers so multi-row tx updates work).
+2. **Service layer.** `asset/service.server.ts` pivot upserts;
+   kit-custody Option B math refactored to read `AssetKit.quantity`
+   directly; custody propagation re-grounded; restock unchanged.
+3. **Query / loader layer.** Location detail, kit detail, asset list
+   columns, filters, pickers, scan drawers — all sourced from pivots.
+   Multi-placement display reuses the `+N more` chip pattern from the
+   Phase 3d-Polish-2 multi-custodian column.
+4. **Mobile API.** Decide at implementation time: synthesise a
+   "primary placement" for backward compat, or ship a mobile-app PR
+   in lockstep.
+5. **User-facing split / merge UX.** "Move N units from Loc A to Loc
+   B" and "Move N units from Kit X to Kit Y" — two-row updates in a
+   single tx. Optional "Place N unplaced units at Location L" flow
+   for the gap. Gated on `Asset.type = QUANTITY_TRACKED`.
+
+### Auxiliary items (independent of pivot work)
+
+- Kit integration polish + checkout/check-in with quantity handling
+- Model grouping tool (bulk assign existing assets to a model)
 - Import/export with quantity columns
+- Bulk operations awareness of asset types
+- **Rebalance kit allocation** when assigning operator custody on a
+  fully kit-allocated qty asset (auto-decrement kit row, paired
+  events; edge case: kit row hits 0). After this lands, update the
+  in-kit copy in `QuantityCustodyDialog` (currently says "kit count
+  unaffected"; will be wrong post-rebalance).
+
+### Out of pivot scope (still gated)
+
+- Open follow-ups (low-stock email recipient UI, backfill verification
+  on prod snapshot) — independent.
+- Post-Phase-4 backlog (Sub-phase 3e calendar polish, Sub-phase 3d
+  follow-ups, reports verification) — pick up after Phase 4 lands.
 
 ---
 
