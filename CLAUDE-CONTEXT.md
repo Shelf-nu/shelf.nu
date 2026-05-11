@@ -642,10 +642,14 @@ wording corrected to point at the assets index (where
 `bulkRemoveAssetsFromKits` actually surfaces); section 13 final
 checks ticked.
 
-### Sub-phase 3d follow-ups (NOT STARTED)
+### Sub-phase 3d follow-ups (DEFERRED — picked up after Phase 4)
 
 Found during manual testing of 3d — worth a dedicated sub-phase
-rather than stretching 3d itself.
+rather than stretching 3d itself. **Sequencing decision (2026-05-08):
+defer until after Phase 4 ships.** Phase 4 reshapes kit + location qty
+flows (split/merge, group-by-model view design) and any UX direction
+for "models" will likely influence the bulk-create and group-by-model
+items here. Doing them now means redoing them.
 
 1. **Bulk-create assets per model.** Currently you can only create
    one asset at a time from an `AssetModel`. For orgs with large
@@ -703,7 +707,13 @@ Natural order: bulk-create first (operators need to populate
 models), then import round-trip (CSV parity with categories /
 kits), then index grouping (last because it's the most UX-heavy).
 
-### Sub-phase 3e: Calendar + Polish (NOT STARTED)
+### Sub-phase 3e: Calendar + Polish (DEFERRED — picked up after Phase 4)
+
+**Sequencing decision (2026-05-08): defer until after Phase 4 ships.**
+Multi-booking edge cases on the same qty pool are entangled with the
+Phase 4 split/merge mechanic (PRD Open Question #6) and kit-aware qty
+behaviour. Calendar tooltip work is small but isolated; we'll bundle
+it with the other 3e + 3d follow-up polish at the end.
 
 - Calendar tooltip quantity info
 - Edge cases: multiple bookings from same qty pool, overdue handling

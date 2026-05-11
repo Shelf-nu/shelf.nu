@@ -700,7 +700,9 @@ All phases ship together as one release. This ordering reflects build dependenci
 - Scan-to-assign at checkout for model-level bookings
 - Conflict detection for quantity-aware and model-level bookings
 - Partial check-in with consumption reports (returnable assets)
-- Calendar view updates
+- ~~Calendar view updates~~ — **deferred to post-Phase-4.** Calendar tooltip quantity info + multi-bookings-on-same-pool edge cases are entangled with Phase 4's split/merge mechanic; bundling with the other 3e/3d-follow-up polish at the end avoids redoing the work.
+
+> **Sub-phase 3d follow-ups** (bulk-create N assets per AssetModel, AssetModel CSV import round-trip, asset index group-by-model view) and **Sub-phase 3e** (calendar polish) are both **deferred to post-Phase-4** as of 2026-05-08. Reasoning: Phase 4 reshapes kit + location qty flows and the "model" UX direction. Doing these now means redoing them. Detailed bullets live in `CLAUDE-CONTEXT.md` → "Sub-phase 3d follow-ups" + "Sub-phase 3e: Calendar + Polish".
 
 ### Phase 4: Kit, Location, and Auxiliary Features
 
@@ -719,6 +721,12 @@ All phases ship together as one release. This ordering reflects build dependenci
 - **Rebalance kit allocation when assigning operator custody on a kit-allocated qty-tracked asset.** Today (Phase 3d-Polish): if all units of a qty-tracked asset are kit-allocated, the asset's Custody Breakdown Assign button is disabled (no free pool). Once the rebalance flow is built, assigning N units to an operator while units are kit-allocated should automatically decrement the kit's `Custody.quantity` by N, emit a `CUSTODY_RELEASED` event for the kit row, and emit `CUSTODY_ASSIGNED` for the new operator row in a single transaction. Edge case to design: kit row hits 0 — delete the row vs. keep at 0 (probably delete + emit a final `CUSTODY_RELEASED` for the residual).
 - **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
 - **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. The verification scaffold (`TESTING-REPORTS.md` at the worktree root) is ready to run once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).
+
+> **Post-Phase-4 cleanup backlog (re-pick up once the Phase 4 schema is stable):**
+>
+> - **Sub-phase 3e — Calendar + Polish.** Calendar tooltip quantity info, multi-bookings-on-same-pool edge cases, overdue handling polish.
+> - **Sub-phase 3d follow-ups.** Bulk-create N assets per `AssetModel`, `AssetModel` CSV import round-trip (`createAssetModelsIfNotExists` helper), asset index group-by-model view. Detailed scope in `CLAUDE-CONTEXT.md`.
+> - **Reports end-to-end verification** (see bullet above) — uses `TESTING-REPORTS.md` scaffold.
 
 > **Deferred post-launch:** Consumption dashboard (consumption rate, top consumed items, cost tracking) — see Decision #3.
 
