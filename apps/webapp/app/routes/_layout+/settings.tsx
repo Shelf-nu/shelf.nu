@@ -60,6 +60,9 @@ export default function SettingsPage() {
   let items = [
     { to: "general", content: "General" },
     ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
+    ...(!_isPersonalOrg
+      ? [{ to: "signed-custody", content: "Signed custody" }]
+      : []),
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
@@ -70,9 +73,14 @@ export default function SettingsPage() {
   if (isBaseOrSelfService) {
     items = items.filter(
       (item) =>
-        !["custom-fields", "team", "general", "bookings", "emails"].includes(
-          item.to
-        )
+        ![
+          "custom-fields",
+          "team",
+          "general",
+          "bookings",
+          "signed-custody",
+          "emails",
+        ].includes(item.to)
     );
   }
 
