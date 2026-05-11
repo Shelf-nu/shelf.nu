@@ -1,12 +1,15 @@
-import { describe, expect, it, vitest, beforeEach } from "vitest";
+import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { getCategory } from "~/modules/category/service.server";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  getActiveCustomFieldsForAsset,
+  parseAssetValuation,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
   updateAsset,
@@ -90,6 +93,11 @@ vitest.mock("~/modules/user/service.server", () => ({
 // why: avoid creating actual notes during relink tests
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: control custom-field lookup so we can assert org+category scoping
+vitest.mock("~/modules/custom-field/service.server", () => ({
+  getActiveCustomFields: vitest.fn(),
 }));
 
 describe("relinkAssetQrCode (asset)", () => {
@@ -456,6 +464,119 @@ describe("updateAsset cross-org guards", () => {
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { id: "location-from-org-B", organizationId: "org-A" },
       select: { id: true },
+    });
+  });
+});
+
+describe("parseAssetValuation", () => {
+  it("returns null for null input", () => {
+    expect(parseAssetValuation(null)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseAssetValuation("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(parseAssetValuation("   ")).toBeNull();
+  });
+
+  it("parses a valid integer", () => {
+    expect(parseAssetValuation("42")).toBe(42);
+  });
+
+  it("parses a valid decimal", () => {
+    expect(parseAssetValuation("1234.56")).toBe(1234.56);
+  });
+
+  it("parses a negative number", () => {
+    expect(parseAssetValuation("-10")).toBe(-10);
+  });
+
+  it("throws ShelfError 400 for non-numeric input", () => {
+    expect(() => parseAssetValuation("abc")).toThrowError(
+      expect.objectContaining({
+        status: 400,
+        message: "Value must be a valid number",
+      })
+    );
+  });
+
+  it("throws ShelfError 400 for Infinity", () => {
+    expect(() => parseAssetValuation("Infinity")).toThrow(ShelfError);
+  });
+
+  it("throws ShelfError 400 for -Infinity", () => {
+    expect(() => parseAssetValuation("-Infinity")).toThrow(ShelfError);
+  });
+});
+
+describe("getActiveCustomFieldsForAsset", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Reset the findUnique mock queue fully so that "once" values from other
+    // describe blocks (e.g. updateAsset cross-org guards) don't leak in.
+    vi.mocked(db.asset.findUnique).mockReset();
+  });
+
+  it("looks up the asset and forwards its categoryId to getActiveCustomFields", async () => {
+    const assetFindUniqueMock = vi.mocked(db.asset.findUnique);
+    assetFindUniqueMock.mockResolvedValue({
+      id: "asset-1",
+      categoryId: "cat-1",
+    } as any);
+    const getActiveCustomFieldsMock = vi.mocked(getActiveCustomFields);
+    getActiveCustomFieldsMock.mockResolvedValue([
+      { id: "cf-1", name: "Serial", required: false } as any,
+    ]);
+
+    const result = await getActiveCustomFieldsForAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+    });
+
+    expect(assetFindUniqueMock).toHaveBeenCalledWith({
+      where: { id: "asset-1", organizationId: "org-1" },
+      select: { categoryId: true },
+    });
+    expect(getActiveCustomFieldsMock).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      category: "cat-1",
+    });
+    expect(result).toEqual([{ id: "cf-1", name: "Serial", required: false }]);
+  });
+
+  it("throws a 404 ShelfError when the asset does not exist in this org", async () => {
+    const assetFindUniqueMock = vi.mocked(db.asset.findUnique);
+    assetFindUniqueMock.mockResolvedValue(null);
+    const getActiveCustomFieldsMock = vi.mocked(getActiveCustomFields);
+
+    await expect(
+      getActiveCustomFieldsForAsset({
+        id: "asset-from-other-org",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrowError(expect.objectContaining({ status: 404 }));
+    expect(getActiveCustomFieldsMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards null categoryId when asset is uncategorized", async () => {
+    const assetFindUniqueMock = vi.mocked(db.asset.findUnique);
+    assetFindUniqueMock.mockResolvedValue({
+      id: "asset-1",
+      categoryId: null,
+    } as any);
+    const getActiveCustomFieldsMock = vi.mocked(getActiveCustomFields);
+    getActiveCustomFieldsMock.mockResolvedValue([]);
+
+    await getActiveCustomFieldsForAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+    });
+
+    expect(getActiveCustomFieldsMock).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      category: null,
     });
   });
 });

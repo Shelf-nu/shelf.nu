@@ -24,6 +24,7 @@ import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
 import {
@@ -1825,19 +1826,33 @@ export function requireAuditAssigneeForBaseSelfService({
 }
 
 /**
- * Cancels an audit session
- * Only the creator can cancel an audit
- * Cannot cancel if audit is already COMPLETED or CANCELLED
+ * Cancels an audit session.
+ *
+ * The creator of an audit can always cancel it. Workspace admins and owners
+ * can also cancel any audit in their org (regardless of who created it) so
+ * that team-managed audits don't get stuck when the creator is unavailable
+ * or no longer responsible — this matches archive/delete permissions.
+ *
+ * Cannot cancel an audit that is already COMPLETED, CANCELLED, or ARCHIVED.
+ *
+ * @param isAdminOrOwner - Whether the acting user is admin/owner in the
+ *   audit's organization. The route layer derives this from the workspace
+ *   role and passes it in; the service trusts it.
+ * @throws {ShelfError} 404 if the audit isn't found, 403 if the user is
+ *   neither the creator nor an admin/owner, 400 if the audit is in a
+ *   terminal status that can't be cancelled.
  */
 export async function cancelAuditSession({
   auditSessionId,
   organizationId,
   userId,
+  isAdminOrOwner,
   hints,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
+  isAdminOrOwner: boolean;
   hints: ClientHint;
 }) {
   try {
@@ -1893,11 +1908,14 @@ export async function cancelAuditSession({
       organizationId,
     });
 
-    // Check if user is the creator
-    if (auditSession.createdById !== userId) {
+    // Allow the creator to cancel their own audit. Also allow workspace
+    // admins/owners to cancel any audit in the org — needed when team
+    // members create audits the supervisor needs to clean up later.
+    if (auditSession.createdById !== userId && !isAdminOrOwner) {
       throw new ShelfError({
         cause: null,
-        message: "Only the audit creator can cancel the audit",
+        message:
+          "Only the audit creator or a workspace admin/owner can cancel the audit",
         additionalData: {
           auditSessionId,
           userId,
@@ -1922,16 +1940,50 @@ export async function cancelAuditSession({
       });
     }
 
-    // Update audit status to CANCELLED
-    const updatedAudit = await db.auditSession.update({
-      where: { id: auditSessionId },
-      data: { status: AuditStatus.CANCELLED, cancelledAt: new Date() },
+    // Atomic state transition guarded by status. The earlier read-then-check
+    // is informational only — between that read and this write, a concurrent
+    // complete/archive could land. updateMany with a status guard prevents
+    // overwriting a now-terminal audit and skips the side effects (note,
+    // event, email, reminder cancel) when nothing actually changed. Same
+    // pattern the delete path uses.
+    const cancelledAt = new Date();
+    const transition = await db.auditSession.updateMany({
+      where: {
+        id: auditSessionId,
+        organizationId,
+        status: {
+          notIn: [
+            AuditStatus.COMPLETED,
+            AuditStatus.CANCELLED,
+            AuditStatus.ARCHIVED,
+          ],
+        },
+      },
+      data: { status: AuditStatus.CANCELLED, cancelledAt },
     });
 
-    // Fetch acting user's info for the activity note
+    if (transition.count !== 1) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Audit status changed before cancellation could complete. Please refresh and try again.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 409,
+      });
+    }
+
+    // Re-fetch to return the up-to-date row (preserves the previous return
+    // contract — callers expect the AuditSession back).
+    const updatedAudit = await db.auditSession.findUniqueOrThrow({
+      where: { id: auditSessionId },
+    });
+
+    // Fetch acting user's info for the activity note + email attribution.
+    // displayName is selected so resolveUserDisplayName picks it up.
     const actingUser = await db.user.findFirst({
       where: { id: userId },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, lastName: true, displayName: true },
     });
 
     // Create activity note for cancellation
@@ -1958,15 +2010,62 @@ export async function cancelAuditSession({
       auditSessionId,
     });
 
-    // Send cancellation email to assignees (excluding creator)
-    const assigneesToNotify = auditSession.assignments.filter(
-      (assignment) => assignment.userId !== userId && assignment.user.email
-    );
+    // Build the notify list for the cancellation email:
+    //  - All assignees other than the canceller (existing behavior)
+    //  - PLUS the audit creator when they didn't cancel themselves and
+    //    aren't already an assignee — without this branch, an admin
+    //    cancelling a team member's audit would silently fail to inform
+    //    the creator that their audit was killed.
+    const assigneesToNotify: Array<{
+      userId: string;
+      user: {
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+        displayName?: string | null;
+      };
+    }> = auditSession.assignments
+      .filter(
+        (assignment) => assignment.userId !== userId && assignment.user.email
+      )
+      .map((assignment) => ({
+        userId: assignment.userId,
+        user: assignment.user,
+      }));
 
-    // Use email helper to send cancellation emails with HTML template
+    const creatorAlreadyNotified = assigneesToNotify.some(
+      (a) => a.userId === auditSession.createdById
+    );
+    if (
+      auditSession.createdById !== userId &&
+      !creatorAlreadyNotified &&
+      auditSession.createdBy.email
+    ) {
+      assigneesToNotify.push({
+        userId: auditSession.createdById,
+        user: {
+          email: auditSession.createdBy.email,
+          firstName: auditSession.createdBy.firstName,
+          lastName: auditSession.createdBy.lastName,
+          displayName: auditSession.createdBy.displayName,
+        },
+      });
+    }
+
+    // Use email helper to send cancellation emails with HTML template.
+    // The fallback is role-aware: when the acting user has no resolvable
+    // display name (e.g. a freshly-created account), pick a label that
+    // matches who actually cancelled — "a workspace admin" for the
+    // admin/owner branch, "the audit creator" otherwise. Avoids the
+    // earlier hard-coded "an admin" mis-attributing creator-cancels.
+    const resolvedCancellerName = resolveUserDisplayName(actingUser);
+    const fallbackCancellerName = isAdminOrOwner
+      ? "a workspace admin"
+      : "the audit creator";
     sendAuditCancelledEmails({
       audit: auditSession,
       assigneesToNotify,
+      cancelledByName: resolvedCancellerName || fallbackCancellerName,
       hints,
     });
 

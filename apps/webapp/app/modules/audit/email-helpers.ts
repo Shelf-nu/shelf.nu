@@ -70,12 +70,24 @@ export const auditAssignedEmailContent = (args: BasicAuditEmailContentArgs) =>
   });
 
 /**
- * Email content when an audit is cancelled
+ * Builds the plain-text body for the audit-cancelled email.
+ *
+ * `cancelledByName` is the user who actually performed the cancellation —
+ * may differ from `creatorName` (the audit's original creator) when an
+ * admin/owner cancels an audit a team member created.
+ *
+ * @param args - Standard audit email args plus the resolved canceller name.
+ * @param args.cancelledByName - Display name of the acting canceller, used
+ *   in the body sentence ("cancelled by {cancelledByName}").
+ * @returns The full plain-text email body produced by
+ *   {@link baseAuditTextEmailContent}.
  */
-export const auditCancelledEmailContent = (args: BasicAuditEmailContentArgs) =>
+export const auditCancelledEmailContent = (
+  args: BasicAuditEmailContentArgs & { cancelledByName: string }
+) =>
   baseAuditTextEmailContent({
     ...args,
-    emailContent: `The audit "${args.auditName}" has been cancelled by ${args.creatorName}. This audit is no longer active.`,
+    emailContent: `The audit "${args.auditName}" has been cancelled by ${args.cancelledByName}. This audit is no longer active.`,
   });
 
 /**
@@ -202,11 +214,30 @@ export async function sendAuditAssignedEmail({
 }
 
 /**
- * Sends cancellation emails to all assignees (excluding the creator)
+ * Sends an "audit cancelled" email to each provided recipient.
+ *
+ * Recipient construction (assigneesToNotify) is the caller's responsibility —
+ * the service decides who to notify. This function only handles delivery and
+ * fan-out: per recipient it builds the plain-text + HTML versions, calls
+ * {@link sendEmail}, and logs success or wraps any per-send failure in a
+ * {@link ShelfError} via {@link Logger.error}. Failures for one recipient do
+ * not stop sends to the others.
+ *
+ * @param args
+ * @param args.audit - Audit record with the metadata embedded in the email
+ *   (name, dueDate, organization, asset count, etc.).
+ * @param args.assigneesToNotify - Recipients with email + display fields.
+ *   Pass an empty array to skip sending entirely.
+ * @param args.cancelledByName - Display name of the acting canceller. May
+ *   differ from `audit.createdBy` when an admin/owner cancels someone
+ *   else's audit; recipients see this name in the body, not the creator's.
+ * @param args.hints - Client hints used to localise dates in the email.
+ * @returns void. Per-recipient send errors are logged, not thrown.
  */
 export function sendAuditCancelledEmails({
   audit,
   assigneesToNotify,
+  cancelledByName,
   hints,
 }: {
   audit: AuditForEmail;
@@ -219,6 +250,12 @@ export function sendAuditCancelledEmails({
       displayName?: string | null;
     };
   }>;
+  /**
+   * Display name of the user who actually cancelled the audit. May differ
+   * from the original creator when an admin/owner cancels someone else's
+   * audit — recipients see the real canceller, not the creator.
+   */
+  cancelledByName: string;
   hints: ClientHint;
 }) {
   const creatorName = resolveUserDisplayName(audit.createdBy);
@@ -244,6 +281,7 @@ export function sendAuditCancelledEmails({
           auditName: audit.name,
           assetsCount: assetCount,
           creatorName,
+          cancelledByName,
           description: audit.description,
           dueDate: audit.dueDate,
           hints,
