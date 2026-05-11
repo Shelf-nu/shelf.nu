@@ -593,13 +593,13 @@ function AssetInventoryPreview({
                   {row.custodian || "—"}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation
-                    ? formatCurrency({
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
                         value: row.valuation,
                         currency: pdfMeta.currency,
                         locale: pdfMeta.locale,
-                      })
-                    : "—"}
+                      })}
                 </td>
               </tr>
             ))}
@@ -684,13 +684,13 @@ function CustodySnapshotPreview({
                   {row.daysInCustody}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation
-                    ? formatCurrency({
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
                         value: row.valuation,
                         currency: pdfMeta.currency,
                         locale: pdfMeta.locale,
-                      })
-                    : "—"}
+                      })}
                 </td>
               </tr>
             ))}
