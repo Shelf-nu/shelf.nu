@@ -68,12 +68,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 title: true,
                 status: true,
                 mainImage: true,
-                kitId: true,
                 category: {
                   select: { id: true, name: true, color: true },
                 },
-                kit: {
-                  select: { id: true, name: true },
+                // Pull the asset's kit through the `AssetKit` pivot.
+                // `@@unique([assetId])` keeps the link 1:1, so the first
+                // pivot row (oldest by createdAt) is a lossless "primary
+                // kit" for mobile clients that expect a singular shape.
+                assetKits: {
+                  select: { kit: { select: { id: true, name: true } } },
+                  orderBy: { createdAt: "asc" },
+                  take: 1,
                 },
               },
             },
@@ -99,8 +104,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
     }
 
-    // Flatten the pivot rows so the JSON contract matches main's expectation.
-    const assets = booking.bookingAssets.map((ba) => ba.asset);
+    // Synthesise singular `kit` / `kitId` keys from the `AssetKit` pivot
+    // so the mobile JSON contract stays flat — clients consume a single
+    // kit per asset, not the pivot array. We also strip the raw
+    // `assetKits` field from the response.
+    const assets = booking.bookingAssets.map((ba) => {
+      const { assetKits, ...rest } = ba.asset;
+      const primaryKit = assetKits[0]?.kit ?? null;
+      return {
+        ...rest,
+        kit: primaryKit,
+        kitId: primaryKit?.id ?? null,
+      };
+    });
 
     // Compute booking capability flags
     const checkedOutCount = assets.filter(

@@ -190,13 +190,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const expectedAssets: BookingExpectedAsset[] = booking.bookingAssets.map(
       (ba) => {
         const asset = ba.asset;
+        // AssetKit pivot for downstream UI consumption.
+        const pivotKit = asset.assetKits[0]?.kit ?? null;
         const base = {
           id: asset.id,
           title: asset.title,
           mainImage: asset.mainImage ?? null,
           thumbnailImage: asset.thumbnailImage ?? null,
-          kitId: asset.kitId ?? null,
-          kitName: asset.kit?.name ?? null,
+          kitId: pivotKit?.id ?? null,
+          kitName: pivotKit?.name ?? null,
         };
 
         if (asset.type === "QUANTITY_TRACKED") {
@@ -241,18 +243,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     >();
     for (const ba of booking.bookingAssets) {
-      const kit = ba.asset.kit;
-      // `kitId` is the source of truth for "this asset belongs to a
-      // kit on this booking". When it's null, `kit` is also null.
-      if (!kit || !ba.asset.kitId) continue;
-      const entry = kitMap.get(ba.asset.kitId) ?? {
-        id: ba.asset.kitId,
+      const kit = ba.asset.assetKits[0]?.kit ?? null;
+      const kitId = kit?.id ?? null;
+      if (!kit || !kitId) continue;
+      const entry = kitMap.get(kitId) ?? {
+        id: kitId,
         name: kit.name,
         mainImage: kit.image ?? null,
         assetIds: [],
       };
       entry.assetIds.push(ba.asset.id);
-      kitMap.set(ba.asset.kitId, entry);
+      kitMap.set(kitId, entry);
     }
     const expectedKits = [...kitMap.values()];
 

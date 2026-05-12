@@ -237,7 +237,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
       id: "kit-123",
       name: "Test Kit",
       custody: { id: "kc-1" },
-      assets: [],
+      assetKits: [],
     } as any);
 
     const formData = new FormData();
@@ -346,7 +346,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
       id: "kit-123",
       name: "Test Kit",
       custody: { id: "kc-1" },
-      assets: [],
+      assetKits: [],
     } as any);
 
     const formData = new FormData();
@@ -398,7 +398,10 @@ describe("kits/$kitId/assets/assign-custody", () => {
       id: "kit-123",
       name: "Mixed Kit",
       custody: { id: "kc-99" },
-      assets: [{ id: "asset-individual" }, { id: "asset-qty" }],
+      assetKits: [
+        { asset: { id: "asset-individual" } },
+        { asset: { id: "asset-qty" } },
+      ],
     } as any);
 
     // The helper reads existing custody via tx.asset.findMany.
@@ -480,7 +483,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
       id: "kit-123",
       name: "Camera Kit",
       custody: { id: "kc-camera" },
-      assets: [{ id: "drill" }, { id: "pens" }],
+      assetKits: [{ asset: { id: "drill" } }, { asset: { id: "pens" } }],
     } as any);
 
     dbMocks.asset.findMany.mockResolvedValue([

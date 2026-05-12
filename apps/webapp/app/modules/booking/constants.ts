@@ -118,7 +118,6 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
-          kitId: true,
           valuation: true,
           // `mainImage`/`thumbnailImage` are consumed by the partial
           // check-in drawer's "expected assets" list (see the loader in
@@ -140,11 +139,16 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // drawer so we can render a kit summary row grouped from
           // `booking.bookingAssets`. Previously only `name` was selected
           // because no downstream consumer needed the rest.
-          kit: {
+          assetKits: {
             select: {
-              id: true,
-              name: true,
-              image: true,
+              kitId: true,
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                },
+              },
             },
           },
         },

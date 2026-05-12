@@ -119,7 +119,7 @@ describe("POST /api/mobile/asset/update-location", () => {
       id: "asset-1",
       title: "Test Laptop",
       location: { id: "loc-old", name: "Old Office" },
-      kit: null,
+      assetKits: [],
     });
     (db.location.findFirst as any).mockResolvedValue({
       id: "loc-new",
@@ -172,7 +172,7 @@ describe("POST /api/mobile/asset/update-location", () => {
       id: "asset-1",
       title: "Kit Asset",
       location: null,
-      kit: { id: "kit-1", name: "Server Kit" },
+      assetKits: [{ kit: { id: "kit-1", name: "Server Kit" } }],
     });
 
     const request = createRequest({

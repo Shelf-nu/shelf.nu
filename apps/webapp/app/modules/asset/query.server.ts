@@ -710,34 +710,34 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     return addUpcomingBookingsFilter(whereClause, filter);
   }
 
-  // Add kit handling using asset's kitId since we're using LEFT JOIN
+  // Kit handling — an asset's kit membership lives on the `AssetKit`
+  // pivot. `@@unique([assetId])` enforces "at most one kit per asset",
+  // so EXISTS checks against AssetKit give a yes/no answer per asset.
   if (filter.name === "kit") {
     switch (filter.operator) {
       case "is":
         if (filter.value === "in-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
         if (filter.value === "without-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
-        //Reference the Kit table for name comparison
+        // Match assets linked to the specified kit via AssetKit.
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Kit"
-          WHERE id = a."kitId" AND id = ${filter.value}
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ${filter.value}
         )`;
 
       case "isNot":
         if (filter.value === "in-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
         if (filter.value === "without-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
-        return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (
-            SELECT 1 FROM public."Kit"
-            WHERE id = a."kitId" AND id = ${filter.value}
-          ) OR a."kitId" IS NULL
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ${filter.value}
         )`;
 
       case "containsAny": {
@@ -759,7 +759,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
         // Handle "in-kit" - assets that are in a kit
         if (hasInKit) {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
 
         // Handle "without-kit" - assets that are not in a kit
@@ -767,7 +767,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           const kitIds = values.filter((v) => v !== "without-kit");
 
           if (kitIds.length === 0) {
-            return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+            return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
           }
 
           const kitIdsArray = Prisma.join(
@@ -775,10 +775,10 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             ", "
           );
           return Prisma.sql`${whereClause} AND (
-            a."kitId" IS NULL
+            NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)
             OR EXISTS (
-              SELECT 1 FROM public."Kit"
-              WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
+              SELECT 1 FROM public."AssetKit" ak
+              WHERE ak."assetId" = a.id AND ak."kitId" = ANY(ARRAY[${kitIdsArray}]::text[])
             )
           )`;
         }
@@ -788,8 +788,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Kit"
-          WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ANY(ARRAY[${kitIdsArray}]::text[])
         )`;
       }
 
@@ -1885,7 +1885,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a.quantity AS "assetQuantity",
       a."unitOfMeasure" AS "assetUnitOfMeasure",
       a."availableToBook" AS "assetAvailableToBook",
-      a."kitId" AS "assetKitId",
+      ak."kitId" AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",
@@ -1998,7 +1998,12 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
-  LEFT JOIN public."Kit" k ON a."kitId" = k.id
+  -- Kit membership goes through the AssetKit pivot. The
+  -- @@unique([assetId]) constraint on AssetKit guarantees at most one
+  -- pivot row per asset, so this LEFT JOIN still yields one output row
+  -- per asset (no fan-out).
+  LEFT JOIN public."AssetKit" ak ON ak."assetId" = a.id
+  LEFT JOIN public."Kit" k ON ak."kitId" = k.id
   LEFT JOIN public."Category" c ON a."categoryId" = c.id
   LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
   LEFT JOIN public."Location" l ON a."locationId" = l.id

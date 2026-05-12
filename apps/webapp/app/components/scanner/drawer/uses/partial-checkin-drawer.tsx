@@ -444,7 +444,8 @@ export default function PartialCheckinDrawer({
         )
         .map((a) => a.id),
       ...kits.flatMap((k) =>
-        k.assets
+        k.assetKits
+          .map((ak) => ak.asset)
           .filter(
             (a) => bookingAssetIds.has(a.id) && !checkedInAssetIds.has(a.id)
           )
@@ -563,7 +564,9 @@ export default function PartialCheckinDrawer({
 
   // Kit blockers - kits not in this booking
   const kitsNotInBooking = kits
-    .filter((kit) => !kit.assets.some((a) => bookingAssetIds.has(a.id)))
+    .filter(
+      (kit) => !kit.assetKits.some((ak) => bookingAssetIds.has(ak.asset.id))
+    )
     .map((kit) => kit.id);
 
   const qrIdsOfKitsNotInBooking = Object.entries(items)
@@ -577,9 +580,9 @@ export default function PartialCheckinDrawer({
   const alreadyCheckedInKits = kits
     .filter((kit) => {
       // Get kit assets that are in this booking
-      const kitAssetsInBooking = kit.assets.filter((asset) =>
-        bookingAssetIds.has(asset.id)
-      );
+      const kitAssetsInBooking = kit.assetKits
+        .map((ak) => ak.asset)
+        .filter((asset) => bookingAssetIds.has(asset.id));
 
       // Kit is considered already checked in only if ALL its assets in booking are checked in
       return (
@@ -611,10 +614,13 @@ export default function PartialCheckinDrawer({
 
   // Check for assets that belong to scanned kits
   assets.forEach((asset) => {
-    if (!asset.kitId) return;
+    // Optional chaining on `assetKits` itself keeps stale fixtures that
+    // never populated the relation from crashing the drawer.
+    const assetKitId = asset.assetKits?.[0]?.kitId;
+    if (!assetKitId) return;
 
     // Check if this asset's kit is also scanned
-    const kitIsScanned = kits.some((kit) => kit.id === asset.kitId);
+    const kitIsScanned = kits.some((kit) => kit.id === assetKitId);
     if (kitIsScanned && bookingAssetIds.has(asset.id)) {
       redundantAssetIds.push(asset.id);
 
@@ -1692,22 +1698,25 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     booking.status
   );
 
+  // `assetKits` itself tolerates fixtures without the pivot relation.
+  const assetKitId = asset.assetKits?.[0]?.kitId;
+
   // Check if this asset is redundant (kit is also scanned)
   const isRedundant =
-    !!asset.kitId &&
+    !!assetKitId &&
     (() => {
       const kits = Object.values(items)
         .filter((item) => !!item && item.data && item.type === "kit")
         .map((item) => item?.data as any);
-      return kits.some((kit) => kit.id === asset.kitId);
+      return kits.some((kit) => kit.id === assetKitId);
     })();
 
   // Check if this is the last asset of a kit in this booking
   const isLastKitAssetInBooking =
-    !!asset.kitId &&
+    !!assetKitId &&
     (() => {
       const kitBookingAssets = booking.bookingAssets.filter(
-        (ba) => ba.asset?.kitId === asset.kitId
+        (ba) => ba.asset?.assetKits[0]?.kitId === assetKitId
       );
       return (
         kitBookingAssets.length === 1 &&
@@ -1754,7 +1763,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     },
     // Custom preset for kit assets - different message based on whether it's the last one
     {
-      condition: !!asset.kitId && !isRedundant, // Only show if not redundant
+      condition: !!assetKitId && !isRedundant, // Only show if not redundant
       badgeText: "Part of kit",
       tooltipTitle: "Asset is part of a kit",
       tooltipContent: isLastKitAssetInBooking
@@ -2033,10 +2042,9 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const bookingAssetIds = new Set(
     booking.bookingAssets.map((ba) => ba.assetId)
   );
-  const kitAssetsInBooking = kit.assets.filter((a) =>
-    bookingAssetIds.has(a.id)
-  );
-  const allKitAssetsInBooking = kitAssetsInBooking.length === kit.assets.length;
+  const kitAssets = kit.assetKits.map((ak) => ak.asset);
+  const kitAssetsInBooking = kitAssets.filter((a) => bookingAssetIds.has(a.id));
+  const allKitAssetsInBooking = kitAssetsInBooking.length === kitAssets.length;
   const noKitAssetsInBooking = kitAssetsInBooking.length === 0;
 
   // Calculate remaining assets that are still CHECKED_OUT
@@ -2081,7 +2089,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
     // Removed checkedOut label - expected in check-in context
     kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kitAssets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
     ),
     // Custom preset for "not in booking"
     {
@@ -2095,7 +2103,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     // Custom preset for "partially in booking" - informational only
     {
       condition: !allKitAssetsInBooking && !noKitAssetsInBooking,
-      badgeText: `${kitAssetsInBooking.length}/${kit.assets.length} assets in booking`,
+      badgeText: `${kitAssetsInBooking.length}/${kitAssets.length} assets in booking`,
       tooltipTitle: "Kit partially in booking",
       tooltipContent:
         "Only some of this kit's assets are part of the current booking.",

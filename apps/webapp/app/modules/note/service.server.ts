@@ -125,18 +125,28 @@ export async function deleteNote({
   }
 }
 
+/**
+ * Per-asset note shape used by `createBulkKitChangeNotes`.
+ *
+ * Kit membership lives on the `AssetKit` pivot rather than a direct
+ * 1:1 relation, so callers flatten the pivot themselves and attach a
+ * `kit: { id, name } | null` synthetic field per row. This helper only
+ * needs the minimal fields it reads from that shape.
+ */
+type AssetForKitChangeNote = {
+  id: Asset["id"];
+  title: Asset["title"];
+  kit: Pick<Kit, "id" | "name"> | null;
+};
+
 export async function createBulkKitChangeNotes({
   newlyAddedAssets,
   removedAssets,
   userId,
   kit,
 }: {
-  newlyAddedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
-  removedAssets: Prisma.AssetGetPayload<{
-    select: { id: true; title: true; kit: true };
-  }>[];
+  newlyAddedAssets: AssetForKitChangeNote[];
+  removedAssets: AssetForKitChangeNote[];
   userId: User["id"];
   kit: Kit;
 }) {

@@ -478,10 +478,14 @@ export async function getPaginatedAndFilterableKits<
   extraInclude?: T;
   currentBookingId?: Booking["id"];
 }) {
+  // include. Treat either `assets` (legacy callers passing typed shapes
+  // that may still reference the old relation) or `assetKits` as the
+  // signal that the caller wants the asset list available for the
+  // hide-empty filter below.
   function hasAssetsIncluded(
     extraInclude?: Prisma.KitInclude
-  ): extraInclude is Prisma.KitInclude & { assets: boolean } {
-    return !!extraInclude?.assets;
+  ): extraInclude is Prisma.KitInclude & { assetKits: boolean } {
+    return !!extraInclude?.assetKits;
   }
 
   const searchParams = getCurrentSearchParams(request);
@@ -536,11 +540,14 @@ export async function getPaginatedAndFilterableKits<
     }
 
     if (currentBookingId && hideUnavailable) {
-      // Basic filters that apply to all kits
-      where.assets = {
+      // "every asset in this kit matches X" predicate becomes
+      // "every AssetKit row's asset matches X".
+      where.assetKits = {
         every: {
-          organizationId,
-          custody: { none: {} },
+          asset: {
+            organizationId,
+            custody: { none: {} },
+          },
         },
       };
 
@@ -549,17 +556,25 @@ export async function getPaginatedAndFilterableKits<
         const kitWhere: Prisma.KitWhereInput[] = [
           // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
           {
-            assets: {
+            assetKits: {
               none: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      id: { not: currentBookingId },
-                      status: BookingStatus.RESERVED,
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
+                asset: {
+                  bookingAssets: {
+                    some: {
+                      booking: {
+                        id: { not: currentBookingId },
+                        status: BookingStatus.RESERVED,
+                        OR: [
+                          {
+                            from: { lte: bookingTo },
+                            to: { gte: bookingFrom },
+                          },
+                          {
+                            from: { gte: bookingFrom },
+                            to: { lte: bookingTo },
+                          },
+                        ],
+                      },
                     },
                   },
                 },
@@ -573,25 +588,30 @@ export async function getPaginatedAndFilterableKits<
               { status: KitStatus.AVAILABLE },
               // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
               {
-                assets: {
+                assetKits: {
                   none: {
-                    bookingAssets: {
-                      some: {
-                        booking: {
-                          id: { not: currentBookingId },
-                          status: {
-                            in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    asset: {
+                      bookingAssets: {
+                        some: {
+                          booking: {
+                            id: { not: currentBookingId },
+                            status: {
+                              in: [
+                                BookingStatus.ONGOING,
+                                BookingStatus.OVERDUE,
+                              ],
+                            },
+                            OR: [
+                              {
+                                from: { lte: bookingTo },
+                                to: { gte: bookingFrom },
+                              },
+                              {
+                                from: { gte: bookingFrom },
+                                to: { lte: bookingTo },
+                              },
+                            ],
                           },
-                          OR: [
-                            {
-                              from: { lte: bookingTo },
-                              to: { gte: bookingFrom },
-                            },
-                            {
-                              from: { gte: bookingFrom },
-                              to: { lte: bookingTo },
-                            },
-                          ],
                         },
                       },
                     },
@@ -634,14 +654,20 @@ export async function getPaginatedAndFilterableKits<
         orderBy: { createdAt: "desc" },
       }),
       db.kit.count({ where }),
-      db.kit.count({ where: { organizationId, assets: { none: {} } } }),
+      // rows.
+      db.kit.count({
+        where: { organizationId, assetKits: { none: {} } },
+      }),
     ]);
 
     if (hideUnavailable && hasAssetsIncluded(extraInclude)) {
-      kits = kits.filter(
-        // @ts-ignore
-        (kit) => Array.isArray(kit.assets) && kit?.assets?.length > 0
-      );
+      kits = kits.filter((kit) => {
+        // extraInclude is dynamic, so the kit shape is widened here.
+        // Cast to a minimal pivot shape rather than disabling type
+        // checks file-wide.
+        const ak = (kit as { assetKits?: unknown[] }).assetKits;
+        return Array.isArray(ak) && ak.length > 0;
+      });
     }
 
     const totalPages = Math.ceil(totalKits / perPage);
@@ -673,7 +699,11 @@ type KitWithInclude<T extends Prisma.KitInclude | undefined> =
       }>
     : Prisma.KitGetPayload<{ include: typeof GET_KIT_STATIC_INCLUDES }>;
 
-export async function getKit<T extends Prisma.KitInclude | undefined>({
+// why: `const T` (TS 5.0+) preserves the literal type of the inline
+// `extraInclude` passed at the call site. Without it, T widens to
+// `Prisma.KitInclude` and consumers lose the deep shape (e.g.
+// `kit.assetKits[0].asset.status`), forcing `as unknown as {…}` casts.
+export async function getKit<const T extends Prisma.KitInclude | undefined>({
   id,
   organizationId,
   extraInclude,
@@ -781,7 +811,11 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    const where: Prisma.AssetWhereInput = { organizationId, kitId };
+    // `AssetKit` pivot. Filter through the pivot instead.
+    const where: Prisma.AssetWhereInput = {
+      organizationId,
+      assetKits: { some: { kitId } },
+    };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();
@@ -1019,13 +1053,15 @@ export async function deleteKit({
   userId: string;
 }) {
   try {
-    const kit = await db.kit.findUniqueOrThrow({
+    const kitRow = await db.kit.findUniqueOrThrow({
       where: { id, organizationId },
       select: {
         id: true,
         name: true,
         image: true,
-        assets: { select: { id: true, title: true } },
+        assetKits: {
+          select: { asset: { select: { id: true, title: true } } },
+        },
         custody: {
           select: {
             id: true,
@@ -1051,6 +1087,13 @@ export async function deleteKit({
         },
       },
     });
+
+    // Flatten pivot rows into the in-memory `assets` shape that
+    // `performKitDeletion` consumes.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     await performKitDeletion({
       kits: [kit],
@@ -1118,13 +1161,15 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const [kit, actor] = await Promise.all([
+    const [kitRow, actor] = await Promise.all([
       db.kit.findUniqueOrThrow({
         where: { id: kitId, organizationId },
         select: {
           id: true,
           name: true,
-          assets: { select: { id: true, title: true } },
+          assetKits: {
+            select: { asset: { select: { id: true, title: true } } },
+          },
           createdBy: {
             select: {
               id: true,
@@ -1149,6 +1194,14 @@ export async function releaseCustody({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // Flatten pivot rows so downstream code reads the same shape it
+    // did pre-pivot. Optional chaining tolerates fixtures / payloads
+    // that omit the pivot relation entirely.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const actorLink = wrapUserLinkForNote({
       id: userId,
@@ -1274,10 +1327,11 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
 
       /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit.
        * We filter for assets that have an active booking to avoid picking
-       * an asset in the kit that is AVAILABLE and has no relevant booking. */
+       * an asset in the kit that is AVAILABLE and has no relevant booking.
+       * Kit membership is read through the `AssetKit` pivot. */
       const kitAsset = await db.asset.findFirst({
         where: {
-          kitId: kit.id,
+          assetKits: { some: { kitId: kit.id } },
           bookingAssets: {
             some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
           },
@@ -1429,13 +1483,15 @@ export async function bulkDeleteKits({
       ? getKitsWhereInput({ organizationId, currentSearchParams })
       : { id: { in: kitIds }, organizationId };
 
-    const kits = await db.kit.findMany({
+    const kitRows = await db.kit.findMany({
       where,
       select: {
         id: true,
         name: true,
         image: true,
-        assets: { select: { id: true, title: true } },
+        assetKits: {
+          select: { asset: { select: { id: true, title: true } } },
+        },
         custody: {
           select: {
             id: true,
@@ -1461,6 +1517,13 @@ export async function bulkDeleteKits({
         },
       },
     });
+
+    // Flatten pivot rows into the in-memory `assets` shape that
+    // `performKitDeletion` consumes.
+    const kits = kitRows.map((k) => ({
+      ...k,
+      assets: (k.assetKits ?? []).map((ak) => ak.asset),
+    }));
 
     await performKitDeletion({
       kits,
@@ -1513,14 +1576,20 @@ export async function bulkAssignKitCustody({
           id: true,
           name: true,
           status: true,
-          assets: {
+          // We include the kit's id/name on each asset row by
+          // re-projecting the parent kit, since the helper needs a
+          // {kit: {id, name}} shape downstream to render the note link.
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              status: true,
-              type: true,
-              quantity: true,
-              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  status: true,
+                  type: true,
+                  quantity: true,
+                },
+              },
             },
           },
         },
@@ -1560,7 +1629,15 @@ export async function bulkAssignKitCustody({
       });
     }
 
-    const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
+    // Flatten the pivot rows into {asset, kit} pairs so downstream code
+    // (notes, activity events) can read both sides without changing
+    // shape.
+    const allAssetsOfAllKits = kits.flatMap((kit) =>
+      (kit.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kit: { id: kit.id, name: kit.name },
+      }))
+    );
 
     const someAssetsUnavailable = allAssetsOfAllKits.some(
       (asset) => asset.status !== "AVAILABLE"
@@ -1620,7 +1697,7 @@ export async function bulkAssignKitCustody({
             tx,
             kitCustodyId,
             teamMemberId: custodianId,
-            assetIds: kit.assets.map((a) => a.id),
+            assetIds: (kit.assetKits ?? []).map((ak) => ak.asset.id),
           });
         })
       );
@@ -1722,24 +1799,33 @@ export async function bulkReleaseKitCustody({
       : { id: { in: kitIds }, organizationId };
 
     /**
-     * To make notes and release assets of kits we have to make this query
+     * To make notes and release assets of kits we have to make this query.
+     *
+     * Kit assets come through the `AssetKit` pivot; we pull each asset
+     * row via `assetKits.asset` and re-attach the parent kit's
+     * `{ id, name }` to it so the downstream note creation can render
+     * a kit link without changing shape.
      */
-    const [kits, user] = await Promise.all([
+    const [kitRows, user] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
           id: true,
+          name: true,
           status: true,
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              title: true,
-              custody: { select: { id: true } },
-              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              asset: {
+                select: {
+                  id: true,
+                  status: true,
+                  title: true,
+                  custody: { select: { id: true } },
+                },
+              },
             },
           },
         },
@@ -1753,6 +1839,17 @@ export async function bulkReleaseKitCustody({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // Flatten pivot rows back into kit-shaped {..., assets: [...]} so the
+    // existing code path reads the same. Each asset carries a
+    // synthetic `kit` field used for the note-link rendering below.
+    const kits = kitRows.map((kit) => ({
+      ...kit,
+      assets: (kit.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kit: { id: kit.id, name: kit.name },
+      })),
+    }));
 
     const custodian = kits[0].custody?.custodian;
 
@@ -2123,10 +2220,16 @@ export async function getAvailableKitAssetForBooking(
   try {
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },
-      select: { assets: { select: { id: true, status: true } } },
+      select: {
+        assetKits: {
+          select: { asset: { select: { id: true, status: true } } },
+        },
+      },
     });
 
-    const allAssets = selectedKits.flatMap((kit) => kit.assets);
+    const allAssets = selectedKits.flatMap((kit) =>
+      (kit.assetKits ?? []).map((ak) => ak.asset)
+    );
 
     return allAssets.map((asset) => asset.id);
   } catch (cause: any) {
@@ -2154,23 +2257,27 @@ export async function updateKitLocation({
   userId?: User["id"];
 }) {
   try {
-    // Get kit with its assets first
-    const kit = await db.kit.findUnique({
+    // Get kit with its assets first.
+    const kitRow = await db.kit.findUnique({
       where: { id, organizationId },
       select: {
         id: true,
         name: true,
-        assets: {
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            location: { select: { id: true, name: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                location: { select: { id: true, name: true } },
+              },
+            },
           },
         },
       },
     });
 
-    if (!kit) {
+    if (!kitRow) {
       throw new ShelfError({
         cause: null,
         message: "Kit not found",
@@ -2178,6 +2285,12 @@ export async function updateKitLocation({
         shouldBeCaptured: false,
       });
     }
+
+    // Flatten pivot rows into the in-memory `assets` shape used below.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const assetIds = kit.assets.map((asset) => asset.id);
 
@@ -2310,23 +2423,35 @@ export async function bulkUpdateKitLocation({
       ? getKitsWhereInput({ organizationId, currentSearchParams })
       : { id: { in: kitIds }, organizationId };
 
-    // Get kits with their assets before updating
-    const kitsWithAssets = await db.kit.findMany({
+    // Get kits with their assets before updating.
+    // flatten back into a `.assets` shape downstream.
+    const kitsWithAssetsRows = await db.kit.findMany({
       where,
       select: {
         id: true,
         name: true,
         locationId: true,
         location: { select: { id: true, name: true } },
-        assets: {
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            location: { select: { id: true, name: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                location: { select: { id: true, name: true } },
+              },
+            },
           },
         },
       },
     });
+
+    // Flatten pivot rows back into a kit-shaped `.assets` array so the
+    // rest of this function reads as it did pre-pivot.
+    const kitsWithAssets = kitsWithAssetsRows.map((kit) => ({
+      ...kit,
+      assets: (kit.assetKits ?? []).map((ak) => ak.asset),
+    }));
 
     const actualKitIds = kitsWithAssets.map((kit) => kit.id);
     const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
@@ -2578,19 +2703,27 @@ export async function updateKitAssets({
       lastName: user?.lastName,
     });
 
-    const kit = await db.kit
+    const kitWithRelations = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
           location: { select: { id: true, name: true } },
-          assets: {
+          // Each pivot row carries the kitId (denormalised) so the
+          // `asset.kit?.id` checks downstream can map to
+          // `asset.assetKits[0]?.kitId`.
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              kit: true,
-              bookingAssets: {
-                include: {
-                  booking: { select: { id: true, status: true } },
+              kitId: true,
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  assetKits: { select: { kitId: true } },
+                  bookingAssets: {
+                    include: {
+                      booking: { select: { id: true, status: true } },
+                    },
+                  },
                 },
               },
             },
@@ -2628,6 +2761,13 @@ export async function updateKitAssets({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // Flatten the AssetKit pivot rows back into a list of assets so the
+    // rest of this function reads the same way it did pre-pivot.
+    const kit = {
+      ...kitWithRelations,
+      assets: (kitWithRelations.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const kitCustodianDisplay = kit.custody?.custodian
       ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
@@ -2681,7 +2821,9 @@ export async function updateKitAssets({
           title: true,
           type: true,
           quantity: true,
-          kit: true,
+          // Pull the (≤1, today) row so we can check whether the asset
+          // already lives in this kit.
+          assetKits: { select: { kitId: true } },
           custody: true,
           location: { select: { id: true, name: true } },
         },
@@ -2704,7 +2846,8 @@ export async function updateKitAssets({
 
     /** An asset already in custody cannot be added to a kit */
     const isSomeAssetInCustody = newlyAddedAssets.some(
-      (asset) => hasCustody(asset.custody) && asset.kit?.id !== kit.id
+      (asset) =>
+        hasCustody(asset.custody) && asset.assetKits[0]?.kitId !== kit.id
     );
     if (isSomeAssetInCustody) {
       throw new ShelfError({
@@ -2722,29 +2865,61 @@ export async function updateKitAssets({
         .find((a) => a.bookingAssets.length > 0)
         ?.bookingAssets.map((ba) => ba.booking) ?? [];
 
-    await db.kit.update({
-      where: { id: kit.id, organizationId },
-      data: {
-        assets: {
-          /**
-           * Only disconnect assets if not in addOnly mode and there are assets to remove
-           * In addOnly mode (bulk-add), we preserve all existing assets
-           */
-          ...(addOnly || removedAssets.length === 0
-            ? {}
-            : { disconnect: removedAssets.map(({ id }) => ({ id })) }),
-          /**
-           * Connect assets that should be added (only the new ones)
-           */
-          connect: newlyAddedAssets.map(({ id }) => ({ id })),
-        },
-      },
+    // The old kit.update({ data: { assets: { connect, disconnect } } })
+    // block becomes direct pivot writes inside a single $transaction so
+    // remove + add are atomic.
+    await db.$transaction(async (tx) => {
+      // Disconnect: drop the pivot rows for removed assets (only when not
+      // in addOnly mode).
+      if (!addOnly && removedAssets.length > 0) {
+        await tx.assetKit.deleteMany({
+          where: {
+            kitId: kit.id,
+            assetId: { in: removedAssets.map(({ id }) => id) },
+          },
+        });
+      }
+
+      // Connect: create one pivot row per newly added asset.
+      if (newlyAddedAssets.length > 0) {
+        await tx.assetKit.createMany({
+          data: newlyAddedAssets.map(({ id }) => ({
+            assetId: id,
+            kitId: kit.id,
+            organizationId,
+          })),
+        });
+      }
     });
+
+    // We synthesise the `{ kit }` field the note helper consumes from
+    // each asset's current `assetKits` pivot rows.
+    const newlyAddedAssetsForNotes = newlyAddedAssets.map((asset) => ({
+      id: asset.id,
+      title: asset.title,
+      kit: asset.assetKits[0]?.kitId
+        ? // For freshly-attached assets we don't have the source kit's
+          // name in scope; the note helper's `currentKit` path only
+          // uses `id` + `name`, so fall back to "" for the latter — the
+          // helper still renders a sane link.
+          { id: asset.assetKits[0].kitId, name: "" }
+        : null,
+    }));
+    const removedAssetsForNotes = (addOnly ? [] : removedAssets).map(
+      (asset) => ({
+        id: asset.id,
+        title: asset.title,
+        // Removed assets came from `kit.assets`, which itself was
+        // flattened off `assetKits` for this kit — so the source kit
+        // is the parent kit we're editing.
+        kit: { id: kit.id, name: kit.name },
+      })
+    );
 
     await createBulkKitChangeNotes({
       kit,
-      newlyAddedAssets,
-      removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
+      newlyAddedAssets: newlyAddedAssetsForNotes,
+      removedAssets: removedAssetsForNotes,
       userId,
     });
 
@@ -2759,7 +2934,9 @@ export async function updateKitAssets({
         assetId: asset.id,
         kitId: kit.id,
         field: "kitId",
-        fromValue: asset.kit?.id ?? null,
+        // (the 1:1 FK). With the pivot, an asset already in another kit
+        // has its kit-id in `assetKits[0].kitId`.
+        fromValue: asset.assetKits[0]?.kitId ?? null,
         toValue: kit.id,
       })),
       ...(addOnly ? [] : removedAssets).map((asset) => ({
@@ -3108,13 +3285,24 @@ export async function bulkRemoveAssetsFromKits({
       settings,
     });
 
-    const assets = await db.asset.findMany({
+    // We pull the parent kit (today: ≤1 pivot row per asset) through
+    // `assetKits.kit`, then flatten back into a synthetic `asset.kit`
+    // shape so the rest of this function reads as it did pre-pivot.
+    const assetRows = await db.asset.findMany({
       where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,
         title: true,
-        kit: {
-          select: { id: true, name: true, custody: { select: { id: true } } },
+        assetKits: {
+          select: {
+            kit: {
+              select: {
+                id: true,
+                name: true,
+                custody: { select: { id: true } },
+              },
+            },
+          },
         },
         custody: {
           select: {
@@ -3138,6 +3326,11 @@ export async function bulkRemoveAssetsFromKits({
         },
       },
     });
+
+    const assets = assetRows.map((asset) => ({
+      ...asset,
+      kit: asset.assetKits[0]?.kit ?? null,
+    }));
 
     await db.$transaction(async (tx) => {
       /**
@@ -3214,9 +3407,13 @@ export async function bulkRemoveAssetsFromKits({
       );
 
       // Detach all from the kit regardless of remaining custody.
-      await tx.asset.updateMany({
-        where: { id: { in: allRemovedAssetIds } },
-        data: { kitId: null },
+      // "detach from kit" means deleting the pivot rows for these
+      // assets within this organization.
+      await tx.assetKit.deleteMany({
+        where: {
+          assetId: { in: allRemovedAssetIds },
+          organizationId,
+        },
       });
       if (assetsToFlipAvailable.length > 0) {
         await tx.asset.updateMany({

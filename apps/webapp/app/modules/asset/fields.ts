@@ -14,7 +14,7 @@ export const LOCATION_WITH_HIERARCHY = {
 } satisfies Prisma.LocationDefaultArgs;
 
 export const KITS_INCLUDE_FIELDS = {
-  _count: { select: { assets: true } },
+  _count: { select: { assetKits: true } },
   custody: {
     select: {
       custodian: {
@@ -91,7 +91,9 @@ export const getAssetOverviewFields = (
       },
     },
     assetModel: { select: { id: true, name: true } },
-    kit: { select: { id: true, name: true, status: true } },
+    assetKits: {
+      select: { kit: { select: { id: true, name: true, status: true } } },
+    },
     bookingAssets: {
       where: {
         booking: {
@@ -159,7 +161,7 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
     location: LOCATION_WITH_HIERARCHY,
@@ -290,7 +292,7 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
     location: {

@@ -488,7 +488,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NOT NULL');
+      expect(sql).toContain('EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
+      expect(sql).not.toContain("NOT EXISTS");
     });
 
     it("handles 'in-kit' with isNot operator (inverts to not in kit)", () => {
@@ -502,7 +504,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NULL');
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
     });
 
     it("handles 'without-kit' with is operator", () => {
@@ -516,7 +519,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NULL');
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
     });
 
     it("handles containsAny with only 'in-kit'", () => {
@@ -530,7 +534,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NOT NULL');
+      expect(sql).toContain('EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
+      expect(sql).not.toContain("NOT EXISTS");
     });
 
     it("handles containsAny with both 'in-kit' and 'without-kit' (matches all)", () => {
@@ -545,8 +551,7 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should not add any kit-specific conditions
-      expect(sql).not.toContain('"kitId" IS NULL');
-      expect(sql).not.toContain('"kitId" IS NOT NULL');
+      expect(sql).not.toContain('"AssetKit"');
     });
 
     it("handles containsAny with 'without-kit' + specific IDs (OR logic)", () => {
@@ -560,9 +565,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      // Should include both: not in kit OR specific kit
-      expect(sql).toContain('"kitId" IS NULL');
-      expect(sql).toContain("Kit");
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."kitId" = ANY');
     });
   });
 });

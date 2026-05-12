@@ -54,6 +54,12 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    assetKit: {
+      create: vitest.fn().mockResolvedValue({}),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
@@ -572,9 +578,9 @@ describe("deleteKit", () => {
     // IN_CUSTODY (Alice's row survives the cascade).
     const inCustodyKit = {
       ...mockKitData,
-      assets: [
-        { id: "drill-1", title: "Drill" },
-        { id: "pens-1", title: "Pens" },
+      assetKits: [
+        { asset: { id: "drill-1", title: "Drill" } },
+        { asset: { id: "pens-1", title: "Pens" } },
       ],
       custody: {
         id: "kc-1",
@@ -665,14 +671,14 @@ describe("bulkDeleteKits", () => {
         id: "kit-1",
         name: "Kit 1",
         image: "image1.jpg",
-        assets: [],
+        assetKits: [],
         custody: null,
       },
       {
         id: "kit-2",
         name: "Kit 2",
         image: null,
-        assets: [],
+        assetKits: [],
         custody: null,
       },
     ];
@@ -703,7 +709,7 @@ describe("bulkDeleteKits", () => {
         id: "kit-A",
         name: "Camera Kit",
         image: null,
-        assets: [{ id: "drill-1", title: "Drill" }],
+        assetKits: [{ asset: { id: "drill-1", title: "Drill" } }],
         custody: {
           id: "kc-A",
           custodian: {
@@ -717,7 +723,7 @@ describe("bulkDeleteKits", () => {
         id: "kit-B",
         name: "Drone Kit",
         image: null,
-        assets: [{ id: "pen-1", title: "Pen" }],
+        assetKits: [{ asset: { id: "pen-1", title: "Pen" } }],
         custody: {
           id: "kc-B",
           custodian: {
@@ -937,7 +943,7 @@ describe("releaseCustody", () => {
     const kitWithCustody = {
       id: "kit-1",
       name: "Test Kit",
-      assets: [{ id: "asset-1", title: "Test Asset" }],
+      assetKits: [{ asset: { id: "asset-1", title: "Test Asset" } }],
       createdBy: { firstName: "John", lastName: "Doe" },
       custody: { custodian: { name: "Jane Smith" } },
     };
@@ -958,7 +964,11 @@ describe("releaseCustody", () => {
       where: { id: "kit-1", organizationId: "org-1" },
       select: expect.any(Object),
     });
-    expect(result).toEqual(kitWithCustody);
+    // returned kit; preserve the original pivot rows alongside.
+    expect(result).toEqual({
+      ...kitWithCustody,
+      assets: [{ id: "asset-1", title: "Test Asset" }],
+    });
   });
 });
 
@@ -1103,13 +1113,15 @@ describe("getAvailableKitAssetForBooking", () => {
     expect.assertions(2);
     const kitsWithAssets = [
       {
-        assets: [
-          { id: "asset-1", status: AssetStatus.AVAILABLE },
-          { id: "asset-2", status: AssetStatus.IN_CUSTODY },
+        assetKits: [
+          { asset: { id: "asset-1", status: AssetStatus.AVAILABLE } },
+          { asset: { id: "asset-2", status: AssetStatus.IN_CUSTODY } },
         ],
       },
       {
-        assets: [{ id: "asset-3", status: AssetStatus.AVAILABLE }],
+        assetKits: [
+          { asset: { id: "asset-3", status: AssetStatus.AVAILABLE } },
+        ],
       },
     ];
     //@ts-expect-error missing vitest type
@@ -1119,7 +1131,11 @@ describe("getAvailableKitAssetForBooking", () => {
 
     expect(db.kit.findMany).toHaveBeenCalledWith({
       where: { id: { in: ["kit-1", "kit-2"] } },
-      select: { assets: { select: { id: true, status: true } } },
+      select: {
+        assetKits: {
+          select: { asset: { select: { id: true, status: true } } },
+        },
+      },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
   });
@@ -1192,7 +1208,7 @@ describe("updateKitsWithBookingCustodians", () => {
     expect(db.asset.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kitId: "kit-co",
+          assetKits: { some: { kitId: "kit-co" } },
           bookingAssets: {
             some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
           },
@@ -1270,7 +1286,7 @@ describe("updateKitAssets - Location Cascade", () => {
     const mockKit = {
       id: "kit-1",
       location: { id: "location-1", name: "Warehouse A" },
-      assets: [],
+      assetKits: [],
       custody: null,
     };
 
@@ -1278,7 +1294,7 @@ describe("updateKitAssets - Location Cascade", () => {
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
+        assetKits: [],
         custody: null,
         location: null,
       },
@@ -1299,14 +1315,9 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
-        },
-      },
+    // onto direct pivot inserts via `assetKit.createMany`.
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      data: [{ assetId: "asset-1", kitId: "kit-1", organizationId: "org-1" }],
     });
 
     // Should update asset locations (cascade behavior)
@@ -1322,7 +1333,7 @@ describe("updateKitAssets - Location Cascade", () => {
     const mockKit = {
       id: "kit-1",
       location: null,
-      assets: [],
+      assetKits: [],
       custody: null,
     };
 
@@ -1330,7 +1341,7 @@ describe("updateKitAssets - Location Cascade", () => {
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
+        assetKits: [],
         custody: null,
         location: { id: "location-1", name: "Current Location" },
       },
@@ -1351,14 +1362,9 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
-        },
-      },
+    // onto direct pivot inserts via `assetKit.createMany`.
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      data: [{ assetId: "asset-1", kitId: "kit-1", organizationId: "org-1" }],
     });
 
     // Should remove location from assets (set to null)
@@ -1393,7 +1399,7 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
     const mockKit = {
       id: "kit-1",
       location: null,
-      assets: [],
+      assetKits: [],
       custody: {
         id: "kc-1",
         custodian: {
@@ -1418,7 +1424,7 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
         title: "Single",
         type: AssetType.INDIVIDUAL,
         quantity: null,
-        kit: null,
+        assetKits: [],
         custody: [],
         location: null,
       },
@@ -1427,7 +1433,7 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
         title: "Batch of 50",
         type: AssetType.QUANTITY_TRACKED,
         quantity: 50,
-        kit: null,
+        assetKits: [],
         custody: [],
         location: null,
       },
@@ -1507,12 +1513,17 @@ describe("updateKitAssets - kit-allocated custody threading", () => {
     const mockKit = {
       id: "kit-1",
       location: null,
-      assets: [
+      // row carries the kitId (denormalised) so the production code can
+      // map `asset.assetKits[0]?.kitId`.
+      assetKits: [
         {
-          id: "asset-1",
-          title: "Existing",
-          kit: { id: "kit-1" },
-          bookingAssets: [],
+          kitId: "kit-1",
+          asset: {
+            id: "asset-1",
+            title: "Existing",
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [],
+          },
         },
       ],
       custody: {
@@ -1589,27 +1600,31 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
   it("threads quantity + kitCustodyId for mixed individual + qty assets", async () => {
     expect.assertions(2);
 
+    // flattens `{...asset, kit: {id, name}}` from the parent kit; the mock
+    // therefore omits `kit` on each inner asset.
     const availableKits = [
       {
         id: "kit-1",
         name: "Mixed Kit",
         status: KitStatus.AVAILABLE,
-        assets: [
+        assetKits: [
           {
-            id: "asset-individual",
-            title: "Single",
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.INDIVIDUAL,
-            quantity: null,
-            kit: { id: "kit-1", name: "Mixed Kit" },
+            asset: {
+              id: "asset-individual",
+              title: "Single",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
           },
           {
-            id: "asset-qty",
-            title: "Batch of 50",
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.QUANTITY_TRACKED,
-            quantity: 50,
-            kit: { id: "kit-1", name: "Mixed Kit" },
+            asset: {
+              id: "asset-qty",
+              title: "Batch of 50",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 50,
+            },
           },
         ],
       },
@@ -1703,25 +1718,27 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
         id: "kit-1",
         name: "Camera Kit",
         status: KitStatus.AVAILABLE,
-        assets: [
+        assetKits: [
           {
-            id: "drill",
-            title: "Drill",
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.INDIVIDUAL,
-            quantity: null,
-            kit: { id: "kit-1", name: "Camera Kit" },
+            asset: {
+              id: "drill",
+              title: "Drill",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
           },
           {
-            id: "pens",
-            title: "Pens",
-            // Qty-tracked with 76 of 80 free — status stays AVAILABLE because
-            // there are units the kit can claim. Status flips to IN_CUSTODY
-            // only once the kit assignment writes its row.
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.QUANTITY_TRACKED,
-            quantity: 80,
-            kit: { id: "kit-1", name: "Camera Kit" },
+            asset: {
+              id: "pens",
+              title: "Pens",
+              // Qty-tracked with 76 of 80 free — status stays AVAILABLE
+              // because there are units the kit can claim. Status flips to
+              // IN_CUSTODY only once the kit assignment writes its row.
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 80,
+            },
           },
         ],
       },
@@ -1787,28 +1804,30 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
         id: "kit-1",
         name: "Stationery Kit",
         status: KitStatus.AVAILABLE,
-        assets: [
+        assetKits: [
           {
-            id: "drill",
-            title: "Drill",
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.INDIVIDUAL,
-            quantity: null,
-            kit: { id: "kit-1", name: "Stationery Kit" },
+            asset: {
+              id: "drill",
+              title: "Drill",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
           },
           {
-            id: "pens",
-            title: "Pens (fully allocated)",
-            // Status would in reality be IN_CUSTODY once all units are
-            // operator-allocated, but this test exercises the helper-level
-            // "skip when remaining <= 0" branch — the bulkAssign guard runs
-            // before the helper does, so we keep AVAILABLE here to bypass it
-            // and verify the helper still skips Pens because custody adds to
-            // 80 of 80.
-            status: AssetStatus.AVAILABLE,
-            type: AssetType.QUANTITY_TRACKED,
-            quantity: 80,
-            kit: { id: "kit-1", name: "Stationery Kit" },
+            asset: {
+              id: "pens",
+              title: "Pens (fully allocated)",
+              // Status would in reality be IN_CUSTODY once all units are
+              // operator-allocated, but this test exercises the helper-level
+              // "skip when remaining <= 0" branch — the bulkAssign guard
+              // runs before the helper does, so we keep AVAILABLE here to
+              // bypass it and verify the helper still skips Pens because
+              // custody adds to 80 of 80.
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 80,
+            },
           },
         ],
       },

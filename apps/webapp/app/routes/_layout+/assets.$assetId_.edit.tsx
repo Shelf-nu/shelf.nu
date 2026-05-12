@@ -73,10 +73,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {
         tags: true,
         customFields: true,
-        kit: {
+        assetKits: {
           select: {
-            id: true,
-            name: true,
+            kit: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
         barcodes: {

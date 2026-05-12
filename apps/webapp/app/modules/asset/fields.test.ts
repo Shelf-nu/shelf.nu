@@ -40,7 +40,7 @@ describe("getAssetOverviewFields", () => {
       "custody",
       "organization",
       "customFields",
-      "kit",
+      "assetKits",
       "bookingAssets",
     ];
 

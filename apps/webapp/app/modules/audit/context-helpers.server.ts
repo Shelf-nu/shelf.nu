@@ -157,7 +157,7 @@ export async function getAssetsForKitContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      kitId,
+      assetKits: { some: { kitId } },
     },
     select: {
       id: true,

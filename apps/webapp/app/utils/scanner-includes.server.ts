@@ -27,6 +27,12 @@ export const ASSET_INCLUDE = {
       name: true,
     },
   },
+  assetKits: {
+    select: {
+      kitId: true,
+      kit: { select: { id: true, name: true } },
+    },
+  },
   ...CUSTODY_INCLUDE,
 };
 
@@ -37,13 +43,17 @@ export const KIT_INCLUDE = {
       name: true,
     },
   },
-  _count: { select: { assets: true } },
-  assets: {
+  _count: { select: { assetKits: true } },
+  assetKits: {
     select: {
-      id: true,
-      status: true,
-      availableToBook: true,
-      custody: true,
+      asset: {
+        select: {
+          id: true,
+          status: true,
+          availableToBook: true,
+          custody: true,
+        },
+      },
     },
   },
   ...CUSTODY_INCLUDE,

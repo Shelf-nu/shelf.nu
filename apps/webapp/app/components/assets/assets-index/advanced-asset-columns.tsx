@@ -291,7 +291,9 @@ export function AdvancedIndexColumn({
           value={
             item?.kit?.name ? (
               <Link
-                to={`/kits/${item.kitId}`}
+                // the advanced index row (assembled from the AssetKit pivot
+                // by the raw SQL loader).
+                to={`/kits/${item.kit.id}`}
                 className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
                 title={item.kit.name}
               >

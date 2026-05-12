@@ -58,7 +58,6 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             consumptionType: true;
             availableToBook: true;
             custody: true;
-            kitId: true;
             status: true;
             mainImage: true;
             thumbnailImage: true;
@@ -70,17 +69,21 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
                 color: true;
               };
             };
-            kit: {
+            assetKits: {
               select: {
-                id: true;
-                name: true;
-                image: true;
-                imageExpiration: true;
-                category: {
+                kit: {
                   select: {
                     id: true;
                     name: true;
-                    color: true;
+                    image: true;
+                    imageExpiration: true;
+                    category: {
+                      select: {
+                        id: true;
+                        name: true;
+                        color: true;
+                      };
+                    };
                   };
                 };
               };
@@ -156,9 +159,17 @@ interface BookingAssetsSidebarProps {
   dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
 }
 
-/** Asset enriched with the booked quantity from the BookingAsset pivot */
-type SidebarAsset = BookingWithAssets["bookingAssets"][number]["asset"] & {
+/**
+ * Asset enriched with the booked quantity from the BookingAsset pivot,
+ * plus a synthesised singular `kit` / `kitId` derived from the
+ * AssetKit pivot. An asset has at most one kit (enforced by
+ * `@@unique([assetId])` on AssetKit), so `kit`/`kitId` are scalars.
+ */
+type SidebarAssetBase = BookingWithAssets["bookingAssets"][number]["asset"];
+type SidebarAsset = SidebarAssetBase & {
   bookedQuantity: number;
+  kit: NonNullable<SidebarAssetBase["assetKits"][number]["kit"]> | null;
+  kitId: string | null;
 };
 
 /**
@@ -178,7 +189,13 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
   const individualAssets: SidebarAsset[] = [];
 
   bookingAssets.forEach((ba) => {
-    const asset: SidebarAsset = { ...ba.asset, bookedQuantity: ba.quantity };
+    const pivotKit = ba.asset.assetKits[0]?.kit ?? null;
+    const asset: SidebarAsset = {
+      ...ba.asset,
+      bookedQuantity: ba.quantity,
+      kit: pivotKit,
+      kitId: pivotKit?.id ?? null,
+    };
     if (asset.kitId && asset.kit) {
       const kitId = asset.kitId;
       if (!itemsMap.has(kitId)) {

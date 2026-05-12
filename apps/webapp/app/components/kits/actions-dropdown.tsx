@@ -61,8 +61,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     select: { custodian: { select: { userId: true } } };
   }>;
 
-  const someAssetIsNotAvailable = kit.assets.some(
-    (asset) => asset.status !== "AVAILABLE"
+  const someAssetIsNotAvailable = kit.assetKits.some(
+    (ak) => ak.asset.status !== "AVAILABLE"
   );
 
   const { roles, isSelfService } = useUserRoleHelper();
@@ -299,7 +299,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         contextType="kit"
         contextId={kit.id}
         contextName={kit.name}
-        assetCount={kit.assets.length}
+        assetCount={kit.assetKits.length}
         open={isStartAuditOpen}
         onClose={() => setIsStartAuditOpen(false)}
         showTrigger={false}

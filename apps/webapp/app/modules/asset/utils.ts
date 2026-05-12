@@ -28,3 +28,25 @@ export function isQuantityTracked(
   const type = typeof assetOrType === "string" ? assetOrType : assetOrType.type;
   return type === "QUANTITY_TRACKED";
 }
+
+/**
+ * Returns the asset's primary kit (or null) from the `AssetKit` pivot.
+ *
+ * `AssetKit.@@unique([assetId])` enforces "at most one kit per asset",
+ * so "primary" means "the only kit". The generic lets callers ask for
+ * whatever kit shape their loader actually projected (e.g. `{ id; name }`
+ * vs `{ id; name; status }`) without losing precision.
+ *
+ * The `unknown` cast inside is a workaround for Prisma's `MergeInclude`
+ * not always preserving the deep `assetKits.select.kit` shape through
+ * the `getAsset` / `getKit` generics — centralising the cast here keeps
+ * the surrounding code clean.
+ *
+ * @param asset - Any asset-like value loaded with `assetKits: { select: { kit: { ... } } }`
+ * @returns The first pivot row's kit, narrowed to `TKit`, or `null` when the asset has no kit
+ */
+export function getPrimaryKit<TKit>(asset: unknown): TKit | null {
+  const pivot = (asset as { assetKits?: Array<{ kit?: TKit | null }> })
+    ?.assetKits;
+  return pivot?.[0]?.kit ?? null;
+}

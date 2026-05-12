@@ -87,7 +87,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       include: {
         custody: { include: { custodian: true } },
-        kit: true,
+        assetKits: {
+          select: {
+            kit: { select: { id: true, name: true, status: true } },
+          },
+        },
         qrCodes: true,
       },
     });

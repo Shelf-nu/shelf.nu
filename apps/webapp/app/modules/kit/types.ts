@@ -51,7 +51,9 @@ export const GET_KIT_STATIC_INCLUDES = {
 };
 
 export const KITS_INCLUDE_FIELDS = {
-  _count: { select: { assets: true } },
+  // The count semantics are identical (rows per kit) since today's
+  // unique constraint on `AssetKit.assetId` keeps it 1:1.
+  _count: { select: { assetKits: true } },
   custody: {
     select: {
       custodian: {

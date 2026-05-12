@@ -1034,7 +1034,7 @@ describe("updateAsset cross-org guards", () => {
     vitest.clearAllMocks();
     // Asset itself is in-org so kit-block lookup and assetBeforeUpdate succeed.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockResolvedValueOnce({ kit: null }) // kit-block check
+      .mockResolvedValueOnce({ assetKits: [] }) // kit-block check
       .mockResolvedValueOnce({
         id: "asset-1",
         title: "Asset 1",

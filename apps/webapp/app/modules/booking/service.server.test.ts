@@ -314,19 +314,19 @@ const mockBookingData = {
   updatedAt: futureCreatedAt,
   bookingAssets: [
     {
-      asset: { id: "asset-1", kitId: null },
+      asset: { id: "asset-1", assetKits: [] },
       assetId: "asset-1",
       quantity: 1,
       id: "ba-1",
     },
     {
-      asset: { id: "asset-2", kitId: null },
+      asset: { id: "asset-2", assetKits: [] },
       assetId: "asset-2",
       quantity: 1,
       id: "ba-2",
     },
     {
-      asset: { id: "asset-3", kitId: "kit-1" },
+      asset: { id: "asset-3", assetKits: [{ kitId: "kit-1" }] },
       assetId: "asset-3",
       quantity: 1,
       id: "ba-3",
@@ -481,19 +481,19 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: null, type: AssetType.INDIVIDUAL },
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
         },
         {
-          asset: { id: "asset-2", kitId: null, type: AssetType.INDIVIDUAL },
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-2",
         },
         {
-          asset: { id: "asset-3", kitId: null, type: AssetType.INDIVIDUAL },
+          asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-3",
@@ -505,9 +505,9 @@ describe("partialCheckinBooking", () => {
     // const updatedBooking = {
     //   ...mockBookingData,
     //   assets: [
-    //     { id: "asset-1", kitId: null },
-    //     { id: "asset-2", kitId: null },
-    //     { id: "asset-3", kitId: null },
+    //     { id: "asset-1", assetKits: [] },
+    //     { id: "asset-2", assetKits: [] },
+    //     { id: "asset-3", assetKits: [] },
     //   ],
     // };
 
@@ -581,13 +581,13 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: null },
+          asset: { id: "asset-1", assetKits: [] },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
         },
         {
-          asset: { id: "asset-2", kitId: null },
+          asset: { id: "asset-2", assetKits: [] },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-2",
@@ -626,7 +626,7 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-3", kitId: null },
+          asset: { id: "asset-3", assetKits: [] },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t1",
@@ -657,19 +657,27 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: "kit-1", type: AssetType.INDIVIDUAL },
+          asset: {
+            id: "asset-1",
+            assetKits: [{ kitId: "kit-1" }],
+            type: AssetType.INDIVIDUAL,
+          },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t2",
         },
         {
-          asset: { id: "asset-2", kitId: "kit-1", type: AssetType.INDIVIDUAL },
+          asset: {
+            id: "asset-2",
+            assetKits: [{ kitId: "kit-1" }],
+            type: AssetType.INDIVIDUAL,
+          },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t3",
         },
         {
-          asset: { id: "asset-3", kitId: null, type: AssetType.INDIVIDUAL },
+          asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t4",
@@ -681,7 +689,7 @@ describe("partialCheckinBooking", () => {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-3", kitId: null },
+          asset: { id: "asset-3", assetKits: [] },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t5",
@@ -864,12 +872,14 @@ describe("getPartiallyCheckedInAssetIds", () => {
 });
 
 describe("getKitIdsByAssets", () => {
+  // An asset belongs to a kit when assetKits[0]?.kitId resolves to a kitId;
+  // an empty assetKits array represents "not in any kit".
   it("should return unique kit IDs from assets", () => {
     const assets = [
-      { id: "asset-1", kitId: "kit-1" },
-      { id: "asset-2", kitId: "kit-1" },
-      { id: "asset-3", kitId: "kit-2" },
-      { id: "asset-4", kitId: null },
+      { id: "asset-1", assetKits: [{ kitId: "kit-1" }] },
+      { id: "asset-2", assetKits: [{ kitId: "kit-1" }] },
+      { id: "asset-3", assetKits: [{ kitId: "kit-2" }] },
+      { id: "asset-4", assetKits: [] },
     ];
 
     const result = getKitIdsByAssets(assets);
@@ -879,8 +889,8 @@ describe("getKitIdsByAssets", () => {
 
   it("should return empty array when no kits present", () => {
     const assets = [
-      { id: "asset-1", kitId: null },
-      { id: "asset-2", kitId: null },
+      { id: "asset-1", assetKits: [] },
+      { id: "asset-2", assetKits: [] },
     ];
 
     const result = getKitIdsByAssets(assets);
@@ -1740,7 +1750,7 @@ describe("checkoutBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             title: "Asset 1",
             status: "AVAILABLE",
             bookingAssets: [], // No conflicting bookings
@@ -1752,7 +1762,7 @@ describe("checkoutBooking", () => {
         {
           asset: {
             id: "asset-2",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             title: "Asset 2",
             status: "AVAILABLE",
             bookingAssets: [], // No conflicting bookings
@@ -1795,7 +1805,7 @@ describe("checkoutBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             title: "Asset 1",
             status: "CHECKED_OUT",
             bookingAssets: [
@@ -1929,7 +1939,7 @@ describe("checkoutBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             title: "Asset 1",
             status: "AVAILABLE",
             bookingAssets: [],
@@ -2017,7 +2027,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
     bookingAssets?: Array<{
       asset: {
         id: string;
-        kitId: string | null;
+        assetKits: { kitId: string }[];
         title: string;
         status: AssetStatus;
         bookingAssets: Array<unknown>;
@@ -2044,7 +2054,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
         {
           asset: {
             id: "hp-1",
-            kitId: null,
+            assetKits: [],
             title: "HP LaserJet 2020",
             status: AssetStatus.AVAILABLE,
             bookingAssets: [],
@@ -2210,7 +2220,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
         {
           asset: {
             id: "hp-1",
-            kitId: null,
+            assetKits: [],
             title: "HP",
             status: AssetStatus.AVAILABLE,
             bookingAssets: [],
@@ -2279,7 +2289,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
         {
           asset: {
             id: "hp-1",
-            kitId: null,
+            assetKits: [],
             title: "HP",
             status: AssetStatus.AVAILABLE,
             bookingAssets: [],
@@ -2406,7 +2416,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
@@ -2419,7 +2429,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-2",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
@@ -2465,7 +2475,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2478,7 +2488,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-2",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             status: AssetStatus.AVAILABLE,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2522,7 +2532,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2573,7 +2583,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-2",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-b", status: BookingStatus.ONGOING } },
@@ -2587,7 +2597,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-3",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-b", status: BookingStatus.ONGOING } },
@@ -2645,7 +2655,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "kit-asset-1",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2658,7 +2668,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "kit-asset-2",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2671,7 +2681,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "kit-asset-3",
-            kitId: "kit-1",
+            assetKits: [{ kitId: "kit-1" }],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2684,7 +2694,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "singular-asset",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
@@ -2747,7 +2757,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
@@ -2795,7 +2805,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
@@ -2842,7 +2852,7 @@ describe("checkinBooking", () => {
         {
           asset: {
             id: "asset-1",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
@@ -2969,7 +2979,7 @@ describe("cancelBooking", () => {
       status: BookingStatus.RESERVED,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: null },
+          asset: { id: "asset-1", assetKits: [] },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t116",
@@ -3180,7 +3190,7 @@ describe("revertBookingToDraft", () => {
       status: BookingStatus.RESERVED,
       bookingAssets: [
         {
-          asset: { id: "asset-1", kitId: null },
+          asset: { id: "asset-1", assetKits: [] },
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t119",
@@ -4526,7 +4536,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         asset: {
           id: mockQtyAssetId,
           type: AssetType.QUANTITY_TRACKED,
-          kitId: null,
+          assetKits: [],
         },
       },
     ],
@@ -4832,7 +4842,7 @@ describe("checkinBooking — qty-tracked auto-default", () => {
             type: AssetType.QUANTITY_TRACKED,
             consumptionType,
             title: "Pens",
-            kitId: null,
+            assetKits: [],
             status: AssetStatus.CHECKED_OUT,
             bookingAssets: [
               {

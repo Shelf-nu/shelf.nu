@@ -80,7 +80,7 @@ export default function ListAssetContent({
     ]
   );
 
-  const isPartOfKit = !!item.kitId;
+  const isPartOfKit = (item.assetKits ?? []).length > 0;
 
   // New logic for determining if actions dropdown should be shown
   const canSeeActions = useMemo(() => {

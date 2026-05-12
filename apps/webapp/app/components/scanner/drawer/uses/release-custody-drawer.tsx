@@ -110,7 +110,7 @@ export default function ReleaseCustodyDrawer({
 
   // Asset is part of a kit
   const assetsArePartOfKit = assets
-    .filter((asset) => !!asset && asset.kitId && asset.id)
+    .filter((asset) => !!asset && asset.assetKits.length > 0 && asset.id)
     .map((asset) => asset.id);
 
   // Kit blockers
@@ -411,7 +411,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       priority: 100,
     },
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(!!asset.kitId),
+    assetLabelPresets.partOfKit(asset.assetKits.length > 0),
   ];
 
   // Create the availability labels component with max 3 labels
@@ -479,7 +479,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

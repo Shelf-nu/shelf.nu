@@ -84,21 +84,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       extraInclude: {
-        assets: {
+        assetKits: {
           select: {
-            status: true,
-            bookingAssets: {
-              where: {
-                booking: {
-                  status: {
-                    in: [BookingStatus.RESERVED],
+            asset: {
+              select: {
+                status: true,
+                bookingAssets: {
+                  where: {
+                    booking: {
+                      status: {
+                        in: [BookingStatus.RESERVED],
+                      },
+                      from: { gt: new Date() },
+                    },
                   },
-                  from: { gt: new Date() },
-                },
-              },
-              include: {
-                booking: {
-                  select: { id: true },
+                  include: {
+                    booking: {
+                      select: { id: true },
+                    },
+                  },
                 },
               },
             },
@@ -117,8 +121,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * If any asset is not available in a kit,
      * then a kit cannot be assigned a custody
      */
-    const someUnavailableAsset = kit.assets.some(
-      (asset) => asset.status !== "AVAILABLE"
+    const someUnavailableAsset = kit.assetKits.some(
+      (ak) => ak.asset.status !== "AVAILABLE"
     );
     if (someUnavailableAsset) {
       sendNotification({
@@ -260,7 +264,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // discriminator distinguishes kit-allocated custody from
           // operator-assigned custody on the same asset.
           custody: { select: { id: true } },
-          assets: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       });
 
@@ -283,7 +287,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         tx,
         kitCustodyId,
         teamMemberId: custodianId,
-        assetIds: updatedKit.assets.map((a) => a.id),
+        assetIds: updatedKit.assetKits.map((ak) => ak.asset.id),
       });
 
       if (inheritData.length > 0) {
@@ -371,8 +375,8 @@ export default function GiveKitCustody() {
 
   const { isSelfService } = useUserRoleHelper();
 
-  const hasBookings = kit.assets.some(
-    (asset) => asset.bookingAssets.length > 0
+  const hasBookings = kit.assetKits.some(
+    (ak) => ak.asset.bookingAssets.length > 0
   );
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
@@ -436,7 +440,7 @@ export default function GiveKitCustody() {
             <>
               Kit is part of an{" "}
               <Link
-                to={`/bookings/${kit.assets[0].bookingAssets[0].booking.id}`}
+                to={`/bookings/${kit.assetKits[0]?.asset.bookingAssets[0]?.booking.id}`}
                 className="underline"
                 target="_blank"
               >

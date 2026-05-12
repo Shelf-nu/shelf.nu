@@ -112,7 +112,7 @@ export type AssetWithBooking = Asset & {
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
-  kitId?: string | null;
+  assetKits: { kitId: string; kit?: { id: string; name: string } }[];
   qrScanned: string;
   /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
   bookedQuantity?: number | null;
@@ -1046,7 +1046,7 @@ export default function AddAssetsToNewBooking() {
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     for (const ba of booking.bookingAssets) {
-      if (isQuantityTracked(ba.asset) && !ba.asset.kitId) {
+      if (isQuantityTracked(ba.asset) && ba.asset.assetKits.length === 0) {
         initial[ba.asset.id] = ba.quantity;
       }
     }
@@ -1087,7 +1087,7 @@ export default function AddAssetsToNewBooking() {
   const bookingAssets = useMemo(
     () =>
       booking.bookingAssets
-        .filter((ba) => !ba.asset.kitId)
+        .filter((ba) => ba.asset.assetKits.length === 0)
         .map((ba) => ba.asset),
     [booking.bookingAssets]
   );
@@ -1110,7 +1110,7 @@ export default function AddAssetsToNewBooking() {
   const initialQuantities = useMemo(() => {
     const m: Record<string, number> = {};
     for (const ba of booking.bookingAssets) {
-      if (isQuantityTracked(ba.asset) && !ba.asset.kitId) {
+      if (isQuantityTracked(ba.asset) && ba.asset.assetKits.length === 0) {
         m[ba.asset.id] = ba.quantity;
       }
     }
@@ -1170,7 +1170,7 @@ export default function AddAssetsToNewBooking() {
       /** Qty-tracked assets can always be selected to adjust quantity */
       if (isQuantityTracked(asset)) return acc;
 
-      if (!asset.availableToBook || !!asset.kitId) {
+      if (!asset.availableToBook || asset.assetKits.length > 0) {
         acc.push(asset);
       }
 
@@ -1500,7 +1500,7 @@ const RowComponent = ({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
   const { category, tags, location } = item;
-  const isPartOfKit = !!item.kitId;
+  const isPartOfKit = (item.assetKits ?? []).length > 0;
   const isAddedThroughKit = isPartOfKit && checked;
   const isQtyTracked = isQuantityTracked(item);
   /** Show the quantity picker only when the asset is selected and is QUANTITY_TRACKED */

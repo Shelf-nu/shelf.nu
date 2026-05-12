@@ -220,7 +220,8 @@ export const ListAssetContent = ({
   bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
-  const { category, tags, custody: custodyArray, location, kit } = item;
+  const { category, tags, custody: custodyArray, location } = item;
+  const kit = item.assetKits?.[0]?.kit ?? null;
   const {
     primary: primaryCustody,
     others: otherCustodians,

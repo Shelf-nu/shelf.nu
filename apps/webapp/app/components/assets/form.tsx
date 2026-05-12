@@ -21,7 +21,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
   loader,
@@ -247,7 +247,8 @@ export const AssetForm = ({
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
-  const isKitAsset = Boolean(asset?.kit);
+  const kitMembership = getPrimaryKit<{ id: string; name: string }>(asset);
+  const isKitAsset = Boolean(kitMembership);
   const locationDisabled = disabled || isKitAsset;
 
   /** Whether we are in edit mode (asset already exists). */
@@ -765,7 +766,7 @@ export const AssetForm = ({
                 <h5 className="text-left text-[14px]">Action disabled</h5>
                 <p className="text-left text-[14px]">
                   This asset's location is managed by its parent kit{" "}
-                  <strong>"{asset?.kit?.name}"</strong>. Update the kit's
+                  <strong>"{kitMembership?.name}"</strong>. Update the kit's
                   location instead.
                 </p>
               </HoverCardContent>

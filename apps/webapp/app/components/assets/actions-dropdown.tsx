@@ -12,7 +12,7 @@ import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
@@ -60,9 +60,14 @@ const ConditionalActionsDropdown = () => {
   const user = useUserData();
 
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
-  const assetIsPartOfKit = Boolean(asset.kit);
+  const assetKitMembership = getPrimaryKit<{
+    id: string;
+    name: string;
+    status: string;
+  }>(asset);
+  const assetIsPartOfKit = Boolean(assetKitMembership);
   const assetIsPartOfUnavailableKit = Boolean(
-    asset.kit && asset.kit.status !== "AVAILABLE"
+    assetKitMembership && assetKitMembership.status !== "AVAILABLE"
   );
   const custodyActionDisabled = assetIsCheckedOut && !assetCanBeReleased;
 
@@ -252,8 +257,9 @@ const ConditionalActionsDropdown = () => {
                             reason: (
                               <>
                                 This asset's location is managed by its parent
-                                kit <strong>"{asset.kit?.name}"</strong>. Update
-                                the kit's location instead.
+                                kit{" "}
+                                <strong>"{assetKitMembership?.name}"</strong>.
+                                Update the kit's location instead.
                               </>
                             ),
                           }

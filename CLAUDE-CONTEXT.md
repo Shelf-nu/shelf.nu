@@ -787,39 +787,71 @@ pattern on the smaller Kit surface before tackling Location.
 Each sub-phase is its own PR, its own migration, its own production
 release:
 
-#### Phase 4a — Kit pivot (first)
+#### Phase 4a — Kit pivot (COMPLETED — staged, ready to ship)
 
-**Why first:**
+Shipped as a structural-only pivot. The quantity-aware enhancements
+originally bundled into Phase 4a (triggers + multi-kit allocation)
+were split out so the pivot itself could be reviewed in isolation —
+they re-merge in a follow-up sub-phase once Phase 4b's structural
+work is also in.
 
-- Smaller surface area than Location. Most assets aren't in a kit;
-  every asset has a location.
-- Phase 3d-Polish-2 + 3d-Polish-3 work on kits is fresh; we know the
-  surface well.
-- **Option B math simplifies naturally.** Today kit-allocated qty is
-  computed as `asset.quantity − sum(operator custody)`. With
-  `AssetKit.quantity` available, it collapses to just reading the
-  pivot row. Cleaner, fewer edge cases.
-- Validates the pivot pattern (schema + triggers + invariant) on a
-  smaller blast radius before applying to Location.
+**What landed:**
 
-**Scope:**
-
-- Schema: `AssetKit` Prisma model, composite unique
-  `(assetId, kitId)`, INDIVIDUAL-single-row trigger, `sum ≤
-Asset.quantity` invariant trigger (constraint-deferred so multi-row
-  tx updates work).
-- Migration: introduce `AssetKit`, backfill from `Asset.kitId`, drop
-  `Asset.kitId` column in same migration.
+- Schema: `AssetKit { id, assetId (unique), kitId, organizationId,
+quantity }` pivot model. `@@unique([assetId])` enforces "at most
+  one kit per asset" today — the same invariant the old `Asset.kitId`
+  FK provided. `quantity` defaults to 1 and stays at 1 for every row
+  in this phase.
+- Migration `20260511120000_add_asset_kit_pivot` — single transaction:
+  `CREATE TABLE` + indexes + FKs (all `ON DELETE CASCADE`) + backfill
+  one row per `Asset.kitId IS NOT NULL` + drop `Asset.kitId` column
+  and its index + `ENABLE ROW LEVEL SECURITY`. Same backfill-then-drop
+  shape as Phase 3a so there is no half-pivoted observable state.
 - Service: `asset/service.server.ts` + `kit/service.server.ts` —
-  replace `kitId` read/write paths with pivot upserts; refactor
-  Option B math to read `AssetKit.quantity`; custody propagation
-  re-grounded.
-- Loader / route / UI: kit detail page asset list, kit manage-assets
-  picker, scan drawers, asset row's kit column. Multi-kit display
-  reuses the `+N more` chip pattern from the Phase 3d-Polish-2
-  multi-custodian column.
-- Tests: unit + route tests for the new pivot upserts; existing
-  kit-custody tests adjusted to the new shape.
+  every `Asset.kit` / `Asset.kitId` read replaced with
+  `asset.assetKits[0]?.kit` / `…kitId`; every write goes through
+  `tx.assetKit.create` / `deleteMany` / `createMany` inside the
+  existing transactions. `updateKitAssets` and `bulkAssignKitCustody`
+  were the central refactors. `getKitIdsByAssets`'s arg type changed
+  from `Pick<Asset, "id" | "kitId">[]` to the pivot-shaped equivalent.
+- Raw SQL: `modules/asset/query.server.ts` — `addKitFilter` rewritten
+  to `EXISTS (SELECT 1 FROM "AssetKit" ak WHERE ak."assetId" = a.id …)`
+  and `assetQueryJoins` to `LEFT JOIN "AssetKit" ak ON …`.
+- Mobile contract preserved: `api+/mobile+/bookings.$bookingId.ts`
+  synthesises singular `kit` / `kitId` from the primary `AssetKit`
+  row (oldest by createdAt) so mobile clients see no schema change.
+- Loader / route / UI: ~25 routes and ~15 components migrated to read
+  through the pivot. Defensive `?.` on `assetKits` where stale test
+  fixtures may omit the relation.
+- Helper: `getPrimaryKit<TKit>(asset)` in `modules/asset/utils.ts`
+  centralises the pivot read with the `MergeInclude` cast that
+  Prisma's generic loses on deep selects.
+- Typing fix: `getKit<const T>` (TS 5.0+) + `satisfies` annotations
+  in `kit/fields.ts` preserve literal include shapes through to
+  consumers, eliminating most `as unknown as { … }` casts.
+- Comment hygiene pass: ~170 narration comments deleted; a small
+  number of substantive WHY comments reworded to drop the
+  task-reference language.
+
+**Validation:** `pnpm webapp:validate` green. 2103/2103 tests pass.
+`RELEASE-CHECKLIST.md` written as a reusable runbook for this and
+future structural releases.
+
+**Cascade-semantics flag for PR description:** Old `Asset.kitId` was
+nullable with the Prisma default `SET NULL` on Kit delete. New
+`AssetKit.kitId` is `ON DELETE CASCADE` — deleting a kit
+cascade-deletes the pivot rows; the assets themselves stay (only the
+link is removed). End-state observably equivalent.
+
+**Deferred to a follow-up phase (originally bundled here):**
+
+- Drop the `@@unique([assetId])` constraint to allow multi-kit
+  allocation.
+- `AssetType`-aware single-row trigger replacing the unique constraint.
+- `sum ≤ Asset.quantity` CONSTRAINT TRIGGER (deferred so multi-row tx
+  updates work).
+- Option B math collapsing to `AssetKit.quantity` reads (currently
+  still computes `Asset.quantity − sum(operator custody)`).
 
 #### Phase 4b — Location pivot (second)
 
@@ -889,6 +921,7 @@ slip into Phase 5 if scope grows:
 8. `20260421123609_add_activity_events_model` — main (PR #2495): structured `ActivityEvent` table for reports
 9. `20260430100759_add_kit_custody_id_to_custody` — Phase 3d-Polish-2: discriminator FK + one-shot backfill UPDATE for kit-allocated rows
 10. `20260504132547_enable_rls_for_booking_model_request` — RLS policy for `BookingModelRequest` (auto-generated alongside session work)
+11. `20260511120000_add_asset_kit_pivot` — Phase 4a: introduce `AssetKit` pivot, backfill from `Asset.kitId`, drop the column, ENABLE RLS
 
 ---
 

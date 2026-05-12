@@ -1296,14 +1296,16 @@ export async function getLocationKits(
           custody: { custodian: { userId: { in: teamMemberIds } } },
         },
         {
-          assets: {
+          assetKits: {
             some: {
-              bookingAssets: {
-                some: {
-                  booking: {
-                    custodianTeamMemberId: { in: teamMemberIds },
-                    status: {
-                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              asset: {
+                bookingAssets: {
+                  some: {
+                    booking: {
+                      custodianTeamMemberId: { in: teamMemberIds },
+                      status: {
+                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                      },
                     },
                   },
                 },
@@ -1312,14 +1314,16 @@ export async function getLocationKits(
           },
         },
         {
-          assets: {
+          assetKits: {
             some: {
-              bookingAssets: {
-                some: {
-                  booking: {
-                    custodianUserId: { in: teamMemberIds },
-                    status: {
-                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              asset: {
+                bookingAssets: {
+                  some: {
+                    booking: {
+                      custodianUserId: { in: teamMemberIds },
+                      status: {
+                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                      },
                     },
                   },
                 },
@@ -1845,7 +1849,7 @@ export async function updateLocationKits({
           kits: {
             select: {
               id: true,
-              assets: { select: { id: true } },
+              assetKits: { select: { asset: { select: { id: true } } } },
             },
           },
         },
@@ -1883,7 +1887,7 @@ export async function updateLocationKits({
         where: kitWhere,
         select: {
           id: true,
-          assets: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       });
 
@@ -1926,7 +1930,7 @@ export async function updateLocationKits({
      * so we don't create duplicate notes for them.
      */
     const existingKitAssetIds = new Set(
-      location.kits.flatMap((kit) => kit.assets.map((a) => a.id))
+      location.kits.flatMap((kit) => kit.assetKits.map((ak) => ak.asset.id))
     );
 
     if (kitIds.length > 0) {
@@ -1938,18 +1942,22 @@ export async function updateLocationKits({
           name: true,
           locationId: true,
           location: { select: { id: true, name: true } },
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              location: { select: { id: true, name: true } },
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  location: { select: { id: true, name: true } },
+                },
+              },
             },
           },
         },
       });
 
       const assetIds = kitsToAdd.flatMap((kit) =>
-        kit.assets.map((asset) => asset.id)
+        kit.assetKits.map((ak) => ak.asset.id)
       );
 
       /** We update the location with the new kits and their assets */
@@ -2071,7 +2079,7 @@ export async function updateLocationKits({
       // Only include assets not already at this location
       if (assetIds.length > 0) {
         const allAssets = kitsToAdd
-          .flatMap((kit) => kit.assets)
+          .flatMap((kit) => kit.assetKits.map((ak) => ak.asset))
           .filter((asset) => !existingKitAssetIds.has(asset.id));
 
         // Create individual notes for each asset
@@ -2103,12 +2111,14 @@ export async function updateLocationKits({
         select: {
           id: true,
           name: true,
-          assets: { select: { id: true, title: true } },
+          assetKits: {
+            select: { asset: { select: { id: true, title: true } } },
+          },
         },
       });
 
       const removedAssetIds = kitsBeingRemoved.flatMap((kit) =>
-        kit.assets.map((asset) => asset.id)
+        kit.assetKits.map((ak) => ak.asset.id)
       );
 
       await db.location
@@ -2150,7 +2160,9 @@ export async function updateLocationKits({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const allRemovedAssets = kitsBeingRemoved.flatMap((kit) => kit.assets);
+        const allRemovedAssets = kitsBeingRemoved.flatMap((kit) =>
+          kit.assetKits.map((ak) => ak.asset)
+        );
 
         // Create location activity note for removed kits
         const removedKitsSummary = kitsBeingRemoved.map((kit) => ({

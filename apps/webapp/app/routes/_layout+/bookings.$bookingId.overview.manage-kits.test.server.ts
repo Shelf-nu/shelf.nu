@@ -151,7 +151,10 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset3" }], // asset1 exists, asset3 is new
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset3" } }, // asset1 exists, asset3 is new
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -160,7 +163,10 @@ describe("manage-kits route validation", () => {
           id: "kit2",
           name: "Kit 2",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing assets
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset2" } }, // all existing assets
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -204,7 +210,10 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset2" } }, // all existing
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -246,7 +255,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -311,7 +320,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -352,7 +361,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.AVAILABLE,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -394,7 +403,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -434,7 +443,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),

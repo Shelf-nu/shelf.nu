@@ -119,7 +119,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             name: true,
             status: true,
             location: { select: { id: true, name: true } },
-            assets: { select: { id: true } },
+            assetKits: { select: { asset: { select: { id: true } } } },
           },
         })
         .catch((cause) => {
@@ -217,7 +217,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems } = useLoaderData<LoaderData>();
-  const kitAssetIds = kit.assets.map((asset) => asset.id);
+  const kitAssetsList = kit.assetKits.map((ak) => ak.asset);
+  const kitAssetIds = kitAssetsList.map((asset) => asset.id);
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -236,8 +237,8 @@ export default function ManageAssetsInKit() {
    * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedBulkItems(kit.assets);
-  }, [kit.assets, setSelectedBulkItems]);
+    setSelectedBulkItems(kitAssetsList);
+  }, [kitAssetsList, setSelectedBulkItems]);
 
   /**
    * Set disabled items for kit
@@ -605,11 +606,15 @@ const RowComponent = ({
 
       {/* Kit */}
       <Td className={allowCursor}>
-        {item.kit?.name ? (
-          <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
-            {item.kit.name}
-          </div>
-        ) : null}
+        {(() => {
+          const kitName = item.assetKits?.[0]?.kit?.name;
+          if (!kitName) return null;
+          return (
+            <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+              {kitName}
+            </div>
+          );
+        })()}
       </Td>
 
       {/* Category */}

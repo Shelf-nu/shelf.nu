@@ -33,7 +33,7 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
-        availableToBook: item.assets.some((asset) => asset.availableToBook),
+        availableToBook: item.assetKits.some((ak) => ak.asset.availableToBook),
       },
     }));
 
@@ -43,7 +43,8 @@ export function useKitAvailabilityData(items: Items) {
     const allBookings = new Map();
 
     items.forEach((kit) => {
-      kit.assets.forEach((asset) => {
+      kit.assetKits.forEach((ak) => {
+        const asset = ak.asset;
         if ("bookingAssets" in asset && asset.bookingAssets) {
           (asset.bookingAssets as Array<{ booking: Booking }>).forEach((ba) => {
             const booking = ba.booking;

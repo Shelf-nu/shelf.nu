@@ -39,7 +39,7 @@ export function AvailabilityLabel({
   isAlreadyAdded?: boolean;
 }) {
   const { booking } = useLoaderData<{ booking: Booking }>();
-  const isPartOfKit = !!asset.kitId;
+  const isPartOfKit = (asset.assetKits ?? []).length > 0;
 
   /** User scanned the asset and it is already in booking */
   if (isAlreadyAdded) {
@@ -271,7 +271,8 @@ export function getKitAvailabilityStatus(
   // `BookingAsset` pivot, so we walk `bookingAssets` and pluck the
   // related booking from each pivot row. Main's `asset.bookings`
   // shape no longer exists in this branch's schema.
-  const bookings = kit.assets
+  const kitAssets = kit.assetKits.map((ak) => ak.asset);
+  const bookings = kitAssets
     .map((asset) => {
       if (asset?.bookingAssets.length) {
         return asset.bookingAssets.map((ba) => ba.booking);
@@ -286,15 +287,14 @@ export function getKitAvailabilityStatus(
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
   const isInCustody =
-    kit.status === "IN_CUSTODY" ||
-    kit.assets.some((a) => hasCustody(a.custody));
+    kit.status === "IN_CUSTODY" || kitAssets.some((a) => hasCustody(a.custody));
 
-  const isKitWithoutAssets = kit.assets.length === 0;
+  const isKitWithoutAssets = kitAssets.length === 0;
 
-  const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
+  const someAssetMarkedUnavailable = kitAssets.some((a) => !a.availableToBook);
 
   // Apply same booking conflict logic as isCheckedOut
-  const someAssetHasUnavailableBooking = kit.assets.some((asset) =>
+  const someAssetHasUnavailableBooking = kitAssets.some((asset) =>
     hasAssetBookingConflicts(asset, currentBookingId)
   );
 
@@ -324,8 +324,8 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   // Check if kit is checked out in current booking - don't show availability label
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
-    kit.assets.some((asset) =>
-      asset.bookingAssets.some(
+    kit.assetKits.some((ak) =>
+      ak.asset.bookingAssets.some(
         (ba) =>
           ba.booking.id === booking.id &&
           ["ONGOING", "OVERDUE"].includes(ba.booking.status)

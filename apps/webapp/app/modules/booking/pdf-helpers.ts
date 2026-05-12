@@ -102,7 +102,7 @@ export async function fetchAllPdfRelatedData(
     const orderBy = sortParams?.orderBy || "status";
     const orderDirection = sortParams?.orderDirection || "desc";
 
-    const [assets, organization] = await Promise.all([
+    const [rawAssets, organization] = await Promise.all([
       db.asset.findMany({
         where: {
           id: {
@@ -121,10 +121,10 @@ export async function fetchAllPdfRelatedData(
               name: true,
             },
           },
-          kit: {
-            select: {
-              name: true,
-            },
+          // `kit` / `kitId` fields below so `groupAndSortAssetsByKit`
+          // (which still consumes the singular shape) keeps working.
+          assetKits: {
+            select: { kit: { select: { id: true, name: true } } },
           },
         },
       }),
@@ -148,6 +148,16 @@ export async function fetchAllPdfRelatedData(
         label: "Organization",
       });
     }
+
+    // consumed by groupAndSortAssetsByKit / downstream PDF helpers.
+    const assets = rawAssets.map((asset) => {
+      const assetKit = asset.assetKits[0]?.kit ?? null;
+      return {
+        ...asset,
+        kitId: assetKit?.id ?? null,
+        kit: assetKit ? { id: assetKit.id, name: assetKit.name } : null,
+      };
+    });
 
     // Group by kit and sort - this ensures kit assets stay together
     const sortedAssets = groupAndSortAssetsByKit(

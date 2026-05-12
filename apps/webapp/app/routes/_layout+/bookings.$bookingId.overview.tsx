@@ -238,10 +238,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Preserves `bookedQuantity` from the pivot so quantity-tracked assets
      * can display how many units were booked.
      */
-    const bookingAssets = booking.bookingAssets.map((ba) => ({
-      ...ba.asset,
-      bookedQuantity: ba.quantity,
-    }));
+    // fields so downstream helpers and grouping logic (which still expect
+    // the 1:1 shape) keep working. There is at most one assetKits row
+    // today.
+    const bookingAssets = booking.bookingAssets.map((ba) => {
+      const firstAssetKit = ba.asset.assetKits[0];
+      return {
+        ...ba.asset,
+        bookedQuantity: ba.quantity,
+        kitId: firstAssetKit?.kitId ?? null,
+        kit: firstAssetKit?.kit ?? null,
+      };
+    });
 
     const hasAvailableAssets = bookingAssets.some(
       (asset) => asset.status === "AVAILABLE"
@@ -364,7 +372,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           category: true,
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
-          kit: true,
+          assetKits: { include: { kit: true } },
           bookingAssets: {
             where: {
               booking: {
@@ -442,7 +450,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               color: true,
             },
           },
-          _count: { select: { assets: true } },
+          _count: { select: { assetKits: true } },
         },
       }),
     ]);
@@ -1188,12 +1196,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           select: {
             id: true,
             name: true,
-            assets: { select: { id: true } },
+            assetKits: { select: { asset: { select: { id: true } } } },
           },
         });
 
         const b = await removeAssets({
-          booking: { id, assetIds: kit.assets.map((a) => a.id) },
+          booking: {
+            id,
+            assetIds: kit.assetKits.map((ak) => ak.asset.id),
+          },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId,
@@ -1329,12 +1340,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const kits = await db.kit.findMany({
           where: { id: { in: assetOrKitIds } },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: {
+            id: true,
+            name: true,
+            assetKits: { select: { asset: { select: { id: true } } } },
+          },
         });
 
         // Get asset IDs that belong to the selected kits
         const kitAssetIds = kits.flatMap((kit) =>
-          kit.assets.map((asset) => asset.id)
+          kit.assetKits.map((ak) => ak.asset.id)
         );
 
         // Filter out assets that belong to the selected kits to avoid double-counting

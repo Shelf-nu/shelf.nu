@@ -271,7 +271,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assets: true } },
+                _count: { select: { assetKits: true } },
               },
             })
           : Promise.resolve([]),
@@ -385,7 +385,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: kit.name,
           description: kit.description || null,
           status: kit.status,
-          assetCount: kit._count?.assets || 0,
+          assetCount: kit._count?.assetKits ?? 0,
         })),
         bookings: bookings.map((booking) => ({
           id: booking.id,

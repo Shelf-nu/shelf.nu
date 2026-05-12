@@ -43,7 +43,7 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 
@@ -718,36 +718,43 @@ export default function AssetOverview() {
 
           <AssetReminderCards className="my-2" />
 
-          {asset?.kit?.name ? (
-            <Card className="my-3 py-3 md:border">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
-                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-                    <Icon icon="kit" />
+          {(() => {
+            const includedInKit = getPrimaryKit<{
+              id: string;
+              name: string;
+            }>(asset);
+            if (!includedInKit?.name) return null;
+            return (
+              <Card className="my-3 py-3 md:border">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                      <Icon icon="kit" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-1 text-sm font-semibold">
+                      Included in kit
+                    </h3>
+                    <Button
+                      to={`/kits/${includedInKit.id}`}
+                      role="link"
+                      variant="link"
+                      className={tw(
+                        "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                      )}
+                      target="_blank"
+                    >
+                      <div className="max-w-[250px] truncate">
+                        {includedInKit.name}
+                      </div>
+                    </Button>
                   </div>
                 </div>
-
-                <div>
-                  <h3 className="mb-1 text-sm font-semibold">
-                    Included in kit
-                  </h3>
-                  <Button
-                    to={`/kits/${asset.kitId}`}
-                    role="link"
-                    variant="link"
-                    className={tw(
-                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
-                    )}
-                    target="_blank"
-                  >
-                    <div className="max-w-[250px] truncate">
-                      {asset.kit.name}
-                    </div>
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ) : null}
+              </Card>
+            );
+          })()}
 
           {!isQuantityTracked(asset) ? (
             <CustodyCard
@@ -789,9 +796,7 @@ export default function AssetOverview() {
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}
-              inKit={
-                asset.kit ? { id: asset.kit.id, name: asset.kit.name } : null
-              }
+              inKit={getPrimaryKit<{ id: string; name: string }>(asset)}
             />
           ) : null}
 

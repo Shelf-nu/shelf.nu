@@ -102,39 +102,43 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: kitId,
         organizationId,
         extraInclude: {
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              custody: { select: { id: true } },
-              bookingAssets: {
-                where: {
-                  booking: {
-                    status: { in: ["ONGOING", "OVERDUE"] },
-                  },
-                },
+              asset: {
                 select: {
-                  booking: {
+                  id: true,
+                  status: true,
+                  custody: { select: { id: true } },
+                  bookingAssets: {
+                    where: {
+                      booking: {
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
                     select: {
-                      id: true,
-                      name: true,
-                      from: true,
-                      status: true,
-                      custodianTeamMember: true,
-                      custodianUser: {
+                      booking: {
                         select: {
-                          firstName: true,
-                          lastName: true,
-                          displayName: true,
-                          profilePicture: true,
-                          email: true,
+                          id: true,
+                          name: true,
+                          from: true,
+                          status: true,
+                          custodianTeamMember: true,
+                          custodianUser: {
+                            select: {
+                              firstName: true,
+                              lastName: true,
+                              displayName: true,
+                              profilePicture: true,
+                              email: true,
+                            },
+                          },
                         },
                       },
                     },
                   },
+                  availableToBook: true,
                 },
               },
-              availableToBook: true,
             },
           },
           qrCodes: true,
@@ -170,7 +174,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : null;
     const currentBooking = getKitCurrentBooking({
       id: kit.id,
-      assets: kit.assets,
+      assets: kit.assetKits.map((ak) => ak.asset),
     });
 
     const header: HeaderData = {
@@ -302,7 +306,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const updatedKit = await tx.kit.update({
             where: { id: kitId, organizationId },
             data: {
-              assets: { disconnect: { id: assetId } },
+              // Remove the pivot row that links this asset to the kit.
+              assetKits: { deleteMany: { assetId } },
             },
             select: {
               name: true,
@@ -467,7 +472,9 @@ export default function KitDetails() {
   const { roles } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
 
-  const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
+  const kitHasUnavailableAssets = kit.assetKits.some(
+    (ak) => !ak.asset.availableToBook
+  );
 
   const items = [
     { to: "assets", content: "Assets" },

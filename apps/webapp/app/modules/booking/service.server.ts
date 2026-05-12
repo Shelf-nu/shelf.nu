@@ -1661,6 +1661,7 @@ export async function checkoutBooking({
                       },
                     },
                   },
+                  assetKits: { select: { kitId: true } },
                 },
               },
             },
@@ -1977,6 +1978,7 @@ export async function fulfilModelRequestsAndCheckout({
                       },
                     },
                   },
+                  assetKits: { select: { kitId: true } },
                 },
               },
             },
@@ -2406,7 +2408,7 @@ export async function checkinBooking({
                   type: true,
                   consumptionType: true,
                   title: true,
-                  kitId: true,
+                  assetKits: { select: { kitId: true } },
                   status: true,
                   bookingAssets: {
                     select: {
@@ -2568,7 +2570,7 @@ export async function checkinBooking({
     const kitsToCheckin = hasKits
       ? kitIds.filter((kitId) => {
           const kitAssetsInBooking = bookingFoundAssets.filter(
-            (asset) => asset.kitId === kitId
+            (asset) => asset.assetKits?.[0]?.kitId === kitId
           );
           return kitAssetsInBooking.every(
             (asset) =>
@@ -2842,7 +2844,14 @@ export async function checkinBooking({
           include: {
             ...BOOKING_INCLUDE_FOR_EMAIL,
             bookingAssets: {
-              include: { asset: { select: { id: true, kitId: true } } },
+              include: {
+                asset: {
+                  select: {
+                    id: true,
+                    assetKits: { select: { kitId: true } },
+                  },
+                },
+              },
             },
           },
         });
@@ -2869,7 +2878,9 @@ export async function checkinBooking({
           select: {
             id: true,
             title: true,
-            kit: { select: { id: true, name: true } },
+            assetKits: {
+              select: { kit: { select: { id: true, name: true } } },
+            },
           },
         });
 
@@ -2884,14 +2895,15 @@ export async function checkinBooking({
         const processedKitIds = new Set<string>();
 
         for (const asset of assetsWithKitInfo) {
+          const assetKit = asset.assetKits?.[0]?.kit;
           if (
-            asset.kit &&
-            kitIds.includes(asset.kit.id) &&
-            !processedKitIds.has(asset.kit.id)
+            assetKit &&
+            kitIds.includes(assetKit.id) &&
+            !processedKitIds.has(assetKit.id)
           ) {
-            completeKits.push({ id: asset.kit.id, name: asset.kit.name });
-            processedKitIds.add(asset.kit.id);
-          } else if (!asset.kit) {
+            completeKits.push({ id: assetKit.id, name: assetKit.name });
+            processedKitIds.add(assetKit.id);
+          } else if (!assetKit) {
             standaloneAssets.push({ id: asset.id, title: asset.title });
           }
         }
@@ -3307,7 +3319,11 @@ export async function partialCheckinBooking({
           bookingAssets: {
             include: {
               asset: {
-                select: { id: true, type: true, kitId: true },
+                select: {
+                  id: true,
+                  type: true,
+                  assetKits: { select: { kitId: true } },
+                },
               },
             },
           },
@@ -3430,10 +3446,10 @@ export async function partialCheckinBooking({
     const completeKitIds: string[] = [];
     for (const kitId of kitIdsBeingCheckedIn) {
       const kitAssetsInBooking = bookingFoundAssets.filter(
-        (a) => a.kitId === kitId
+        (a) => a.assetKits?.[0]?.kitId === kitId
       );
       const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
-        (a) => a.kitId === kitId
+        (a) => a.assetKits?.[0]?.kitId === kitId
       );
 
       if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
@@ -3810,7 +3826,9 @@ export async function partialCheckinBooking({
               select: {
                 id: true,
                 title: true,
-                kit: { select: { id: true, name: true } },
+                assetKits: {
+                  select: { kit: { select: { id: true, name: true } } },
+                },
               },
             })
           : [];
@@ -3819,14 +3837,15 @@ export async function partialCheckinBooking({
       const standaloneAssets: Array<{ id: string; title: string }> = [];
       const processedKitIds = new Set<string>();
       for (const asset of assetsWithKitInfo) {
+        const assetKit = asset.assetKits?.[0]?.kit;
         if (
-          asset.kit &&
-          txResult.completeKitIds.includes(asset.kit.id) &&
-          !processedKitIds.has(asset.kit.id)
+          assetKit &&
+          txResult.completeKitIds.includes(assetKit.id) &&
+          !processedKitIds.has(assetKit.id)
         ) {
-          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
-          processedKitIds.add(asset.kit.id);
-        } else if (!asset.kit) {
+          completeKits.push({ id: assetKit.id, name: assetKit.name });
+          processedKitIds.add(assetKit.id);
+        } else if (!assetKit) {
           standaloneAssets.push({ id: asset.id, title: asset.title });
         }
       }
@@ -4268,7 +4287,12 @@ export async function cancelBooking({
           status: true,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, kitId: true } },
+              asset: {
+                select: {
+                  id: true,
+                  assetKits: { select: { kitId: true } },
+                },
+              },
             },
           },
         },
@@ -5083,7 +5107,7 @@ export async function getBookings(params: {
 
     if (kitId) {
       where.bookingAssets = {
-        some: { asset: { kitId } },
+        some: { asset: { assetKits: { some: { kitId } } } },
       };
     }
 
@@ -5114,7 +5138,6 @@ export async function getBookings(params: {
                   quantity: true,
                   custody: true,
                   availableToBook: true,
-                  kitId: true,
                   status: true,
                   mainImage: true,
                   thumbnailImage: true,
@@ -5131,17 +5154,21 @@ export async function getBookings(params: {
                       bookingId: true,
                     },
                   },
-                  kit: {
+                  assetKits: {
                     select: {
-                      id: true,
-                      name: true,
-                      image: true,
-                      imageExpiration: true,
-                      category: {
+                      kit: {
                         select: {
                           id: true,
                           name: true,
-                          color: true,
+                          image: true,
+                          imageExpiration: true,
+                          category: {
+                            select: {
+                              id: true,
+                              name: true,
+                              color: true,
+                            },
+                          },
                         },
                       },
                     },
@@ -5428,7 +5455,7 @@ export async function deleteBooking(
           asset: {
             select: {
               id: true,
-              kitId: true,
+              assetKits: { select: { kitId: true } },
             },
           },
         },
@@ -5457,10 +5484,10 @@ export async function deleteBooking(
 
     const activeBookingAssets =
       activeBooking?.bookingAssets.map((ba) => ba.asset) ?? [];
-    const assetWithKits = activeBookingAssets.filter((a) => !!a.kitId);
-    const uniqueKitIds = new Set(
-      assetWithKits.map((a) => a.kitId) as unknown as string
-    );
+    const assetKitIds = activeBookingAssets
+      .map((a) => a.assetKits?.[0]?.kitId)
+      .filter((id): id is string => Boolean(id));
+    const uniqueKitIds = new Set(assetKitIds);
     const hasKits = uniqueKitIds.size > 0;
 
     const b = await db.booking.delete({
@@ -5811,14 +5838,16 @@ export async function getBookingsForCalendar(params: {
   }
 }
 
-export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
-  const assetsWithKit = assets.filter((a) => !!a.kitId) as Pick<
-    Asset,
-    "id" | "kitId"
-  >[];
-  const allKitIds = assetsWithKit
-    .map((a) => a.kitId)
-    .filter((id) => id !== null); // filter out null entreis
+type AssetWithKitId = Pick<Asset, "id"> & {
+  assetKits: { kitId: string }[];
+};
+
+export function getKitIdsByAssets(assets: AssetWithKitId[]) {
+  // Defensive `?.` on `assetKits` tolerates fixtures / payloads where the
+  // pivot relation isn't projected (older mocks, narrower selects).
+  const allKitIds = assets
+    .map((a) => a.assetKits?.[0]?.kitId)
+    .filter((id): id is string => Boolean(id));
 
   const uniqueKitIds = new Set(allKitIds);
 
@@ -5843,7 +5872,7 @@ export async function getBookingFlags(
     include: {
       category: true,
       custody: true,
-      kit: true,
+      assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
           booking: {
@@ -5938,7 +5967,7 @@ export async function getBookingFlags(
     (asset) => asset.status === AssetStatus.IN_CUSTODY
   );
 
-  const hasKits = assets.some((asset) => !!asset.kitId);
+  const hasKits = assets.some((asset) => (asset.assetKits ?? []).length > 0);
   const hasModelRequests = (booking.modelRequestCount ?? 0) > 0;
 
   return {
@@ -5980,7 +6009,12 @@ export async function bulkDeleteBookings({
           ...BOOKING_INCLUDE_FOR_EMAIL,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, kitId: true } },
+              asset: {
+                select: {
+                  id: true,
+                  assetKits: { select: { kitId: true } },
+                },
+              },
             },
           },
         },
@@ -6018,8 +6052,8 @@ export async function bulkDeleteBookings({
         );
 
         const allKitIds = allAssets
-          .filter((asset) => !!asset.kitId)
-          .map((asset) => asset.kitId as string);
+          .map((asset) => asset.assetKits?.[0]?.kitId)
+          .filter((id): id is string => Boolean(id));
 
         const uniqueKitIds = new Set(allKitIds);
 
@@ -6250,7 +6284,12 @@ export async function bulkCancelBookings({
           ...BOOKING_INCLUDE_FOR_EMAIL,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, kitId: true } },
+              asset: {
+                select: {
+                  id: true,
+                  assetKits: { select: { kitId: true } },
+                },
+              },
             },
           },
         },
@@ -6314,8 +6353,8 @@ export async function bulkCancelBookings({
           b.bookingAssets.map((ba) => ba.asset)
         );
         const allKitIds = allAssets
-          .filter((a) => !!a.kitId)
-          .map((a) => a.kitId as string);
+          .map((a) => a.assetKits?.[0]?.kitId)
+          .filter((id): id is string => Boolean(id));
 
         const uniqueKitIds = new Set(allKitIds);
 
@@ -6466,7 +6505,11 @@ async function createNotesForScannedAssetsAndKits({
     kitIds.length > 0
       ? db.kit.findMany({
           where: { id: { in: kitIds }, organizationId },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: {
+            id: true,
+            name: true,
+            assetKits: { select: { assetId: true } },
+          },
         })
       : Promise.resolve([]),
   ]);
@@ -6474,8 +6517,8 @@ async function createNotesForScannedAssetsAndKits({
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
   kits.forEach((kit) => {
-    kit.assets.forEach((asset) => {
-      assetIdToKitName.set(asset.id, kit.name);
+    kit.assetKits.forEach((ak) => {
+      assetIdToKitName.set(ak.assetId, kit.name);
     });
   });
 
@@ -6853,10 +6896,14 @@ export async function getAvailableAssetsIdsForBooking(
   try {
     const selectedAssets = await db.asset.findMany({
       where: { id: { in: assetIds } },
-      select: { status: true, id: true, kitId: true },
+      select: {
+        status: true,
+        id: true,
+        assetKits: { select: { kitId: true } },
+      },
     });
 
-    if (selectedAssets.some((asset) => asset.kitId)) {
+    if (selectedAssets.some((asset) => asset.assetKits.length > 0)) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add assets that belong to a kit.",

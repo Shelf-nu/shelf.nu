@@ -298,8 +298,8 @@ async function validateKitCustodyConflicts({
     ...new Set(conflictCandidates.map((asset) => asset.kit)),
   ].filter(Boolean) as string[];
 
-  // Fetch existing kits and their custody status in one query
-  const existingKits = await db.kit.findMany({
+  // Fetch existing kits and their custody status in one query.
+  const existingKitsRaw = await db.kit.findMany({
     where: {
       name: { in: kitNames },
       organizationId,
@@ -317,13 +317,20 @@ async function validateKitCustodyConflicts({
           },
         },
       },
-      assets: {
+      assetKits: {
         select: {
-          id: true,
+          asset: { select: { id: true } },
         },
       },
     },
   });
+
+  // Flatten pivot rows into the in-memory `assets` shape the existing
+  // conflict logic expects.
+  const existingKits = existingKitsRaw.map((kit) => ({
+    ...kit,
+    assets: kit.assetKits.map((ak) => ak.asset),
+  }));
 
   // Find conflicts: existing kits without custody that would receive assets with custody
   const conflicts: Array<{
@@ -813,10 +820,12 @@ export async function getAssets(params: {
     }
 
     /**
-     * User should only see the assets without kits for hideUnavailable true
+     * `hideUnavailable` filters out assets that are in a kit. Since kit
+     * membership lives on the `AssetKit` pivot, "not in any kit" is
+     * "asset has zero AssetKit rows".
      */
     if (hideUnavailable === true) {
-      where.kit = null;
+      where.assetKits = { none: {} };
     }
 
     if (teamMemberIds && teamMemberIds.length) {
@@ -863,9 +872,9 @@ export async function getAssets(params: {
     }
 
     if (assetKitFilter === "NOT_IN_KIT") {
-      where.kit = null;
+      where.assetKits = { none: {} };
     } else if (assetKitFilter === "IN_OTHER_KITS") {
-      where.kit = { isNot: null };
+      where.assetKits = { some: {} };
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -1402,25 +1411,30 @@ export async function updateAsset({
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
 
-    // Check if asset belongs to a kit and prevent location updates
+    // Check if asset belongs to a kit and prevent location updates.
+    // the parent kit (today: ≤1 pivot row per asset) through
+    // `assetKits.kit` and read it as `assetWithKit?.assetKits[0]?.kit`.
     if (isChangingLocation) {
       const assetWithKit = await db.asset.findUnique({
         where: { id, organizationId },
         select: {
-          kit: {
-            select: { id: true, name: true },
+          assetKits: {
+            select: { kit: { select: { id: true, name: true } } },
           },
         },
       });
 
-      if (assetWithKit?.kit) {
+      // Defensive `?.` on `assetKits` itself tolerates fixtures /
+      // payloads that omit the pivot relation entirely.
+      const parentKit = assetWithKit?.assetKits?.[0]?.kit;
+      if (parentKit) {
         throw new ShelfError({
           cause: null,
-          message: `This asset's location is managed by its parent kit "${assetWithKit.kit.name}". Please update the kit's location instead.`,
+          message: `This asset's location is managed by its parent kit "${parentKit.name}". Please update the kit's location instead.`,
           additionalData: {
             assetId: id,
-            kitId: assetWithKit.kit.id,
-            kitName: assetWithKit.kit.name,
+            kitId: parentKit.id,
+            kitName: parentKit.name,
           },
           label: "Assets",
           status: 400,
@@ -2490,7 +2504,9 @@ export async function getPaginatedAndFilterableAssets({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  kitId?: Prisma.AssetWhereInput["kitId"];
+  // `AssetKit` pivot. Callers still pass a plain `kitId` string here
+  // for filtering; the where-builder will map it onto `assetKits.some`.
+  kitId?: string | null;
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
@@ -4281,7 +4297,7 @@ export async function bulkUpdateAssetLocation({
           id: true,
           title: true,
           location: true,
-          kit: { select: { id: true, name: true } },
+          assetKits: { select: { kit: { select: { id: true, name: true } } } },
         },
       }),
       getUserByID(userId, {
@@ -4295,10 +4311,10 @@ export async function bulkUpdateAssetLocation({
     ]);
 
     // Check if any assets belong to kits and prevent bulk location updates
-    const assetsInKits = assets.filter((asset) => asset.kit);
+    const assetsInKits = assets.filter((asset) => asset.assetKits?.[0]?.kit);
     if (assetsInKits.length > 0) {
       const kitNames = Array.from(
-        new Set(assetsInKits.map((asset) => asset.kit?.name))
+        new Set(assetsInKits.map((asset) => asset.assetKits?.[0]?.kit?.name))
       ).join(", ");
       throw new ShelfError({
         cause: null,

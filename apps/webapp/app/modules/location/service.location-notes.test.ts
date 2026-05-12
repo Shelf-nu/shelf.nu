@@ -337,8 +337,13 @@ describe("location service activity logging", () => {
         },
       ];
 
+      // Phase-4a: Kit now exposes assets through the AssetKit pivot
       const kitRecords = [
-        { id: "kit-1", name: "Shoot Kit", assets: kitAssets },
+        {
+          id: "kit-1",
+          name: "Shoot Kit",
+          assetKits: kitAssets.map((asset) => ({ asset })),
+        },
       ];
 
       dbMocks.kit.findMany

@@ -212,7 +212,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       mainImage: ba.asset.mainImage,
       thumbnailImage: ba.asset.thumbnailImage,
       assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
-      kitId: ba.asset.kitId,
+      kitId: ba.asset.assetKits[0]?.kitId ?? null,
       // `ba.quantity` is the BOOKING-specific unit count (from the
       // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for
       // QUANTITY_TRACKED. Needed so the drawer's "Already included"
