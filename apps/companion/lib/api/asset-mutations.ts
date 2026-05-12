@@ -1,9 +1,22 @@
+/**
+ * Asset mutation API helpers.
+ *
+ * Thin wrappers around `apiFetch` / `apiUpload` for the create / update /
+ * delete / image-upload endpoints, plus the supporting picker endpoints
+ * (`categories`, `customFields`). All helpers return the structured
+ * `{ data, error }` envelope from `apiFetch` — they never throw.
+ *
+ * @see {@link file://./client.ts} for the underlying transport and how
+ *   `options.signal` is plumbed through for cancellation.
+ */
+
 import { apiFetch, apiUpload } from "./client";
 import { cachedApiFetch } from "./cache";
 import type {
   CategoriesResponse,
   CreateAssetResponse,
   CustomFieldsResponse,
+  CustomFieldValue,
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
@@ -21,12 +34,19 @@ export const assetMutationsApi = {
    * to render the right inputs (including required indicators) for the
    * currently selected category. Pass `categoryId = undefined` (or omit) to
    * get the fields that apply to assets with no category.
+   *
+   * @param signal Optional `AbortSignal`. When the caller's effect cleans up
+   *   (e.g. the user changes the category before the previous request
+   *   completes), aborting prevents a stale response from clobbering the
+   *   newer one. Forwarded to `apiFetch` which already chains it onto its
+   *   internal timeout controller.
    */
-  customFields: (orgId: string, categoryId?: string) => {
+  customFields: (orgId: string, categoryId?: string, signal?: AbortSignal) => {
     const params = new URLSearchParams({ orgId });
     if (categoryId) params.set("categoryId", categoryId);
     return apiFetch<CustomFieldsResponse>(
-      `/api/mobile/custom-fields?${params}`
+      `/api/mobile/custom-fields?${params}`,
+      { signal }
     );
   },
 
@@ -45,7 +65,7 @@ export const assetMutationsApi = {
       categoryId?: string;
       locationId?: string;
       valuation?: number;
-      customFields?: { id: string; value: any }[];
+      customFields?: { id: string; value: CustomFieldValue }[];
     }
   ) =>
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {

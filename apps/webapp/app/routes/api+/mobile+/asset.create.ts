@@ -1,5 +1,25 @@
+/**
+ * Mobile Asset Create API
+ *
+ * Endpoint backing the companion app's quick-create flow. Mirrors the webapp's
+ * create form contract: enforces required custom fields for the chosen
+ * category, validates submitted custom-field values against the canonical
+ * type/shape, and produces a fully persisted asset via `createAsset`.
+ *
+ * Security notes:
+ * - `categoryId` is verified against the caller's organization before it is
+ *   used to filter active custom fields (prevents cross-org probing).
+ * - Submitted custom-field ids are intersected with the active definitions
+ *   so unknown ids fail fast (HTTP 400) rather than reaching the persistence
+ *   helper.
+ *
+ * @see {@link file://./../../../utils/custom-fields.ts} — `buildCustomFieldValue`, `extractCustomFieldValuesFromPayload`
+ * @see {@link file://./../../../modules/custom-field/service.server.ts} — `getActiveCustomFields`
+ * @see {@link file://./../../../modules/asset/service.server.ts} — `createAsset`
+ */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -29,8 +49,15 @@ import {
  *   categoryId?: string
  *   locationId?: string
  *   valuation?: number
- *   customFields?: { id: string; value: any }[]
+ *   customFields?: { id: string; value: string | number | boolean | null }[]
  * }
+ *
+ * @param args - React Router action args (carrying the incoming request).
+ * @returns A JSON response with the created asset's id/title on success, or
+ *   `{ error: { message } }` with an appropriate HTTP status on failure:
+ *   - 400 Invalid category / unknown custom field id / missing required fields
+ *   - 401/403 Auth or permission errors (surfaced by `requireMobileAuth` /
+ *     `requireMobilePermission`)
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -63,12 +90,28 @@ export async function action({ request }: ActionFunctionArgs) {
           .array(
             z.object({
               id: z.string(),
-              value: z.any(),
+              value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
             })
           )
           .optional(),
       })
       .parse(body);
+
+    // why: a categoryId from the request body is attacker-controlled. Without
+    // verifying it belongs to the caller's organization we'd happily use it to
+    // probe `getActiveCustomFields` for category metadata across tenants.
+    if (categoryId) {
+      const category = await db.category.findFirst({
+        where: { id: categoryId, organizationId },
+        select: { id: true },
+      });
+      if (!category) {
+        return data(
+          { error: { message: "Invalid category" } },
+          { status: 400 }
+        );
+      }
+    }
 
     // why: every category may have its own set of required custom fields.
     // We always fetch the active definitions for the chosen category (or
@@ -82,6 +125,25 @@ export async function action({ request }: ActionFunctionArgs) {
       category: categoryId ?? null,
     });
 
+    const defById = new Map(customFieldDef.map((def) => [def.id, def]));
+
+    // why: reject unknown ids up front. extractCustomFieldValuesFromPayload
+    // would otherwise throw deep in buildCustomFieldValue when it dereferences
+    // a missing definition — a 500 instead of an actionable 400.
+    if (customFields) {
+      const unknown = customFields.find((cf) => !defById.has(cf.id));
+      if (unknown) {
+        return data(
+          {
+            error: {
+              message: `Unknown custom field id: ${unknown.id}`,
+            },
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const submittedById = new Map(
       (customFields ?? []).map((cf) => [cf.id, cf.value])
     );
@@ -89,7 +151,14 @@ export async function action({ request }: ActionFunctionArgs) {
     for (const def of customFieldDef) {
       if (!def.required) continue;
       const submitted = submittedById.get(def.id);
-      if (submitted === undefined || submitted === null || submitted === "") {
+      // why: treat whitespace-only strings as missing. Without `.trim()` a
+      // caller could submit "   " and bypass the required check.
+      if (
+        submitted === undefined ||
+        submitted === null ||
+        submitted === "" ||
+        (typeof submitted === "string" && submitted.trim() === "")
+      ) {
         missingRequired.push(def.name);
       }
     }
@@ -110,8 +179,23 @@ export async function action({ request }: ActionFunctionArgs) {
     if (customFields && customFields.length > 0) {
       // The helper expects a flat object with cf-{id} keys (form-data shape).
       // Reshape the mobile array into that contract.
+      // why: `CustomFieldInput` on the companion side emits "true"/"false"
+      // strings for booleans, but `buildCustomFieldValue` only recognises
+      // "yes"/"no" (or real booleans). Normalise here so the pipeline matches
+      // the webapp form's contract.
       const cfPayload = Object.fromEntries(
-        customFields.map((cf) => [`cf-${cf.id}`, cf.value])
+        customFields.map((cf) => {
+          const def = defById.get(cf.id);
+          let value = cf.value;
+          if (def?.type === "BOOLEAN") {
+            if (value === true || value === "true") {
+              value = true;
+            } else if (value === false || value === "false") {
+              value = false;
+            }
+          }
+          return [`cf-${cf.id}`, value];
+        })
       );
       customFieldsValues = extractCustomFieldValuesFromPayload({
         payload: cfPayload,

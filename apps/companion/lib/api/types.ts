@@ -408,6 +408,16 @@ export type CreateAssetResponse = {
   };
 };
 
+/**
+ * Server-accepted scalar value for a custom field on create / update.
+ * The webapp coerces these into the appropriate stored representation:
+ * - string  → TEXT / MULTILINE_TEXT / DATE (ISO) / OPTION (option text)
+ * - number  → NUMBER / AMOUNT
+ * - boolean → BOOLEAN
+ * - null    → clear the value (UPDATE only)
+ */
+export type CustomFieldValue = string | number | boolean | null;
+
 export type UpdateAssetPayload = {
   assetId: string;
   title?: string;
@@ -416,7 +426,12 @@ export type UpdateAssetPayload = {
   newLocationId?: string;
   currentLocationId?: string;
   valuation?: number | null;
-  customFields?: { id: string; value: any }[];
+  /**
+   * Custom field updates. Each entry is the customField `id` (NOT the asset's
+   * custom-field-value row id) plus the new value. Omitted fields are left
+   * unchanged on the server.
+   */
+  customFields?: { id: string; value: CustomFieldValue }[];
 };
 
 /**
@@ -424,6 +439,21 @@ export type UpdateAssetPayload = {
  * `GET /api/mobile/custom-fields`. The companion uses this shape to render
  * the right input (via `CustomFieldInput`) and to enforce required-ness
  * client-side before submitting the create / update payload.
+ *
+ * Field semantics:
+ * - `id`        — stable CustomField primary key; used as the dictionary
+ *                 key on the form's local id → value map.
+ * - `name`      — human-readable label shown above the input.
+ * - `type`      — one of `TEXT`, `MULTILINE_TEXT`, `BOOLEAN`, `DATE`,
+ *                 `NUMBER`, `AMOUNT`, `OPTION`. Drives input rendering.
+ * - `helpText`  — optional hint shown next to the label (and forwarded as
+ *                 an `accessibilityHint` to screen readers).
+ * - `required`  — when true, the create / update screens block submit
+ *                 until a non-empty value is provided. The server enforces
+ *                 the same contract; the client check is a UX improvement.
+ * - `options`   — only populated for `type === "OPTION"`. The allowed set
+ *                 of values the user may pick from. Empty array / null for
+ *                 every other type.
  */
 export type MobileCustomFieldDefinition = {
   id: string;
@@ -434,6 +464,11 @@ export type MobileCustomFieldDefinition = {
   options: string[] | null;
 };
 
+/**
+ * Response payload for `GET /api/mobile/custom-fields?orgId=...&categoryId=...`.
+ * Returns the full set of active custom-field definitions that apply to the
+ * selected category (or to "no category" when `categoryId` is omitted).
+ */
 export type CustomFieldsResponse = {
   customFields: MobileCustomFieldDefinition[];
 };

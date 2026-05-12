@@ -1,4 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+/**
+ * Create-asset screen.
+ *
+ * Renders the form for creating a new asset (title, description, optional
+ * image, category, location, and category-scoped custom fields). The custom
+ * field definitions are fetched on mount and whenever the category changes;
+ * required fields are enforced client-side BEFORE submit so the user sees
+ * a clear, immediate message instead of a 400 round-trip. The server enforces
+ * the same contract — the client check is purely a UX improvement, but a
+ * critical one: if the custom-fields fetch fails the screen surfaces the
+ * error and blocks submission rather than silently skipping the guard.
+ *
+ * @see {@link file://../../../hooks/use-edit-asset-form.ts} for the parallel
+ *   pattern used on the edit screen.
+ */
+
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -91,6 +107,14 @@ export default function CreateAssetScreen() {
     Record<string, string>
   >({});
   const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(false);
+  // why: surfacing the fetch failure is critical — without it the required-
+  // field client guard silently becomes a no-op (empty `customFieldDefs`),
+  // letting the user submit a payload the server will reject.
+  const [customFieldsError, setCustomFieldsError] = useState<string | null>(
+    null
+  );
+  // Bumped on each retry to re-run the load effect without changing org/cat.
+  const [customFieldsRetryNonce, setCustomFieldsRetryNonce] = useState(0);
 
   // ── Load categories ─────────────────────────────
   const loadCategories = useCallback(async () => {
@@ -117,15 +141,23 @@ export default function CreateAssetScreen() {
   // ── Load custom fields for the selected category ──
   // Re-runs whenever the chosen category changes (including "no category").
   // Any existing values for fields that no longer apply to the new category
-  // are pruned so we don't accidentally send stale data on submit.
+  // are pruned so we don't accidentally send stale data on submit. Uses an
+  // AbortController so a fast category change cancels the in-flight request
+  // (avoiding a stale response clobbering a newer one) and surfaces errors
+  // explicitly so submit is blocked instead of silently bypassed.
   useEffect(() => {
     if (!currentOrg) return;
-    let cancelled = false;
+    const controller = new AbortController();
     setIsCustomFieldsLoading(true);
+    setCustomFieldsError(null);
     api
-      .customFields(currentOrg.id, selectedCategory?.id)
-      .then(({ data }) => {
-        if (cancelled) return;
+      .customFields(currentOrg.id, selectedCategory?.id, controller.signal)
+      .then(({ data, error }) => {
+        if (controller.signal.aborted) return;
+        if (error) {
+          setCustomFieldsError(error);
+          return;
+        }
         const defs = data?.customFields ?? [];
         setCustomFieldDefs(defs);
         // Drop any values whose definition is no longer in scope
@@ -138,13 +170,25 @@ export default function CreateAssetScreen() {
           return next;
         });
       })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setCustomFieldsError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load custom fields. Please retry."
+        );
+      })
       .finally(() => {
-        if (!cancelled) setIsCustomFieldsLoading(false);
+        if (!controller.signal.aborted) setIsCustomFieldsLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [currentOrg, selectedCategory?.id]);
+  }, [currentOrg, selectedCategory?.id, customFieldsRetryNonce]);
+
+  const retryLoadCustomFields = useCallback(() => {
+    setCustomFieldsRetryNonce((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     loadCategories();
@@ -276,6 +320,21 @@ export default function CreateAssetScreen() {
     }
   };
 
+  // ── Stable onChange handlers per custom field ──
+  // why: passing a new inline arrow on every render forces React to treat
+  // each `CustomFieldInput` as having new props, defeating any memoization
+  // and re-running effects inside it. We build one handler per field id and
+  // cache them so a value change in field A doesn't re-create handlers for
+  // fields B…Z. The map is rebuilt only when the set of field IDs changes.
+  const customFieldChangeHandlers = useMemo(() => {
+    const handlers: Record<string, (val: string) => void> = {};
+    for (const def of customFieldDefs) {
+      handlers[def.id] = (val: string) =>
+        setCustomFieldValues((prev) => ({ ...prev, [def.id]: val }));
+    }
+    return handlers;
+  }, [customFieldDefs]);
+
   // ── Build the custom-fields payload from the local string map ──
   // Empty strings are dropped so we don't send "I touched the input then
   // cleared it" — the server treats absence as "no value." For required
@@ -298,6 +357,25 @@ export default function CreateAssetScreen() {
       return;
     }
     if (!currentOrg) return;
+
+    // why: block submit if the custom-field definitions failed to load —
+    // otherwise the required-field guard below silently passes on an empty
+    // `customFieldDefs` array, letting the user POST a payload the server
+    // will then reject with 400.
+    if (customFieldsError) {
+      Alert.alert(
+        "Cannot create asset",
+        "Custom fields failed to load. Please retry before submitting."
+      );
+      return;
+    }
+    if (isCustomFieldsLoading) {
+      Alert.alert(
+        "Please wait",
+        "Custom fields are still loading. Try again in a moment."
+      );
+      return;
+    }
 
     // why: enforce required custom fields BEFORE hitting the server so the
     // user sees a clear, immediate message instead of a 400 round-trip. The
@@ -380,7 +458,11 @@ export default function CreateAssetScreen() {
     ]);
   };
 
-  const canSubmit = title.trim().length >= 2 && !isSubmitting;
+  const canSubmit =
+    title.trim().length >= 2 &&
+    !isSubmitting &&
+    !isCustomFieldsLoading &&
+    !customFieldsError;
 
   return (
     <KeyboardAvoidingView
@@ -702,6 +784,36 @@ export default function CreateAssetScreen() {
               Loading custom fields…
             </Text>
           </View>
+        ) : customFieldsError ? (
+          <View style={styles.customFieldsErrorBox}>
+            <Ionicons
+              name="alert-circle-outline"
+              size={18}
+              color={colors.error}
+            />
+            <View style={styles.customFieldsErrorBody}>
+              <Text
+                style={styles.customFieldsErrorText}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                Couldn&apos;t load custom fields. Submission is disabled until
+                this succeeds.
+              </Text>
+              <Text style={styles.customFieldsErrorDetail}>
+                {customFieldsError}
+              </Text>
+              <TouchableOpacity
+                onPress={retryLoadCustomFields}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading custom fields"
+                style={styles.customFieldsRetryButton}
+              >
+                <Ionicons name="refresh" size={14} color={colors.primary} />
+                <Text style={styles.customFieldsRetryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         ) : customFieldDefs.length > 0 ? (
           <View style={styles.customFieldsSection}>
             <Text style={styles.sectionLabel}>Custom Fields</Text>
@@ -722,11 +834,11 @@ export default function CreateAssetScreen() {
                     name: def.name,
                     type: def.type,
                     helpText: def.helpText,
+                    required: def.required,
+                    options: def.options,
                   }}
                   value={customFieldValues[def.id] ?? ""}
-                  onChange={(val) =>
-                    setCustomFieldValues((prev) => ({ ...prev, [def.id]: val }))
-                  }
+                  onChange={customFieldChangeHandlers[def.id]}
                 />
               </View>
             ))}
@@ -984,6 +1096,42 @@ const useStyles = createStyles((colors, shadows) => ({
   customFieldsLoadingText: {
     fontSize: fontSize.sm,
     color: colors.muted,
+  },
+  customFieldsErrorBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  customFieldsErrorBody: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  customFieldsErrorText: {
+    fontSize: fontSize.base,
+    color: colors.error,
+    fontWeight: "600",
+  },
+  customFieldsErrorDetail: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  customFieldsRetryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    alignSelf: "flex-start",
+    marginTop: spacing.xs,
+  },
+  customFieldsRetryText: {
+    fontSize: fontSize.base,
+    color: colors.primary,
+    fontWeight: "600",
   },
 
   // ── Bottom bar ────────────────────────────────
