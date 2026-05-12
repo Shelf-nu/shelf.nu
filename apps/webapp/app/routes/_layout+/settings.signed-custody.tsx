@@ -5,8 +5,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, useFetcher, useLoaderData } from "react-router";
-import { useZorm } from "react-zorm";
+import { data, Form, useLoaderData } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import FormRow from "~/components/forms/form-row";
@@ -57,6 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message:
           "Signed custody settings are not available in a personal workspace.",
         label: "Settings",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -99,6 +99,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         message:
           "Signed custody settings are not available in a personal workspace.",
         label: "Settings",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -157,16 +158,15 @@ export const ErrorBoundary = () => <ErrorContent />;
 
 export default function SignedCustodySettingsPage() {
   const { organization } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher({ key: "signed-custody-settings" });
-  const disabled = useDisabled(fetcher);
-  const zo = useZorm("SignedCustodySettings", SignedCustodySettingsSchema);
+  const disabled = useDisabled();
 
   const [signedCustodyEnabled, setSignedCustodyEnabled] = useState(
     organization.enableSignedCustodyOnAssignment
   );
 
   return (
-    <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
+    <Form method="post" className="flex flex-col gap-2">
+      <input type="hidden" name="intent" value="updateSignedCustodySettings" />
       <Card className="my-0">
         <div className="mb-6">
           <h3 className="text-text-lg font-semibold">Signed custody</h3>
@@ -190,7 +190,7 @@ export default function SignedCustodySettingsPage() {
           <div className="flex flex-col items-center gap-2">
             <Switch
               id="enableSignedCustodyOnAssignment"
-              name={zo.fields.enableSignedCustodyOnAssignment()}
+              name="enableSignedCustodyOnAssignment"
               checked={signedCustodyEnabled}
               disabled={disabled}
               onCheckedChange={setSignedCustodyEnabled}
@@ -218,7 +218,7 @@ export default function SignedCustodySettingsPage() {
           <div className="flex flex-col items-center gap-2">
             <Switch
               id="requireCustodySignatureOnAssignment"
-              name={zo.fields.requireCustodySignatureOnAssignment()}
+              name="requireCustodySignatureOnAssignment"
               defaultChecked={organization.requireCustodySignatureOnAssignment}
               disabled={disabled || !signedCustodyEnabled}
             />
@@ -232,16 +232,11 @@ export default function SignedCustodySettingsPage() {
         </FormRow>
 
         <div className="text-right">
-          <Button
-            type="submit"
-            value="updateSignedCustodySettings"
-            name="intent"
-            disabled={disabled}
-          >
+          <Button type="submit" disabled={disabled}>
             {disabled ? <Spinner /> : "Save settings"}
           </Button>
         </div>
       </Card>
-    </fetcher.Form>
+    </Form>
   );
 }

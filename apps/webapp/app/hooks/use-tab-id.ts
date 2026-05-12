@@ -15,6 +15,21 @@
 import { useEffect, useRef } from "react";
 
 const SESSION_KEY = "__shelfTabId";
+let tabIdFallbackCounter = 0;
+
+function generateTabId(): string {
+  if (typeof globalThis.crypto !== "undefined") {
+    try {
+      if (typeof globalThis.crypto.randomUUID === "function") {
+        return globalThis.crypto.randomUUID();
+      }
+    } catch {
+      // Fallback below handles environments where crypto exists but is partially shimmed.
+    }
+  }
+  tabIdFallbackCounter += 1;
+  return `tab-${Date.now()}-${tabIdFallbackCounter}`;
+}
 
 /**
  * Returns a stable, unique identifier for the current browser tab.
@@ -32,7 +47,7 @@ export function useTabId(): string {
     const stored = sessionStorage.getItem(SESSION_KEY);
     // Cloned tabs (window.open / target="_blank") inherit sessionStorage,
     // so generate a fresh ID when an opener is detected.
-    tabIdRef.current = stored && !window.opener ? stored : crypto.randomUUID();
+    tabIdRef.current = stored && !window.opener ? stored : generateTabId();
     sessionStorage.setItem(SESSION_KEY, tabIdRef.current);
   }
 
