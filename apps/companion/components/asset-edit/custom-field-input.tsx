@@ -31,6 +31,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import type { MobileCustomFieldType } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -46,7 +47,14 @@ type CustomFieldInputProps = {
   field: {
     id: string;
     name: string;
-    type: string;
+    /**
+     * Field type from the canonical {@link MobileCustomFieldType} union.
+     * Using the literal union (not `string`) catches casing mismatches at
+     * compile time — the most common confusion is webapp internals using
+     * lowercase identifiers while the database / mobile API contract is
+     * uppercase.
+     */
+    type: MobileCustomFieldType;
     helpText: string | null;
     required?: boolean;
     options?: string[] | null;
@@ -262,11 +270,15 @@ function OptionDropdown({
       {open && (
         <View style={styles.pickerDropdown}>
           <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-            {options.map((opt) => {
+            {options.map((opt, index) => {
               const selected = opt === value;
               return (
                 <TouchableOpacity
-                  key={opt}
+                  // why: index in the key guards against duplicate option
+                  // labels (we don't enforce uniqueness server-side).
+                  // Without it React's reconciliation would mis-attribute
+                  // selection state on collision.
+                  key={`${opt}-${index}`}
                   style={[
                     styles.pickerItem,
                     selected && styles.pickerItemSelected,

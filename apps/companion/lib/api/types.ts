@@ -455,10 +455,26 @@ export type UpdateAssetPayload = {
  *                 of values the user may pick from. Empty array / null for
  *                 every other type.
  */
+/**
+ * Discriminated union of all supported custom-field types. Keeping this as
+ * a literal union (not `string`) catches typos at compile time — the most
+ * common confusion is webapp internals using lowercase identifiers
+ * (`"option"`, `"boolean"`) while the database and this API contract use
+ * uppercase. Add a new constant here when introducing a new field type.
+ */
+export type MobileCustomFieldType =
+  | "TEXT"
+  | "MULTILINE_TEXT"
+  | "BOOLEAN"
+  | "DATE"
+  | "NUMBER"
+  | "AMOUNT"
+  | "OPTION";
+
 export type MobileCustomFieldDefinition = {
   id: string;
   name: string;
-  type: string;
+  type: MobileCustomFieldType;
   helpText: string | null;
   required: boolean;
   options: string[] | null;

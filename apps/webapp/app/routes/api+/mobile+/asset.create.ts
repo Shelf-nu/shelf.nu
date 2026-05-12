@@ -25,6 +25,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
@@ -125,25 +126,9 @@ export async function action({ request }: ActionFunctionArgs) {
       category: categoryId ?? null,
     });
 
-    const defById = new Map(customFieldDef.map((def) => [def.id, def]));
-
-    // why: reject unknown ids up front. extractCustomFieldValuesFromPayload
-    // would otherwise throw deep in buildCustomFieldValue when it dereferences
-    // a missing definition — a 500 instead of an actionable 400.
-    if (customFields) {
-      const unknown = customFields.find((cf) => !defById.has(cf.id));
-      if (unknown) {
-        return data(
-          {
-            error: {
-              message: `Unknown custom field id: ${unknown.id}`,
-            },
-          },
-          { status: 400 }
-        );
-      }
-    }
-
+    // why: enforce required-field totality at CREATE time. The matching check
+    // on update is intentionally narrower (only blocks explicit clears) — see
+    // the docstring on the update route for rationale.
     const submittedById = new Map(
       (customFields ?? []).map((cf) => [cf.id, cf.value])
     );
@@ -177,28 +162,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
     let customFieldsValues;
     if (customFields && customFields.length > 0) {
-      // The helper expects a flat object with cf-{id} keys (form-data shape).
-      // Reshape the mobile array into that contract.
-      // why: `CustomFieldInput` on the companion side emits "true"/"false"
-      // strings for booleans, but `buildCustomFieldValue` only recognises
-      // "yes"/"no" (or real booleans). Normalise here so the pipeline matches
-      // the webapp form's contract.
-      const cfPayload = Object.fromEntries(
-        customFields.map((cf) => {
-          const def = defById.get(cf.id);
-          let value = cf.value;
-          if (def?.type === "BOOLEAN") {
-            if (value === true || value === "true") {
-              value = true;
-            } else if (value === false || value === "false") {
-              value = false;
-            }
-          }
-          return [`cf-${cf.id}`, value];
-        })
-      );
+      // why: unknown-id rejection + BOOLEAN normalisation + cf-{id} reshape
+      // live in a shared helper now (both create and update use it). Removes
+      // ~40 lines of duplicated logic and the drift surface that came with
+      // it. See `mobile-custom-fields.server.ts` for the why behind each
+      // transformation step.
+      const built = buildMobileCustomFieldPayload(customFields, customFieldDef);
+      if (!built.ok) {
+        return data(
+          {
+            error: {
+              message: `Unknown custom field id: ${built.unknownId}`,
+            },
+          },
+          { status: 400 }
+        );
+      }
       customFieldsValues = extractCustomFieldValuesFromPayload({
-        payload: cfPayload,
+        payload: built.payload,
         customFieldDef,
       });
     }

@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, type AssetDetail, type Category, type Location } from "@/lib/api";
+import {
+  api,
+  type AssetDetail,
+  type Category,
+  type Location,
+  type MobileCustomFieldType,
+} from "@/lib/api";
 
 /** Extract a displayable string value from a custom field's stored value */
 function extractCustomFieldValue(cf: AssetDetail["customFields"][0]): string {
@@ -28,7 +34,7 @@ function extractCustomFieldValue(cf: AssetDetail["customFields"][0]): string {
 export type CustomFieldState = {
   id: string; // customField.id
   name: string;
-  type: string;
+  type: MobileCustomFieldType;
   helpText: string | null;
   value: string; // string representation for editing
   originalValue: string;
@@ -141,7 +147,12 @@ export function useEditAssetForm(
                 return {
                   id: cf.customField.id,
                   name: cf.customField.name,
-                  type: cf.customField.type,
+                  // why: AssetDetail's response shape declares `type: string`
+                  // (kept loose to match the API contract verbatim). At this
+                  // narrow construction point we know the server only emits
+                  // valid MobileCustomFieldType identifiers, so we narrow
+                  // here once and downstream code stays type-safe.
+                  type: cf.customField.type as MobileCustomFieldType,
                   helpText: cf.customField.helpText,
                   value: rawVal,
                   originalValue: rawVal,

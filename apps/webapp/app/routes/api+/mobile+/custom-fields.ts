@@ -17,6 +17,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { UNCATEGORIZED_SENTINEL } from "~/modules/api/mobile-custom-fields.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -44,7 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const url = new URL(request.url);
     const categoryIdRaw = url.searchParams.get("categoryId");
     const categoryId =
-      categoryIdRaw && categoryIdRaw !== "uncategorized" ? categoryIdRaw : null;
+      categoryIdRaw && categoryIdRaw !== UNCATEGORIZED_SENTINEL
+        ? categoryIdRaw
+        : null;
 
     // why: prefer an explicit `select` over reusing `getActiveCustomFields`
     // (which returns the full row). This guarantees we never leak

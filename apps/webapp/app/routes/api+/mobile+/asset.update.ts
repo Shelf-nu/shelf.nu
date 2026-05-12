@@ -13,6 +13,14 @@
  * actively changing the category) and fall back to the asset's persisted
  * `categoryId` so we validate against the right set of definitions.
  *
+ * **Required-field totality is enforced at CREATE time only.** This update
+ * path is intentionally narrower: it blocks *explicit clears* of required
+ * fields but does NOT detect "this update changed the category to one whose
+ * required fields aren't all populated on the asset." That mirrors the
+ * webapp edit form's behaviour today (partial updates). If a caller wants
+ * "make sure this asset still satisfies its category's required fields"
+ * semantics, that's a separate validation step at the call site.
+ *
  * @see {@link file://./../../../utils/custom-fields.ts} — `buildCustomFieldValue`, `extractCustomFieldValuesFromPayload`
  * @see {@link file://./../../../modules/custom-field/service.server.ts} — `getActiveCustomFields`
  * @see {@link file://./../../../modules/asset/service.server.ts} — `updateAsset`
@@ -25,6 +33,10 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import {
+  UNCATEGORIZED_SENTINEL,
+  buildMobileCustomFieldPayload,
+} from "~/modules/api/mobile-custom-fields.server";
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
@@ -117,12 +129,12 @@ export async function action({ request }: ActionFunctionArgs) {
       // miss required fields or reject legitimate values. Fetching here also
       // doubles as the cross-org existence check (returns 404 if the asset
       // isn't visible to the caller's organization).
-      // why: normalize the documented "uncategorized" sentinel to null so
+      // why: normalize the documented UNCATEGORIZED_SENTINEL to null so
       // getActiveCustomFields receives the same shape downstream code expects.
       // Without this, validation runs against the literal string and rejects
       // legitimate uncategorized field updates with false "unknown id" errors.
       let effectiveCategoryId: string | null =
-        categoryId === "uncategorized" ? null : categoryId ?? null;
+        categoryId === UNCATEGORIZED_SENTINEL ? null : categoryId ?? null;
       if (categoryId === undefined) {
         const existing = await db.asset.findUnique({
           where: { id: assetId, organizationId },
@@ -141,23 +153,6 @@ export async function action({ request }: ActionFunctionArgs) {
         organizationId,
         category: effectiveCategoryId,
       });
-
-      const defById = new Map(customFieldDef.map((def) => [def.id, def]));
-
-      // why: reject unknown ids up front. extractCustomFieldValuesFromPayload
-      // would otherwise throw deep in buildCustomFieldValue when it
-      // dereferences a missing definition.
-      const unknown = customFields.find((cf) => !defById.has(cf.id));
-      if (unknown) {
-        return data(
-          {
-            error: {
-              message: `Unknown custom field id: ${unknown.id}`,
-            },
-          },
-          { status: 400 }
-        );
-      }
 
       // why: reject attempts to explicitly clear a required custom field on
       // update. We can't enforce "every required field has a value" here
@@ -191,29 +186,25 @@ export async function action({ request }: ActionFunctionArgs) {
         );
       }
 
-      // The helper expects a flat object with cf-{id} keys (form-data shape).
-      // Reshape the mobile array into that contract.
-      // why: `CustomFieldInput` on the companion side emits "true"/"false"
-      // strings for booleans, but `buildCustomFieldValue` only recognises
-      // "yes"/"no" (or real booleans). Normalise here so the pipeline matches
-      // the webapp form's contract.
-      const cfPayload = Object.fromEntries(
-        customFields.map((cf) => {
-          const def = defById.get(cf.id);
-          let value = cf.value;
-          if (def?.type === "BOOLEAN") {
-            if (value === true || value === "true") {
-              value = true;
-            } else if (value === false || value === "false") {
-              value = false;
-            }
-          }
-          return [`cf-${cf.id}`, value];
-        })
-      );
+      // why: unknown-id rejection + BOOLEAN normalisation + cf-{id} reshape
+      // live in a shared helper now (both create and update use it). Removes
+      // ~40 lines of duplicated logic and the drift surface that came with
+      // it. See `mobile-custom-fields.server.ts` for the why behind each
+      // transformation step.
+      const built = buildMobileCustomFieldPayload(customFields, customFieldDef);
+      if (!built.ok) {
+        return data(
+          {
+            error: {
+              message: `Unknown custom field id: ${built.unknownId}`,
+            },
+          },
+          { status: 400 }
+        );
+      }
 
       customFieldsValues = extractCustomFieldValuesFromPayload({
-        payload: cfPayload,
+        payload: built.payload,
         customFieldDef,
       });
     }
