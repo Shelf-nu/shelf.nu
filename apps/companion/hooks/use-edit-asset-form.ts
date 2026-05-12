@@ -105,10 +105,10 @@ export function useEditAssetForm(
 
   // ── Load existing asset ─────────────────────────
   useEffect(() => {
-    if (!assetId) return;
+    if (!assetId || !orgId) return;
     setIsLoadingAsset(true);
     api
-      .asset(assetId)
+      .asset(assetId, orgId)
       .then(({ data, error }) => {
         if (error || !data) {
           setLoadError(error || "Failed to load asset");
@@ -168,7 +168,7 @@ export function useEditAssetForm(
       .finally(() => {
         setIsLoadingAsset(false);
       });
-  }, [assetId]);
+  }, [assetId, orgId]);
 
   // ── Load categories & locations ─────────────────
   const loadCategories = useCallback(async () => {
