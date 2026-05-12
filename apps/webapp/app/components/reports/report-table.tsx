@@ -27,6 +27,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { AssetImage } from "~/components/assets/asset-image";
+import { DateS } from "~/components/shared/date";
 import { tw } from "~/utils/tw";
 
 export interface ReportTableProps<TData> {
@@ -286,6 +287,12 @@ export function StatusCell({
 
 /**
  * Date cell renderer with consistent formatting.
+ *
+ * Delegates to the shared {@link DateS} component so dates render in the
+ * user's locale + timezone (from `useHints()`) rather than a hardcoded
+ * `en-US` format — per the CLAUDE.md "Date Display" rule that all UI dates
+ * must go through `DateS`. The outer span preserves `tabular-nums` column
+ * alignment in report tables.
  */
 export function DateCell({ date }: { date: Date | null }) {
   if (!date) {
@@ -294,11 +301,10 @@ export function DateCell({ date }: { date: Date | null }) {
 
   return (
     <span className="tabular-nums">
-      {date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })}
+      <DateS
+        date={date}
+        options={{ month: "short", day: "numeric", year: "numeric" }}
+      />
     </span>
   );
 }
