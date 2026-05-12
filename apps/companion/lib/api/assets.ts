@@ -31,7 +31,18 @@ export const assetsApi = {
     return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`);
   },
 
-  /** Get full asset details */
+  /**
+   * Get full details for a single asset. The mobile asset-detail route
+   * requires `orgId` to scope the lookup to the caller's workspace —
+   * passing it as a query param is the standard pattern across the mobile
+   * API (matches `assets`, `barcode`, `teamMembers`, etc.).
+   *
+   * @param assetId - Identifier of the asset to fetch.
+   * @param orgId - Caller's current workspace id. Required by the server;
+   *   client callers should not invoke this when the value isn't available.
+   * @returns `{ asset }` on success or `{ error }` on failure (per
+   *   `apiFetch`'s envelope).
+   */
   asset: (assetId: string, orgId: string) =>
     apiFetch<{ asset: AssetDetail }>(
       `/api/mobile/assets/${assetId}?orgId=${orgId}`

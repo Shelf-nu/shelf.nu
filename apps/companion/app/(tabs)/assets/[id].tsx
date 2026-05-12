@@ -437,6 +437,11 @@ export default function AssetDetailScreen() {
             onChangeNoteText={setNoteText}
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
+            // why: surface the no-org-context state to the user. Without
+            // this, `handlePostNote` silently early-returns on missing
+            // orgId and the tap feels broken. The disabled state + hint
+            // label is the visible feedback.
+            canPostNote={!!currentOrg?.id}
           />
         </ScrollView>
       </KeyboardAvoidingView>
