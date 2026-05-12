@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -39,7 +40,29 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    const asset = await releaseCustody({ assetId, organizationId });
+    // why: read the current custody record so we can attach actor +
+    // teamMember + targetUser to the CUSTODY_RELEASED activity event.
+    // releaseCustody only emits the event when activityEvent is provided
+    // (it's optional in the helper signature) — mirrors the pattern used
+    // in assets.$assetId.overview.release-custody.tsx.
+    const custodyRecord = await db.custody.findUnique({
+      where: { assetId },
+      select: {
+        custodian: {
+          select: { id: true, user: { select: { id: true } } },
+        },
+      },
+    });
+
+    const asset = await releaseCustody({
+      assetId,
+      organizationId,
+      activityEvent: {
+        actorUserId: user.id,
+        teamMemberId: custodyRecord?.custodian?.id,
+        targetUserId: custodyRecord?.custodian?.user?.id,
+      },
+    });
 
     // Create a note for the activity log (matches webapp format)
     const actor = wrapUserLinkForNote({

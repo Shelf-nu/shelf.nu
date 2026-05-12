@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -80,15 +81,37 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Update the asset's location
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId },
-      data: { locationId },
-      select: {
-        id: true,
-        title: true,
-        location: { select: { id: true, name: true } },
-      },
+    // Update the asset's location and atomically record the
+    // ASSET_LOCATION_CHANGED activity event so reports + activity-event
+    // aggregations include mobile-initiated location changes.
+    const updatedAsset = await db.$transaction(async (tx) => {
+      const updated = await tx.asset.update({
+        where: { id: assetId },
+        data: { locationId },
+        select: {
+          id: true,
+          title: true,
+          location: { select: { id: true, name: true } },
+        },
+      });
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: user.id,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          locationId: location.id,
+          field: "locationId",
+          fromValue: asset.location?.id ?? null,
+          toValue: location.id,
+        },
+        tx
+      );
+
+      return updated;
     });
 
     // Create activity note (matches webapp format)
