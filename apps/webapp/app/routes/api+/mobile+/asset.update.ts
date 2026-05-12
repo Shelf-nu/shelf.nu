@@ -87,6 +87,35 @@ export async function action({ request }: ActionFunctionArgs) {
         category: categoryId ?? null,
       });
 
+      // why: reject attempts to explicitly clear a required custom field on
+      // update. We can't enforce "every required field has a value" here
+      // because update is partial — the caller may only be touching some
+      // fields. But if they EXPLICITLY send null/"" for a required field,
+      // that's a contract violation we should block server-side.
+      const violatedRequired: string[] = [];
+      for (const def of customFieldDef) {
+        if (!def.required) continue;
+        const submitted = customFields.find((cf) => cf.id === def.id);
+        if (
+          submitted !== undefined &&
+          (submitted.value === null || submitted.value === "")
+        ) {
+          violatedRequired.push(def.name);
+        }
+      }
+      if (violatedRequired.length > 0) {
+        return data(
+          {
+            error: {
+              message: `Cannot clear required custom field${
+                violatedRequired.length === 1 ? "" : "s"
+              }: ${violatedRequired.join(", ")}`,
+            },
+          },
+          { status: 400 }
+        );
+      }
+
       // The helper expects a flat object with cf-{id} keys (form-data shape).
       // Reshape the mobile array into that contract.
       const cfPayload = Object.fromEntries(

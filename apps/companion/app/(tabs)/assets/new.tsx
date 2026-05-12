@@ -17,12 +17,18 @@ import { useRouter } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type Category, type Location } from "@/lib/api";
+import {
+  api,
+  type Category,
+  type Location,
+  type MobileCustomFieldDefinition,
+} from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
+import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -71,6 +77,21 @@ export default function CreateAssetScreen() {
   const [categorySearch, setCategorySearch] = useState("");
   const [locationSearch, setLocationSearch] = useState("");
 
+  // ── Custom fields state ─────────────────────────
+  // Definitions are fetched whenever the selected category changes; values
+  // are stored as a flat id -> string map so the same string representation
+  // works for every input type (BOOLEAN serialises to "true"/"false", DATE
+  // is an ISO string, OPTION is the option text, etc). The shape matches
+  // what useEditAssetForm uses for the edit screen — keeps both screens'
+  // logic parallel.
+  const [customFieldDefs, setCustomFieldDefs] = useState<
+    MobileCustomFieldDefinition[]
+  >([]);
+  const [customFieldValues, setCustomFieldValues] = useState<
+    Record<string, string>
+  >({});
+  const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(false);
+
   // ── Load categories ─────────────────────────────
   const loadCategories = useCallback(async () => {
     if (!currentOrg) return;
@@ -93,6 +114,38 @@ export default function CreateAssetScreen() {
     setIsLocationsLoading(false);
   }, [currentOrg]);
 
+  // ── Load custom fields for the selected category ──
+  // Re-runs whenever the chosen category changes (including "no category").
+  // Any existing values for fields that no longer apply to the new category
+  // are pruned so we don't accidentally send stale data on submit.
+  useEffect(() => {
+    if (!currentOrg) return;
+    let cancelled = false;
+    setIsCustomFieldsLoading(true);
+    api
+      .customFields(currentOrg.id, selectedCategory?.id)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const defs = data?.customFields ?? [];
+        setCustomFieldDefs(defs);
+        // Drop any values whose definition is no longer in scope
+        const validIds = new Set(defs.map((d) => d.id));
+        setCustomFieldValues((prev) => {
+          const next: Record<string, string> = {};
+          for (const id of Object.keys(prev)) {
+            if (validIds.has(id)) next[id] = prev[id];
+          }
+          return next;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setIsCustomFieldsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrg, selectedCategory?.id]);
+
   useEffect(() => {
     loadCategories();
     loadLocations();
@@ -107,7 +160,8 @@ export default function CreateAssetScreen() {
     description.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
-    !!imageUri;
+    !!imageUri ||
+    Object.values(customFieldValues).some((v) => v.trim() !== "");
 
   useEffect(() => {
     if (!hasUnsavedChanges || didSubmitRef.current) return;
@@ -222,6 +276,20 @@ export default function CreateAssetScreen() {
     }
   };
 
+  // ── Build the custom-fields payload from the local string map ──
+  // Empty strings are dropped so we don't send "I touched the input then
+  // cleared it" — the server treats absence as "no value." For required
+  // fields the absence is exactly what triggers the client-side guard.
+  const buildCustomFieldsPayload = useCallback(() => {
+    return customFieldDefs
+      .map((def) => {
+        const raw = customFieldValues[def.id];
+        if (raw === undefined || raw.trim() === "") return null;
+        return { id: def.id, value: raw };
+      })
+      .filter((cf): cf is { id: string; value: string } => cf !== null);
+  }, [customFieldDefs, customFieldValues]);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
@@ -231,12 +299,34 @@ export default function CreateAssetScreen() {
     }
     if (!currentOrg) return;
 
+    // why: enforce required custom fields BEFORE hitting the server so the
+    // user sees a clear, immediate message instead of a 400 round-trip. The
+    // server enforces the same contract — this is just a UX improvement.
+    const missingRequired = customFieldDefs
+      .filter((def) => def.required)
+      .filter((def) => {
+        const raw = customFieldValues[def.id];
+        return raw === undefined || raw.trim() === "";
+      })
+      .map((def) => def.name);
+    if (missingRequired.length > 0) {
+      Alert.alert(
+        "Missing required fields",
+        `Please fill in: ${missingRequired.join(", ")}`
+      );
+      return;
+    }
+
+    const customFieldsPayload = buildCustomFieldsPayload();
+
     setIsSubmitting(true);
     const { data, error } = await api.createAsset(currentOrg.id, {
       title: trimmedTitle,
       description: description.trim() || undefined,
       categoryId: selectedCategory?.id,
       locationId: selectedLocation?.id,
+      customFields:
+        customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
     });
 
     setIsSubmitting(false);
@@ -284,6 +374,7 @@ export default function CreateAssetScreen() {
           setSelectedLocation(null);
           setImageUri(null);
           setImageMimeType("image/jpeg");
+          setCustomFieldValues({});
         },
       },
     ]);
@@ -602,6 +693,45 @@ export default function CreateAssetScreen() {
             </View>
           )}
         </View>
+
+        {/* ── Custom Fields (scoped to selected category) ────────── */}
+        {isCustomFieldsLoading ? (
+          <View style={styles.customFieldsLoading}>
+            <ActivityIndicator size="small" color={colors.muted} />
+            <Text style={styles.customFieldsLoadingText}>
+              Loading custom fields…
+            </Text>
+          </View>
+        ) : customFieldDefs.length > 0 ? (
+          <View style={styles.customFieldsSection}>
+            <Text style={styles.sectionLabel}>Custom Fields</Text>
+            {customFieldDefs.map((def) => (
+              <View key={def.id} style={styles.field}>
+                <Text style={styles.label}>
+                  {def.name}
+                  {def.required ? (
+                    <Text style={styles.required}> *</Text>
+                  ) : null}
+                  {def.helpText ? (
+                    <Text style={styles.helpText}> — {def.helpText}</Text>
+                  ) : null}
+                </Text>
+                <CustomFieldInput
+                  field={{
+                    id: def.id,
+                    name: def.name,
+                    type: def.type,
+                    helpText: def.helpText,
+                  }}
+                  value={customFieldValues[def.id] ?? ""}
+                  onChange={(val) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [def.id]: val }))
+                  }
+                />
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
 
       {/* ── Bottom action bar ──────────────────────── */}
@@ -819,6 +949,41 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+
+  // ── Custom fields ──────────────────────────────
+  customFieldsSection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  sectionLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: spacing.md,
+  },
+  helpText: {
+    fontWeight: "400",
+    color: colors.mutedLight,
+    fontSize: fontSize.sm,
+  },
+  customFieldsLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+    paddingTop: spacing.lg,
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  customFieldsLoadingText: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
   },
 
   // ── Bottom bar ────────────────────────────────

@@ -3,6 +3,7 @@ import { cachedApiFetch } from "./cache";
 import type {
   CategoriesResponse,
   CreateAssetResponse,
+  CustomFieldsResponse,
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
@@ -14,7 +15,28 @@ export const assetMutationsApi = {
   categories: (orgId: string) =>
     cachedApiFetch<CategoriesResponse>(`/api/mobile/categories?orgId=${orgId}`),
 
-  /** Create a new asset (quick creation -- title required, rest optional) */
+  /**
+   * Get the active custom field definitions for the org, optionally filtered
+   * to those that apply to `categoryId`. Used by the create / edit screens
+   * to render the right inputs (including required indicators) for the
+   * currently selected category. Pass `categoryId = undefined` (or omit) to
+   * get the fields that apply to assets with no category.
+   */
+  customFields: (orgId: string, categoryId?: string) => {
+    const params = new URLSearchParams({ orgId });
+    if (categoryId) params.set("categoryId", categoryId);
+    return apiFetch<CustomFieldsResponse>(
+      `/api/mobile/custom-fields?${params}`
+    );
+  },
+
+  /**
+   * Create a new asset. Title is required; description / category / location
+   * / valuation are optional. If the chosen category has any custom fields
+   * with `required: true`, every required field MUST be present in the
+   * `customFields` payload — otherwise the server returns 400 with the
+   * missing field names. Mirrors the webapp create form contract.
+   */
   createAsset: (
     orgId: string,
     payload: {
@@ -23,6 +45,7 @@ export const assetMutationsApi = {
       categoryId?: string;
       locationId?: string;
       valuation?: number;
+      customFields?: { id: string; value: any }[];
     }
   ) =>
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {

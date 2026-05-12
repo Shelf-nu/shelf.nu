@@ -419,6 +419,25 @@ export type UpdateAssetPayload = {
   customFields?: { id: string; value: any }[];
 };
 
+/**
+ * Definition of an active custom field as returned by
+ * `GET /api/mobile/custom-fields`. The companion uses this shape to render
+ * the right input (via `CustomFieldInput`) and to enforce required-ness
+ * client-side before submitting the create / update payload.
+ */
+export type MobileCustomFieldDefinition = {
+  id: string;
+  name: string;
+  type: string;
+  helpText: string | null;
+  required: boolean;
+  options: string[] | null;
+};
+
+export type CustomFieldsResponse = {
+  customFields: MobileCustomFieldDefinition[];
+};
+
 export type UpdateAssetResponse = {
   asset: {
     id: string;
