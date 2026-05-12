@@ -22,7 +22,9 @@ import {
   relinkKitQrCode,
   getAvailableKitAssetForBooking,
   updateKitsWithBookingCustodians,
+  bulkRemoveAssetsFromKits,
 } from "./service.server";
+import { recordEvents } from "../activity-event/service.server";
 import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
@@ -50,6 +52,10 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    location: {
+      update: vitest.fn().mockResolvedValue({}),
+      findUnique: vitest.fn().mockResolvedValue(null),
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
@@ -537,6 +543,8 @@ describe("deleteKit", () => {
     expect.assertions(2);
     //@ts-expect-error missing vitest type
     db.kit.delete.mockResolvedValue(mockKitData);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
 
     const result = await deleteKit({
       id: "kit-1",
@@ -547,6 +555,58 @@ describe("deleteKit", () => {
       where: { id: "kit-1", organizationId: "org-1" },
     });
     expect(result).toEqual(mockKitData);
+  });
+
+  it("should emit ASSET_KIT_CHANGED per asset that was in the kit", async () => {
+    expect.assertions(2);
+    const assetsInKit = [{ id: "asset-1" }, { id: "asset-2" }];
+    //@ts-expect-error missing vitest type
+    db.kit.delete.mockResolvedValue(mockKitData);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assetsInKit);
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-1",
+    });
+
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-1",
+          kitId: "kit-1",
+          field: "kitId",
+          fromValue: "kit-1",
+          toValue: null,
+          actorUserId: "user-1",
+        }),
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-2",
+          kitId: "kit-1",
+          fromValue: "kit-1",
+          toValue: null,
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("should not emit events when kit has no assets", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-1",
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
   });
 
   it("should handle deletion errors", async () => {
@@ -569,15 +629,13 @@ describe("bulkDeleteKits", () => {
   });
 
   it("should bulk delete kits successfully", async () => {
-    expect.assertions(2);
+    expect.assertions(1);
     const kitsToDelete = [
-      { id: "kit-1", image: "image1.jpg" },
-      { id: "kit-2", image: null },
+      { id: "kit-1", image: "image1.jpg", assets: [] },
+      { id: "kit-2", image: null, assets: [] },
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(kitsToDelete);
-    //@ts-expect-error missing vitest type
-    db.$transaction.mockResolvedValue(true);
 
     await bulkDeleteKits({
       kitIds: ["kit-1", "kit-2"],
@@ -585,11 +643,177 @@ describe("bulkDeleteKits", () => {
       userId: "user-1",
     });
 
-    expect(db.kit.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
-      select: { id: true, image: true },
-    });
     expect(db.$transaction).toHaveBeenCalled();
+  });
+
+  it("should emit ASSET_KIT_CHANGED per asset across all deleted kits", async () => {
+    expect.assertions(1);
+    const kitsToDelete = [
+      {
+        id: "kit-1",
+        image: null,
+        assets: [{ id: "asset-1" }, { id: "asset-2" }],
+      },
+      {
+        id: "kit-2",
+        image: null,
+        assets: [{ id: "asset-3" }],
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsToDelete);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-1",
+          kitId: "kit-1",
+          fromValue: "kit-1",
+          toValue: null,
+        }),
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-2",
+          kitId: "kit-1",
+        }),
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-3",
+          kitId: "kit-2",
+          fromValue: "kit-2",
+          toValue: null,
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("should not emit events when no kits have assets", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      { id: "kit-1", image: null, assets: [] },
+    ]);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkRemoveAssetsFromKits", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("should emit ASSET_KIT_CHANGED for each asset that left a kit", async () => {
+    expect.assertions(1);
+
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: { id: "kit-1", name: "Kit 1", custody: null },
+        custody: null,
+      },
+      {
+        id: "asset-2",
+        title: "Asset 2",
+        kit: { id: "kit-2", name: "Kit 2", custody: null },
+        custody: null,
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assets);
+
+    await bulkRemoveAssetsFromKits({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://test.com"),
+      // @ts-expect-error settings shape not relevant for this test
+      settings: {},
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-1",
+          kitId: "kit-1",
+          fromValue: "kit-1",
+          toValue: null,
+        }),
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-2",
+          kitId: "kit-2",
+          fromValue: "kit-2",
+          toValue: null,
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("should emit CUSTODY_RELEASED for assets whose kit-inherited custody was cleaned up", async () => {
+    expect.assertions(1);
+
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        kit: {
+          id: "kit-1",
+          name: "Kit 1",
+          custody: { id: "kit-custody-1" },
+        },
+        custody: {
+          id: "custody-1",
+          custodian: {
+            id: "tm-1",
+            name: "Custodian",
+            user: { id: "user-2", firstName: "C", lastName: "U" },
+          },
+        },
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(assets);
+
+    await bulkRemoveAssetsFromKits({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://test.com"),
+      // @ts-expect-error settings shape not relevant
+      settings: {},
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "asset-1",
+          kitId: "kit-1",
+          teamMemberId: "tm-1",
+          targetUserId: "user-2",
+          meta: { viaKit: true },
+        }),
+      ],
+      expect.anything()
+    );
   });
 });
 

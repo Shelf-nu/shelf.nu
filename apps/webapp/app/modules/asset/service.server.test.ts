@@ -2,12 +2,16 @@ import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { recordEvents } from "~/modules/activity-event/service.server";
 import { getCategory } from "~/modules/category/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  bulkAssignAssetTags,
+  bulkDeleteAssets,
+  bulkUpdateAssetCategory,
   getActiveCustomFieldsForAsset,
   parseAssetValuation,
   refreshExpiredAssetImages,
@@ -19,10 +23,19 @@ import {
 // why: isolating asset service logic from actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callback: (tx: unknown) => unknown) => callback(db)),
     asset: {
       findFirst: vitest.fn().mockResolvedValue(null),
       findUnique: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    category: {
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     location: {
       findFirst: vitest.fn().mockResolvedValue(null),
@@ -31,6 +44,23 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
     },
   },
+}));
+
+// why: avoid emitting real activity events during asset service tests; assert
+// the mock was called with the expected payload instead.
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vitest.fn().mockResolvedValue(undefined),
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: avoid resolving real asset IDs from search params; just echo the ids
+// the caller passed in so the test focuses on event emission.
+vitest.mock("./bulk-operations-helper.server", () => ({
+  resolveAssetIdsForBulkOperation: vitest
+    .fn()
+    .mockImplementation(({ assetIds }: { assetIds: string[] }) =>
+      Promise.resolve(assetIds)
+    ),
 }));
 
 // why: control category lookup so we can simulate a cross-org category id
@@ -93,6 +123,11 @@ vitest.mock("~/modules/user/service.server", () => ({
 // why: avoid creating actual notes during relink tests
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+  createAssetCategoryChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetDescriptionChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetNameChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetValuationChangeNote: vitest.fn().mockResolvedValue({}),
+  createTagChangeNoteIfNeeded: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: control custom-field lookup so we can assert org+category scoping
@@ -578,5 +613,190 @@ describe("getActiveCustomFieldsForAsset", () => {
       organizationId: "org-1",
       category: null,
     });
+  });
+});
+
+describe("bulkUpdateAssetCategory", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits ASSET_CATEGORY_CHANGED only for assets whose category actually changes", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        category: { id: "cat-old", name: "Old", color: "#000" },
+      },
+      // already in the target category → should be skipped
+      {
+        id: "asset-2",
+        category: { id: "cat-new", name: "New", color: "#fff" },
+      },
+      // currently uncategorized → should change
+      { id: "asset-3", category: null },
+    ]);
+    //@ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue({
+      id: "cat-new",
+      name: "New",
+      color: "#fff",
+    });
+
+    await bulkUpdateAssetCategory({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      categoryId: "cat-new",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_CATEGORY_CHANGED",
+          assetId: "asset-1",
+          fromValue: "cat-old",
+          toValue: "cat-new",
+        }),
+        expect.objectContaining({
+          action: "ASSET_CATEGORY_CHANGED",
+          assetId: "asset-3",
+          fromValue: null,
+          toValue: "cat-new",
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("does not emit events when no asset's category changes", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", category: { id: "cat-new", name: "x", color: "#000" } },
+    ]);
+
+    await bulkUpdateAssetCategory({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      categoryId: "cat-new",
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkAssignAssetTags", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits ASSET_TAGS_CHANGED only for assets whose tag set changed", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", tags: [{ id: "tag-old", name: "Old" }] },
+      { id: "asset-2", tags: [] },
+    ]);
+
+    (db.asset.update as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce({
+        id: "asset-1",
+        tags: [
+          { id: "tag-old", name: "Old" },
+          { id: "tag-new", name: "New" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: "asset-2",
+        tags: [{ id: "tag-new", name: "New" }],
+      });
+
+    await bulkAssignAssetTags({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      tagsIds: ["tag-new"],
+      remove: false,
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_TAGS_CHANGED",
+          assetId: "asset-1",
+          field: "tags",
+        }),
+        expect.objectContaining({
+          action: "ASSET_TAGS_CHANGED",
+          assetId: "asset-2",
+        }),
+      ],
+      expect.anything()
+    );
+  });
+});
+
+describe("bulkDeleteAssets", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits ASSET_DELETED per asset before deleteMany", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", mainImage: null },
+      { id: "asset-2", mainImage: null },
+    ]);
+
+    await bulkDeleteAssets({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      // @ts-expect-error settings not relevant
+      settings: {},
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_DELETED",
+          assetId: "asset-1",
+          entityType: "ASSET",
+          entityId: "asset-1",
+        }),
+        expect.objectContaining({
+          action: "ASSET_DELETED",
+          assetId: "asset-2",
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("does not emit events when no assets resolved", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([]);
+
+    await bulkDeleteAssets({
+      assetIds: [],
+      organizationId: "org-1",
+      userId: "user-1",
+      // @ts-expect-error settings not relevant
+      settings: {},
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
   });
 });
