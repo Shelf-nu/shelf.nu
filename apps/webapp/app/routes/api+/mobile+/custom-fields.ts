@@ -83,9 +83,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         helpText: cf.helpText,
         required: cf.required,
         // why: `options` is only meaningful for OPTION fields per the schema
-        // contract (non-nullable String[] but empty for other types). Hide it
-        // for non-OPTION fields so mobile clients don't render empty pickers.
-        options: cf.type === "OPTION" ? cf.options : undefined,
+        // contract (non-nullable String[] but empty for other types). Emit
+        // `null` for non-OPTION fields so the JSON response always carries
+        // the key and matches the companion's exported
+        // `MobileCustomFieldDefinition.options: string[] | null` shape.
+        options: cf.type === "OPTION" ? cf.options : null,
         updatedAt: cf.updatedAt.toISOString(),
       })),
     });

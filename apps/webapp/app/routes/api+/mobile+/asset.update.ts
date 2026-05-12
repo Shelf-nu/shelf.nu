@@ -117,7 +117,12 @@ export async function action({ request }: ActionFunctionArgs) {
       // miss required fields or reject legitimate values. Fetching here also
       // doubles as the cross-org existence check (returns 404 if the asset
       // isn't visible to the caller's organization).
-      let effectiveCategoryId: string | null = categoryId ?? null;
+      // why: normalize the documented "uncategorized" sentinel to null so
+      // getActiveCustomFields receives the same shape downstream code expects.
+      // Without this, validation runs against the literal string and rejects
+      // legitimate uncategorized field updates with false "unknown id" errors.
+      let effectiveCategoryId: string | null =
+        categoryId === "uncategorized" ? null : categoryId ?? null;
       if (categoryId === undefined) {
         const existing = await db.asset.findUnique({
           where: { id: assetId, organizationId },
