@@ -79,7 +79,23 @@ export const assetsApi = {
       : cachedApiFetch<LocationsResponse>(path);
   },
 
-  /** Add a comment note to an asset */
+  /**
+   * Post a user-authored comment note to an asset's activity log. The
+   * mobile add-note route requires `orgId` to scope the action to the
+   * caller's workspace — passing it as a query param matches the rest of
+   * the org-scoped mobile API surface (`asset`, `assets`, `barcode`,
+   * etc.).
+   *
+   * @param assetId - Identifier of the asset to attach the note to.
+   * @param content - Trimmed note body. Caller should validate non-empty
+   *   before invoking; the server will reject empty content but the
+   *   round-trip is wasteful.
+   * @param orgId - Caller's current workspace id. Required by the server;
+   *   client callers should not invoke this when the value isn't available
+   *   (the asset-detail screen disables the Post button until it is).
+   * @returns `{ note }` on success or `{ error }` on failure (per
+   *   `apiFetch`'s envelope).
+   */
   addNote: (assetId: string, content: string, orgId: string) =>
     apiFetch<{ note: AssetNote }>(`/api/mobile/asset/add-note?orgId=${orgId}`, {
       method: "POST",
