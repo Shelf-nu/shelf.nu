@@ -202,10 +202,15 @@ describe("GET /api/mobile/custom-fields", () => {
       expect(cf).toHaveProperty("type");
       expect(cf).toHaveProperty("helpText");
       expect(cf).toHaveProperty("required");
-      // `options` is only emitted for OPTION fields; for TEXT it must be
-      // absent (undefined) so JSON.stringify drops it from the payload.
+      // `options` is always present in the JSON response; it is the actual
+      // option array for OPTION fields and `null` for every other type. This
+      // keeps the wire shape in sync with the companion's exported
+      // `MobileCustomFieldDefinition.options: string[] | null` type.
+      expect(cf).toHaveProperty("options");
       if (cf.type === "OPTION") {
-        expect(cf).toHaveProperty("options");
+        expect(Array.isArray(cf.options)).toBe(true);
+      } else {
+        expect(cf.options).toBeNull();
       }
     }
 
@@ -215,6 +220,7 @@ describe("GET /api/mobile/custom-fields", () => {
       type: "TEXT",
       helpText: "Where to find it",
       required: true,
+      options: null,
     });
     expect(body.customFields[1]).toMatchObject({
       id: "cf-2",

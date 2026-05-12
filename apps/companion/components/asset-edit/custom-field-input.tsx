@@ -63,10 +63,19 @@ type CustomFieldInputProps = {
 /**
  * Render the right input control for a single custom field.
  *
+ * Selects the appropriate component per `field.type` (boolean toggle,
+ * multiline text, numeric input, OPTION dropdown, default text input).
+ * Each branch threads `accessibilityLabel` (via `labelForRequired` when
+ * `required`) and `accessibilityHint` (from `helpText`) so VoiceOver /
+ * TalkBack announce the field correctly.
+ *
  * @param field    Definition (id / name / type / helpText / required / options).
  * @param value    Current string value from the parent form's id → value map.
  * @param onChange Setter invoked with the new string value on every change.
  * @param error    Optional inline error; appended to the accessibility label.
+ * @returns A React Native input component wired to `value` / `onChange`.
+ * @throws Never — branches without a matching `field.type` fall back to a
+ *   plain text input so unknown / future types remain usable.
  */
 export function CustomFieldInput({
   field,
