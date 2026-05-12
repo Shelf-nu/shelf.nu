@@ -14,14 +14,18 @@ interface UseAssetDataReturn {
   onRefresh: () => Promise<void>;
 }
 
-export function useAssetData(assetId: string): UseAssetDataReturn {
+export function useAssetData(
+  assetId: string,
+  orgId: string | undefined
+): UseAssetDataReturn {
   const [asset, setAsset] = useState<AssetDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAsset = useCallback(async () => {
-    const { data, error: fetchErr } = await api.asset(assetId);
+    if (!orgId) return;
+    const { data, error: fetchErr } = await api.asset(assetId, orgId);
     // Request cancelled (navigation) — ignore
     if (!data && !fetchErr) return;
     if (fetchErr || !data) {
@@ -31,7 +35,7 @@ export function useAssetData(assetId: string): UseAssetDataReturn {
       setAsset(data.asset);
       setError(null);
     }
-  }, [assetId]);
+  }, [assetId, orgId]);
 
   useEffect(() => {
     setIsLoading(true);

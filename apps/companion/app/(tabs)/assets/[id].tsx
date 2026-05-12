@@ -68,7 +68,7 @@ export default function AssetDetailScreen() {
     setIsLoading,
     fetchAsset,
     onRefresh,
-  } = useAssetData(id);
+  } = useAssetData(id, currentOrg?.id);
 
   // Custody actions
   const {

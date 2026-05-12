@@ -32,8 +32,10 @@ export const assetsApi = {
   },
 
   /** Get full asset details */
-  asset: (assetId: string) =>
-    apiFetch<{ asset: AssetDetail }>(`/api/mobile/assets/${assetId}`),
+  asset: (assetId: string, orgId: string) =>
+    apiFetch<{ asset: AssetDetail }>(
+      `/api/mobile/assets/${assetId}?orgId=${orgId}`
+    ),
 
   /** Resolve a QR code to an asset */
   qr: (qrId: string) => apiFetch<QrResponse>(`/api/mobile/qr/${qrId}`),
