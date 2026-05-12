@@ -69,8 +69,8 @@ export const assetsApi = {
   },
 
   /** Add a comment note to an asset */
-  addNote: (assetId: string, content: string) =>
-    apiFetch<{ note: AssetNote }>("/api/mobile/asset/add-note", {
+  addNote: (assetId: string, content: string, orgId: string) =>
+    apiFetch<{ note: AssetNote }>(`/api/mobile/asset/add-note?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ assetId, content }),
     }),
