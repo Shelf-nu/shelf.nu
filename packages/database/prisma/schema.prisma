@@ -716,6 +716,10 @@ model Organization {
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
 
+  // Signed custody configuration
+  enableSignedCustodyOnAssignment   Boolean @default(false) // If true, admins can require custodians to acknowledge a custody agreement during assignment.
+  requireCustodySignatureOnAssignment Boolean @default(false) // If true, a signature is required before custody is finalized (only when signed custody is enabled).
+
   // Barcode add-on (per-organization, managed via Stripe subscription)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
   barcodesEnabledAt DateTime? // Track when barcode feature was enabled
