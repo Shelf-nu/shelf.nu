@@ -27,6 +27,9 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { AssetImage } from "~/components/assets/asset-image";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 export interface ReportTableProps<TData> {
@@ -305,6 +308,11 @@ export function DateCell({ date }: { date: Date | null }) {
 
 /**
  * Number cell renderer with proper alignment.
+ *
+ * For `format="currency"`, the value is rendered in the workspace's configured
+ * currency (read via `useCurrentOrganization`) and the user's locale (read via
+ * `useHints`). Falls back to USD only if the workspace has no currency set,
+ * which should not happen in practice (the Prisma default is USD).
  */
 export function NumberCell({
   value,
@@ -313,6 +321,9 @@ export function NumberCell({
   value: number | null;
   format?: "number" | "currency" | "percent";
 }) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
   if (value === null || value === undefined) {
     return <span className="text-gray-400">—</span>;
   }
@@ -321,23 +332,65 @@ export function NumberCell({
 
   switch (format) {
     case "currency":
-      formatted = new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-      }).format(value);
+      formatted = formatCurrency({
+        value,
+        currency: currentOrganization?.currency ?? "USD",
+        locale,
+      });
       break;
     case "percent":
-      formatted = new Intl.NumberFormat("en-US", {
+      formatted = new Intl.NumberFormat(locale, {
         style: "percent",
         minimumFractionDigits: 0,
         maximumFractionDigits: 1,
       }).format(value / 100);
       break;
     default:
-      formatted = value.toLocaleString();
+      formatted = value.toLocaleString(locale);
   }
 
   return <span className="tabular-nums">{formatted}</span>;
+}
+
+/**
+ * Currency cell renderer for use inside TanStack column definitions that live
+ * at module scope. Reads workspace currency + user locale via hooks so the
+ * column array stays referentially stable across renders (no `useMemo` needed).
+ *
+ * `0` renders as a real "$0" (or workspace equivalent), not the empty
+ * fallback — pass `treatZeroAsEmpty` if the caller prefers the dash for zero.
+ *
+ * @example
+ * { accessorKey: "valuation", cell: ({ row }) => <CurrencyCell value={row.original.valuation} /> }
+ */
+export function CurrencyCell({
+  value,
+  emptyFallback = "—",
+  treatZeroAsEmpty = false,
+}: {
+  /** Numeric value to format. `null`/`undefined` render the empty fallback. */
+  value: number | null | undefined;
+  /** Fallback text when value is missing. Defaults to em-dash. */
+  emptyFallback?: string;
+  /** When true, `0` renders as the empty fallback instead of "$0". */
+  treatZeroAsEmpty?: boolean;
+}) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
+  if (value == null || (treatZeroAsEmpty && value === 0)) {
+    return <span className="text-gray-400">{emptyFallback}</span>;
+  }
+
+  return (
+    <span className="tabular-nums">
+      {formatCurrency({
+        value,
+        currency: currentOrganization?.currency ?? "USD",
+        locale,
+      })}
+    </span>
+  );
 }
 
 /**

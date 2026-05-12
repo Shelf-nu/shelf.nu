@@ -18,6 +18,14 @@ interface NotesSectionProps {
   onChangeNoteText: (text: string) => void;
   onPostNote: () => void;
   isPostingNote: boolean;
+  /**
+   * When `false` the post-note input and button are disabled with a hint
+   * label. The parent uses this to surface the case where the workspace
+   * context (`currentOrg`) hasn't resolved yet — without it the user can
+   * type a note, tap Post, and silently get nothing because the parent
+   * `handlePostNote` early-returns on missing `orgId`.
+   */
+  canPostNote?: boolean;
 }
 
 export const NotesSection = memo(function NotesSection({
@@ -26,9 +34,12 @@ export const NotesSection = memo(function NotesSection({
   onChangeNoteText,
   onPostNote,
   isPostingNote,
+  canPostNote = true,
 }: NotesSectionProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+
+  const postDisabled = !noteText.trim() || isPostingNote || !canPostNote;
 
   return (
     <View style={styles.sectionContainer}>
@@ -42,21 +53,31 @@ export const NotesSection = memo(function NotesSection({
           style={styles.noteInput}
           value={noteText}
           onChangeText={onChangeNoteText}
-          placeholder="Add a note..."
+          placeholder={canPostNote ? "Add a note..." : "Loading workspace…"}
           placeholderTextColor={colors.placeholderText}
+          editable={canPostNote}
           multiline
           maxLength={5000}
           accessibilityLabel="Add a note"
+          accessibilityHint={
+            canPostNote ? undefined : "Workspace context is still loading."
+          }
         />
         <TouchableOpacity
           style={[
             styles.notePostBtn,
-            (!noteText.trim() || isPostingNote) && styles.notePostBtnDisabled,
+            postDisabled && styles.notePostBtnDisabled,
           ]}
           onPress={onPostNote}
-          disabled={!noteText.trim() || isPostingNote}
+          disabled={postDisabled}
           accessibilityLabel="Post note"
+          accessibilityHint={
+            canPostNote
+              ? undefined
+              : "Disabled until the workspace context loads."
+          }
           accessibilityRole="button"
+          accessibilityState={{ disabled: postDisabled }}
         >
           {isPostingNote ? (
             <ActivityIndicator size="small" color={colors.primaryForeground} />

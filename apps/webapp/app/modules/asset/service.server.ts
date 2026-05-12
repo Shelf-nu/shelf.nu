@@ -4637,6 +4637,74 @@ export async function getEntitiesWithSelectedValues({
   };
 }
 
+/**
+ * Parses a raw valuation string from a form input into a finite number, or
+ * null when the field was left blank. Throws a 400 ShelfError for any input
+ * that cannot be coerced to a finite number.
+ *
+ * Used by the asset overview's inline-edit action so that browser-side
+ * `type="text" inputMode="decimal"` inputs surface a clear server error
+ * instead of a Prisma type error.
+ *
+ * @param raw - The raw string value from `formData.get("fieldValue")`
+ * @returns A finite number, or null when the input is blank
+ * @throws {ShelfError} 400 when the input is non-empty but not a finite number
+ */
+export function parseAssetValuation(raw: string | null): number | null {
+  if (!raw || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Value must be a valid number",
+      label: "Assets",
+      shouldBeCaptured: false,
+      status: 400,
+    });
+  }
+  return parsed;
+}
+
+/**
+ * Returns the active custom field definitions scoped to the given asset's
+ * category. Throws a 404 ShelfError when the asset does not exist in the
+ * given organization — this is the source of truth for the cross-org IDOR
+ * guard used by the asset overview inline-edit action.
+ *
+ * @param params.id - Asset id
+ * @param params.organizationId - Organization id (asset must belong to it)
+ * @returns The array of active custom-field definitions for the asset's category
+ * @throws {ShelfError} 404 when the asset is not found in the organization
+ */
+export async function getActiveCustomFieldsForAsset({
+  id,
+  organizationId,
+}: {
+  id: string;
+  organizationId: string;
+}) {
+  const asset = await db.asset.findUnique({
+    where: { id, organizationId },
+    select: { categoryId: true },
+  });
+
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Assets",
+      status: 404,
+      shouldBeCaptured: false,
+      additionalData: { id, organizationId },
+    });
+  }
+
+  return getActiveCustomFields({
+    organizationId,
+    category: asset.categoryId,
+  });
+}
+
 export async function getCategoriesForCreateAndEdit({
   organizationId,
   request,

@@ -75,6 +75,7 @@ export const getAssetOverviewFields = (
             required: true,
             type: true,
             categories: true,
+            options: true,
           },
         },
       },

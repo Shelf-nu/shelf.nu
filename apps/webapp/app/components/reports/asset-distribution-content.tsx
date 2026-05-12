@@ -12,7 +12,10 @@
 import { useNavigate } from "react-router";
 
 import { DistributionDonut } from "~/components/reports/distribution-donut";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { DistributionBreakdown, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 
 /** Props for {@link AssetDistributionContent}. */
 type Props = {
@@ -36,6 +39,8 @@ export function AssetDistributionContent({
   distributionBreakdown,
 }: Props) {
   const navigate = useNavigate();
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
 
   // Navigate to assets filtered by the clicked item
   // IDs match the special filter values: "uncategorized", "without-location", or actual IDs
@@ -88,7 +93,13 @@ export function AssetDistributionContent({
             <div className="flex flex-col">
               <span className="text-xs text-gray-500">Total Value</span>
               <span className="text-lg font-medium text-gray-900">
-                {totalValue > 0 ? `$${totalValue.toLocaleString()}` : "—"}
+                {totalValue > 0
+                  ? formatCurrency({
+                      value: totalValue,
+                      currency: currentOrganization?.currency ?? "USD",
+                      locale,
+                    })
+                  : "—"}
               </span>
             </div>
           </div>

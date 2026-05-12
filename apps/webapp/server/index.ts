@@ -178,7 +178,7 @@ export default createHonoServer<ServerEnv>({
           "/qr/:qrId",
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
-          "/api/mobile/:path*", // Mobile companion app API (JWT auth, not cookie)
+          "/api/mobile/*path", // Mobile companion app API (JWT auth, not cookie)
         ],
       })
     );
