@@ -106,7 +106,13 @@ export default function CreateAssetScreen() {
   const [customFieldValues, setCustomFieldValues] = useState<
     Record<string, string>
   >({});
-  const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(false);
+  // why: start as `true` so the brief window between first render and the
+  // fetch effect setting it explicitly can't be exploited by a very fast
+  // tap on Create. Without this, `canSubmit` and the `handleSubmit` guard
+  // both see `false` for one render cycle, opening a microsecond-wide
+  // submit-bypass for the client-side required-fields check. The server
+  // still rejects via 400, but proper UX shows the inline warning first.
+  const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(true);
   // why: surfacing the fetch failure is critical — without it the required-
   // field client guard silently becomes a no-op (empty `customFieldDefs`),
   // letting the user submit a payload the server will reject.
