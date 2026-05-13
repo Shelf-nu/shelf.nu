@@ -39,23 +39,6 @@ export interface DistributionDonutProps {
 }
 
 /**
- * Sentinel ids the distribution helpers return for entities with no value
- * in the grouped column (e.g. assets with no location, uncategorized assets).
- *
- * In Simple mode these translate to `locationId IS NULL` server-side; the
- * Advanced mode where-clause builder does not yet have an equivalent `isNull`
- * operator, so the legend item is rendered as a non-clickable label until
- * proper null-filter semantics land. Tracked as follow-up.
- *
- * @see helpers.server.ts `computeDistributionByLocation`, `computeDistributionByCategory`
- */
-const SENTINEL_IDS = new Set([
-  "without-location",
-  "uncategorized",
-  "without-custody",
-]);
-
-/**
  * Color palette for distribution charts.
  * Uses a harmonious progression from warm to cool colors.
  */
@@ -174,51 +157,48 @@ export function DistributionDonut({
 
         {/* Legend */}
         <div className="w-full space-y-1">
-          {legendItems.map((item, index) => {
-            const itemClickable = isClickable && !SENTINEL_IDS.has(item.id);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={itemClickable ? () => onItemClick?.(item) : undefined}
-                disabled={!itemClickable}
-                className={tw(
-                  "-mx-2 flex w-full items-center justify-between rounded-md px-2 py-1.5",
-                  itemClickable &&
-                    "cursor-pointer transition-colors hover:bg-gray-50",
-                  !itemClickable && "cursor-default"
-                )}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="size-2.5 shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: getColorValue(
-                        DISTRIBUTION_COLORS[index % DISTRIBUTION_COLORS.length]
-                      ),
-                    }}
-                  />
-                  <span
-                    className={tw(
-                      "truncate text-sm",
-                      itemClickable ? "text-gray-900" : "text-gray-700"
-                    )}
-                    title={item.groupName}
-                  >
-                    {item.groupName}
-                  </span>
-                </div>
-                <div className="ml-2 flex shrink-0 items-center gap-2">
-                  <span className="text-sm font-semibold tabular-nums text-gray-900">
-                    {item.assetCount}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    ({item.percentage.toFixed(0)}%)
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+          {legendItems.map((item, index) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onItemClick?.(item)}
+              disabled={!isClickable}
+              className={tw(
+                "-mx-2 flex w-full items-center justify-between rounded-md px-2 py-1.5",
+                isClickable &&
+                  "cursor-pointer transition-colors hover:bg-gray-50",
+                !isClickable && "cursor-default"
+              )}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{
+                    backgroundColor: getColorValue(
+                      DISTRIBUTION_COLORS[index % DISTRIBUTION_COLORS.length]
+                    ),
+                  }}
+                />
+                <span
+                  className={tw(
+                    "truncate text-sm",
+                    isClickable ? "text-gray-900" : "text-gray-700"
+                  )}
+                  title={item.groupName}
+                >
+                  {item.groupName}
+                </span>
+              </div>
+              <div className="ml-2 flex shrink-0 items-center gap-2">
+                <span className="text-sm font-semibold tabular-nums text-gray-900">
+                  {item.assetCount}
+                </span>
+                <span className="text-xs text-gray-500">
+                  ({item.percentage.toFixed(0)}%)
+                </span>
+              </div>
+            </button>
+          ))}
 
           {/* Expand/collapse toggle */}
           {canExpand && (

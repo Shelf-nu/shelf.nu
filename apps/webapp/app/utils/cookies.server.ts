@@ -222,6 +222,39 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
   });
 
 /**
+ * Normalize a filter param string for the Advanced-mode Assets index.
+ *
+ * Column filters not in operator form (e.g. `?location=<uuid>` emitted by
+ * report drill-downs or external deep links) are promoted to `is:<value>`
+ * so downstream filter parsing applies them rather than dropping them
+ * silently — which previously broke drill-down for Advanced-mode workspaces.
+ * Non-column params (page, search, etc.) pass through unchanged.
+ *
+ * Used by both the URL path (CASE 1) and the cookie path (CASE 2) of
+ * {@link getAdvancedFiltersFromRequest}.
+ */
+function normalizeAdvancedFilterParams(
+  filters: string,
+  columnNames: string[]
+): URLSearchParams {
+  const normalized = new URLSearchParams();
+  new URLSearchParams(filters).forEach((value, key) => {
+    if (!columnNames.includes(key)) {
+      normalized.append(key, value);
+      return;
+    }
+    if (advancedFilterFormatSchema.safeParse(value).success) {
+      normalized.append(key, value);
+      return;
+    }
+    if (value) {
+      normalized.append(key, `is:${value}`);
+    }
+  });
+  return normalized;
+}
+
+/**
  * Gets and validates advanced filters from request parameters
  * Ensures URL parameters match the expected advanced filter format
  * @param request - The incoming request
@@ -243,35 +276,12 @@ export async function getAdvancedFiltersFromRequest(
   const cookieHeader = request.headers.get("Cookie");
   const advancedAssetFilterCookie =
     createAdvancedAssetFilterCookie(organizationId);
+  const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
   // CASE 1: URL has filters
   // Validate them, save to cookie, and return (with redirect if validation changed params)
   if (filters) {
-    const validatedParams = new URLSearchParams();
-    const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-    // Normalize each filter parameter
-    new URLSearchParams(filters).forEach((value, key) => {
-      // Non-column params (like page, search) pass through without validation
-      if (!columnNames.includes(key as any)) {
-        validatedParams.append(key, value);
-        return;
-      }
-
-      // Column filters in operator form (e.g., "is:AVAILABLE") pass through.
-      if (advancedFilterFormatSchema.safeParse(value).success) {
-        validatedParams.append(key, value);
-        return;
-      }
-
-      // Bare-value column filters (e.g. from report drill-down or external deep
-      // links: `?location=<uuid>`) get normalized to `is:<value>`. Silently
-      // dropping them previously broke drill-down in Advanced-mode workspaces.
-      if (value) {
-        validatedParams.append(key, `is:${value}`);
-      }
-    });
-
+    const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
     const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
@@ -292,26 +302,10 @@ export async function getAdvancedFiltersFromRequest(
     filters = (await advancedAssetFilterCookie.parse(cookieHeader)) || "";
 
     if (filters) {
-      const validatedParams = new URLSearchParams();
-      const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-      // Normalize each filter from cookie (mirrors CASE 1; see comments above)
-      new URLSearchParams(filters).forEach((value, key) => {
-        if (!columnNames.includes(key as any)) {
-          validatedParams.append(key, value);
-          return;
-        }
-
-        if (advancedFilterFormatSchema.safeParse(value).success) {
-          validatedParams.append(key, value);
-          return;
-        }
-
-        if (value) {
-          validatedParams.append(key, `is:${value}`);
-        }
-      });
-
+      const validatedParams = normalizeAdvancedFilterParams(
+        filters,
+        columnNames
+      );
       const validatedParamsString = validatedParams.toString();
       const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
