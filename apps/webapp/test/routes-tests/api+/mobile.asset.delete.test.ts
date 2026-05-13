@@ -102,6 +102,9 @@ describe("POST /api/mobile/asset/delete", () => {
     expect(deleteAsset).toHaveBeenCalledWith({
       id: "asset-1",
       organizationId: "org-1",
+      // PR #2533 threads `actorUserId` through so `deleteAsset` can attribute
+      // the `ASSET_DELETED` activity event to the user who triggered it.
+      actorUserId: "user-1",
     });
   });
 
