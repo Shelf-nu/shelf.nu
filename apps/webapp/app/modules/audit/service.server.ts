@@ -126,6 +126,14 @@ export type AuditExpectedAsset = {
   mainImage?: string | null;
   thumbnailImage?: string | null;
   locationName?: string | null;
+  /** Asset category name (only loaded on the mobile audit detail path). */
+  categoryName?: string | null;
+  /**
+   * Display name of the team member holding the asset (custody.custodian).
+   * Prefers User.displayName → first+last → TeamMember.name. Null if the
+   * asset isn't currently in custody, or on paths that don't load it.
+   */
+  custodianName?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -649,6 +657,32 @@ export async function getAuditSessionDetails({
                     name: true,
                   },
                 },
+                // why: surface category + active custodian on the
+                // audit detail row so the field worker can find the
+                // asset without leaving the audit context. The mobile
+                // endpoint plumbs these straight through to
+                // AuditExpectedAsset.
+                category: {
+                  select: {
+                    name: true,
+                  },
+                },
+                custody: {
+                  select: {
+                    custodian: {
+                      select: {
+                        name: true,
+                        user: {
+                          select: {
+                            firstName: true,
+                            lastName: true,
+                            displayName: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
             _count: {
@@ -705,16 +739,37 @@ export async function getAuditSessionDetails({
 
     const expectedAssets: AuditExpectedAsset[] = session.assets
       .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => ({
-        id: auditAsset.assetId,
-        name: auditAsset.asset?.title ?? "",
-        auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
-        auditNotesCount: auditAsset._count?.notes ?? 0,
-        auditImagesCount: auditAsset._count?.images ?? 0,
-        mainImage: auditAsset.asset?.mainImage ?? null,
-        thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-        locationName: auditAsset.asset?.location?.name ?? null,
-      }));
+      .map((auditAsset) => {
+        // why: prefer the User's display fields when the custodian is a
+        // real user; fall back to the TeamMember's display name (which
+        // is what the webapp uses for non-user "external" custodians
+        // like contractors). One-string out for the mobile UI.
+        const custodian = auditAsset.asset?.custody?.custodian;
+        const custodianUser = custodian?.user;
+        let custodianName: string | null = null;
+        if (custodianUser) {
+          const fullName = [custodianUser.firstName, custodianUser.lastName]
+            .filter(Boolean)
+            .join(" ");
+          custodianName =
+            custodianUser.displayName || fullName || custodian?.name || null;
+        } else if (custodian?.name) {
+          custodianName = custodian.name;
+        }
+
+        return {
+          id: auditAsset.assetId,
+          name: auditAsset.asset?.title ?? "",
+          auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
+          auditNotesCount: auditAsset._count?.notes ?? 0,
+          auditImagesCount: auditAsset._count?.images ?? 0,
+          mainImage: auditAsset.asset?.mainImage ?? null,
+          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          locationName: auditAsset.asset?.location?.name ?? null,
+          categoryName: auditAsset.asset?.category?.name ?? null,
+          custodianName,
+        };
+      });
 
     return {
       session,

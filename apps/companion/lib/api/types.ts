@@ -331,6 +331,24 @@ export type AuditExpectedAsset = {
   auditAssetId: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Where the asset is supposed to be physically. Surfaced on the
+   * audit detail row so the field worker can navigate to the right
+   * shelf / room without leaving the audit context. Null when the
+   * asset has no location set or the server didn't load it.
+   */
+  locationName: string | null;
+  /**
+   * Asset category name — helps when the image is generic and you
+   * need to disambiguate "which laptop" among many identical rows.
+   */
+  categoryName: string | null;
+  /**
+   * Display name of the team member currently holding the asset, if
+   * any. Helps explain why an expected asset can't be found at its
+   * location (someone has it on loan).
+   */
+  custodianName: string | null;
 };
 
 export type AuditScanData = {
