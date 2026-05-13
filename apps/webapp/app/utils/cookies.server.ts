@@ -250,7 +250,7 @@ export async function getAdvancedFiltersFromRequest(
     const validatedParams = new URLSearchParams();
     const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
-    // Validate each filter parameter
+    // Normalize each filter parameter
     new URLSearchParams(filters).forEach((value, key) => {
       // Non-column params (like page, search) pass through without validation
       if (!columnNames.includes(key as any)) {
@@ -258,9 +258,17 @@ export async function getAdvancedFiltersFromRequest(
         return;
       }
 
-      // Column filters must match advanced filter format (e.g., "is:AVAILABLE")
+      // Column filters in operator form (e.g., "is:AVAILABLE") pass through.
       if (advancedFilterFormatSchema.safeParse(value).success) {
         validatedParams.append(key, value);
+        return;
+      }
+
+      // Bare-value column filters (e.g. from report drill-down or external deep
+      // links: `?location=<uuid>`) get normalized to `is:<value>`. Silently
+      // dropping them previously broke drill-down in Advanced-mode workspaces.
+      if (value) {
+        validatedParams.append(key, `is:${value}`);
       }
     });
 
@@ -287,17 +295,20 @@ export async function getAdvancedFiltersFromRequest(
       const validatedParams = new URLSearchParams();
       const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
-      // Validate each filter from cookie
+      // Normalize each filter from cookie (mirrors CASE 1; see comments above)
       new URLSearchParams(filters).forEach((value, key) => {
-        // Non-column params pass through
         if (!columnNames.includes(key as any)) {
           validatedParams.append(key, value);
           return;
         }
 
-        // Column filters must match advanced filter format
         if (advancedFilterFormatSchema.safeParse(value).success) {
           validatedParams.append(key, value);
+          return;
+        }
+
+        if (value) {
+          validatedParams.append(key, `is:${value}`);
         }
       });
 
