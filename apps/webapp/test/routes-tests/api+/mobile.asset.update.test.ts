@@ -37,6 +37,17 @@ vi.mock("~/modules/asset/service.server", () => ({
   updateAsset: vi.fn(),
 }));
 
+// why: when categoryId is omitted from the body, the route looks up the
+// asset's persisted category to resolve the right custom-field defs.
+// Mocking the DB lets tests control that lookup without hitting Postgres.
+vi.mock("~/database/db.server", () => ({
+  db: {
+    asset: {
+      findUnique: vi.fn().mockResolvedValue({ categoryId: null }),
+    },
+  },
+}));
+
 // why: avoid hitting the DB to load org custom field defs
 vi.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vi.fn().mockResolvedValue([]),
@@ -70,6 +81,7 @@ import {
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
+import { db } from "~/database/db.server";
 
 const mockUser = {
   id: "user-1",
@@ -99,6 +111,7 @@ describe("POST /api/mobile/asset/update", () => {
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (db.asset.findUnique as any).mockResolvedValue({ categoryId: null });
   });
 
   it("should update an asset and return the updated data", async () => {
@@ -158,6 +171,13 @@ describe("POST /api/mobile/asset/update", () => {
   });
 
   it("validates customFields against org-scoped definitions before update", async () => {
+    // why: route now rejects unknown custom-field ids up front. Provide
+    // matching defs so we exercise the validator path the test cares about.
+    const defs = [
+      { id: "cf-text-1", name: "Notes", type: "TEXT", required: false },
+      { id: "cf-num-1", name: "Quantity", type: "NUMBER", required: false },
+    ];
+    (getActiveCustomFields as any).mockResolvedValue(defs);
     (updateAsset as any).mockResolvedValue({
       id: "asset-1",
       title: "T",
@@ -188,7 +208,104 @@ describe("POST /api/mobile/asset/update", () => {
         "cf-cf-text-1": "hello",
         "cf-cf-num-1": 42,
       },
-      customFieldDef: [],
+      customFieldDef: defs,
+    });
+  });
+
+  describe("required custom fields contract", () => {
+    it("rejects with 400 when explicitly clearing a required field to null", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-serial", name: "Serial Number", required: true },
+      ]);
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-serial", value: null }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(400);
+      const body = await (result as unknown as Response).json();
+      expect(body.error.message).toContain(
+        "Cannot clear required custom field"
+      );
+      expect(body.error.message).toContain("Serial Number");
+      expect(updateAsset).not.toHaveBeenCalled();
+    });
+
+    it("rejects with 400 when explicitly clearing a required field to empty string", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-serial", name: "Serial Number", required: true },
+      ]);
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-serial", value: "" }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(400);
+      const body = await (result as unknown as Response).json();
+      expect(body.error.message).toContain("Serial Number");
+      expect(updateAsset).not.toHaveBeenCalled();
+    });
+
+    it("allows a partial update that omits required field ids entirely", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-serial", name: "Serial Number", required: true },
+      ]);
+      (updateAsset as any).mockResolvedValue({
+        id: "asset-1",
+        title: "New Title",
+        description: null,
+      });
+
+      // Only touching title — required custom field is left untouched. Update
+      // is partial, so this must succeed.
+      const request = createRequest({
+        assetId: "asset-1",
+        title: "New Title",
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(200);
+      expect(updateAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "asset-1",
+          title: "New Title",
+        })
+      );
+    });
+
+    it("allows setting a required field to a new non-empty value", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-serial", name: "Serial Number", required: true },
+      ]);
+      (extractCustomFieldValuesFromPayload as any).mockReturnValue([
+        { id: "cf-serial", value: { raw: "SN-NEW" } },
+      ]);
+      (updateAsset as any).mockResolvedValue({
+        id: "asset-1",
+        title: "T",
+        description: null,
+      });
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-serial", value: "SN-NEW" }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(200);
+      expect(updateAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customFieldsValues: [{ id: "cf-serial", value: { raw: "SN-NEW" } }],
+        })
+      );
     });
   });
 });
