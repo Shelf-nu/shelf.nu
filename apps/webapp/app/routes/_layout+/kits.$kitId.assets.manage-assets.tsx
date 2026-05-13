@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AssetStatus, KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircleIcon } from "lucide-react";
@@ -217,8 +217,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems } = useLoaderData<LoaderData>();
-  const kitAssetsList = kit.assetKits.map((ak) => ak.asset);
-  const kitAssetIds = kitAssetsList.map((asset) => asset.id);
+  // why: `.map` returns a new array each render. The effects below depend on
+  // these lists, so without memoisation each render fired the effect and
+  // re-triggered a render via setSelectedBulkItems → infinite loop.
+  const kitAssetsList = useMemo(
+    () => kit.assetKits.map((ak) => ak.asset),
+    [kit.assetKits]
+  );
+  const kitAssetIds = useMemo(
+    () => kitAssetsList.map((asset) => asset.id),
+    [kitAssetsList]
+  );
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);

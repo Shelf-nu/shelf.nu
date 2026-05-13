@@ -23,24 +23,83 @@ flows shipped through Phase 3d-Polish-2.
 
 ## Prerequisites
 
-- [ ] Migration applied (T-0 confirmed; `_prisma_migrations` has the row).
-- [ ] `pnpm webapp:validate` green — typecheck + lint + tests all pass after the refactor.
-- [ ] Dev/staging server running so you can re-hit any failing flow.
-- [ ] Workspace with realistic data — at least 1 kit with 2+ assets, 1 kit in custody, 1 kit available, 1 asset not in any kit.
-- [ ] Browser console open for runtime errors.
+- [x] Migration applied (T-0 confirmed; `_prisma_migrations` has the row).
+- [x] `pnpm webapp:validate` green — typecheck + lint + tests all pass after the refactor.
+- [x] Dev/staging server running so you can re-hit any failing flow.
+- [x] Workspace with realistic data — at least 1 kit with 2+ assets, 1 kit in custody, 1 kit available, 1 asset not in any kit.
+- [x] Browser console open for runtime errors.
 
 ## §0 Schema + backfill verification
 
-- [ ] `AssetKit` table exists with the right columns:
+Local dev DB verified via supabase-local MCP on 2026-05-12. Two checks
+require a staging/prod snapshot with `Asset.kitId` restored — those
+stay open under "Snapshot-only" below.
+
+- [x] `AssetKit` table exists with the right columns:
 
   ```sql
   SELECT column_name, data_type FROM information_schema.columns
   WHERE table_name = 'AssetKit';
   ```
 
-  Expect: `id text`, `assetId text`, `kitId text`, `organizationId text`, `quantity integer`, `createdAt timestamp`, `updatedAt timestamp`.
+  Expected: `id text`, `assetId text`, `kitId text`, `organizationId text`, `quantity integer`, `createdAt timestamp`, `updatedAt timestamp`.
+  Got: ✅ all 7 columns in the right shape.
 
-- [ ] Backfill row count equals pre-migration `Asset.kitId IS NOT NULL` count:
+- [x] No orphans:
+
+  ```sql
+  SELECT count(*) FROM "AssetKit" ak
+  LEFT JOIN "Asset" a ON ak."assetId" = a.id
+  WHERE a.id IS NULL;
+  ```
+
+  Expected 0. Got 0. ✅
+  Bonus kit-side check: same query against `Kit` also returns 0 ✅.
+
+- [x] FK enforcement (cascade) on all three FKs:
+
+  ```sql
+  SELECT constraint_name, delete_rule
+  FROM information_schema.referential_constraints
+  WHERE constraint_name LIKE 'AssetKit_%_fkey';
+  ```
+
+  Expected `CASCADE` on `assetId`, `kitId`, `organizationId`.
+  Got: ✅ all three are `ON UPDATE CASCADE` + `ON DELETE CASCADE`.
+
+- [x] Unique constraint functional — duplicate `assetId` insert rejected:
+
+  ```sql
+  INSERT INTO "AssetKit" ("id", "assetId", "kitId", "organizationId", "quantity", "createdAt", "updatedAt")
+  VALUES ('test-dup', '<existing assetId>', '<some other kitId>', '<org>', 1, now(), now());
+  ```
+
+  Expected: violation on `AssetKit_assetId_key`. Got: ✅ rejected with
+  `duplicate key value violates unique constraint "AssetKit_assetId_key"`; follow-up
+  `SELECT count(*) FROM "AssetKit" WHERE id = 'test-dup'` returns 0.
+
+- [x] RLS enabled:
+
+  ```sql
+  SELECT relname, relrowsecurity FROM pg_class WHERE relname = 'AssetKit';
+  ```
+
+  Expected `relrowsecurity = t`. Got `t`. ✅
+
+- [x] Indexes present (bonus):
+  ```sql
+  SELECT indexname FROM pg_indexes WHERE tablename = 'AssetKit';
+  ```
+  Got: ✅ `AssetKit_pkey`, `AssetKit_assetId_key` (unique),
+  `AssetKit_assetId_kitId_key` (unique composite), `AssetKit_kitId_idx`,
+  `AssetKit_organizationId_idx`.
+
+**Snapshot-only (re-run before prod deploy)** — these need
+`Asset.kitId` restored on a staging/prod snapshot, since the migration
+already dropped the column:
+
+- [ ] Backfill row count equals the pre-migration baseline of
+      `Asset.kitId IS NOT NULL`:
 
   ```sql
   -- Pre-migration baseline captured at T-4h.
@@ -49,7 +108,13 @@ flows shipped through Phase 3d-Polish-2.
   -- Must match the baseline exactly.
   ```
 
-- [ ] Per-row match — every pre-migration `Asset.kitId` produced a corresponding `AssetKit` row (run on a snapshot copy where you can temporarily restore `Asset.kitId`):
+  Local dev: `count = 5` (no baseline preserved; trust the developer
+  who ran the migration). Production: validate against the T-4h
+  snapshot count.
+
+- [ ] Per-row match — every pre-migration `Asset.kitId` produced a
+      corresponding `AssetKit` row (run on a snapshot copy where you can
+      temporarily restore `Asset.kitId`):
 
   ```sql
   SELECT a.id AS asset_id, a."kitId" AS legacy_kit
@@ -60,82 +125,46 @@ flows shipped through Phase 3d-Polish-2.
   -- Expect 0 rows.
   ```
 
-- [ ] No orphans:
-
-  ```sql
-  SELECT count(*) FROM "AssetKit" ak
-  LEFT JOIN "Asset" a ON ak."assetId" = a.id
-  WHERE a.id IS NULL;
-  ```
-
-  Expect 0.
-
-- [ ] FK enforcement (cascade) on all three FKs:
-
-  ```sql
-  SELECT constraint_name, delete_rule
-  FROM information_schema.referential_constraints
-  WHERE constraint_name LIKE 'AssetKit_%_fkey';
-  ```
-
-  Expect `CASCADE` on `assetId`, `kitId`, `organizationId`.
-
-- [ ] Unique constraint functional — attempt to insert a duplicate `assetId`:
-
-  ```sql
-  INSERT INTO "AssetKit" ("id", "assetId", "kitId", "organizationId", "quantity", "createdAt", "updatedAt")
-  VALUES ('test-dup', '<existing assetId>', '<some other kitId>', '<org>', 1, now(), now());
-  -- Expect: unique constraint violation on AssetKit_assetId_key.
-  ```
-
-  Then confirm no test row exists:
-
-  ```sql
-  SELECT count(*) FROM "AssetKit" WHERE id = 'test-dup';  -- Expect 0.
-  ```
-
-- [ ] RLS enabled:
-  ```sql
-  SELECT relname, relrowsecurity FROM pg_class WHERE relname = 'AssetKit';
-  ```
-  Expect `relrowsecurity = t`.
-
 ## §1 Kit detail page — read paths
 
-- [ ] Navigate to `/kits/<kitId>` for a kit with multiple assets.
-- [ ] Asset list renders all the kit's assets (verify count matches `SELECT count(*) FROM "AssetKit" WHERE "kitId" = '<kitId>'`).
-- [ ] Asset status badges and qty display (where applicable) render identically to pre-migration.
-- [ ] Click an asset → asset detail page loads; "Included in kit" card shows the kit name and links back correctly.
-- [ ] Kit detail page sub-tabs (assets, overview, bookings) all load without error.
+- [x] Navigate to `/kits/<kitId>` for a kit with multiple assets.
+- [x] Asset list renders all the kit's assets (verify count matches `SELECT count(*) FROM "AssetKit" WHERE "kitId" = '<kitId>'`).
+- [x] Asset status badges and qty display (where applicable) render identically to pre-migration.
+- [x] Click an asset → asset detail page loads; "Included in kit" card shows the kit name and links back correctly.
+- [x] Kit detail page sub-tabs (assets, overview, bookings) all load without error.
 
 ## §2 Adding assets to a kit (`updateKitAssets` core path)
 
-- [ ] Go to `/kits/<kitId>/assets/manage-assets`. Pick 2-3 AVAILABLE assets that aren't currently in any kit. Click Save.
-- [ ] DB verification:
+- [x] Go to `/kits/<kitId>/assets/manage-assets`. Pick 2-3 AVAILABLE assets that aren't currently in any kit. Click Save.
+- [x] DB verification:
   ```sql
   SELECT * FROM "AssetKit" WHERE "kitId" = '<kitId>' AND "assetId" IN ('<a1>', '<a2>', '<a3>');
   ```
   Expect 3 rows, one per selected asset, all with `quantity = 1`.
-- [ ] UI verification: kit detail page now shows the 3 added assets.
-- [ ] Activity feed shows one `ASSET_KIT_CHANGED` event per asset with `field: "kitId"`, `fromValue: null`, `toValue: <kitId>`.
+  Got (Camera Kit, 4 assets): ✅ 4 rows, all `kitId = cmor5xj0t000gulal08v1nexc`,
+  all `quantity = 1`, identical `createdAt` (single tx).
+- [x] UI verification: kit detail page now shows the 3 added assets.
+- [x] Activity feed shows one `ASSET_KIT_CHANGED` event per asset with `field: "kitId"`, `fromValue: null`, `toValue: <kitId>`.
+      Got: ✅ 4 × `ASSET_KIT_CHANGED` (`field: kitId`, `fromValue: null`,
+      `toValue: cmor5xj0t000gulal08v1nexc`), one per added asset.
 
 ### Edge — moving an asset between kits
 
-- [ ] Pick an asset already in Kit A. Go to Kit B's manage-assets picker and select that asset.
-- [ ] Save. Expectation: only ONE `AssetKit` row exists for that asset, now pointing at Kit B (the `@@unique([assetId])` constraint enforces this).
-- [ ] Activity event: `ASSET_KIT_CHANGED` with `fromValue: <kitA>`, `toValue: <kitB>`.
+- [x] Pick an asset already in Kit A. Go to Kit B's manage-assets picker and select that asset.
+- [x] Save. Expectation: only ONE `AssetKit` row exists for that asset, now pointing at Kit B (the `@@unique([assetId])` constraint enforces this).
+- [x] Activity event: `ASSET_KIT_CHANGED` with `fromValue: <kitA>`, `toValue: <kitB>`.
 
 ### Edge — location cascade
 
-- [ ] Kit B has a location set. Add an asset (currently at a different location) to Kit B.
-- [ ] Asset's `Asset.locationId` should auto-update to Kit B's location. Verify in DB and on the asset detail page.
+- [x] Kit B has a location set. Add an asset (currently at a different location) to Kit B.
+- [x] Asset's `Asset.locationId` should auto-update to Kit B's location. Verify in DB and on the asset detail page.
 
 ## §3 Removing assets from a kit (`updateKitAssets` removal path)
 
-- [ ] Go to a kit's manage-assets picker. Deselect 2 assets currently in the kit. Save.
-- [ ] DB: the corresponding `AssetKit` rows are gone.
-- [ ] UI: the assets no longer appear in the kit's asset list.
-- [ ] Activity events: `ASSET_KIT_CHANGED` with `fromValue: <kitId>`, `toValue: null` per removed asset.
+- [x] Go to a kit's manage-assets picker. Deselect 2 assets currently in the kit. Save.
+- [x] DB: the corresponding `AssetKit` rows are gone.
+- [x] UI: the assets no longer appear in the kit's asset list.
+- [x] Activity events: `ASSET_KIT_CHANGED` with `fromValue: <kitId>`, `toValue: null` per removed asset.
 
 ## §4 `bulkRemoveAssetsFromKits` (assets index → bulk action)
 

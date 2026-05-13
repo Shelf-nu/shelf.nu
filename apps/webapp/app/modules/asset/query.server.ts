@@ -1885,7 +1885,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a.quantity AS "assetQuantity",
       a."unitOfMeasure" AS "assetUnitOfMeasure",
       a."availableToBook" AS "assetAvailableToBook",
-      ak."kitId" AS "assetKitId",
+      k.id AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
       a."assetModelId" AS "assetModelId",
       am.name AS "assetModelName",

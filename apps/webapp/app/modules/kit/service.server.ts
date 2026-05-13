@@ -2880,6 +2880,20 @@ export async function updateKitAssets({
         });
       }
 
+      // Cross-kit move: assets being added that already live in another
+      // kit need their existing pivot row dropped first; @@unique([assetId])
+      // forbids two rows for the same asset, so the createMany below would
+      // otherwise hit P2002. Pre-pivot this worked because Asset.kitId was
+      // an update-in-place FK.
+      const movedFromOtherKitIds = newlyAddedAssets
+        .filter((asset) => (asset.assetKits?.length ?? 0) > 0)
+        .map((asset) => asset.id);
+      if (movedFromOtherKitIds.length > 0) {
+        await tx.assetKit.deleteMany({
+          where: { assetId: { in: movedFromOtherKitIds } },
+        });
+      }
+
       // Connect: create one pivot row per newly added asset.
       if (newlyAddedAssets.length > 0) {
         await tx.assetKit.createMany({
@@ -2946,6 +2960,10 @@ export async function updateKitAssets({
         entityType: "ASSET" as const,
         entityId: asset.id,
         assetId: asset.id,
+        // The removal is still "about" this kit — populate the cross-ref so
+        // "all activity for kit X" report queries see both adds and removes.
+        // Flagged but deferred on PR #2495; picked up during Phase 4a testing.
+        kitId: kit.id,
         field: "kitId",
         fromValue: kit.id,
         toValue: null,
