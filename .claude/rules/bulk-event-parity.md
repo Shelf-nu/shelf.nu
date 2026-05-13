@@ -26,7 +26,9 @@ async function bulkRemoveAssetsFromKits({ assetIds }) {
 
 // ✅ Good — emit one event per affected item + cascade
 async function bulkRemoveAssetsFromKits({ assetIds }) {
-  const assets = await db.asset.findMany({ select: { id, kit, custody } });
+  const assets = await db.asset.findMany({
+    select: { id: true, kit: true, custody: true },
+  });
   await db.$transaction(async (tx) => {
     await tx.asset.updateMany({ data: { kitId: null } });
     await recordEvents(
