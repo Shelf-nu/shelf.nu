@@ -45,8 +45,20 @@ export async function action({ request }: ActionFunctionArgs) {
     // releaseCustody only emits the event when activityEvent is provided
     // (it's optional in the helper signature) — mirrors the pattern used
     // in assets.$assetId.overview.release-custody.tsx.
-    const custodyRecord = await db.custody.findUnique({
-      where: { assetId },
+    //
+    // why org-scoped via `asset.organizationId`: `findUnique({ assetId })`
+    // would happily return custody data for an asset in ANOTHER org
+    // (assetId is globally unique but not org-scoped on its own). The
+    // downstream `releaseCustody` enforces org scoping, but this pre-read
+    // would still leak `custodian.id` / `custodian.user.id` cross-org if
+    // an attacker guessed an asset id. Filtering on the related asset's
+    // `organizationId` makes the read consistent with the rest of the
+    // route's tenant boundary.
+    const custodyRecord = await db.custody.findFirst({
+      where: {
+        assetId,
+        asset: { organizationId },
+      },
       select: {
         custodian: {
           select: { id: true, user: { select: { id: true } } },

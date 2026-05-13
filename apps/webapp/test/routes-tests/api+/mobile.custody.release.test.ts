@@ -40,7 +40,7 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 vitest.mock("~/database/db.server", () => ({
   db: {
     custody: {
-      findUnique: vitest.fn(),
+      findFirst: vitest.fn(),
     },
   },
 }));
@@ -135,7 +135,7 @@ describe("POST /api/mobile/custody/release", () => {
     // `releaseCustody` so it can attribute the `CUSTODY_RELEASED` event
     // to the team member who held the asset (and the user behind that
     // team member, if any).
-    (db.custody.findUnique as any).mockResolvedValue({
+    (db.custody.findFirst as any).mockResolvedValue({
       custodian: {
         id: "team-member-1",
         user: { id: "user-2" },
