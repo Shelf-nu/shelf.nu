@@ -1906,7 +1906,11 @@ describe("audit service", () => {
   });
 
   describe("getAuditsForOrganization", () => {
-    const mockDb = vi.mocked(db, true) as any;
+    // why: the shared `mockDb` above declares `auditSession.count` as a
+    // `vi.fn()` returning `unknown` — that's enough for vi.mocked to
+    // surface it as a typed mock here without resorting to `as any`,
+    // which silenced the very type signal these tests should provide.
+    const mockDb = vi.mocked(db, true);
 
     beforeEach(() => {
       mockDb.auditSession.findMany.mockResolvedValue([]);
@@ -1921,7 +1925,9 @@ describe("audit service", () => {
         assignedToUserId: "admin-user",
       });
 
-      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
       expect(findManyArgs.where).toMatchObject({
         organizationId: "org-1",
         assignments: { some: { userId: "admin-user" } },
@@ -1936,9 +1942,12 @@ describe("audit service", () => {
         assignedToUserId: null,
       });
 
-      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
       // why: the toggle is OFF — admin/owner sees all audits, not just theirs.
-      expect(findManyArgs.where.assignments).toBeUndefined();
+      expect(findManyArgs.where).toBeDefined();
+      expect(findManyArgs.where!.assignments).toBeUndefined();
     });
 
     it("auto-scopes for BASE/SELF_SERVICE even when assignedToUserId is unset", async () => {
@@ -1948,8 +1957,11 @@ describe("audit service", () => {
         isSelfServiceOrBase: true,
       });
 
-      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
-      expect(findManyArgs.where.assignments).toEqual({
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      expect(findManyArgs.where).toBeDefined();
+      expect(findManyArgs.where!.assignments).toEqual({
         some: { userId: "base-user" },
       });
     });
@@ -1975,7 +1987,9 @@ describe("audit service", () => {
         prioritizeDeadlines: true,
       });
 
-      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
       expect(findManyArgs.orderBy).toEqual([
         { dueDate: { sort: "asc", nulls: "last" } },
         { createdAt: "desc" },
@@ -1989,7 +2003,9 @@ describe("audit service", () => {
         orderDirection: "desc",
       });
 
-      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
       expect(findManyArgs.orderBy).toEqual([{ createdAt: "desc" }]);
     });
   });

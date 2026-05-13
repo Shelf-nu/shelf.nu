@@ -741,21 +741,15 @@ export async function getAuditSessionDetails({
       .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
       .map((auditAsset) => {
         // why: prefer the User's display fields when the custodian is a
-        // real user; fall back to the TeamMember's display name (which
-        // is what the webapp uses for non-user "external" custodians
-        // like contractors). One-string out for the mobile UI.
+        // real user; fall back to the TeamMember's name for non-user
+        // "external" custodians (contractors etc.). Routes through the
+        // shared `resolveUserDisplayName` helper so the precedence
+        // (displayName → first+last) stays in one place.
         const custodian = auditAsset.asset?.custody?.custodian;
-        const custodianUser = custodian?.user;
-        let custodianName: string | null = null;
-        if (custodianUser) {
-          const fullName = [custodianUser.firstName, custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ");
-          custodianName =
-            custodianUser.displayName || fullName || custodian?.name || null;
-        } else if (custodian?.name) {
-          custodianName = custodian.name;
-        }
+        const custodianName =
+          (custodian?.user && resolveUserDisplayName(custodian.user)) ||
+          custodian?.name ||
+          null;
 
         return {
           id: auditAsset.assetId,

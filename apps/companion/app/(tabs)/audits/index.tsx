@@ -167,8 +167,14 @@ function AuditsListContent() {
   const hasFetchedAudits = useRef(false);
   const lastFetchedAt = useRef(0);
 
-  // Reset cache when org changes so useFocusEffect refetches
+  // Reset cache when org changes so useFocusEffect refetches.
+  // why: also abort any request still in flight against the PREVIOUS
+  // org. Without this, an older response could resolve later and
+  // repopulate the list with audits from the prior org until the next
+  // request finishes.
   useEffect(() => {
+    inFlightListRequest.current?.abort();
+    inFlightListRequest.current = null;
     lastFetchedAt.current = 0;
     hasFetchedAudits.current = false;
     setAudits([]);
