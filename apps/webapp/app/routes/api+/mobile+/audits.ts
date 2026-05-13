@@ -1,6 +1,7 @@
 import { AuditStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -33,6 +34,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    // why: BASE/SELF_SERVICE users must NEVER see audits they're not
+    // assigned to — passing these two params makes
+    // `getAuditsForOrganization` apply its role-based assignee filter
+    // server-side. Without them, the service skips the auto-filter and
+    // a client sending `assignedToMe=false` (or just omitting the flag)
+    // sees the whole org. Mirrors how `audits.complete.ts` does it.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
 
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
@@ -69,6 +79,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { audits: rawAudits, totalAudits: rawTotal } =
       await getAuditsForOrganization({
         organizationId,
+        userId: user.id,
+        isSelfServiceOrBase,
         page: isSingleStatus || isAllOrNone ? page : 1,
         perPage: isSingleStatus || isAllOrNone ? perPage : 200,
         search: searchParam || null,

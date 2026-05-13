@@ -90,6 +90,12 @@ function AuditsListContent() {
   const [assignedToMe, setAssignedToMe] = useState(true);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
+  // why: the list re-fires on every status/scope toggle. Without
+  // aborting the previous request, a slow earlier response can land
+  // AFTER the latest one and overwrite the visible list with stale
+  // data. Tracking the in-flight controller in a ref lets us abort
+  // the previous "reset" fetch the moment we kick off a new one.
+  const inFlightListRequest = useRef<AbortController | null>(null);
 
   // Swipe-to-filter gesture
   const {
@@ -108,13 +114,32 @@ function AuditsListContent() {
   const fetchAudits = useCallback(
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
-      const { data, error: fetchErr } = await api.audits(currentOrg.id, {
-        status: STATUS_FILTERS[activeFilter].value,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-        assignedToMe,
-      });
-      // Request cancelled (navigation) — ignore
+      // Only abort/replace the controller on a "reset" fetch (filter
+      // change, manual refresh). Pagination appends are append-only so
+      // they don't fight with each other the same way — letting them
+      // share the active controller keeps "load more" working while a
+      // filter switch is in flight.
+      if (reset) {
+        inFlightListRequest.current?.abort();
+        inFlightListRequest.current = new AbortController();
+      }
+      const controller = inFlightListRequest.current;
+      const { data, error: fetchErr } = await api.audits(
+        currentOrg.id,
+        {
+          status: STATUS_FILTERS[activeFilter].value,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          assignedToMe,
+        },
+        controller?.signal
+      );
+      // If this request was aborted while in flight, drop its result
+      // so the newer fetch's response wins. apiFetch translates
+      // AbortError to `{data: undefined, error: undefined}` upstream;
+      // the truthiness guard already handled that case, but we add the
+      // explicit `controller?.signal.aborted` check for clarity.
+      if (controller?.signal.aborted) return;
       if (!data && !fetchErr) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load audits");
@@ -127,6 +152,15 @@ function AuditsListContent() {
       else setAudits((prev) => [...prev, ...data.audits]);
     },
     [currentOrg, activeFilter, assignedToMe]
+  );
+
+  // Abort any in-flight fetch on unmount so its setState doesn't fire
+  // against an unmounted screen.
+  useEffect(
+    () => () => {
+      inFlightListRequest.current?.abort();
+    },
+    []
   );
 
   // Stale-while-revalidate: skeleton on first load, skip refetch if data is fresh (< 60s old)
