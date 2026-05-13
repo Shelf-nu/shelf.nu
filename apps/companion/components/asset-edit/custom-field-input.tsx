@@ -421,6 +421,29 @@ function DateFieldInput({
           />
         </View>
       )}
+
+      {/*
+        Always-visible clear affordance when the field has a value. Mirrors
+        the OptionDropdown's `pickerClear` pattern but sits OUTSIDE the
+        `open` branch because on Android the picker is a modal dialog —
+        anything inside `open` is hidden behind the OS sheet, so there'd
+        be no UI window to surface "Clear" via that path. For optional
+        DATE fields, this is the only way to send `null` and reset the
+        server-side value (see `buildCustomFieldPayloadValue`).
+      */}
+      {value ? (
+        <TouchableOpacity
+          style={styles.dateClearRow}
+          onPress={() => {
+            onChange("");
+            setOpen(false);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Clear ${accessibilityLabel}`}
+        >
+          <Text style={styles.pickerClearText}>Clear date</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -524,6 +547,15 @@ const useStyles = createStyles((colors, shadows) => ({
   // Inline DateTimePicker (iOS) wrapper — gives the calendar room to
   // breathe under the field button without colliding with the next field.
   dateInlineWrap: {
+    marginTop: spacing.xs,
+  },
+  // Clear affordance row below the date picker button — only rendered when
+  // the field has a value. Sits outside the picker open/closed state so
+  // Android (modal dialog) users can still clear without opening the picker.
+  dateClearRow: {
+    alignSelf: "flex-end",
+    paddingVertical: spacing.xs,
+    paddingHorizontal: 4,
     marginTop: spacing.xs,
   },
 }));

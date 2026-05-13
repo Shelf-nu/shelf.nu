@@ -83,6 +83,19 @@ export default function EditAssetScreen() {
       );
       return;
     }
+    // why: `form.customFields` is empty (or stale, mid-category-switch) while
+    // defs are loading, so the required-field filter below would silently
+    // produce `[]` and let the save through. Belt-and-suspenders with the
+    // `canSubmit` disable on the button: the button is disabled, but if the
+    // user somehow triggers submit anyway (rapid double-tap before the
+    // disable lands), this guard still catches it. Mirrors `new.tsx`.
+    if (form.isCustomFieldsLoading) {
+      Alert.alert(
+        "Please wait",
+        "Custom fields are still loading. Try again in a moment."
+      );
+      return;
+    }
     const missingRequired = form.customFields
       .filter((cf) => cf.required && !cf.value.trim())
       .map((cf) => cf.name);
@@ -169,7 +182,11 @@ export default function EditAssetScreen() {
     ]);
   };
 
-  const canSubmit = form.title.trim().length >= 2 && !form.isSubmitting;
+  const canSubmit =
+    form.title.trim().length >= 2 &&
+    !form.isSubmitting &&
+    !form.isCustomFieldsLoading &&
+    !form.customFieldsError;
 
   // ── Loading state ───────────────────────────────
   if (form.isLoadingAsset) {
