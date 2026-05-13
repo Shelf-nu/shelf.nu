@@ -10,18 +10,25 @@ export const auditsApi = {
   /**
    * Get paginated audits for an organization.
    *
+   * Results are always sorted server-side by
+   * `(dueDate asc nulls last, createdAt desc)` so overdue + soon-due
+   * work surfaces first; the companion does not expose a sort UI.
+   *
    * @param orgId Active organization id from `useOrg`.
-   * @param params Optional filters / pagination.
-   *   - `status`: comma-separated `AuditStatus` values (e.g. `"PENDING,ACTIVE"`).
-   *   - `assignedToMe`: when `true`, restricts the result to audits the
-   *     caller is assigned to. For BASE/SELF_SERVICE users this is
+   * @param params Optional filters / pagination:
+   *   - `status` — comma-separated `AuditStatus` values (e.g. `"PENDING,ACTIVE"`).
+   *   - `page` / `perPage` — pagination knobs.
+   *   - `search` — free-text search over name / description.
+   *   - `assignedToMe` — when `true`, restricts the result to audits
+   *     the caller is assigned to. For BASE/SELF_SERVICE users this is
    *     already implicit server-side; for admins/owners it's the
-   *     companion's "Assigned to me" filter toggle.
-   *   - `signal`: AbortSignal for in-flight cancellation on rapid filter
-   *     toggling (the list re-fires on every chip tap, and we don't want
-   *     a stale response to overwrite the current one).
-   * Results are always sorted server-side by `dueDate asc nulls last,
-   * createdAt desc` so overdue + soon-due work surfaces first.
+   *     companion's "Assigned to me" toggle.
+   * @param signal AbortSignal for in-flight cancellation on rapid
+   *   filter toggling (the list re-fires on every chip tap; aborting
+   *   the previous request stops a slow earlier response from
+   *   overwriting the latest state).
+   * @returns The `apiFetch` envelope `{ data, error }` carrying an
+   *   `AuditsResponse` payload on success.
    */
   audits: (
     orgId: string,

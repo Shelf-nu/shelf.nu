@@ -58,6 +58,11 @@ const ROLE_PERMISSIONS: Record<
  * visually, but the result set never widens. Use this to hide / disable
  * UI that only makes sense for users who can actually opt into a wider
  * scope.
+ *
+ * @param roles The user's org-role strings as returned by `/me`
+ *   (`Organization.roles`). `undefined` or empty arrays default to
+ *   "no widening" — safe direction for ambiguous state.
+ * @returns `true` only when the array contains `"OWNER"` or `"ADMIN"`.
  */
 export function userCanSeeOrgWideAudits(roles: string[] | undefined): boolean {
   if (!roles?.length) return false;
