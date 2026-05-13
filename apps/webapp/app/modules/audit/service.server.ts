@@ -3251,3 +3251,172 @@ export async function bulkDeleteAudits({
     });
   }
 }
+
+/**
+ * Audit statuses that allow duplication. Source of truth shared between
+ * the duplicate-audit route loader (UX guard so we don't render the dialog
+ * for a non-terminal audit) and {@link duplicateAuditSession} (the service
+ * contract for any caller — route action, background job, future internal
+ * use). Keep these in sync — the loader and service both reference this
+ * constant.
+ */
+export const DUPLICATE_AUDIT_ALLOWED_STATUSES = [
+  AuditStatus.COMPLETED,
+  AuditStatus.CANCELLED,
+  AuditStatus.ARCHIVED,
+] as const satisfies readonly AuditStatus[];
+
+/** Result returned from {@link duplicateAuditSession}. */
+export type DuplicateAuditResult = {
+  /** The newly created audit session. */
+  newSession: AuditSession;
+  /** Number of assets that were dropped because they no longer exist. */
+  droppedAssetCount: number;
+  /** Total number of assets in the original audit. */
+  originalAssetCount: number;
+};
+
+/**
+ * Duplicates an audit session into a new PENDING audit.
+ *
+ * Copies the original audit's name (with `" (Copy)"` suffix), description, and
+ * `scopeMeta` as-is. Only the originally-expected assets carry over —
+ * unexpected scan records (`AuditAsset.expected: false`) are excluded so the
+ * duplicate's scope matches the source. Surviving asset IDs are validated
+ * against the org; missing ones are silently dropped and reported via
+ * `droppedAssetCount`. If every expected asset is gone, throws so the caller
+ * can show a blocking error.
+ *
+ * Refuses non-terminal audits (PENDING / ACTIVE) with a 400 — the dropdown
+ * gate is client-side, so the service owns the contract for any caller
+ * (route action, background jobs, future internal callers).
+ *
+ * Assignments, notes, scans, images, and the due date are NOT copied — the
+ * new audit starts clean. Creator is set to `userId`.
+ *
+ * @param auditSessionId - ID of the audit to duplicate
+ * @param organizationId - Workspace scoping
+ * @param userId - User performing the duplication (becomes creator)
+ * @returns The new audit session and missing-asset counts for warning UX
+ * @throws {ShelfError} 404 if the audit isn't found, 400 if the source is not
+ *   in a terminal status, 400 if every original asset is gone
+ */
+export async function duplicateAuditSession({
+  auditSessionId,
+  organizationId,
+  userId,
+}: {
+  auditSessionId: string;
+  organizationId: string;
+  userId: string;
+}): Promise<DuplicateAuditResult> {
+  try {
+    const originalAudit = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      include: {
+        // Only the originally-scoped assets carry over. AuditAsset rows
+        // also include unexpected scans (`expected: false`) — those must
+        // not be promoted to expected in the duplicate.
+        assets: { where: { expected: true }, select: { assetId: true } },
+      },
+    });
+
+    if (!originalAudit) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+      });
+    }
+
+    // Defense in depth: the route loader/action also check terminal status,
+    // but the service owns the contract for any internal caller (background
+    // jobs, future routes). Mirrors the pattern archive/delete enforce.
+    if (
+      !DUPLICATE_AUDIT_ALLOWED_STATUSES.includes(
+        originalAudit.status as (typeof DUPLICATE_AUDIT_ALLOWED_STATUSES)[number]
+      )
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only completed, cancelled, or archived audits can be duplicated.",
+        additionalData: {
+          auditSessionId,
+          organizationId,
+          status: originalAudit.status,
+        },
+        label,
+        status: 400,
+      });
+    }
+
+    const originalAssetCount = originalAudit.assets.length;
+    const resolvedAssetIds = await validateExistingAssetIds(
+      originalAudit.assets.map((a) => a.assetId),
+      organizationId
+    );
+
+    const droppedAssetCount = originalAssetCount - resolvedAssetIds.length;
+
+    if (resolvedAssetIds.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "None of the original assets exist anymore. Cannot duplicate.",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 400,
+      });
+    }
+
+    const { session: newSession } = await createAuditSession({
+      name: `${originalAudit.name} (Copy)`,
+      description: originalAudit.description,
+      assetIds: resolvedAssetIds,
+      organizationId,
+      createdById: userId,
+      // PRD: scopeMeta copied as-is. The DB column is Json?, the typed surface
+      // is AuditScopeMeta — cast through and let createAuditSession persist it.
+      scopeMeta: (originalAudit.scopeMeta ?? null) as AuditScopeMeta | null,
+    });
+
+    return {
+      newSession,
+      droppedAssetCount,
+      originalAssetCount,
+    };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while duplicating the audit.",
+      additionalData: { auditSessionId, organizationId, userId },
+      label,
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Returns the subset of `assetIds` that still exist in the given organization.
+ * Used by {@link duplicateAuditSession} to drop assets that have been deleted
+ * or moved to another org since the original audit was created.
+ */
+async function validateExistingAssetIds(
+  assetIds: string[],
+  organizationId: string
+): Promise<string[]> {
+  if (assetIds.length === 0) return [];
+
+  const existingAssets = await db.asset.findMany({
+    where: {
+      id: { in: assetIds },
+      organizationId,
+    },
+    select: { id: true },
+  });
+
+  return existingAssets.map((a) => a.id);
+}
