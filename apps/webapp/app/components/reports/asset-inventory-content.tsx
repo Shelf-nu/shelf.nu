@@ -20,11 +20,15 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import {
   AssetCell,
+  CurrencyCell,
   DateCell,
   ReportTable,
   StatusCell,
 } from "~/components/reports/report-table";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { AssetInventoryRow, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 
 /**
  * Map asset status to badge variant.
@@ -109,12 +113,9 @@ const ASSET_INVENTORY_COLUMNS: ColumnDef<AssetInventoryRow>[] = [
   {
     accessorKey: "valuation",
     header: "Value",
-    cell: ({ row }) =>
-      row.original.valuation ? (
-        `$${row.original.valuation.toLocaleString()}`
-      ) : (
-        <span className="text-gray-400">—</span>
-      ),
+    cell: ({ row }) => (
+      <CurrencyCell value={row.original.valuation} treatZeroAsEmpty />
+    ),
   },
   {
     accessorKey: "createdAt",
@@ -148,6 +149,9 @@ export function AssetInventoryContent({
   totalRows,
   onRowClick,
 }: Props) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
   // Stable reference is guaranteed by `ASSET_INVENTORY_COLUMNS` living at
   // module scope (see its JSDoc for why that matters).
   const columns = ASSET_INVENTORY_COLUMNS;
@@ -186,7 +190,13 @@ export function AssetInventoryContent({
             <div className="flex flex-col">
               <span className="text-xs text-gray-500">Total Value</span>
               <span className="text-lg font-medium text-gray-900">
-                {totalValue > 0 ? `$${totalValue.toLocaleString()}` : "—"}
+                {totalValue > 0
+                  ? formatCurrency({
+                      value: totalValue,
+                      currency: currentOrganization?.currency ?? "USD",
+                      locale,
+                    })
+                  : "—"}
               </span>
             </div>
             <div className="flex flex-col">
