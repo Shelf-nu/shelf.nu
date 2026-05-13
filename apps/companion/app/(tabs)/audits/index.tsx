@@ -580,11 +580,18 @@ function AuditsListContent() {
                 {assignedToMe
                   ? activeFilter === 0
                     ? "No active audits assigned to you"
+                    : activeFilter === 2
+                    ? // why: STATUS_FILTERS[2] is "All", which would
+                      // interpolate to the ungrammatical "No all
+                      // audits assigned to you". Special-case it.
+                      "No audits assigned to you"
                     : `No ${STATUS_FILTERS[
                         activeFilter
                       ].label.toLowerCase()} audits assigned to you`
                   : activeFilter === 0
                   ? "No active audits"
+                  : activeFilter === 2
+                  ? "No audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter
                     ].label.toLowerCase()} audits`}
