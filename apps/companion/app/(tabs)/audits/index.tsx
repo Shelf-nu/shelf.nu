@@ -258,6 +258,20 @@ function AuditsListContent() {
         : isDueSoon
         ? colors.warning
         : colors.mutedLight;
+      // why: the urgency tier (red/amber) and "You" marker are visual-only
+      // signals — without surfacing them through the accessibility label,
+      // VoiceOver / TalkBack users miss two important pieces of context
+      // ("this one's mine", "this one's late"). Compose the label so it
+      // reads the visible state, not just the static fields.
+      const cardA11yLabel = [
+        `Audit: ${item.name}`,
+        item.status,
+        `${item.foundAssetCount} of ${item.expectedAssetCount} found`,
+        isOverdue ? "overdue" : isDueSoon ? "due soon" : null,
+        showAssignedMarker ? "assigned to you" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
 
       return (
         <TouchableOpacity
@@ -267,7 +281,7 @@ function AuditsListContent() {
             router.push(`/(tabs)/audits/${item.id}`);
           }}
           activeOpacity={0.6}
-          accessibilityLabel={`Audit: ${item.name}, ${item.status}, ${item.foundAssetCount} of ${item.expectedAssetCount} found`}
+          accessibilityLabel={cardA11yLabel}
           accessibilityRole="button"
         >
           <View style={styles.auditHeader}>
