@@ -1954,6 +1954,21 @@ describe("audit service", () => {
       });
     });
 
+    it("throws when isSelfServiceOrBase is true but userId is missing", async () => {
+      // why: silently falling back to assignedToUserId (or null) when a
+      // caller signals role-scoping but forgets the userId would leak
+      // the whole org list to a BASE/SELF_SERVICE user. The guard fails
+      // loud so the bug surfaces in dev/tests, not in customers' hands.
+      await expect(
+        getAuditsForOrganization({
+          organizationId: "org-1",
+          isSelfServiceOrBase: true,
+          // userId intentionally omitted
+        })
+      ).rejects.toThrow(/Missing user context/);
+      expect(mockDb.auditSession.findMany).not.toHaveBeenCalled();
+    });
+
     it("applies (dueDate asc nulls last, createdAt desc) when prioritizeDeadlines is true", async () => {
       await getAuditsForOrganization({
         organizationId: "org-1",

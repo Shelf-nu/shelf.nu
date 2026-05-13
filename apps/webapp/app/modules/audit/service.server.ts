@@ -1756,6 +1756,21 @@ export async function getAuditsForOrganization(params: {
     prioritizeDeadlines = false,
   } = params;
 
+  // why: BASE/SELF_SERVICE roles MUST be scoped to their own assignments.
+  // If a caller signals "scope to role" but forgets to pass userId, the
+  // predicate would silently collapse to null and leak the whole org list.
+  // Fail loud — and OUTSIDE the try/catch below so the precise error reaches
+  // the caller (the catch wraps everything in a generic "fetch failed").
+  if (isSelfServiceOrBase && !userId) {
+    throw new ShelfError({
+      cause: null,
+      message: "Missing user context for assignment-scoped audit query.",
+      additionalData: { organizationId, isSelfServiceOrBase },
+      label,
+      status: 400,
+    });
+  }
+
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
@@ -1766,9 +1781,11 @@ export async function getAuditsForOrganization(params: {
     // explicitly asks for "assigned to me". Both paths use the same
     // `assignments.some.userId` predicate so an admin/owner who opts into
     // the filter via `assignedToUserId` gets the same scoping the role
-    // check would apply automatically for low-permission users.
+    // check would apply automatically for low-permission users. The
+    // BASE/SELF_SERVICE branch can rely on `userId` being non-null
+    // thanks to the guard above.
     const assigneeFilterUserId =
-      (isSelfServiceOrBase && userId ? userId : null) ?? assignedToUserId;
+      (isSelfServiceOrBase ? userId : null) ?? assignedToUserId ?? null;
     if (assigneeFilterUserId) {
       where.assignments = {
         some: {
