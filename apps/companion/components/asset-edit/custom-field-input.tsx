@@ -150,6 +150,7 @@ export function CustomFieldInput({
     case "DATE":
       return (
         <DateFieldInput
+          fieldId={field.id}
           value={value}
           onChange={onChange}
           accessibilityLabel={accessibilityLabel}
@@ -339,11 +340,14 @@ function OptionDropdown({
  * stored "2026-01-15" rendering as Jan 14 in negative-UTC timezones).
  */
 function DateFieldInput({
+  fieldId,
   value,
   onChange,
   accessibilityLabel,
   accessibilityHint,
 }: {
+  /** customField.id — used to scope the picker's testID per field. */
+  fieldId: string;
   value: string;
   onChange: (value: string) => void;
   accessibilityLabel: string;
@@ -427,7 +431,7 @@ function DateFieldInput({
       {open && (
         <View style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}>
           <DateTimePicker
-            testID="custom-field-date-picker"
+            testID={`custom-field-date-picker-${fieldId}`}
             value={dateValue}
             mode="date"
             display={Platform.OS === "ios" ? "inline" : "default"}
