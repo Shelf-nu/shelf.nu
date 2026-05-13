@@ -63,6 +63,8 @@ const ROLE_PERMISSIONS: Record<
  *   (`Organization.roles`). `undefined` or empty arrays default to
  *   "no widening" — safe direction for ambiguous state.
  * @returns `true` only when the array contains `"OWNER"` or `"ADMIN"`.
+ * @throws Never — pure predicate; defends `roles?.length` for the
+ *   nullable/undefined input case.
  */
 export function userCanSeeOrgWideAudits(roles: string[] | undefined): boolean {
   if (!roles?.length) return false;
