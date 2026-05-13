@@ -3217,9 +3217,10 @@ export async function bulkDeleteAudits({
 /**
  * Audit statuses that allow duplication. Source of truth shared between
  * the duplicate-audit route loader (UX guard so we don't render the dialog
- * for a non-terminal audit) and {@link duplicateAuditSession} (defense in
- * depth against direct POSTs). Keep these in sync — the loader and service
- * both reference this constant.
+ * for a non-terminal audit) and {@link duplicateAuditSession} (the service
+ * contract for any caller — route action, background job, future internal
+ * use). Keep these in sync — the loader and service both reference this
+ * constant.
  */
 export const DUPLICATE_AUDIT_ALLOWED_STATUSES = [
   AuditStatus.COMPLETED,
@@ -3249,8 +3250,8 @@ export type DuplicateAuditResult = {
  * can show a blocking error.
  *
  * Refuses non-terminal audits (PENDING / ACTIVE) with a 400 — the dropdown
- * gate is client-side, so the service enforces the contract for direct
- * POSTs that bypass the UI.
+ * gate is client-side, so the service owns the contract for any caller
+ * (route action, background jobs, future internal callers).
  *
  * Assignments, notes, scans, images, and the due date are NOT copied — the
  * new audit starts clean. Creator is set to `userId`.
@@ -3292,9 +3293,9 @@ export async function duplicateAuditSession({
       });
     }
 
-    // Defense in depth: the dropdown gates on terminal status, but a direct
-    // POST could still hit this service for a PENDING/ACTIVE audit. Mirrors
-    // the pattern archive/delete already enforce server-side.
+    // Defense in depth: the route loader/action also check terminal status,
+    // but the service owns the contract for any internal caller (background
+    // jobs, future routes). Mirrors the pattern archive/delete enforce.
     if (
       !DUPLICATE_AUDIT_ALLOWED_STATUSES.includes(
         originalAudit.status as (typeof DUPLICATE_AUDIT_ALLOWED_STATUSES)[number]
@@ -3349,14 +3350,13 @@ export async function duplicateAuditSession({
       originalAssetCount,
     };
   } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : "Something went wrong while duplicating the audit.",
+      message: "Something went wrong while duplicating the audit.",
       additionalData: { auditSessionId, organizationId, userId },
       label,
-      status: isLikeShelfError(cause) ? cause.status : 500,
+      status: 500,
     });
   }
 }
