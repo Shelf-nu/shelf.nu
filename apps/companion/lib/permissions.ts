@@ -48,6 +48,23 @@ const ROLE_PERMISSIONS: Record<
 };
 
 /**
+ * Returns true when the user holds an org role that grants visibility
+ * across the entire workspace (not just their assignments).
+ *
+ * Why this helper exists separately from `userHasPermission`: the audit
+ * mobile endpoint silently scopes BASE/SELF_SERVICE callers to their
+ * own assignments regardless of any query flags. Surfacing a UI toggle
+ * that promises "All audits" to those roles is a lie — the chip flips
+ * visually, but the result set never widens. Use this to hide / disable
+ * UI that only makes sense for users who can actually opt into a wider
+ * scope.
+ */
+export function userCanSeeOrgWideAudits(roles: string[] | undefined): boolean {
+  if (!roles?.length) return false;
+  return roles.some((role) => role === "OWNER" || role === "ADMIN");
+}
+
+/**
  * Checks if a user with the given roles has permission for an entity/action.
  * Returns true if any of the user's roles grant the permission.
  */

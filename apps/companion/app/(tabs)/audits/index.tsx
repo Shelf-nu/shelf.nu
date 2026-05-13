@@ -27,6 +27,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { userCanSeeOrgWideAudits } from "@/lib/permissions";
 
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
@@ -83,11 +84,23 @@ function AuditsListContent() {
   // why: default the "Assigned to me" toggle ON so a field worker who
   // opens the tab immediately sees their own work first — the original
   // complaint was that an admin assigned to 1 audit out of 50 had to
-  // scroll past everything else. They can flip it off to see the full
-  // org list. For BASE/SELF_SERVICE users this is already implicit
-  // server-side, so the toggle is effectively a no-op for them (still
-  // shown for visual consistency with admin/owner views).
+  // scroll past everything else.
+  //
+  // BASE/SELF_SERVICE roles are server-side-scoped to their own
+  // assignments regardless of the flag; showing them an "All audits"
+  // toggle would be a lie (the chip flips visually, the result set
+  // never widens). For those roles we hide the toggle entirely and
+  // force `assignedToMe` to true. See `canWidenScope` below.
+  const canWidenScope = userCanSeeOrgWideAudits(currentOrg?.roles);
   const [assignedToMe, setAssignedToMe] = useState(true);
+  // Defensive: if the user's role changes mid-session to one that
+  // can't widen scope, snap the toggle back to true so the visible
+  // state matches what the server will actually return.
+  useEffect(() => {
+    if (!canWidenScope && !assignedToMe) {
+      setAssignedToMe(true);
+    }
+  }, [canWidenScope, assignedToMe]);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   // why: the list re-fires on every status/scope toggle. Without
@@ -112,8 +125,8 @@ function AuditsListContent() {
   }, [activeFilter, syncIndex]);
 
   const fetchAudits = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
+    async (pageNum: number, reset: boolean): Promise<boolean> => {
+      if (!currentOrg) return false;
       // Only abort/replace the controller on a "reset" fetch (filter
       // change, manual refresh). Pagination appends are append-only so
       // they don't fight with each other the same way — letting them
@@ -134,22 +147,23 @@ function AuditsListContent() {
         },
         controller?.signal
       );
-      // If this request was aborted while in flight, drop its result
-      // so the newer fetch's response wins. apiFetch translates
-      // AbortError to `{data: undefined, error: undefined}` upstream;
-      // the truthiness guard already handled that case, but we add the
-      // explicit `controller?.signal.aborted` check for clarity.
-      if (controller?.signal.aborted) return;
-      if (!data && !fetchErr) return;
+      // Returning `false` from the abort / no-data / error branches
+      // lets the callers below differentiate success from failure so
+      // they only mark the list "fresh" on a real successful fetch
+      // (the previous `.finally` refreshed timestamps even on aborted
+      // / failed requests, which then suppressed retries for 60s).
+      if (controller?.signal.aborted) return false;
+      if (!data && !fetchErr) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load audits");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
       if (reset) setAudits(data.audits);
       else setAudits((prev) => [...prev, ...data.audits]);
+      return true;
     },
     // why: depend on the org id (not the full object) so an identity-
     // only re-render from useOrg doesn't churn fetchAudits and cascade
@@ -192,8 +206,13 @@ function AuditsListContent() {
   useEffect(() => {
     if (!currentOrg || !hasFetchedAudits.current) return;
     nextPage.current = 1;
-    fetchAudits(1, true).finally(() => {
-      lastFetchedAt.current = Date.now();
+    fetchAudits(1, true).then((ok) => {
+      // why: only mark the list fresh on a SUCCESSFUL fetch. The old
+      // `.finally` ran on aborted + failed responses too, which then
+      // suppressed `useFocusEffect`'s retry for the 60s freshness
+      // window (so a failed first load could leave the user staring
+      // at an empty/erroring list until they pulled to refresh).
+      if (ok) lastFetchedAt.current = Date.now();
     });
   }, [activeFilter, assignedToMe]); // eslint-disable-line react-hooks/exhaustive-deps
   useFocusEffect(
@@ -209,8 +228,12 @@ function AuditsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedAudits.current;
-      fetchAudits(1, true).finally(() => {
+      fetchAudits(1, true).then((ok) => {
         setIsLoading(false);
+        // why: same as above — only refresh freshness / flip
+        // `hasFetchedAudits` to true on a real success, so a failed
+        // or aborted first load remains retryable on the next focus.
+        if (!ok) return;
         lastFetchedAt.current = Date.now();
         if (isFirstLoad) {
           hasFetchedAudits.current = true;
@@ -457,34 +480,42 @@ function AuditsListContent() {
 
   return (
     <View style={styles.container}>
-      {/* Scope toggle: "Assigned to me" vs everything in the org. */}
-      <View style={styles.scopeRow}>
-        <TouchableOpacity
-          style={[styles.scopeChip, assignedToMe && styles.scopeChipActive]}
-          onPress={() => {
-            Haptics.selectionAsync();
-            setAssignedToMe((v) => !v);
-          }}
-          hitSlop={hitSlop.sm}
-          accessibilityRole="switch"
-          accessibilityLabel="Show only audits assigned to me"
-          accessibilityState={{ checked: assignedToMe }}
-        >
-          <Ionicons
-            name={assignedToMe ? "person" : "person-outline"}
-            size={14}
-            color={assignedToMe ? colors.primary : colors.muted}
-          />
-          <Text
-            style={[
-              styles.scopeChipText,
-              assignedToMe && styles.scopeChipTextActive,
-            ]}
+      {/*
+        Scope toggle: "Assigned to me" vs everything in the org.
+        Hidden for BASE/SELF_SERVICE users — the mobile audits endpoint
+        force-scopes them to their own assignments regardless of the
+        flag, so a toggle that flips visually but never widens the
+        result set is a UI lie.
+      */}
+      {canWidenScope ? (
+        <View style={styles.scopeRow}>
+          <TouchableOpacity
+            style={[styles.scopeChip, assignedToMe && styles.scopeChipActive]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setAssignedToMe((v) => !v);
+            }}
+            hitSlop={hitSlop.sm}
+            accessibilityRole="switch"
+            accessibilityLabel="Show only audits assigned to me"
+            accessibilityState={{ checked: assignedToMe }}
           >
-            {assignedToMe ? "Assigned to me" : "All audits"}
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <Ionicons
+              name={assignedToMe ? "person" : "person-outline"}
+              size={14}
+              color={assignedToMe ? colors.primary : colors.muted}
+            />
+            <Text
+              style={[
+                styles.scopeChipText,
+                assignedToMe && styles.scopeChipTextActive,
+              ]}
+            >
+              {assignedToMe ? "Assigned to me" : "All audits"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Status filter pills */}
       <View style={styles.filterRow} accessibilityRole="tablist">
@@ -560,12 +591,19 @@ function AuditsListContent() {
               </Text>
               <Text style={styles.emptyText}>
                 {assignedToMe
-                  ? "Tap “All audits” above to see audits across the workspace."
+                  ? canWidenScope
+                    ? "Tap “All audits” above to see audits across the workspace."
+                    : "Ask an admin to assign an audit to you, or create one from the web app."
                   : activeFilter === 0
                   ? "Create an audit from the web app to get started"
                   : "Try selecting a different status filter"}
               </Text>
-              {assignedToMe ? (
+              {/*
+                Escape hatch only renders when the user can actually
+                widen scope. BASE/SELF_SERVICE see the prompt above
+                instead — no false promise.
+              */}
+              {assignedToMe && canWidenScope ? (
                 <TouchableOpacity
                   style={styles.retryButton}
                   onPress={() => {

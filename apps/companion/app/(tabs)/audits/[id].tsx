@@ -341,6 +341,12 @@ function AuditDetailContent() {
       return (
         <View
           style={styles.assetCard}
+          // why: React Native 0.81 treats a plain View as a container,
+          // so VoiceOver/TalkBack would announce each child Text node
+          // separately. `accessible` collapses the subtree into one
+          // element with the composed label below — same UX a tapable
+          // TouchableOpacity gives by default.
+          accessible
           accessibilityLabel={[
             item.name,
             statusLabel,
