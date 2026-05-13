@@ -29,6 +29,9 @@ export const auditsApi = {
    *   overwriting the latest state).
    * @returns The `apiFetch` envelope `{ data, error }` carrying an
    *   `AuditsResponse` payload on success.
+   * @throws Never — `apiFetch` returns network / parse / HTTP errors
+   *   inside the envelope's `error` field instead of throwing, so
+   *   callers branch on the envelope rather than try/catch.
    */
   audits: (
     orgId: string,
