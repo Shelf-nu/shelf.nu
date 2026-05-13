@@ -40,6 +40,9 @@ vitest.mock("~/database/db.server", () => ({
     location: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
+    tag: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
@@ -622,7 +625,7 @@ describe("bulkUpdateAssetCategory", () => {
   });
 
   it("emits ASSET_CATEGORY_CHANGED only for assets whose category actually changes", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([
       {
@@ -654,7 +657,7 @@ describe("bulkUpdateAssetCategory", () => {
     });
 
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_CATEGORY_CHANGED",
           assetId: "asset-1",
@@ -667,9 +670,12 @@ describe("bulkUpdateAssetCategory", () => {
           fromValue: null,
           toValue: "cat-new",
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(2);
   });
 
   it("does not emit events when no asset's category changes", async () => {
@@ -690,6 +696,26 @@ describe("bulkUpdateAssetCategory", () => {
 
     expect(recordEvents).not.toHaveBeenCalled();
   });
+
+  it("throws when categoryId belongs to a different organization", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", category: null }]);
+    // why: emulate a foreign-org category — findFirst is org-scoped, returns null
+    //@ts-expect-error mock setup
+    db.category.findFirst.mockResolvedValue(null);
+
+    await expect(
+      bulkUpdateAssetCategory({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        categoryId: "foreign-cat",
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+    ).rejects.toThrow(ShelfError);
+  });
 });
 
 describe("bulkAssignAssetTags", () => {
@@ -698,8 +724,10 @@ describe("bulkAssignAssetTags", () => {
   });
 
   it("emits ASSET_TAGS_CHANGED only for assets whose tag set changed", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
+    //@ts-expect-error mock setup
+    db.tag.findMany.mockResolvedValue([{ id: "tag-new" }]);
     //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([
       { id: "asset-1", tags: [{ id: "tag-old", name: "Old" }] },
@@ -730,7 +758,7 @@ describe("bulkAssignAssetTags", () => {
     });
 
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_TAGS_CHANGED",
           assetId: "asset-1",
@@ -740,9 +768,31 @@ describe("bulkAssignAssetTags", () => {
           action: "ASSET_TAGS_CHANGED",
           assetId: "asset-2",
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(2);
+  });
+
+  it("throws when any tagId belongs to a different organization", async () => {
+    expect.assertions(1);
+    // why: emulate cross-org tag — org-scoped findMany returns fewer rows
+    //@ts-expect-error mock setup
+    db.tag.findMany.mockResolvedValue([{ id: "tag-own" }]);
+
+    await expect(
+      bulkAssignAssetTags({
+        userId: "user-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        tagsIds: ["tag-own", "tag-foreign"],
+        remove: false,
+        // @ts-expect-error settings not relevant for this test
+        settings: {},
+      })
+    ).rejects.toThrow(ShelfError);
   });
 });
 
@@ -752,7 +802,7 @@ describe("bulkDeleteAssets", () => {
   });
 
   it("emits ASSET_DELETED per asset before deleteMany", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([
       { id: "asset-1", mainImage: null },
@@ -768,7 +818,7 @@ describe("bulkDeleteAssets", () => {
     });
 
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_DELETED",
           assetId: "asset-1",
@@ -779,9 +829,12 @@ describe("bulkDeleteAssets", () => {
           action: "ASSET_DELETED",
           assetId: "asset-2",
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(2);
   });
 
   it("does not emit events when no assets resolved", async () => {

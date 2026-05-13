@@ -4234,13 +4234,28 @@ export async function bulkUpdateAssetCategory({
       return true;
     }
 
-    // Fetch the new category once for note formatting.
+    // Fetch the new category once for note formatting AND to verify it
+    // belongs to this organization. Without this check, a crafted
+    // foreign-org `categoryId` would be written verbatim by `updateMany`.
     const newCategory = newCategoryId
       ? await db.category.findFirst({
           where: { id: newCategoryId, organizationId },
           select: { id: true, name: true, color: true },
         })
       : null;
+
+    if (newCategoryId && !newCategory) {
+      throw new ShelfError({
+        cause: null,
+        title: "Category not found",
+        message:
+          "The category you are trying to use does not exist or you do not have permission to access it.",
+        additionalData: { categoryId: newCategoryId, organizationId, userId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
     await db.$transaction(async (tx) => {
       await tx.asset.updateMany({
@@ -4319,6 +4334,29 @@ export async function bulkAssignAssetTags({
 
     if (resolvedIds.length === 0) {
       return true;
+    }
+
+    // Validate that every tag id belongs to this organization before
+    // wiring it into the `connect`/`disconnect` payload. Prisma's nested
+    // `connect: { id }` operation has no org scoping on its own, so a
+    // crafted foreign-org tag id would otherwise be attached/detached.
+    if (tagsIds.length > 0) {
+      const orgTags = await db.tag.findMany({
+        where: { id: { in: tagsIds }, organizationId },
+        select: { id: true },
+      });
+      if (orgTags.length !== new Set(tagsIds).size) {
+        throw new ShelfError({
+          cause: null,
+          title: "Tag not found",
+          message:
+            "One or more selected tags do not exist or you do not have permission to access them.",
+          additionalData: { tagsIds, organizationId, userId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     const loadUserForNotes = createLoadUserForNotes(userId);

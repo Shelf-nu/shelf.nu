@@ -558,7 +558,7 @@ describe("deleteKit", () => {
   });
 
   it("should emit ASSET_KIT_CHANGED per asset that was in the kit", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     const assetsInKit = [{ id: "asset-1" }, { id: "asset-2" }];
     //@ts-expect-error missing vitest type
     db.kit.delete.mockResolvedValue(mockKitData);
@@ -573,7 +573,7 @@ describe("deleteKit", () => {
 
     expect(recordEvents).toHaveBeenCalledTimes(1);
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_KIT_CHANGED",
           assetId: "asset-1",
@@ -590,9 +590,12 @@ describe("deleteKit", () => {
           fromValue: "kit-1",
           toValue: null,
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(2);
   });
 
   it("should not emit events when kit has no assets", async () => {
@@ -647,7 +650,7 @@ describe("bulkDeleteKits", () => {
   });
 
   it("should emit ASSET_KIT_CHANGED per asset across all deleted kits", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     const kitsToDelete = [
       {
         id: "kit-1",
@@ -670,7 +673,7 @@ describe("bulkDeleteKits", () => {
     });
 
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_KIT_CHANGED",
           assetId: "asset-1",
@@ -690,9 +693,12 @@ describe("bulkDeleteKits", () => {
           fromValue: "kit-2",
           toValue: null,
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(3);
   });
 
   it("should not emit events when no kits have assets", async () => {
@@ -718,7 +724,7 @@ describe("bulkRemoveAssetsFromKits", () => {
   });
 
   it("should emit ASSET_KIT_CHANGED for each asset that left a kit", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     const assets = [
       {
@@ -747,7 +753,7 @@ describe("bulkRemoveAssetsFromKits", () => {
     });
 
     expect(recordEvents).toHaveBeenCalledWith(
-      [
+      expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_KIT_CHANGED",
           assetId: "asset-1",
@@ -762,9 +768,12 @@ describe("bulkRemoveAssetsFromKits", () => {
           fromValue: "kit-2",
           toValue: null,
         }),
-      ],
+      ]),
       expect.anything()
     );
+    expect(
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+    ).toHaveLength(2);
   });
 
   it("should emit CUSTODY_RELEASED for assets whose kit-inherited custody was cleaned up", async () => {
