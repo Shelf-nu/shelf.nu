@@ -1,3 +1,26 @@
+/**
+ * useEditAssetForm
+ *
+ * Centralises all state and side-effects for the asset edit screen:
+ *   - Loads the existing asset (title / description / category / location /
+ *     valuation) into editable form fields.
+ *   - Loads the org's full active custom-field definitions, scoped to the
+ *     asset's category, and joins them with the asset's saved values to
+ *     produce the rendered field list (so fields the asset has never had
+ *     a value for still appear, just like on the create screen).
+ *   - Tracks the user's unsaved edits separately from the asset's saved
+ *     values so a category switch (which reloads the defs) can preserve
+ *     keystrokes for fields still in scope.
+ *   - Loads picker data (categories, locations) for the select inputs.
+ *
+ * Owned by `apps/companion/app/(tabs)/assets/edit.tsx`. The hook returns a
+ * single state-shape object (`EditAssetFormState`) instead of N tuples so
+ * the screen can spread / destructure cleanly.
+ *
+ * @see {@link file://../../app/(tabs)/assets/edit.tsx EditAssetScreen}
+ * @see {@link file://../components/asset-edit/custom-field-input.tsx CustomFieldInput}
+ */
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   api,
@@ -8,7 +31,17 @@ import {
   type MobileCustomFieldType,
 } from "@/lib/api";
 
-/** Extract a displayable string value from a custom field's stored value */
+/**
+ * Extract a displayable string value from a custom field's stored value.
+ *
+ * The webapp persists each custom field as a `{ raw, valueText }` blob
+ * whose shape depends on `customField.type`. This helper normalises it to
+ * the string form the mobile form inputs work with.
+ *
+ * @param cf  An entry from `AssetDetail.customFields`.
+ * @returns   The string the user should see in the input. Empty string
+ *            when the field has no value yet.
+ */
 function extractCustomFieldValue(cf: AssetDetail["customFields"][0]): string {
   const val = cf.value;
   if (val === null || val === undefined) return "";
@@ -32,23 +65,50 @@ function extractCustomFieldValue(cf: AssetDetail["customFields"][0]): string {
   }
 }
 
+/**
+ * Per-field state rendered by the edit form's custom-fields section.
+ *
+ * Joined from three sources in the hook:
+ *   - `id` / `name` / `type` / `helpText` / `required` / `options` come from
+ *     the org's `MobileCustomFieldDefinition` (so we know required-ness
+ *     and OPTION choices regardless of whether the asset has a saved value).
+ *   - `originalValue` is the asset's saved value at load time, used by
+ *     `useFormValidation` to detect dirty state for the unsaved-changes guard.
+ *   - `value` reflects the user's in-progress edit (falls back to
+ *     `originalValue` when the user hasn't touched the field).
+ */
 export type CustomFieldState = {
-  id: string; // customField.id
+  /** The customField (definition) id, NOT the asset's AssetCustomFieldValue id. */
+  id: string;
+  /** Human-readable label rendered above the input. */
   name: string;
+  /** Field type — drives which `CustomFieldInput` branch renders. */
   type: MobileCustomFieldType;
+  /** Optional hint shown next to the label and as `accessibilityHint`. */
   helpText: string | null;
   /** Sourced from the org's custom-field definition, not from the asset. */
   required: boolean;
   /** Allowed values for OPTION fields; null/empty for every other type. */
   options: string[] | null;
-  value: string; // string representation for editing
+  /** Current string value the user is editing. */
+  value: string;
+  /** Original saved value at load time. Used to detect dirty state. */
   originalValue: string;
 };
 
+/**
+ * The full state surface `useEditAssetForm` returns to the edit screen.
+ *
+ * Grouped by concern (loading, form fields, custom fields, picker data,
+ * submission). The screen destructures whatever it needs; nothing here is
+ * optional — every field is always present.
+ */
 export type EditAssetFormState = {
-  // Loading / error
+  /** True while the initial asset fetch is in flight. */
   isLoadingAsset: boolean;
+  /** Asset-load failure message; null on success. */
   loadError: string | null;
+  /** The asset as returned by the server. Used as the baseline for diffs. */
   originalAsset: AssetDetail | null;
 
   // Form fields
@@ -64,10 +124,15 @@ export type EditAssetFormState = {
   setValuation: (v: string) => void;
 
   // Custom fields
+  /** Derived: org defs ⨯ asset saved values ⨯ user's in-progress edits. */
   customFields: CustomFieldState[];
+  /** Update a single custom field's in-progress edit. */
   updateCustomField: (cfId: string, newValue: string) => void;
+  /** True while custom-field definitions are being fetched. */
   isCustomFieldsLoading: boolean;
+  /** Custom-fields fetch failure message; null on success. */
   customFieldsError: string | null;
+  /** Manual retry trigger for the defs fetch. */
   retryLoadCustomFields: () => void;
 
   // Picker data
@@ -81,6 +146,19 @@ export type EditAssetFormState = {
   setIsSubmitting: (v: boolean) => void;
 };
 
+/**
+ * Initialise the asset edit form.
+ *
+ * Performs three independent fetches (asset detail, categories, locations)
+ * plus a fourth that depends on the asset's category (custom-field defs).
+ * Returns a stable state-shape object the screen renders from.
+ *
+ * @param assetId The asset id from the route param. The hook is a no-op
+ *                until both this and `orgId` are defined.
+ * @param orgId   The active organisation id from `useOrg`. Must match the
+ *                org the asset belongs to (the asset endpoint enforces this).
+ * @returns       The full edit-form state surface — see {@link EditAssetFormState}.
+ */
 export function useEditAssetForm(
   assetId: string | undefined,
   orgId: string | undefined

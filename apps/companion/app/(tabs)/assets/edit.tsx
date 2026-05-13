@@ -1,3 +1,16 @@
+/**
+ * EditAssetScreen
+ *
+ * Asset edit form for the mobile companion. Mirrors the create flow
+ * (`assets/new.tsx`) but starts from a server-loaded baseline and submits
+ * a partial-update payload containing only changed fields. Hooks into
+ * `useEditAssetForm` for state, `useFormValidation` for the dirty-state
+ * unsaved-changes guard, and `CustomFieldInput` (shared with create) for
+ * each custom-field row.
+ *
+ * @see {@link file://../../../hooks/use-edit-asset-form.ts useEditAssetForm}
+ * @see {@link file://../../../components/asset-edit/custom-field-input.tsx CustomFieldInput}
+ */
 import {
   View,
   Text,
@@ -43,6 +56,17 @@ function buildCustomFieldPayloadValue(type: string, value: string): any {
   }
 }
 
+/**
+ * The asset edit screen rendered at `/assets/[id]/edit`.
+ *
+ * Loads the asset + custom-field definitions, renders the editable form,
+ * validates required fields client-side before submit, and dispatches a
+ * partial-update payload through `api.updateAsset` containing only the
+ * fields that actually changed (so the server's audit log stays clean).
+ *
+ * @returns The edit form JSX, or a centered loading / error placeholder
+ *          while the asset is being fetched.
+ */
 export default function EditAssetScreen() {
   const router = useRouter();
   const { id: assetId } = useLocalSearchParams<{ id: string }>();
