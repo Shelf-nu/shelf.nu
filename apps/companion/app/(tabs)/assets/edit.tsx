@@ -25,7 +25,7 @@ import {
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, type MobileCustomFieldType } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -37,8 +37,26 @@ import { PickerField } from "@/components/asset-edit/picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 
-/** Build the JSON value payload for a custom field update */
-function buildCustomFieldPayloadValue(type: string, value: string): any {
+/** The shape the server expects for a single custom-field update entry. */
+type CustomFieldPayloadValue = { raw: string | number | boolean } | null;
+
+/**
+ * Build the JSON value payload for a single custom field update.
+ *
+ * Returns `null` for empty values so the server clears the field. For
+ * NUMBER / AMOUNT, a non-numeric string parses to `null` (treated as a
+ * clear) so the user can't ship a malformed number to the server.
+ *
+ * @param type  The field's declared type from the canonical
+ *              `MobileCustomFieldType` union — narrowed so the switch is
+ *              exhaustively checkable.
+ * @param value The string value from the form input.
+ * @returns     `{ raw: ... }` on success, or `null` to clear the field.
+ */
+function buildCustomFieldPayloadValue(
+  type: MobileCustomFieldType,
+  value: string
+): CustomFieldPayloadValue {
   if (!value.trim()) return null; // null to clear the field
 
   switch (type) {
@@ -51,7 +69,9 @@ function buildCustomFieldPayloadValue(type: string, value: string): any {
       const num = parseFloat(value);
       return isNaN(num) ? null : { raw: num };
     }
-    default:
+    case "TEXT":
+    case "MULTILINE_TEXT":
+    case "OPTION":
       return { raw: value };
   }
 }

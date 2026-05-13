@@ -360,7 +360,22 @@ function DateFieldInput({
     // negative-offset timezones).
     const [y, m, d] = value.split("-").map(Number);
     if (!y || !m || !d) return new Date();
-    return new Date(y, m - 1, d);
+    // why: the truthiness check above lets through nonsense like
+    // "2026-13-99" or "2026-02-30" — JS's Date constructor silently
+    // overflows (2026-02-30 → 2026-03-02), which would render a
+    // confusing date on the picker. Construct, then verify the
+    // round-trip matches the input. If a server bug ever ships a bad
+    // YYYY-MM-DD string, this falls back to "today" instead of a
+    // silently wrong date.
+    const parsed = new Date(y, m - 1, d);
+    if (
+      parsed.getFullYear() !== y ||
+      parsed.getMonth() + 1 !== m ||
+      parsed.getDate() !== d
+    ) {
+      return new Date();
+    }
+    return parsed;
   }, [value]);
 
   const handleChange = (
