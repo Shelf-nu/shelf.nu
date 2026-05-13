@@ -151,7 +151,13 @@ function AuditsListContent() {
       if (reset) setAudits(data.audits);
       else setAudits((prev) => [...prev, ...data.audits]);
     },
-    [currentOrg, activeFilter, assignedToMe]
+    // why: depend on the org id (not the full object) so an identity-
+    // only re-render from useOrg doesn't churn fetchAudits and cascade
+    // an extra refetch through useFocusEffect after the 60s freshness
+    // window. Consistent with the org-reset useEffect + useFocusEffect
+    // below which already key on `currentOrg?.id`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentOrg?.id, activeFilter, assignedToMe]
   );
 
   // Abort any in-flight fetch on unmount so its setState doesn't fire
