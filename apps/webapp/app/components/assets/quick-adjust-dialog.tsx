@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isFormProcessing } from "~/utils/form";
 
@@ -87,6 +88,12 @@ export function QuickAdjustDialog({
   const fetcher = useFetcher({ key: "adjust-quantity" });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
+  // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus. The hook
+  // re-focuses on every closed → open flip and handles the rAF defer
+  // needed for the Radix portal mount. `data-dialog-initial-focus` is the
+  // layout/Dialog convention and is dead inside AlertDialog, so the
+  // hook-driven ref is the source of truth here.
+  const quantityInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
@@ -167,6 +174,7 @@ export function QuickAdjustDialog({
 
           <div className="flex flex-col gap-4">
             <Input
+              ref={quantityInputRef}
               name="quantity"
               type="number"
               label={`Quantity (${unitLabel})`}
@@ -174,7 +182,6 @@ export function QuickAdjustDialog({
               min={1}
               step={1}
               required
-              autoFocus
               data-dialog-initial-focus
               error={quantityError || serverError || undefined}
               onChange={() => setQuantityError(null)}

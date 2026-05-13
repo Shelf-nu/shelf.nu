@@ -542,11 +542,22 @@ export async function getPaginatedAndFilterableKits<
     if (currentBookingId && hideUnavailable) {
       // "every asset in this kit matches X" predicate becomes
       // "every AssetKit row's asset matches X".
+      //
+      // QUANTITY_TRACKED assets carry Custody rows for partial operator
+      // allocations on a single pooled asset (e.g. Pleb holds 4 of 80
+      // Pens). Those rows do *not* make the kit unavailable for
+      // booking — the booking system's own availability formula
+      // handles the math at checkout time. Only INDIVIDUAL custody
+      // means the physical item is unavailable. Mirrors the
+      // `getKitAvailabilityStatus` exemption + the kit picker fixes.
       where.assetKits = {
         every: {
           asset: {
             organizationId,
-            custody: { none: {} },
+            OR: [
+              { type: AssetType.QUANTITY_TRACKED },
+              { custody: { none: {} } },
+            ],
           },
         },
       };
@@ -1678,8 +1689,15 @@ export async function bulkAssignKitCustody({
       }))
     );
 
+    // INDIVIDUAL assets block the assign; QUANTITY_TRACKED don't.
+    // Phase 3d-Polish-2's `buildKitCustodyInheritData` (Option B) writes
+    // the *remaining* pool per asset, so a qty-tracked asset whose
+    // row-level status is IN_CUSTODY (some units operator-held) still
+    // assigns the leftover quantity, and fully-allocated assets are
+    // silently skipped — neither needs to block here.
     const someAssetsUnavailable = allAssetsOfAllKits.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) =>
+        asset.type !== "QUANTITY_TRACKED" && asset.status !== "AVAILABLE"
     );
     if (someAssetsUnavailable) {
       throw new ShelfError({
@@ -2996,10 +3014,20 @@ export async function updateKitAssets({
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
 
-    /** An asset already in custody cannot be added to a kit */
+    /**
+     * An INDIVIDUAL asset already in custody cannot be added to a kit.
+     * QUANTITY_TRACKED assets are exempt: their `custody` array can carry
+     * operator-allocated rows for *some* units while the rest of the pool
+     * is free. Option B math in `buildKitCustodyInheritData` allocates
+     * only the remaining pool when the kit is later put in custody, and
+     * silently skips fully-allocated assets. Mirrors the client-side
+     * picker exemption + the kit-custody assign-button exemption.
+     */
     const isSomeAssetInCustody = newlyAddedAssets.some(
       (asset) =>
-        hasCustody(asset.custody) && asset.assetKits[0]?.kitId !== kit.id
+        asset.type !== AssetType.QUANTITY_TRACKED &&
+        hasCustody(asset.custody) &&
+        asset.assetKits[0]?.kitId !== kit.id
     );
     if (isSomeAssetInCustody) {
       throw new ShelfError({

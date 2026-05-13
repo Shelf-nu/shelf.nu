@@ -814,7 +814,7 @@ function FulfilCheckoutForm({
             attached to the booking in the transactional service. */}
         {assetIds.map((assetId, index) => (
           <input
-            key={`assetIds-${index}`}
+            key={assetId}
             type="hidden"
             name={`assetIds[${index}]`}
             value={assetId}

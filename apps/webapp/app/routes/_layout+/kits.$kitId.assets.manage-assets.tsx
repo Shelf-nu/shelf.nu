@@ -243,17 +243,36 @@ export default function ManageAssetsInKit() {
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
   /**
-   * Set selected items for kit based on the route data
+   * Set selected items for kit based on the route data.
+   *
+   * Initialise the shared Jotai atom synchronously during the first
+   * render (guarded by a ref) rather than running the setter inside a
+   * mount effect — react-doctor's `no-derived-state-effect` flags the
+   * useEffect form, and the render-time init avoids the empty-first-
+   * frame flicker. Same pattern as the booking manage-assets picker
+   * at `bookings.$bookingId.overview.manage-assets.tsx:1156-1160`.
+   * `AtomsResetHandler` runs its pathname-change reset during render
+   * too, so it executes before this init and doesn't clobber the
+   * selection.
    */
-  useEffect(() => {
+  const didInitializeSelectedItemsRef = useRef(false);
+  if (!didInitializeSelectedItemsRef.current) {
+    didInitializeSelectedItemsRef.current = true;
     setSelectedBulkItems(kitAssetsList);
-  }, [kitAssetsList, setSelectedBulkItems]);
+  }
 
   /**
-   * Set disabled items for kit
+   * Set disabled items for kit.
+   * QUANTITY_TRACKED assets never block selection — their row-level status
+   * flips to IN_CUSTODY / CHECKED_OUT as soon as *any* units are
+   * operator-allocated or actively booked, but the kit-assign flow uses
+   * Option B math (`buildKitCustodyInheritData`) to allocate only the
+   * remaining pool. Same precedent as the manage-assets picker filter in
+   * `asset/service.server.ts` and the kit ActionsDropdown guard.
    */
   useEffect(() => {
     const disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
+      if (isQuantityTracked(asset)) return acc;
       const isCheckedOut = asset.status === AssetStatus.CHECKED_OUT;
       const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
 
@@ -347,15 +366,22 @@ export default function ManageAssetsInKit() {
           navigate={(_assetId, item) => {
             const isParkOfCurrentKit = kitAssetIds.includes(item.id);
 
-            if (
-              item.status === AssetStatus.CHECKED_OUT &&
-              !isParkOfCurrentKit
-            ) {
-              return;
-            }
+            // QUANTITY_TRACKED rows are always clickable — partial
+            // allocation doesn't block kit-add (Option B handles it).
+            if (!isQuantityTracked(item)) {
+              if (
+                item.status === AssetStatus.CHECKED_OUT &&
+                !isParkOfCurrentKit
+              ) {
+                return;
+              }
 
-            if (item.status === AssetStatus.IN_CUSTODY && !isParkOfCurrentKit) {
-              return;
+              if (
+                item.status === AssetStatus.IN_CUSTODY &&
+                !isParkOfCurrentKit
+              ) {
+                return;
+              }
             }
 
             updateItem(item);
@@ -476,8 +502,11 @@ const RowComponent = ({
   extraProps: { kitAssetIds: string[] };
 }) => {
   const { category, tags, location } = item;
-  const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
-  const isInCustody = item.status === AssetStatus.IN_CUSTODY;
+  const isQty = isQuantityTracked(item);
+  // QUANTITY_TRACKED rows behave as "available" for the picker regardless
+  // of row-level status — Option B handles partial allocation on assign.
+  const isCheckedOut = !isQty && item.status === AssetStatus.CHECKED_OUT;
+  const isInCustody = !isQty && item.status === AssetStatus.IN_CUSTODY;
   const isParkOfCurrentKit = kitAssetIds.includes(item.id);
 
   const allowCursor =
@@ -515,13 +544,27 @@ const RowComponent = ({
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 {/*
-                   When asset is available, show normal status badge 
-                   When asset is in custody, and not in other custody, show normal status badge
+                   When asset is available, show normal status badge.
+                   QUANTITY_TRACKED rows are treated as Available for the
+                   picker even when their row-level status is IN_CUSTODY /
+                   CHECKED_OUT — the row is selectable and Option B math
+                   will assign the remaining pool on save. Render the
+                   Available badge with a forced AVAILABLE status so the
+                   visual matches the actual selectability.
                 */}
-                <When truthy={item.status === AssetStatus.AVAILABLE}>
+                <When
+                  truthy={
+                    item.status === AssetStatus.AVAILABLE ||
+                    isQuantityTracked(item)
+                  }
+                >
                   <AssetStatusBadge
                     id={item.id}
-                    status={item.status}
+                    status={
+                      isQuantityTracked(item)
+                        ? AssetStatus.AVAILABLE
+                        : item.status
+                    }
                     availableToBook={item.availableToBook}
                     asset={item}
                   />

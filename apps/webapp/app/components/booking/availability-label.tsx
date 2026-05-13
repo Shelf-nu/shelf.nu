@@ -272,22 +272,23 @@ export function getKitAvailabilityStatus(
   // related booking from each pivot row. Main's `asset.bookings`
   // shape no longer exists in this branch's schema.
   const kitAssets = kit.assetKits.map((ak) => ak.asset);
-  const bookings = kitAssets
-    .map((asset) => {
-      if (asset?.bookingAssets.length) {
-        return asset.bookingAssets.map((ba) => ba.booking);
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .flat();
+  const bookings = kitAssets.flatMap(
+    (asset) => asset?.bookingAssets.map((ba) => ba.booking) ?? []
+  );
 
   /** Checks whether this is checked out in another not overlapping booking */
   const isCheckedOutInANonConflictingBooking =
     kit.status === KitStatus.CHECKED_OUT && bookings.length === 0;
   const isCheckedOut = kit.status === KitStatus.CHECKED_OUT;
+  // For QUANTITY_TRACKED assets, `Custody` rows reflect partial
+  // operator allocations on a single pooled asset — they should not
+  // flag the whole kit as in-custody just because Pleb is holding 4
+  // of 80 Pens. Only INDIVIDUAL custody rows escalate to the kit
+  // level. Mirrors the qty-aware exemptions in the kit
+  // ActionsDropdown + manage-assets picker fixed in 4a-Polish.
   const isInCustody =
-    kit.status === "IN_CUSTODY" || kitAssets.some((a) => hasCustody(a.custody));
+    kit.status === "IN_CUSTODY" ||
+    kitAssets.some((a) => !isQuantityTracked(a) && hasCustody(a.custody));
 
   const isKitWithoutAssets = kitAssets.length === 0;
 

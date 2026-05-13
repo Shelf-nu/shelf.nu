@@ -108,6 +108,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                 select: {
                   id: true,
                   status: true,
+                  // `type` powers the qty-aware unavailability guard in
+                  // ActionsDropdown — QUANTITY_TRACKED assets don't block
+                  // kit-custody assign (Option B handles partial pools).
+                  type: true,
                   custody: { select: { id: true } },
                   bookingAssets: {
                     where: {

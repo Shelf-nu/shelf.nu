@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isFormProcessing } from "~/utils/form";
 
@@ -88,6 +89,10 @@ export function AdjustBookingAssetQuantityDialog({
   const fetcher = useFetcher({ key: `adjust-booking-asset-${assetId}` });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
+  // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus while keeping the
+  // intentional modal-open focus UX. The hook handles the rAF-defer needed
+  // for the Radix portal mount and re-focuses on every closed → open flip.
+  const quantityInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
@@ -159,6 +164,7 @@ export function AdjustBookingAssetQuantityDialog({
 
           <div className="flex flex-col gap-4">
             <Input
+              ref={quantityInputRef}
               name="quantity"
               type="number"
               label={`Quantity (${unitLabel})`}
@@ -166,7 +172,6 @@ export function AdjustBookingAssetQuantityDialog({
               max={maxQuantity ?? undefined}
               step={1}
               required
-              autoFocus
               defaultValue={currentQuantity}
               error={quantityError || serverError || undefined}
               onChange={() => setQuantityError(null)}

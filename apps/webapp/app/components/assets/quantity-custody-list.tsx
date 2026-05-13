@@ -36,6 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -346,6 +347,10 @@ function ReleaseButton({
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmitting = isFormProcessing(fetcher.state);
+  // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus. The hook
+  // re-focuses on every closed → open flip and handles the rAF defer
+  // needed for the Radix portal mount.
+  const quantityInputRef = useAutoFocus<HTMLInputElement>({ when: open });
 
   /** Close the dialog after a successful release */
   useEffect(() => {
@@ -382,6 +387,7 @@ function ReleaseButton({
 
           <div className="flex flex-col gap-4">
             <Input
+              ref={quantityInputRef}
               name="quantity"
               type="number"
               label={`Quantity (${unitLabel})`}
@@ -390,7 +396,6 @@ function ReleaseButton({
               max={maxQuantity}
               step={1}
               required
-              autoFocus
               defaultValue={maxQuantity}
             />
 

@@ -16,6 +16,7 @@ import type { AssetModel } from "@prisma/client";
 import { useActionData, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { action } from "~/routes/_layout+/settings.asset-models.new";
@@ -70,6 +71,10 @@ export default function AssetModelForm({
 }: AssetModelFormProps) {
   const zo = useZorm("AssetModelForm", AssetModelFormSchema);
   const fetcher = useFetcherWithReset<typeof action>();
+  // Replaces `autoFocus` on the Name input. Mounts inside a layout Dialog
+  // (which also sets `data-dialog-initial-focus` here), but the hook is the
+  // source of truth so jsx-a11y/no-autofocus passes.
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
   // Fetcher-scoped disabled for the inline/dialog mode. The full-page mode
   // uses navigation-based disabled wired up inside FullPageForm.
   const disabled = useDisabled(fetcher);
@@ -114,13 +119,13 @@ export default function AssetModelForm({
       >
         <div className="gap-4 md:flex md:items-end">
           <Input
+            ref={nameInputRef}
             label="Name"
             placeholder="Asset model name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
             disabled={disabled}
             error={nameError}
-            autoFocus
             data-dialog-initial-focus
             required={zodFieldIsRequired(AssetModelFormSchema.shape.name)}
             defaultValue={assetModel?.name}
@@ -193,6 +198,9 @@ function FullPageForm({
   // Page form submits via navigation, so the disabled state must watch the
   // router's navigation state — not a fetcher.
   const disabled = useDisabled();
+  // Replaces `autoFocus` on the Name input — focuses on mount (full-page
+  // mode, no `open` gate needed).
+  const nameInputRef = useAutoFocus<HTMLInputElement>();
   const { currency } = useLoaderData<{
     currency: string;
     categories: unknown[];
@@ -230,12 +238,12 @@ function FullPageForm({
           required={true}
         >
           <Input
+            ref={nameInputRef}
             label="Name"
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
             error={validationErrors?.name?.message || zo.errors.name()?.message}
-            autoFocus
             className="w-full"
             placeholder="e.g. MacBook Pro 16-inch"
             defaultValue={assetModel?.name || ""}

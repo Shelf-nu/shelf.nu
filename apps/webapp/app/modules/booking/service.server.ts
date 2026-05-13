@@ -1703,10 +1703,20 @@ export async function checkoutBooking({
       }
     }
 
-    /** Server-side validation: Block checkout if any assets are in custody */
+    /**
+     * Server-side validation: Block checkout if any INDIVIDUAL asset is
+     * in custody. QUANTITY_TRACKED assets can have row-level status
+     * IN_CUSTODY because *some* units are operator-allocated; the
+     * remaining pool is still bookable and the in-tx availability
+     * check below validates the math against current custody +
+     * outstanding bookings under a row lock.
+     */
     const assetsInCustody = bookingFound.bookingAssets
       .map((ba) => ba.asset)
-      .filter((asset) => asset.status === AssetStatus.IN_CUSTODY);
+      .filter(
+        (asset) =>
+          !isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY
+      );
 
     if (assetsInCustody.length > 0) {
       const assetNames = assetsInCustody
@@ -2019,10 +2029,17 @@ export async function fulfilModelRequestsAndCheckout({
       }
     }
 
-    /** Server-side validation: Block checkout if any assets are in custody */
+    /**
+     * Server-side validation: Block checkout if any INDIVIDUAL asset is
+     * in custody. QUANTITY_TRACKED is exempt — see the parallel guard in
+     * the other checkoutBooking path above for the full reasoning.
+     */
     const assetsInCustody = bookingFound.bookingAssets
       .map((ba) => ba.asset)
-      .filter((asset) => asset.status === AssetStatus.IN_CUSTODY);
+      .filter(
+        (asset) =>
+          !isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY
+      );
 
     if (assetsInCustody.length > 0) {
       const assetNames = assetsInCustody
@@ -5963,8 +5980,13 @@ export async function getBookingFlags(
     });
   });
 
+  // QUANTITY_TRACKED row-level IN_CUSTODY just means *some* units are
+  // operator-allocated; the remaining pool is still bookable. Only
+  // INDIVIDUAL custody blocks the checkout button. Mirrors the
+  // server-side guards in `checkoutBooking`.
   const hasAssetsInCustody = assets.some(
-    (asset) => asset.status === AssetStatus.IN_CUSTODY
+    (asset) =>
+      !isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY
   );
 
   const hasKits = assets.some((asset) => (asset.assetKits ?? []).length > 0);

@@ -710,16 +710,17 @@ All phases ship together as one release. This ordering reflects build dependenci
 
 **Prerequisites:** Open Question #6 resolved (2026-05-11) — see the resolution row in "Remaining Open Questions" and Design Principle #3 for the rationale.
 
-**Shipping plan: sequential, four sub-phases, each its own production release.** Updated 2026-05-11. An earlier draft of this section proposed a single all-of-Phase-4 release; that was retracted because the **placement axes are independent** — each axis (Location, Kit, Custody, Booking) enforces its own `sum ≤ Asset.quantity` invariant without referencing the others, so an intermediate state where Kit is pivoted and Location is still FK (or vice versa) is correctness-safe. Sequential ships make plans + PRs reviewable at a sane scope and let us validate the pivot pattern on the smaller Kit surface before tackling the larger Location surface.
+**Shipping plan: sequential, five sub-phases, each its own production release.** Updated 2026-05-13 (added 4e). Earlier drafts proposed a single all-of-Phase-4 release and later a four-substage plan; retracted because the **placement axes are independent** — each axis (Location, Kit, Custody, Booking) enforces its own `sum ≤ Asset.quantity` invariant without referencing the others, so an intermediate state where Kit is pivoted and Location is still FK (or vice versa) is correctness-safe. 4e was carved out because the quantity-aware notes audit is a cross-cutting sweep that benefits from being scoped as a unit instead of being scattered across 4a–4d call-site touches.
 
-| Sub-phase | Scope                                                                | Notes                                                                                                                                                                                                             |
-| --------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **4a**    | Kit pivot — `AssetKit` schema + triggers + service refactor + Kit UX | First, because (1) smaller surface area, (2) Phase 3d-Polish-2 context is fresh, (3) Option B math simplifies naturally to `AssetKit.quantity`                                                                    |
-| **4b**    | Location pivot — `AssetLocation` schema + triggers + Location UX     | Larger surface (every asset has a location) but same pattern as 4a; mobile API contract change happens here                                                                                                       |
-| **4c**    | Split / merge UX — "Move N units from X to Y" flows for both pivots  | Sits on top of 4a + 4b; pure user-facing feature work                                                                                                                                                             |
-| **4d**    | Auxiliary items                                                      | Model grouping tool, group-by-model view, import/export with qty columns, bulk-op type awareness, rebalance kit allocation, `QuantityCustodyDialog` copy update. Some items may slip into Phase 5 if scope grows. |
+| Sub-phase | Scope                                                                                                                                                                                                                                                       | Notes                                                                                                                                                                                                                                                  |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **4a**    | Kit pivot — `AssetKit` schema + triggers + service refactor + Kit UX                                                                                                                                                                                        | First, because (1) smaller surface area, (2) Phase 3d-Polish-2 context is fresh, (3) Option B math simplifies naturally to `AssetKit.quantity`                                                                                                         |
+| **4b**    | Location pivot — `AssetLocation` schema + triggers + Location UX                                                                                                                                                                                            | Larger surface (every asset has a location) but same pattern as 4a; mobile API contract change happens here                                                                                                                                            |
+| **4c**    | Split / merge UX — "Move N units from X to Y" flows for both pivots                                                                                                                                                                                         | Sits on top of 4a + 4b; pure user-facing feature work                                                                                                                                                                                                  |
+| **4d**    | Auxiliary items                                                                                                                                                                                                                                             | Model grouping tool, group-by-model view, import/export with qty columns, bulk-op type awareness, rebalance kit allocation, `QuantityCustodyDialog` copy update. Some items may slip into Phase 5 if scope grows.                                      |
+| **4e**    | Quantity-aware notes + activity-feed audit — sweep every UPDATE-type note + every `ActivityEvent.meta` rendering path so qty-tracked actions show units (e.g. "released custody of **76** Pens via kit") instead of pretending the whole asset was affected | Cross-cutting; benefits from being scoped as one PR per axis rather than scattered through 4a–4d. Sits on the schema work in 4a–4c (needs `Custody.quantity`, `AssetKit.quantity`, `AssetLocation.quantity` all in place to render the right numbers). |
 
-The schema, invariant layer, and service/loader/route work described below is split across 4a and 4b along the Kit vs Location boundary. The split/merge UX (formerly the headline of Phase 4) lives in 4c. Post-Phase-4 backlog items (sub-phase 3e calendar polish, sub-phase 3d follow-ups, reports verification) wait until all four sub-phases are stable.
+The schema, invariant layer, and service/loader/route work described below is split across 4a and 4b along the Kit vs Location boundary. The split/merge UX (formerly the headline of Phase 4) lives in 4c. The notes audit is 4e. Post-Phase-4 backlog items (sub-phase 3e calendar polish, sub-phase 3d follow-ups, reports verification) wait until all five sub-phases are stable.
 
 #### Schema changes (split across 4a + 4b)
 
@@ -838,6 +839,43 @@ Available pool for new claims is the same Phase 2 formula: `Asset.quantity − s
 - **Rebalance kit allocation when assigning operator custody on a kit-allocated qty-tracked asset.** Today (Phase 3d-Polish): if all units of a qty-tracked asset are kit-allocated, the asset's Custody Breakdown Assign button is disabled (no free pool). Once the rebalance flow is built, assigning N units to an operator while units are kit-allocated should automatically decrement the kit's `Custody.quantity` by N, emit a `CUSTODY_RELEASED` event for the kit row, and emit `CUSTODY_ASSIGNED` for the new operator row in a single transaction. Edge case to design: kit row hits 0 — delete the row vs. keep at 0 (probably delete + emit a final `CUSTODY_RELEASED` for the residual).
 - **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
 - **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. The verification scaffold (`TESTING-REPORTS.md` at the worktree root) is ready to run once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).
+
+**Phase 4e — Quantity-aware notes + activity-feed audit**
+
+Cross-cutting polish. Today every UPDATE-type note and every
+`ActivityEvent.meta` rendering path treats qty-tracked actions as if the
+whole asset were affected — e.g. _"Nikolay released Self Service's custody
+via kit assignment Camera Kit"_ omits that this was 76 Pens out of 80,
+not all of them. The note is technically true (a Custody row was deleted)
+but reads as if the entire Pens line was the subject. With Custody now
+1:N + carrying `quantity`, and Phase 4a–4c adding `AssetKit.quantity` +
+`AssetLocation.quantity`, the data is there — we just need to thread it
+through the rendering layer.
+
+Scope, one PR per axis:
+
+- **Custody notes** (`createCustodyNote`, `createCustodyReleaseNote`,
+  kit-cascade notes from `performKitDeletion` /
+  `bulkRemoveAssetsFromKits`): include unit count for qty-tracked
+  (_"released custody of **76 pcs** of Pens via Camera Kit"_); leave
+  INDIVIDUAL phrasing unchanged.
+- **Kit-membership notes** (add-to-kit, remove-from-kit, cross-kit move):
+  for qty-tracked rows, include the `AssetKit.quantity` once 4a's
+  follow-up unlocks variable qty (today it's always 1, so this row is a
+  no-op until multi-kit allocation ships).
+- **Location-change notes**: include the moved unit count from
+  `AssetLocation.quantity` once 4b lands.
+- **Booking notes** (checkout, partial check-in, check-in): already
+  show "× N" in some places (sidebar, email, PDF) — sweep the remaining
+  note-writers to match.
+- **Activity-feed rendering**: the structured `ActivityEvent` rows carry
+  `meta.quantity` for Phase 2 events but not yet everywhere. Audit
+  `apps/webapp/app/components/activity-feed/*` rendering to surface the
+  count when present.
+
+Acceptance: a fresh dev-DB walk through the §1–§13 testing-doc flows
+shows every note + activity-feed entry for a qty-tracked asset includes
+the affected unit count.
 
 > **Post-Phase-4 cleanup backlog (re-pick up once the Phase 4 schema is stable):**
 >

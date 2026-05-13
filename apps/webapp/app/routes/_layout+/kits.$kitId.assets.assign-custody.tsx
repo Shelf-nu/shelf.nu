@@ -89,6 +89,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             asset: {
               select: {
                 status: true,
+                // `type` is required so the qty-aware unavailability guard
+                // below can skip QUANTITY_TRACKED rows whose row-level
+                // status is IN_CUSTODY only because *some* units are
+                // operator-allocated (Option B handles that on assign).
+                type: true,
                 bookingAssets: {
                   where: {
                     booking: {
@@ -118,11 +123,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * If any asset is not available in a kit,
-     * then a kit cannot be assigned a custody
+     * If any INDIVIDUAL asset is not available in a kit, a kit cannot be
+     * assigned custody. QUANTITY_TRACKED assets are exempt: their row-level
+     * status may be IN_CUSTODY because some units are operator-allocated,
+     * but `buildKitCustodyInheritData` (Option B) computes the remaining
+     * pool per asset on assign — partially-allocated assets get the leftover
+     * quantity, fully-allocated assets are silently skipped. Same precedent
+     * as the manage-assets picker filter in `asset/service.server.ts`.
      */
     const someUnavailableAsset = kit.assetKits.some(
-      (ak) => ak.asset.status !== "AVAILABLE"
+      (ak) =>
+        ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
     );
     if (someUnavailableAsset) {
       sendNotification({

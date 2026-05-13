@@ -898,6 +898,62 @@ slip into Phase 5 if scope grows:
   in-kit copy in `QuantityCustodyDialog` (currently says "kit count
   unaffected"; will be wrong post-rebalance).
 
+#### Phase 4d follow-up — Kit-included qty-tracked booking quantity
+
+Surfaced 2026-05-13 during §7 testing. When a kit is added to a
+booking, qty-tracked assets inside the kit get `BookingAsset.quantity
+= 1` instead of the kit's actual allocation. Today `AssetKit.quantity`
+is pinned at 1 (Phase 4a structural-only) so the booking layer has no
+source of truth for "how many units the kit owns." Two options at
+follow-up time:
+
+1. **Tied to multi-kit allocation post-4a polish:** once
+   `AssetKit.quantity` becomes meaningful, set
+   `BookingAsset.quantity = AssetKit.quantity` when materialising kit
+   assets onto a booking. Disable the per-asset qty picker on the
+   booking sidebar for kit-included rows (they're not adjustable
+   without leaving the kit).
+2. **Interim heuristic (lighter weight):** when a kit is added to a
+   booking, default qty-tracked `BookingAsset.quantity` to
+   `Asset.quantity` (full pool) rather than 1. Available pool math at
+   checkout time will still catch overallocation. Acceptable as a
+   bridge until option (1) ships.
+
+Either way, the asset overview / booking sidebar needs a UX cue: the
+qty for a kit-included asset is locked because the kit owns it.
+
+#### Phase 4e — Quantity-aware notes + activity-feed audit
+
+Cross-cutting polish. Today every UPDATE-type note + `ActivityEvent.meta`
+rendering path treats qty-tracked actions as if the whole asset row
+were affected (e.g. _"released custody via kit assignment Camera Kit"_
+omits that this was 76 Pens out of 80). Custody is 1:N + carries
+`quantity` since Phase 2; 4a–4c add `AssetKit.quantity` and
+`AssetLocation.quantity`. 4e threads the unit count through the
+rendering layer one PR per axis:
+
+- **Custody notes** (`createCustodyNote`, `createCustodyReleaseNote`,
+  kit-cascade notes from `performKitDeletion` /
+  `bulkRemoveAssetsFromKits`) include unit count for qty-tracked.
+- **Kit-membership notes** (add/remove/cross-kit-move) include
+  `AssetKit.quantity` once multi-kit allocation ships in the post-4a
+  polish.
+- **Location-change notes** include moved unit count from
+  `AssetLocation.quantity` once 4b lands.
+- **Booking notes** (checkout, partial check-in, check-in) — sweep
+  remaining note-writers to match the existing "× N" rendering on
+  sidebar / email / PDF.
+- **Activity-feed rendering** — surface `meta.quantity` where present
+  on the asset / booking / kit activity feeds.
+
+Acceptance: walking the §1–§13 testing-doc flows on a fresh dev DB,
+every qty-tracked note + activity-feed entry shows the affected count.
+
+Flagged 2026-05-13 from manual testing of §5 — the kit-custody
+release note read _"released Self Service's custody via kit assignment
+Camera Kit"_ with no indication it was 76 units out of 80. Detailed
+scope in `docs/proposals/quantitative-assets.md` → Phase 4e.
+
 ### Out of Phase 4 scope (still gated)
 
 - Open follow-ups (low-stock email recipient UI, backfill verification

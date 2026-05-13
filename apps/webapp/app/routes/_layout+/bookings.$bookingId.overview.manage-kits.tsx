@@ -91,6 +91,11 @@ export type KitForBooking = Prisma.KitGetPayload<{
         asset: {
           select: {
             id: true;
+            // `type` powers the qty-aware in-custody guard in
+            // `getKitAvailabilityStatus` — qty-tracked assets with
+            // partial operator custody must not flag the whole kit
+            // as in-custody.
+            type: true;
             status: true;
             availableToBook: true;
             custody: true;
@@ -180,6 +185,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               asset: {
                 select: {
                   id: true,
+                  type: true,
                   status: true,
                   availableToBook: true,
                   custody: true,
