@@ -72,6 +72,28 @@ export default function EditAssetScreen() {
     }
     if (!currentOrg || !assetId) return;
 
+    // why: enforce required custom fields BEFORE hitting the server so the
+    // user sees a focused message naming the empty fields instead of a
+    // generic 400. The server enforces the same contract — see the webapp's
+    // mergedSchema validation.
+    if (form.customFieldsError) {
+      Alert.alert(
+        "Custom Fields Unavailable",
+        "We couldn't load the custom field definitions. Please retry before saving."
+      );
+      return;
+    }
+    const missingRequired = form.customFields
+      .filter((cf) => cf.required && !cf.value.trim())
+      .map((cf) => cf.name);
+    if (missingRequired.length > 0) {
+      Alert.alert(
+        "Missing required fields",
+        `Please fill in: ${missingRequired.join(", ")}.`
+      );
+      return;
+    }
+
     form.setIsSubmitting(true);
 
     // Build payload with only changed fields
@@ -323,24 +345,43 @@ export default function EditAssetScreen() {
           />
 
           {/* ── Custom Fields ──────────────────────────── */}
-          {form.customFields.length > 0 && (
+          {(form.customFields.length > 0 ||
+            form.isCustomFieldsLoading ||
+            form.customFieldsError) && (
             <View style={styles.customFieldsSection}>
               <Text style={styles.sectionLabel}>Custom Fields</Text>
-              {form.customFields.map((cf) => (
-                <View key={cf.id} style={styles.field}>
-                  <Text style={styles.label}>
-                    {cf.name}
-                    {cf.helpText ? (
-                      <Text style={styles.helpText}> — {cf.helpText}</Text>
-                    ) : null}
-                  </Text>
-                  <CustomFieldInput
-                    field={cf}
-                    value={cf.value}
-                    onChange={(val) => form.updateCustomField(cf.id, val)}
-                  />
+              {form.isCustomFieldsLoading && form.customFields.length === 0 ? (
+                <Text style={styles.helpText}>Loading custom fields…</Text>
+              ) : form.customFieldsError ? (
+                <View>
+                  <Text style={styles.helpText}>{form.customFieldsError}</Text>
+                  <TouchableOpacity
+                    onPress={form.retryLoadCustomFields}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.retryLink}>Retry</Text>
+                  </TouchableOpacity>
                 </View>
-              ))}
+              ) : (
+                form.customFields.map((cf) => (
+                  <View key={cf.id} style={styles.field}>
+                    <Text style={styles.label}>
+                      {cf.name}
+                      {cf.required ? (
+                        <Text style={styles.required}> *</Text>
+                      ) : null}
+                      {cf.helpText ? (
+                        <Text style={styles.helpText}> — {cf.helpText}</Text>
+                      ) : null}
+                    </Text>
+                    <CustomFieldInput
+                      field={cf}
+                      value={cf.value}
+                      onChange={(val) => form.updateCustomField(cf.id, val)}
+                    />
+                  </View>
+                ))
+              )}
             </View>
           )}
         </ScrollView>
@@ -568,5 +609,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "400",
     color: colors.mutedLight,
     fontSize: fontSize.sm,
+  },
+  retryLink: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    fontWeight: "500",
+    marginTop: spacing.xs,
   },
 }));

@@ -10,7 +10,7 @@
  * Supported types:
  * - `BOOLEAN`         — native `Switch` with a "Yes"/"No" label.
  * - `MULTILINE_TEXT`  — multi-line `TextInput`.
- * - `DATE`            — single-line `TextInput` with `YYYY-MM-DD` placeholder.
+ * - `DATE`            — native date picker (iOS inline / Android dialog).
  * - `NUMBER`/`AMOUNT` — numeric keyboard, strips non-numeric chars on input.
  * - `OPTION`          — tap-to-open dropdown picker over `field.options`.
  *                       Falls back to a plain text input when options are
@@ -20,7 +20,7 @@
  * @see {@link file://../../lib/api/types.ts MobileCustomFieldDefinition}
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -29,7 +29,11 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  Platform,
 } from "react-native";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import type { MobileCustomFieldType } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
@@ -145,12 +149,9 @@ export function CustomFieldInput({
       );
     case "DATE":
       return (
-        <TextInput
-          style={styles.input}
+        <DateFieldInput
           value={value}
-          onChangeText={onChange}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={colors.placeholderText}
+          onChange={onChange}
           accessibilityLabel={accessibilityLabel}
           accessibilityHint={accessibilityHint}
         />
@@ -321,6 +322,109 @@ function OptionDropdown({
   );
 }
 
+/**
+ * Native date picker for `DATE` custom fields.
+ *
+ * Closed state mirrors the `OptionDropdown` look-and-feel (same `pickerButton`
+ * style + chevron-equivalent calendar icon) so the form reads consistently.
+ * Tap reveals the platform-native picker:
+ *
+ * - iOS: inline calendar below the field. Auto-collapses on selection so the
+ *   form stays scannable; re-opening is one tap away.
+ * - Android: native modal dialog (provided by the OS), auto-closes itself.
+ *
+ * The wire format is `YYYY-MM-DD` (matches `MobileCustomFieldType.DATE`
+ * server contract — see `lib/api/types.ts`). Parsing the existing value uses
+ * local-time `Date` construction to avoid the UTC-shift footgun (e.g. a
+ * stored "2026-01-15" rendering as Jan 14 in negative-UTC timezones).
+ */
+function DateFieldInput({
+  value,
+  onChange,
+  accessibilityLabel,
+  accessibilityHint,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  accessibilityLabel: string;
+  accessibilityHint: string | undefined;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [open, setOpen] = useState(false);
+
+  const dateValue = useMemo(() => {
+    if (!value) return new Date();
+    // Parse `YYYY-MM-DD` as a local date (NOT `new Date(value)`, which
+    // interprets the bare date as UTC midnight and shifts the day in
+    // negative-offset timezones).
+    const [y, m, d] = value.split("-").map(Number);
+    if (!y || !m || !d) return new Date();
+    return new Date(y, m - 1, d);
+  }, [value]);
+
+  const handleChange = (
+    event: DateTimePickerEvent,
+    selected: Date | undefined
+  ) => {
+    // Android's native dialog dismisses itself; sync our wrapper state.
+    if (Platform.OS === "android") {
+      setOpen(false);
+    }
+    if (event.type === "dismissed") {
+      return;
+    }
+    if (selected) {
+      const y = selected.getFullYear();
+      const m = String(selected.getMonth() + 1).padStart(2, "0");
+      const d = String(selected.getDate()).padStart(2, "0");
+      onChange(`${y}-${m}-${d}`);
+      // iOS inline picker stays open by default — close it on selection so
+      // the form remains scannable. Re-tapping the field re-opens it.
+      if (Platform.OS === "ios") {
+        setOpen(false);
+      }
+    }
+  };
+
+  return (
+    <View>
+      <TouchableOpacity
+        style={styles.pickerButton}
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityLabel={
+          value
+            ? `${accessibilityLabel}: ${value}, tap to change`
+            : `${accessibilityLabel}, tap to choose`
+        }
+        accessibilityHint={accessibilityHint}
+        accessibilityState={{ expanded: open }}
+      >
+        <Text
+          style={value ? styles.pickerSelectedText : styles.pickerPlaceholder}
+        >
+          {value || "Select date..."}
+        </Text>
+        <Ionicons name="calendar-outline" size={18} color={colors.mutedLight} />
+      </TouchableOpacity>
+
+      {open && (
+        <View style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}>
+          <DateTimePicker
+            testID="custom-field-date-picker"
+            value={dateValue}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            onChange={handleChange}
+            accentColor={colors.primary}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
 const useStyles = createStyles((colors, shadows) => ({
   input: {
     backgroundColor: colors.white,
@@ -415,5 +519,11 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.error,
     fontWeight: "500",
+  },
+
+  // Inline DateTimePicker (iOS) wrapper — gives the calendar room to
+  // breathe under the field button without colliding with the next field.
+  dateInlineWrap: {
+    marginTop: spacing.xs,
   },
 }));

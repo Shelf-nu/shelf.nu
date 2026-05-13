@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   api,
   type AssetDetail,
   type Category,
   type Location,
+  type MobileCustomFieldDefinition,
   type MobileCustomFieldType,
 } from "@/lib/api";
 
@@ -36,6 +37,10 @@ export type CustomFieldState = {
   name: string;
   type: MobileCustomFieldType;
   helpText: string | null;
+  /** Sourced from the org's custom-field definition, not from the asset. */
+  required: boolean;
+  /** Allowed values for OPTION fields; null/empty for every other type. */
+  options: string[] | null;
   value: string; // string representation for editing
   originalValue: string;
 };
@@ -61,6 +66,9 @@ export type EditAssetFormState = {
   // Custom fields
   customFields: CustomFieldState[];
   updateCustomField: (cfId: string, newValue: string) => void;
+  isCustomFieldsLoading: boolean;
+  customFieldsError: string | null;
+  retryLoadCustomFields: () => void;
 
   // Picker data
   categories: Category[];
@@ -95,7 +103,29 @@ export function useEditAssetForm(
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Custom fields state ───────────────────────
-  const [customFields, setCustomFields] = useState<CustomFieldState[]>([]);
+  // Org-scoped definitions (full list, filtered by selected category).
+  // Sourced from `api.customFields` — NOT from the asset, so we see fields
+  // the asset has never had a value for. Required-ness and OPTION choices
+  // live here too.
+  const [customFieldDefs, setCustomFieldDefs] = useState<
+    MobileCustomFieldDefinition[]
+  >([]);
+  const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(false);
+  // why: surfacing the fetch failure is critical — without it the required-
+  // field client guard silently becomes a no-op on an empty defs array,
+  // letting the user submit a payload the server then rejects.
+  const [customFieldsError, setCustomFieldsError] = useState<string | null>(
+    null
+  );
+  // Manual retry trigger for the defs fetch (analogous to new.tsx).
+  const [customFieldsRetryNonce, setCustomFieldsRetryNonce] = useState(0);
+
+  // In-progress user edits keyed by customField id. Kept separately from
+  // the asset's saved values so a category change (which reloads the defs)
+  // doesn't blow away the user's unsaved typing for fields still in scope.
+  const [customFieldEdits, setCustomFieldEdits] = useState<
+    Record<string, string>
+  >({});
 
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
@@ -137,29 +167,11 @@ export function useEditAssetForm(
           if (a.valuation != null && a.valuation > 0) {
             setValuation(String(a.valuation));
           }
-
-          // Populate custom fields
-          if (a.customFields?.length) {
-            const cfStates: CustomFieldState[] = a.customFields
-              .filter((cf) => cf.customField.active !== false)
-              .map((cf) => {
-                const rawVal = extractCustomFieldValue(cf);
-                return {
-                  id: cf.customField.id,
-                  name: cf.customField.name,
-                  // why: AssetDetail's response shape declares `type: string`
-                  // (kept loose to match the API contract verbatim). At this
-                  // narrow construction point we know the server only emits
-                  // valid MobileCustomFieldType identifiers, so we narrow
-                  // here once and downstream code stays type-safe.
-                  type: cf.customField.type as MobileCustomFieldType,
-                  helpText: cf.customField.helpText,
-                  value: rawVal,
-                  originalValue: rawVal,
-                };
-              });
-            setCustomFields(cfStates);
-          }
+          // why: custom-field state is now derived from `customFieldDefs`
+          // (the org's full active set, filtered by the asset's category)
+          // joined with the asset's saved values. Population happens in the
+          // `customFields` useMemo below — not here — so that fields the
+          // asset has never had a value for still render on the form.
         }
       })
       .catch(() => {
@@ -192,12 +204,75 @@ export function useEditAssetForm(
     loadLocations();
   }, [loadCategories, loadLocations]);
 
+  // ── Load custom field definitions ───────────────
+  // Mirrors `new.tsx` so the edit screen sees the full set of applicable
+  // org custom fields (not just those the asset has a saved value for),
+  // and so `required` / `options` come straight from the server contract.
+  useEffect(() => {
+    if (!orgId) return;
+    const controller = new AbortController();
+    setIsCustomFieldsLoading(true);
+    setCustomFieldsError(null);
+    api
+      .customFields(orgId, selectedCategory?.id, controller.signal)
+      .then(({ data, error }) => {
+        if (controller.signal.aborted) return;
+        if (error) {
+          setCustomFieldsError(error);
+          return;
+        }
+        setCustomFieldDefs(data?.customFields ?? []);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setCustomFieldsError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load custom fields. Please retry."
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsCustomFieldsLoading(false);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [orgId, selectedCategory?.id, customFieldsRetryNonce]);
+
+  const retryLoadCustomFields = useCallback(() => {
+    setCustomFieldsRetryNonce((n) => n + 1);
+  }, []);
+
   // ── Custom field helpers ────────────────────────
-  const updateCustomField = (cfId: string, newValue: string) => {
-    setCustomFields((prev) =>
-      prev.map((cf) => (cf.id === cfId ? { ...cf, value: newValue } : cf))
-    );
-  };
+  // Derived state: join org defs with the asset's saved values + the user's
+  // unsaved edits. Defs are the source of truth for name / type / required /
+  // options / helpText; the asset provides `originalValue` (per-field
+  // baseline used by `useFormValidation` to detect dirty state); the edits
+  // map provides the live value while the user is typing.
+  const customFields = useMemo<CustomFieldState[]>(() => {
+    if (!originalAsset) return [];
+    return customFieldDefs.map((def) => {
+      const existing = originalAsset.customFields.find(
+        (cf) => cf.customField.id === def.id
+      );
+      const originalValue = existing ? extractCustomFieldValue(existing) : "";
+      return {
+        id: def.id,
+        name: def.name,
+        type: def.type,
+        helpText: def.helpText,
+        required: def.required,
+        options: def.options,
+        // Prefer the live edit; fall back to the asset's saved value.
+        value: customFieldEdits[def.id] ?? originalValue,
+        originalValue,
+      };
+    });
+  }, [customFieldDefs, customFieldEdits, originalAsset]);
+
+  const updateCustomField = useCallback((cfId: string, newValue: string) => {
+    setCustomFieldEdits((prev) => ({ ...prev, [cfId]: newValue }));
+  }, []);
 
   return {
     isLoadingAsset,
@@ -215,6 +290,9 @@ export function useEditAssetForm(
     setValuation,
     customFields,
     updateCustomField,
+    isCustomFieldsLoading,
+    customFieldsError,
+    retryLoadCustomFields,
     categories,
     locations,
     isCategoriesLoading,
