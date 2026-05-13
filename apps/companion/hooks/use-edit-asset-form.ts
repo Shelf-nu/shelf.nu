@@ -213,6 +213,16 @@ export function useEditAssetForm(
     const controller = new AbortController();
     setIsCustomFieldsLoading(true);
     setCustomFieldsError(null);
+    // why: clear the stale defs at the start of each fetch so the
+    // `customFields` useMemo briefly returns `[]` during the reload
+    // window. Without this, a category change shows fields from the
+    // OLD category until the new fetch resolves, and any keystrokes the
+    // user makes in that window are keyed by the old defs' ids and
+    // become orphaned once the new defs land. `customFieldEdits` is
+    // intentionally NOT cleared — keystrokes for fields that survive
+    // the category change (same id) should be preserved across the
+    // reload (the documented behaviour above).
+    setCustomFieldDefs([]);
     api
       .customFields(orgId, selectedCategory?.id, controller.signal)
       .then(({ data, error }) => {
