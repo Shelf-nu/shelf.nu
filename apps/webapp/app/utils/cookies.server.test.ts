@@ -96,6 +96,22 @@ describe("getAdvancedFiltersFromRequest", () => {
     expect(result.redirectNeeded).toBe(true);
   });
 
+  it("drops malformed operator-form values instead of coercing them to `is:<malformed>`", async () => {
+    // Regression: a value containing `:` whose prefix isn't a valid operator
+    // (e.g. `?status=foo:AVAILABLE`) used to be silently dropped by the old
+    // validator. The normalizer must not promote it to `is:foo:AVAILABLE` —
+    // that would split downstream to operator=`is`, value=`foo` and crash the
+    // status enum cast in `parseFilters`. Caught by Codex on PR #2540.
+    const result = await getAdvancedFiltersFromRequest(
+      makeRequest("?status=foo:AVAILABLE"),
+      ORG_ID,
+      settings
+    );
+
+    expect(result.filters).toBe("");
+    expect(result.redirectNeeded).toBe(true);
+  });
+
   it("returns empty state when no URL params and no cookie", async () => {
     const result = await getAdvancedFiltersFromRequest(
       makeRequest(""),

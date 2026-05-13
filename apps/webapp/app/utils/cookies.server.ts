@@ -230,6 +230,12 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
  * silently — which previously broke drill-down for Advanced-mode workspaces.
  * Non-column params (page, search, etc.) pass through unchanged.
  *
+ * Values that contain a `:` but fail operator validation are treated as
+ * **malformed operator attempts** and dropped, preserving the previous
+ * reject-unknown-operator semantics. Otherwise downstream code would split
+ * something like `?status=foo:AVAILABLE` into operator=`is`, value=`foo`
+ * and try to cast `foo` to the AssetStatus enum at query time.
+ *
  * Used by both the URL path (CASE 1) and the cookie path (CASE 2) of
  * {@link getAdvancedFiltersFromRequest}.
  */
@@ -247,7 +253,10 @@ function normalizeAdvancedFilterParams(
       normalized.append(key, value);
       return;
     }
-    if (value) {
+    // Only promote unambiguous bare values. A `:` indicates the caller meant
+    // operator form; if it didn't validate above, the operator is unknown and
+    // we keep the old "drop malformed" behavior rather than coercing it.
+    if (value && !value.includes(":")) {
       normalized.append(key, `is:${value}`);
     }
   });
