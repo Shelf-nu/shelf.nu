@@ -77,7 +77,7 @@
     "detectrtc": "^1.4.1",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
-    "hono": "^4.12.14",
+    "hono": "^4.12.18",
     "hono-rate-limiter": "^0.5.3",
     "html-to-image": "1.11.11",
     "iconv-lite": "^0.7.2",

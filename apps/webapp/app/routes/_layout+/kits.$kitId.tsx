@@ -269,7 +269,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "delete": {
-        await deleteKit({ id: kitId, organizationId, userId });
+        await deleteKit({ id: kitId, organizationId, actorUserId: userId });
 
         if (image) {
           await deleteKitImage({ url: image });

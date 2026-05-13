@@ -990,6 +990,39 @@ async function performKitDeletion({
       }
     }
 
+    // Activity events — one ASSET_KIT_CHANGED per asset that loses its
+    // kit on cascade. Emitted before the deleteMany so the AssetKit
+    // pivot rows are still readable for context if a future report
+    // needs them. Folded in from main's PR #2535 which emitted these
+    // inline in both `deleteKit` and `bulkDeleteKits`; the shared
+    // helper deduplicates that.
+    const kitByAssetId = new Map<string, KitForDeletion>();
+    for (const k of kits) {
+      for (const a of k.assets) {
+        kitByAssetId.set(a.id, k);
+      }
+    }
+    if (allAssetIds.length > 0) {
+      await recordEvents(
+        allAssetIds.map((assetId) => {
+          const sourceKit = kitByAssetId.get(assetId);
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_KIT_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            kitId: sourceKit?.id,
+            field: "kitId",
+            fromValue: sourceKit?.id ?? null,
+            toValue: null,
+          };
+        }),
+        tx
+      );
+    }
+
     await tx.kit.deleteMany({
       where: { id: { in: kitIdsToDelete }, organizationId },
     });
@@ -1041,16 +1074,18 @@ async function performKitDeletion({
 export async function deleteKit({
   id,
   organizationId,
-  userId,
+  actorUserId,
 }: {
   id: Kit["id"];
   organizationId: Kit["organizationId"];
   /**
-   * Required for the activity-events + notes that fire when a
-   * **kit-in-custody** is deleted. Treated as the actor of the
-   * implicit `CUSTODY_RELEASED` for each affected asset.
+   * Actor for the activity events + system notes emitted when a
+   * **kit-in-custody** is deleted, and for the per-asset
+   * `ASSET_KIT_CHANGED` events fired for every asset that loses its
+   * kit on cascade. Renamed from `userId` to align with the rest of
+   * the activity-event call sites (see PR #2535).
    */
-  userId: string;
+  actorUserId: string;
 }) {
   try {
     const kitRow = await db.kit.findUniqueOrThrow({
@@ -1098,7 +1133,7 @@ export async function deleteKit({
     await performKitDeletion({
       kits: [kit],
       organizationId,
-      userId,
+      userId: actorUserId,
     });
 
     return kit;
@@ -1106,7 +1141,7 @@ export async function deleteKit({
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting kit",
-      additionalData: { id, organizationId, userId },
+      additionalData: { id, organizationId, userId: actorUserId },
       label,
     });
   }
@@ -1519,7 +1554,11 @@ export async function bulkDeleteKits({
     });
 
     // Flatten pivot rows into the in-memory `assets` shape that
-    // `performKitDeletion` consumes.
+    // `performKitDeletion` consumes. Main's PR #2535 added per-asset
+    // ASSET_KIT_CHANGED emission for the cascade unkit inside
+    // `bulkDeleteKits` — on our branch the equivalent emission lives in
+    // `performKitDeletion` so single + bulk paths share one
+    // implementation (see the recordEvents call there).
     const kits = kitRows.map((k) => ({
       ...k,
       assets: (k.assetKits ?? []).map((ak) => ak.asset),
@@ -2295,17 +2334,45 @@ export async function updateKitLocation({
     const assetIds = kit.assets.map((asset) => asset.id);
 
     if (newLocationId) {
-      // Connect both kit and its assets to the new location in one update
-      await db.location.update({
-        where: { id: newLocationId },
-        data: {
-          kits: {
-            connect: { id },
+      // Only emit events for assets whose location actually changes.
+      const assetsWithLocationChange = kit.assets.filter(
+        (asset) => (asset.location?.id ?? null) !== newLocationId
+      );
+
+      // Connect both kit and its assets to the new location atomically with
+      // the per-asset ASSET_LOCATION_CHANGED events.
+      await db.$transaction(async (tx) => {
+        await tx.location.update({
+          where: { id: newLocationId },
+          data: {
+            kits: {
+              connect: { id },
+            },
+            assets: {
+              connect: assetIds.map((id) => ({ id })),
+            },
           },
-          assets: {
-            connect: assetIds.map((id) => ({ id })),
-          },
-        },
+        });
+
+        if (userId && assetsWithLocationChange.length > 0) {
+          await recordEvents(
+            assetsWithLocationChange.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: id,
+              locationId: newLocationId,
+              field: "locationId",
+              fromValue: asset.location?.id ?? null,
+              toValue: newLocationId,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
       });
 
       // Add notes to assets about location update via parent kit
@@ -2343,17 +2410,44 @@ export async function updateKitLocation({
         );
       }
     } else if (!newLocationId && currentLocationId) {
-      // Disconnect both kit and its assets from the current location
-      await db.location.update({
-        where: { id: currentLocationId },
-        data: {
-          kits: {
-            disconnect: { id },
+      // Only emit events for assets that actually had this kit's location.
+      const assetsWithLocationChange = kit.assets.filter(
+        (asset) => asset.location?.id === currentLocationId
+      );
+
+      // Disconnect both kit and its assets atomically with the per-asset
+      // ASSET_LOCATION_CHANGED events.
+      await db.$transaction(async (tx) => {
+        await tx.location.update({
+          where: { id: currentLocationId },
+          data: {
+            kits: {
+              disconnect: { id },
+            },
+            assets: {
+              disconnect: assetIds.map((id) => ({ id })),
+            },
           },
-          assets: {
-            disconnect: assetIds.map((id) => ({ id })),
-          },
-        },
+        });
+
+        if (userId && assetsWithLocationChange.length > 0) {
+          await recordEvents(
+            assetsWithLocationChange.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: id,
+              field: "locationId",
+              fromValue: currentLocationId,
+              toValue: null,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
       });
 
       // Add notes to assets about location removal via parent kit
@@ -2455,23 +2549,58 @@ export async function bulkUpdateKitLocation({
 
     const actualKitIds = kitsWithAssets.map((kit) => kit.id);
     const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
+    // Map asset.id → owning kit.id so we can attach `kitId` to each cascade event.
+    const kitIdByAssetId = new Map<string, string>();
+    for (const kit of kitsWithAssets) {
+      for (const asset of kit.assets) {
+        kitIdByAssetId.set(asset.id, kit.id);
+      }
+    }
 
     if (
       newLocationId &&
       newLocationId.trim() !== "" &&
       actualKitIds.length > 0
     ) {
-      // Update location to connect both kits and their assets
-      await db.location.update({
-        where: { id: newLocationId },
-        data: {
-          kits: {
-            connect: actualKitIds.map((id) => ({ id })),
+      // Only emit events for assets whose location actually changes.
+      const assetsWithLocationChange = allAssets.filter(
+        (asset) => (asset.location?.id ?? null) !== newLocationId
+      );
+
+      // Update location to connect both kits and their assets atomically
+      // with the per-asset ASSET_LOCATION_CHANGED events.
+      await db.$transaction(async (tx) => {
+        await tx.location.update({
+          where: { id: newLocationId },
+          data: {
+            kits: {
+              connect: actualKitIds.map((id) => ({ id })),
+            },
+            assets: {
+              connect: allAssets.map((asset) => ({ id: asset.id })),
+            },
           },
-          assets: {
-            connect: allAssets.map((asset) => ({ id: asset.id })),
-          },
-        },
+        });
+
+        if (assetsWithLocationChange.length > 0) {
+          await recordEvents(
+            assetsWithLocationChange.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: kitIdByAssetId.get(asset.id),
+              locationId: newLocationId,
+              field: "locationId",
+              fromValue: asset.location?.id ?? null,
+              toValue: newLocationId,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
       });
 
       // Create notes for affected assets
@@ -2509,15 +2638,48 @@ export async function bulkUpdateKitLocation({
         );
       }
     } else {
-      // Removing location - set to null and handle cascade
-      await db.kit.updateMany({
-        where,
-        data: {
-          locationId: null,
-        },
+      // Only assets that currently have a location actually change.
+      const assetsWithLocationChange = allAssets.filter(
+        (asset) => asset.location?.id
+      );
+
+      // Removing location - set to null and handle cascade, atomically with
+      // the per-asset ASSET_LOCATION_CHANGED events.
+      await db.$transaction(async (tx) => {
+        await tx.kit.updateMany({
+          where,
+          data: { locationId: null },
+        });
+
+        if (allAssets.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: allAssets.map((asset) => asset.id) } },
+            data: { locationId: null },
+          });
+        }
+
+        if (assetsWithLocationChange.length > 0) {
+          await recordEvents(
+            assetsWithLocationChange.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: kitIdByAssetId.get(asset.id),
+              field: "locationId",
+              fromValue: asset.location!.id,
+              toValue: null,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
       });
 
-      // Also remove location from assets and create notes
+      // Create individual notes for each asset (asset locations were already
+      // cleared atomically in the transaction above).
       if (allAssets.length > 0) {
         const user = await getUserByID(userId, {
           select: {
@@ -2528,16 +2690,6 @@ export async function bulkUpdateKitLocation({
           } satisfies Prisma.UserSelect,
         });
 
-        await db.asset.updateMany({
-          where: {
-            id: { in: allAssets.map((asset) => asset.id) },
-          },
-          data: {
-            locationId: null,
-          },
-        });
-
-        // Create individual notes for each asset
         await Promise.all(
           allAssets.map((asset) =>
             createNote({
@@ -2976,10 +3128,39 @@ export async function updateKitAssets({
     // Handle location cascade for newly added assets (after kit assignment notes)
     if (newlyAddedAssets.length > 0) {
       if (kit.location) {
-        // Kit has a location, update all newly added assets to that location
-        await db.asset.updateMany({
-          where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
-          data: { locationId: kit.location.id },
+        // Kit has a location, update all newly added assets to that location.
+        // Only assets whose location actually changes get an event.
+        const assetsWithLocationChange = newlyAddedAssets.filter(
+          (asset) => asset.location?.id !== kit.location!.id
+        );
+
+        await db.$transaction(async (tx) => {
+          await tx.asset.updateMany({
+            where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
+            data: { locationId: kit.location!.id },
+          });
+
+          // Activity events — one ASSET_LOCATION_CHANGED per asset whose
+          // location was changed by the kit-join cascade.
+          if (assetsWithLocationChange.length > 0) {
+            await recordEvents(
+              assetsWithLocationChange.map((asset) => ({
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_LOCATION_CHANGED" as const,
+                entityType: "ASSET" as const,
+                entityId: asset.id,
+                assetId: asset.id,
+                kitId: kit.id,
+                locationId: kit.location!.id,
+                field: "locationId",
+                fromValue: asset.location?.id ?? null,
+                toValue: kit.location!.id,
+                meta: { viaKit: true },
+              })),
+              tx
+            );
+          }
         });
 
         // Create notes for assets that had their location changed
@@ -3015,9 +3196,32 @@ export async function updateKitAssets({
         );
 
         if (assetsWithLocation.length > 0) {
-          await db.asset.updateMany({
-            where: { id: { in: assetsWithLocation.map((asset) => asset.id) } },
-            data: { locationId: null },
+          await db.$transaction(async (tx) => {
+            await tx.asset.updateMany({
+              where: {
+                id: { in: assetsWithLocation.map((asset) => asset.id) },
+              },
+              data: { locationId: null },
+            });
+
+            // Activity events — one ASSET_LOCATION_CHANGED per asset whose
+            // location was cleared by the kit-join cascade (kit has no location).
+            await recordEvents(
+              assetsWithLocation.map((asset) => ({
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_LOCATION_CHANGED" as const,
+                entityType: "ASSET" as const,
+                entityId: asset.id,
+                assetId: asset.id,
+                kitId: kit.id,
+                field: "locationId",
+                fromValue: asset.location!.id,
+                toValue: null,
+                meta: { viaKit: true },
+              })),
+              tx
+            );
           });
 
           // Create notes for assets that had their location removed
@@ -3063,6 +3267,14 @@ export async function updateKitAssets({
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
+      // Phase 3d-Polish-2 logic kept — uses `buildKitCustodyInheritData`
+      // below to write child Custody rows with `kitCustodyId` set and the
+      // *remaining* tracked quantity per asset (Option B). Main's PR #2535
+      // version regressed to a per-asset `Asset.update` with a default
+      // `quantity: 1` and no `kitCustodyId`; that would orphan
+      // operator-assigned custody on qty-tracked assets and break the
+      // Phase 3d-Polish-2 invariants. The CUSTODY_ASSIGNED events main
+      // emits inline are emitted further below alongside the inheritData.
       const kitCustodyId = kit.custody.id;
       const teamMemberId = kit.custody.custodian.id;
 
@@ -3136,6 +3348,11 @@ export async function updateKitAssets({
     ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
+      // Phase 3d-Polish-2: filter the kit-custody delete by `kitCustodyId`
+      // so only the kit-allocated rows are removed; operator-assigned
+      // per-unit custody on the same asset stays. Main's PR #2535
+      // emitted events using only the kit's primary custodian id —
+      // that would mis-attribute multi-custodian qty-tracked rows.
       const kitCustodyId = kit.custody.id;
 
       // Use transaction for atomicity - prevents orphaned custody records.
@@ -3171,8 +3388,14 @@ export async function updateKitAssets({
           where: { assetId: { in: assetIds }, kitCustodyId },
         });
 
-        // Only flip to AVAILABLE for assets that have no remaining custody
-        // (an operator-assigned per-unit row would keep them IN_CUSTODY).
+        // Phase 3d-Polish-2: only flip the asset to AVAILABLE when no
+        // remaining Custody rows exist after deleting the kit-allocated
+        // ones (operator-assigned per-unit custody keeps it IN_CUSTODY).
+        // Main's PR #2535 added a CUSTODY_RELEASED emission *after* the
+        // delete that mis-attributed every removed asset to the kit's
+        // primary custodian — we already emit those events above keyed
+        // on each Custody row's `teamMemberId`, so main's version is
+        // dropped here.
         const stillCustodied = await tx.custody.findMany({
           where: { assetId: { in: assetIds } },
           select: { assetId: true },
@@ -3329,6 +3552,7 @@ export async function bulkRemoveAssetsFromKits({
             kitCustodyId: true,
             custodian: {
               select: {
+                id: true,
                 name: true,
                 user: {
                   select: {
@@ -3347,7 +3571,10 @@ export async function bulkRemoveAssetsFromKits({
 
     const assets = assetRows.map((asset) => ({
       ...asset,
-      kit: asset.assetKits[0]?.kit ?? null,
+      // Defensive `?.` — test fixtures from main's PR #2535 mock the legacy
+      // `kit` directly and omit the `assetKits` array entirely; this avoids a
+      // TypeError reading [0] of undefined for those rows.
+      kit: asset.assetKits?.[0]?.kit ?? null,
     }));
 
     await db.$transaction(async (tx) => {
@@ -3477,6 +3704,51 @@ export async function bulkRemoveAssetsFromKits({
             };
           }),
         });
+      }
+
+      // Activity events — one ASSET_KIT_CHANGED per asset that left a kit.
+      if (assetsRemovedFromKit.length > 0) {
+        await recordEvents(
+          assetsRemovedFromKit.map((asset) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_KIT_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: asset.id,
+            assetId: asset.id,
+            kitId: asset.kit!.id,
+            field: "kitId",
+            fromValue: asset.kit!.id,
+            toValue: null,
+          })),
+          tx
+        );
+      }
+
+      // Activity events — one CUSTODY_RELEASED per asset whose kit-inherited
+      // custody was cleaned up. `meta.viaKit` mirrors the kit-custody flows
+      // in `releaseCustody` / `bulkReleaseKitCustody`. Phase 2 turned Custody
+      // from 1:1 into 1:N so `asset.custody` is an array now — read the
+      // primary row via the helper.
+      if (assetsWhoseKitsInCustody.length > 0) {
+        await recordEvents(
+          assetsWhoseKitsInCustody.map((asset) => {
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: asset.kit?.id,
+              teamMemberId: primaryCustody?.custodian?.id,
+              targetUserId: primaryCustody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true },
+            };
+          }),
+          tx
+        );
       }
     });
 
