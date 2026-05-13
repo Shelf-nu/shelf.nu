@@ -309,6 +309,12 @@ export type AuditListItem = {
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null };
   assigneeCount: number;
+  /**
+   * True when the authenticated mobile user is among the audit's
+   * assignees. Server-computed on the list endpoint so the companion
+   * can render a "Yours" marker without an extra round-trip per row.
+   */
+  isAssignedToMe: boolean;
 };
 
 export type AuditsResponse = {

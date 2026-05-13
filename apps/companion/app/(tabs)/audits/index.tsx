@@ -37,6 +37,25 @@ const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
 ];
 
+// why: due-today threshold in ms. Anything strictly past `now` is overdue
+// (red); anything within the next 24h is due-today (amber). Beyond that the
+// card stays neutral. Mirrors the urgency tiers we surface in the webapp's
+// audit dashboard so a user toggling between web + companion sees the same
+// signal.
+const DUE_SOON_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/** Urgency tier for the deadline pill on an audit card. */
+type DueUrgency = "overdue" | "dueSoon" | "neutral";
+
+function getDueUrgency(dueDate: string | null, isActive: boolean): DueUrgency {
+  if (!isActive || !dueDate) return "neutral";
+  const due = new Date(dueDate).getTime();
+  const now = Date.now();
+  if (due < now) return "overdue";
+  if (due - now <= DUE_SOON_THRESHOLD_MS) return "dueSoon";
+  return "neutral";
+}
+
 export default function AuditsListScreen() {
   return (
     <ErrorBoundary screenName="Audits">
@@ -61,6 +80,14 @@ function AuditsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
+  // why: default the "Assigned to me" toggle ON so a field worker who
+  // opens the tab immediately sees their own work first — the original
+  // complaint was that an admin assigned to 1 audit out of 50 had to
+  // scroll past everything else. They can flip it off to see the full
+  // org list. For BASE/SELF_SERVICE users this is already implicit
+  // server-side, so the toggle is effectively a no-op for them (still
+  // shown for visual consistency with admin/owner views).
+  const [assignedToMe, setAssignedToMe] = useState(true);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
 
@@ -85,6 +112,7 @@ function AuditsListContent() {
         status: STATUS_FILTERS[activeFilter].value,
         page: pageNum,
         perPage: PAGE_SIZE,
+        assignedToMe,
       });
       // Request cancelled (navigation) — ignore
       if (!data && !fetchErr) return;
@@ -98,7 +126,7 @@ function AuditsListContent() {
       if (reset) setAudits(data.audits);
       else setAudits((prev) => [...prev, ...data.audits]);
     },
-    [currentOrg, activeFilter]
+    [currentOrg, activeFilter, assignedToMe]
   );
 
   // Stale-while-revalidate: skeleton on first load, skip refetch if data is fresh (< 60s old)
@@ -114,14 +142,14 @@ function AuditsListContent() {
     nextPage.current = 1;
   }, [currentOrg?.id]);
 
-  // Re-fetch immediately when filter changes
+  // Re-fetch immediately when filter changes (status OR assignedToMe).
   useEffect(() => {
     if (!currentOrg || !hasFetchedAudits.current) return;
     nextPage.current = 1;
     fetchAudits(1, true).finally(() => {
       lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, assignedToMe]); // eslint-disable-line react-hooks/exhaustive-deps
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
@@ -185,10 +213,17 @@ function AuditsListContent() {
           : 0;
       const progressPercent = Math.round(progress * 100);
 
-      const isOverdue =
-        isActive &&
-        item.dueDate &&
-        new Date(item.dueDate).getTime() < Date.now();
+      const dueUrgency = getDueUrgency(item.dueDate, isActive);
+      const isOverdue = dueUrgency === "overdue";
+      const isDueSoon = dueUrgency === "dueSoon";
+      // Marker is only useful when the user is looking at the unfiltered
+      // org list — if "Assigned to me" is on, every row is already theirs.
+      const showAssignedMarker = !assignedToMe && item.isAssignedToMe;
+      const dueColor = isOverdue
+        ? colors.error
+        : isDueSoon
+        ? colors.warning
+        : colors.mutedLight;
 
       return (
         <TouchableOpacity
@@ -202,9 +237,20 @@ function AuditsListContent() {
           accessibilityRole="button"
         >
           <View style={styles.auditHeader}>
-            <Text style={styles.auditName} numberOfLines={1}>
-              {item.name}
-            </Text>
+            <View style={styles.auditNameRow}>
+              <Text style={styles.auditName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {showAssignedMarker ? (
+                <View
+                  style={styles.assignedMarker}
+                  accessibilityLabel="Assigned to you"
+                >
+                  <Ionicons name="person" size={10} color={colors.primary} />
+                  <Text style={styles.assignedMarkerText}>You</Text>
+                </View>
+              ) : null}
+            </View>
             <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
               <View
                 style={[styles.statusDot, { backgroundColor: badge.text }]}
@@ -248,18 +294,21 @@ function AuditsListContent() {
           <View style={styles.auditMeta}>
             {item.dueDate && (
               <View style={styles.metaRow}>
-                <Ionicons
-                  name="time-outline"
-                  size={13}
-                  color={isOverdue ? colors.error : colors.mutedLight}
-                />
+                <Ionicons name="time-outline" size={13} color={dueColor} />
                 <Text
                   style={[
                     styles.metaText,
-                    isOverdue && { color: colors.error, fontWeight: "500" },
+                    (isOverdue || isDueSoon) && {
+                      color: dueColor,
+                      fontWeight: "500",
+                    },
                   ]}
                 >
-                  {isOverdue ? "Overdue · " : "Due "}
+                  {isOverdue
+                    ? "Overdue · "
+                    : isDueSoon
+                    ? "Due soon · "
+                    : "Due "}
                   {formatDateTime(item.dueDate)}
                 </Text>
               </View>
@@ -305,7 +354,7 @@ function AuditsListContent() {
         </TouchableOpacity>
       );
     },
-    [router, colors, auditStatusBadge, styles]
+    [router, colors, auditStatusBadge, styles, assignedToMe]
   );
 
   if (orgLoading) {
@@ -348,6 +397,35 @@ function AuditsListContent() {
 
   return (
     <View style={styles.container}>
+      {/* Scope toggle: "Assigned to me" vs everything in the org. */}
+      <View style={styles.scopeRow}>
+        <TouchableOpacity
+          style={[styles.scopeChip, assignedToMe && styles.scopeChipActive]}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setAssignedToMe((v) => !v);
+          }}
+          hitSlop={hitSlop.sm}
+          accessibilityRole="switch"
+          accessibilityLabel="Show only audits assigned to me"
+          accessibilityState={{ checked: assignedToMe }}
+        >
+          <Ionicons
+            name={assignedToMe ? "person" : "person-outline"}
+            size={14}
+            color={assignedToMe ? colors.primary : colors.muted}
+          />
+          <Text
+            style={[
+              styles.scopeChipText,
+              assignedToMe && styles.scopeChipTextActive,
+            ]}
+          >
+            {assignedToMe ? "Assigned to me" : "All audits"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Status filter pills */}
       <View style={styles.filterRow} accessibilityRole="tablist">
         {STATUS_FILTERS.map((f, i) => (
@@ -408,17 +486,38 @@ function AuditsListContent() {
                 color={colors.border}
               />
               <Text style={styles.emptyTitle}>
-                {activeFilter === 0
+                {assignedToMe
+                  ? activeFilter === 0
+                    ? "No active audits assigned to you"
+                    : `No ${STATUS_FILTERS[
+                        activeFilter
+                      ].label.toLowerCase()} audits assigned to you`
+                  : activeFilter === 0
                   ? "No active audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter
                     ].label.toLowerCase()} audits`}
               </Text>
               <Text style={styles.emptyText}>
-                {activeFilter === 0
+                {assignedToMe
+                  ? "Tap “All audits” above to see audits across the workspace."
+                  : activeFilter === 0
                   ? "Create an audit from the web app to get started"
                   : "Try selecting a different status filter"}
               </Text>
+              {assignedToMe ? (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setAssignedToMe(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show all audits"
+                >
+                  <Text style={styles.retryText}>Show all audits</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : (
             <FlatList
@@ -469,6 +568,38 @@ const useStyles = createStyles((colors) => ({
     justifyContent: "center",
     alignItems: "center",
     gap: spacing.md,
+  },
+
+  // Scope toggle (Assigned to me vs All audits)
+  scopeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  scopeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 30,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scopeChipActive: {
+    backgroundColor: colors.primaryBg,
+    borderColor: colors.primary,
+  },
+  scopeChipText: {
+    fontSize: fontSize.sm,
+    fontWeight: "500",
+    color: colors.muted,
+  },
+  scopeChipTextActive: {
+    color: colors.primary,
   },
 
   // Filter pills
@@ -522,11 +653,34 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center",
     gap: spacing.sm,
   },
-  auditName: {
+  auditNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     flex: 1,
+  },
+  auditName: {
+    flexShrink: 1,
     fontSize: fontSize.md,
     fontWeight: "600",
     color: colors.foreground,
+  },
+  // "You" marker shown on cards when the global toggle is off but the
+  // current user is among the assignees — saves a scroll past unrelated
+  // audits in admin/owner views.
+  assignedMarker: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+  },
+  assignedMarkerText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.primary,
   },
 
   // Status badge

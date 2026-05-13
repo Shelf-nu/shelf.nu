@@ -10,6 +10,7 @@ import {
   addAssetsToAudit,
   removeAssetFromAudit,
   removeAssetsFromAudit,
+  getAuditsForOrganization,
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
@@ -77,6 +78,10 @@ vi.mock("~/database/db.server", () => {
       updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
+      // why: getAuditsForOrganization runs findMany + count in parallel
+      // for pagination; without this mock the Promise.all rejects with
+      // "count is not a function" and the test crashes before assertions.
+      count: vi.fn(),
     },
     auditNote: {
       create: vi.fn(),
@@ -1657,6 +1662,80 @@ describe("audit service", () => {
       expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
         expect.objectContaining({ cancelledByName: "the audit creator" })
       );
+    });
+  });
+
+  describe("getAuditsForOrganization", () => {
+    const mockDb = vi.mocked(db, true) as any;
+
+    beforeEach(() => {
+      mockDb.auditSession.findMany.mockResolvedValue([]);
+      mockDb.auditSession.count.mockResolvedValue(0);
+    });
+
+    it("scopes to the caller's assignments when assignedToUserId is set (admin opt-in)", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "admin-user",
+        isSelfServiceOrBase: false,
+        assignedToUserId: "admin-user",
+      });
+
+      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      expect(findManyArgs.where).toMatchObject({
+        organizationId: "org-1",
+        assignments: { some: { userId: "admin-user" } },
+      });
+    });
+
+    it("does NOT scope to assignments for admin/owner when assignedToUserId is null", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "admin-user",
+        isSelfServiceOrBase: false,
+        assignedToUserId: null,
+      });
+
+      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      // why: the toggle is OFF — admin/owner sees all audits, not just theirs.
+      expect(findManyArgs.where.assignments).toBeUndefined();
+    });
+
+    it("auto-scopes for BASE/SELF_SERVICE even when assignedToUserId is unset", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "base-user",
+        isSelfServiceOrBase: true,
+      });
+
+      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      expect(findManyArgs.where.assignments).toEqual({
+        some: { userId: "base-user" },
+      });
+    });
+
+    it("applies (dueDate asc nulls last, createdAt desc) when prioritizeDeadlines is true", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        prioritizeDeadlines: true,
+      });
+
+      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      expect(findManyArgs.orderBy).toEqual([
+        { dueDate: { sort: "asc", nulls: "last" } },
+        { createdAt: "desc" },
+      ]);
+    });
+
+    it("falls back to the legacy single-field orderBy when prioritizeDeadlines is false", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        orderBy: "createdAt",
+        orderDirection: "desc",
+      });
+
+      const [findManyArgs] = mockDb.auditSession.findMany.mock.calls[0];
+      expect(findManyArgs.orderBy).toEqual([{ createdAt: "desc" }]);
     });
   });
 });

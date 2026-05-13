@@ -1669,6 +1669,23 @@ export async function getAuditsForOrganization(params: {
   orderBy?: string;
   /** Sort direction */
   orderDirection?: SortingDirection;
+  /**
+   * When set, restricts the result to audits this user is assigned to.
+   * Used by the mobile companion's "Assigned to me" filter — admins/owners
+   * normally see every audit, so this gives them an opt-in way to scope
+   * the list to their own work without losing visibility into the rest
+   * (toggle off → see everything). Layered on top of the role-based
+   * auto-filter for BASE/SELF_SERVICE: if either condition demands the
+   * filter, it applies.
+   */
+  assignedToUserId?: string | null;
+  /**
+   * When true, sort by `(dueDate asc nulls last, createdAt desc)` so the
+   * companion's audit list surfaces overdue and upcoming-due items
+   * first. Overrides `orderBy` / `orderDirection`. Mobile-only — the
+   * webapp uses its own column-sort UI.
+   */
+  prioritizeDeadlines?: boolean;
 }) {
   const {
     organizationId,
@@ -1680,6 +1697,8 @@ export async function getAuditsForOrganization(params: {
     status,
     orderBy = "createdAt",
     orderDirection = "desc",
+    assignedToUserId,
+    prioritizeDeadlines = false,
   } = params;
 
   try {
@@ -1688,11 +1707,17 @@ export async function getAuditsForOrganization(params: {
 
     const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-    // Filter by assignee for BASE/SELF_SERVICE users
-    if (isSelfServiceOrBase && userId) {
+    // Filter by assignee for BASE/SELF_SERVICE users, OR when the caller
+    // explicitly asks for "assigned to me". Both paths use the same
+    // `assignments.some.userId` predicate so an admin/owner who opts into
+    // the filter via `assignedToUserId` gets the same scoping the role
+    // check would apply automatically for low-permission users.
+    const assigneeFilterUserId =
+      (isSelfServiceOrBase && userId ? userId : null) ?? assignedToUserId;
+    if (assigneeFilterUserId) {
       where.assignments = {
         some: {
-          userId,
+          userId: assigneeFilterUserId,
         },
       };
     }
@@ -1712,12 +1737,25 @@ export async function getAuditsForOrganization(params: {
       where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
+    // why: the companion's `prioritizeDeadlines` toggle surfaces work
+    // the user has to act on next — overdue first (asc dueDate puts
+    // earliest dates first, and any negative-offset overdue date is
+    // earliest), then upcoming dues, then audits without a deadline
+    // (Prisma's `nulls: "last"` keeps no-deadline rows from polluting
+    // the top of the list). The secondary `createdAt desc` is a stable
+    // tiebreaker so two same-day-due audits don't shuffle between
+    // requests.
+    const resolvedOrderBy: Prisma.AuditSessionOrderByWithRelationInput[] =
+      prioritizeDeadlines
+        ? [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }]
+        : [{ [orderBy]: orderDirection }];
+
     const [audits, totalAudits] = await Promise.all([
       db.auditSession.findMany({
         skip,
         take,
         where,
-        orderBy: { [orderBy]: orderDirection },
+        orderBy: resolvedOrderBy,
         include: AUDIT_LIST_INCLUDE,
       }),
       db.auditSession.count({ where }),
