@@ -151,6 +151,7 @@ export function CustomFieldInput({
       return (
         <DateFieldInput
           fieldId={field.id}
+          fieldName={field.name}
           value={value}
           onChange={onChange}
           accessibilityLabel={accessibilityLabel}
@@ -341,6 +342,7 @@ function OptionDropdown({
  */
 function DateFieldInput({
   fieldId,
+  fieldName,
   value,
   onChange,
   accessibilityLabel,
@@ -348,6 +350,15 @@ function DateFieldInput({
 }: {
   /** customField.id — used to scope the picker's testID per field. */
   fieldId: string;
+  /**
+   * Plain field name (no error-suffix). Used for the Clear button's
+   * accessibility label so VoiceOver doesn't re-announce the field's
+   * error state when reading the clear action — `accessibilityLabel`
+   * (the parent-computed one) already includes `", invalid: <error>"`
+   * when an error is present, which would make the clear control sound
+   * invalid.
+   */
+  fieldName: string;
   value: string;
   onChange: (value: string) => void;
   accessibilityLabel: string;
@@ -458,7 +469,7 @@ function DateFieldInput({
             setOpen(false);
           }}
           accessibilityRole="button"
-          accessibilityLabel={`Clear ${accessibilityLabel}`}
+          accessibilityLabel={`Clear ${fieldName}`}
         >
           <Text style={styles.pickerClearText}>Clear date</Text>
         </TouchableOpacity>
