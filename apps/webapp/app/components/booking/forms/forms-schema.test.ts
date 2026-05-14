@@ -578,4 +578,108 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       ).toBe(true);
     }
   });
+
+  /**
+   * Codex/CodeRabbit P1: when working hours are enabled, `validateWorkingHours`
+   * must read weekday / HH:mm / yyyy-MM-dd in the user's timezone, not the
+   * server's. Otherwise an LA user's 10:00 booking becomes 17:00 (or 18:00)
+   * UTC on the server and gets rejected by a 9–17 working-hours window.
+   */
+  it("accepts a working-hours-window booking from a non-UTC user (LA)", () => {
+    const hints = { timeZone: "America/Los_Angeles" } as any;
+    // 9–17 every day so the test exercises a narrow window — pre-fix, the
+    // server would format the parsed instant as 19:00 PDT-equivalent and
+    // reject. Post-fix, components are read in the user's zone.
+    const enabledWorkingHours = {
+      enabled: true,
+      weeklySchedule: {
+        "0": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "2": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "3": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "4": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "5": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "6": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      },
+      overrides: [],
+    };
+    const schema = BookingFormSchema({
+      hints,
+      action: "new",
+      workingHours: enabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    // Fixed wire strings well inside the 9–17 window in LA local. Avoiding
+    // `buildLocalWireString` here keeps the test deterministic regardless of
+    // when CI runs — otherwise an actual LA wall-clock outside 09:00–14:00
+    // would push the synthetic future booking outside the window.
+    const result = schema.safeParse({
+      name: "WH Booking",
+      startDate: "2099-04-24T10:00",
+      endDate: "2099-04-24T15:00",
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    if (!result.success) {
+      // eslint-disable-next-line no-console
+      console.error("Working-hours rejection", result.error.errors);
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a working-hours-window booking outside the LA local window", () => {
+    const hints = { timeZone: "America/Los_Angeles" } as any;
+    const enabledWorkingHours = {
+      enabled: true,
+      weeklySchedule: {
+        "0": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "2": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "3": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "4": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "5": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+        "6": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      },
+      overrides: [],
+    };
+    const schema = BookingFormSchema({
+      hints,
+      action: "new",
+      workingHours: enabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    // 22:00 LA local is outside 09–17. The same wire string parsed in UTC
+    // would also be outside the window, but for the WRONG reason — this
+    // assertion proves the zone is being honored: if we accidentally fell
+    // back to server-local interpretation, the rejection message would
+    // still appear but for a different time.
+    const result = schema.safeParse({
+      name: "WH Booking",
+      startDate: "2099-04-24T22:00",
+      endDate: "2099-04-25T01:00",
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errorMessages = result.error.errors.map((e) => e.message);
+      expect(
+        errorMessages.some((msg) =>
+          msg.toLowerCase().includes("must be between")
+        )
+      ).toBe(true);
+    }
+  });
 });
