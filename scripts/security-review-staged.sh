@@ -254,10 +254,23 @@ if [[ -z "$DIFF_TEXT" ]]; then
   exit 0
 fi
 
-# Guard against pathologically large diffs (argv limits, model context).
-# 800KB ~= 200k tokens, comfortably under Opus 1M context.
+# Guard against pathologically large diffs. The hard bound is the kernel's
+# ARG_MAX (argv + env size limit) — exceeding it makes the claude invocation
+# fail with E2BIG, which our error handler would silently treat as non-fatal,
+# allowing the commit through unreviewed. Linux is usually 131072 (POSIX
+# minimum) up to a few MB; macOS reports ~256KB. We subtract headroom for the
+# prompt scaffolding, env vars, and other claude flags, then cap at 800KB so
+# we don't push very large diffs at Opus even when the kernel would allow it.
+if command -v getconf >/dev/null 2>&1; then
+  ARG_MAX_BYTES=$(getconf ARG_MAX 2>/dev/null || echo 131072)
+else
+  ARG_MAX_BYTES=131072
+fi
+DIFF_MAX_AUTO=$((ARG_MAX_BYTES - 32768))
+[[ $DIFF_MAX_AUTO -gt 800000 ]] && DIFF_MAX_AUTO=800000
+[[ $DIFF_MAX_AUTO -lt 16384 ]] && DIFF_MAX_AUTO=16384
+DIFF_MAX_BYTES="${SHELF_SEC_REVIEW_MAX_BYTES:-$DIFF_MAX_AUTO}"
 DIFF_BYTES=${#DIFF_TEXT}
-DIFF_MAX_BYTES=${SHELF_SEC_REVIEW_MAX_BYTES:-800000}
 if [[ $DIFF_BYTES -gt $DIFF_MAX_BYTES ]]; then
   echo "[shelf-security-reviewer] staged diff is $DIFF_BYTES bytes (max $DIFF_MAX_BYTES); skipping."
   echo "  This is a coarse safety guard, not a real review. Run the agent manually:"
@@ -265,6 +278,23 @@ if [[ $DIFF_BYTES -gt $DIFF_MAX_BYTES ]]; then
   exit 0
 fi
 
+# Detect a portable timeout wrapper. GNU `timeout` ships with coreutils
+# (default on Linux); macOS exposes the same binary as `gtimeout` once
+# `brew install coreutils` is run. If neither is available we still invoke
+# claude — without a wrapper the commit can hang until Ctrl-C, but the
+# review is not silently skipped (which is what happened pre-fix when
+# `timeout` returned 127 on bare macOS and the error handler treated it
+# as non-fatal infra).
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD=(timeout "${SHELF_SEC_REVIEW_TIMEOUT:-120}s")
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD=(gtimeout "${SHELF_SEC_REVIEW_TIMEOUT:-120}s")
+else
+  TIMEOUT_CMD=()
+  echo "[shelf-security-reviewer] no 'timeout' / 'gtimeout' command found."
+  echo "  Review will run without a wall-clock limit. On macOS:"
+  echo "    brew install coreutils"
+fi
 TIMEOUT="${SHELF_SEC_REVIEW_TIMEOUT:-120}"
 
 echo ""
@@ -300,12 +330,21 @@ EOF
 )
 
 set +e
-RAW=$(timeout "${TIMEOUT}s" claude \
-  --print \
-  --output-format json \
-  --agent shelf-security-reviewer-headless \
-  --permission-mode bypassPermissions \
-  "$PROMPT" 2>&1)
+if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+  RAW=$("${TIMEOUT_CMD[@]}" claude \
+    --print \
+    --output-format json \
+    --agent shelf-security-reviewer-headless \
+    --permission-mode bypassPermissions \
+    "$PROMPT" 2>&1)
+else
+  RAW=$(claude \
+    --print \
+    --output-format json \
+    --agent shelf-security-reviewer-headless \
+    --permission-mode bypassPermissions \
+    "$PROMPT" 2>&1)
+fi
 EXIT_CODE=$?
 set -e
 
