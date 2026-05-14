@@ -308,4 +308,110 @@ describe("POST /api/mobile/asset/update", () => {
       );
     });
   });
+
+  describe("wire contract: customFields value must be a primitive", () => {
+    // why: the companion's edit screen previously wrapped the value in
+    // `{ raw: ... }`, which Zod rejected, surfacing as a generic
+    // "Sorry, something went wrong" 500 to the user (any custom field
+    // edit was broken in production). This block locks the wire
+    // contract — `value` is `string | number | boolean | null` — so a
+    // future client that drifts back to the wrapped shape fails loud
+    // in tests instead of in customers' hands.
+    it("rejects a wrapped { raw: ... } object as the value", async () => {
+      // why: seed a matching definition so the test path is unambiguously
+      // the Zod parse failure on `value`, not the unknown-id rejection
+      // that runs against an empty defs array.
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-text-1", name: "Notes", type: "TEXT", required: false },
+      ]);
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-text-1", value: { raw: "hello" } }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      // Zod parse throws ZodError → caught by the route → makeShelfError
+      // wraps it. The mock at the top of this file (`vi.mock` for
+      // ~/utils/error) doesn't extract a status from ZodError, so the
+      // fallback `cause?.status || 500` returns 500. Assert that exact
+      // status — looser checks (e.g. `!= 200`) accept 401/403 and miss
+      // a future regression where auth fails before validation.
+      expect((result as unknown as Response).status).toBe(500);
+      expect(updateAsset).not.toHaveBeenCalled();
+    });
+
+    it("accepts a raw string for DATE / TEXT / OPTION values", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-date", name: "Purchase date", type: "DATE", required: true },
+      ]);
+      (extractCustomFieldValuesFromPayload as any).mockReturnValue([
+        { id: "cf-date", value: { raw: "2026-02-05" } },
+      ]);
+      (updateAsset as any).mockResolvedValue({
+        id: "asset-1",
+        title: "T",
+        description: null,
+      });
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-date", value: "2026-02-05" }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect(result instanceof Response).toBe(true);
+      expect((result as unknown as Response).status).toBe(200);
+    });
+
+    it("accepts a raw number for NUMBER / AMOUNT values", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-qty", name: "Qty", type: "NUMBER", required: false },
+      ]);
+      (extractCustomFieldValuesFromPayload as any).mockReturnValue([
+        { id: "cf-qty", value: { raw: 42 } },
+      ]);
+      (updateAsset as any).mockResolvedValue({
+        id: "asset-1",
+        title: "T",
+        description: null,
+      });
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-qty", value: 42 }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect((result as unknown as Response).status).toBe(200);
+    });
+
+    it("accepts a raw boolean for BOOLEAN values", async () => {
+      (getActiveCustomFields as any).mockResolvedValue([
+        {
+          id: "cf-warranty",
+          name: "Under warranty",
+          type: "BOOLEAN",
+          required: false,
+        },
+      ]);
+      (extractCustomFieldValuesFromPayload as any).mockReturnValue([
+        { id: "cf-warranty", value: { raw: true } },
+      ]);
+      (updateAsset as any).mockResolvedValue({
+        id: "asset-1",
+        title: "T",
+        description: null,
+      });
+
+      const request = createRequest({
+        assetId: "asset-1",
+        customFields: [{ id: "cf-warranty", value: true }],
+      });
+      const result = await action(createActionArgs({ request }));
+
+      expect((result as unknown as Response).status).toBe(200);
+    });
+  });
 });
