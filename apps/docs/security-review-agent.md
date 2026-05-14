@@ -11,13 +11,17 @@ report, and (by default) lets the commit proceed. It does not edit code.
 
 ## Components
 
-| File                                              | Role                                                                                                                                                      |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.claude/agents/shelf-security-reviewer.md`       | The subagent definition — Shelf-specific auth patterns, the IDOR history, and the conditional skill activations. Runs on Opus.                            |
-| `scripts/security-review-staged.sh`               | The pre-commit wrapper — filters staged files to security-sensitive paths, invokes the agent headlessly, prints the report, optionally blocks the commit. |
-| `lefthook.yml` → `pre-commit` → `security-review` | Wires the script into the existing pre-commit chain at priority 5 (after typecheck). Inherits `skip: [merge, rebase]` from the rest of the pipeline.      |
+There are **two** agent variants — the same Shelf-specific checklist, but
+different capability boundaries for different invocation contexts.
 
-The agent is also usable on demand — see [Manual invocation](#manual-invocation).
+| File                                                 | Role                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.claude/agents/shelf-security-reviewer.md`          | **Interactive** variant. Tools: `Read, Bash, Skill, Agent, WebFetch, WebSearch`. Used when a human runs `claude --agent shelf-security-reviewer ...` for PR / branch / commit-range review. Bash is needed so the agent can run `gh pr diff`, `git diff`, `grep`, etc. Permission prompts confirm each tool call.                                                                               |
+| `.claude/agents/shelf-security-reviewer-headless.md` | **Headless** variant — what the pre-commit hook invokes. Tools: `Skill` only — no Bash, no WebFetch, no Agent. Receives the staged diff inline between `<shelf_diff>` tags rather than fetching it itself. Emits a strict JSON envelope. Designed for `bypassPermissions` use because there are no capabilities to bypass — a prompt-injection payload in the diff has no exfiltration channel. |
+| `scripts/security-review-staged.sh`                  | The pre-commit wrapper — filters staged files to security-sensitive paths, pre-computes the diff, invokes the headless agent, parses the JSON envelope, prints the report, optionally blocks the commit.                                                                                                                                                                                        |
+| `lefthook.yml` → `pre-commit` → `security-review`    | Wires the script into the existing pre-commit chain at priority 5 (after typecheck). Inherits `skip: [merge, rebase]` from the rest of the pipeline.                                                                                                                                                                                                                                            |
+
+The interactive agent is also usable on demand — see [Manual invocation](#manual-invocation).
 
 ## Requirements
 
@@ -129,7 +133,7 @@ flows touched), `supabase-postgres-best-practices` (when SQL/migrations).
 
 The agent emits a structured markdown report:
 
-```
+```markdown
 ## Security Review: <PR or branch>
 
 **Scope:** files changed, lines +/-
@@ -139,24 +143,30 @@ The agent emits a structured markdown report:
 ## Findings
 
 ### 🔴 Critical / P0
+
 - **<title>** — `path/to/file.ts:42`
   <explanation>
   **Fix:** <concrete suggestion>
 
 ### 🟠 High / P1
+
 ### 🟡 Medium / P2
+
 ### 🔵 Low / nit
 
 ## Checklist coverage
-| Area | Status | Notes |
-| --- | --- | --- |
-| Org-scoping / IDOR | ✅ / ⚠️ / ❌ / N/A | ... |
+
+| Area               | Status             | Notes |
+| ------------------ | ------------------ | ----- |
+| Org-scoping / IDOR | ✅ / ⚠️ / ❌ / N/A | ...   |
 
 ## Skills consulted
+
 - security-review
 - supabase
 
 ## What I didn't check
+
 <honest limits — things outside the diff or outside the repo>
 ```
 
@@ -222,11 +232,80 @@ claude --agent shelf-security-reviewer "review commits abc123..def456"
 From inside an interactive Claude session, you can also delegate to the
 agent without leaving the conversation:
 
-```
+```text
 > Use the shelf-security-reviewer to audit my changes on this branch
 ```
 
 Description-based routing will pick up the subagent automatically.
+
+::: warning
+`shelf-security-reviewer` is the **interactive** agent. It has `Bash`,
+`WebFetch`, `WebSearch`, and `Agent` tools because a human in the loop
+confirms tool calls. **Never invoke it headlessly with
+`--permission-mode bypassPermissions`** — that combination is a
+prompt-injection RCE channel (the agent reads attacker-influenced diff
+content while having unrestricted shell + network access auto-approved).
+For automation use `shelf-security-reviewer-headless` instead; see
+[Threat model](#threat-model) below.
+:::
+
+## Threat model
+
+The pre-commit hook deliberately treats the staged diff as **untrusted
+input**. Several plausible scenarios put attacker-influenced code into a
+developer's staged changes:
+
+- A maintainer stages a malicious PR locally to test or rebase it.
+- A compromised upstream dependency adds code to a `.server.ts` or route file.
+- Third-party code (snippets, examples) gets pasted into the repo.
+- A teammate's machine is compromised and pushes to a shared branch.
+
+If the reviewer agent reads that diff via its own `Bash` tool (running
+`git diff --cached`) while operating under `--permission-mode
+bypassPermissions`, a textbook prompt-injection payload embedded in a
+comment can direct the LLM to use the same `Bash` tool to exfiltrate SSH
+keys, `.env` contents, or cloud tokens — silently, with no confirmation
+prompt the developer could deny.
+
+The architecture closes that channel:
+
+1. **Capability minimization.** The headless agent's `tools:` frontmatter
+   lists only `Skill`. There is no `Bash`, `WebFetch`, `WebSearch`, or
+   `Agent` tool available — so even a fully successful prompt injection
+   has nowhere to exfiltrate to. The agent can analyze text and that's
+   it.
+2. **Diff passed as data, not fetched as action.** The wrapper script
+   computes the diff in trusted shell (`git diff --cached --no-color`)
+   and injects it into the prompt between `<shelf_diff>` and
+   `</shelf_diff>` tags. The agent's system prompt explicitly states
+   that anything inside those tags is **data**, not instructions, and
+   that detected injection attempts should be **reported as Critical
+   findings** rather than followed.
+3. **Structured output, not a free-text sentinel.** The agent returns a
+   JSON envelope `{security_relevant: bool, report: string}` parsed
+   server-side with `jq`. Replacing the old `NO_SECURITY_RELEVANT_CHANGES`
+   string sentinel raises the bar for an injection that wants to
+   silently suppress the review — it now has to produce a precisely
+   well-formed JSON object with `security_relevant: false`, which is
+   substantially harder than emitting a free-text marker.
+4. **Defense in depth via the wrapper.** The script enforces a timeout
+   so a stalled agent can't hang the commit, captures non-zero exit
+   codes without blocking, and falls back to printing raw output if the
+   envelope is malformed (so a broken agent fails _open_ on the report
+   side and _closed_ on the suppression side).
+
+Residual risk: a successful injection could still cause the agent to
+**emit a wrong report** (false negative, false positive, or content the
+developer didn't expect to see in their terminal). This is a denial-of-
+service / quality-of-service issue, not an RCE. Defenses are the
+explicit anti-injection instructions in the agent system prompt plus
+the requirement to flag suspicious payloads as findings.
+
+For interactive use (`claude --agent shelf-security-reviewer ...`) the
+full toolset is fine — the human in the loop confirms each tool call.
+The risk model only changes under `bypassPermissions`, which is why the
+interactive agent's docstring explicitly warns against headless use with
+that flag.
 
 ## Cost and quota
 
@@ -289,9 +368,15 @@ exists and that `claude` is logged in.
 **"`claude` CLI not found — skipping"** — install Claude Code and run
 `claude /login` once. The hook will pick up the next `git commit`.
 
-**Hook fires but produces no report** — likely the agent returned
-`NO_SECURITY_RELEVANT_CHANGES`. Run with `SHELF_SEC_REVIEW_VERBOSE=1` to
-confirm which files passed the filter, and inspect the diff manually.
+**"`jq` not found — falling back to raw-text output"** — install `jq` for
+proper JSON envelope parsing. Without it the script still works but
+loses the `security_relevant` short-circuit and may print malformed
+output. On macOS: `brew install jq`. On Debian/Ubuntu: `sudo apt install jq`.
+
+**Hook fires but produces no report** — the agent returned
+`security_relevant: false` in its JSON envelope (no security-relevant
+changes detected). Run with `SHELF_SEC_REVIEW_VERBOSE=1` to confirm
+which files passed the filter, and inspect the diff manually.
 
 **Hook times out** — bump the timeout: `SHELF_SEC_REVIEW_TIMEOUT=240 git commit ...`.
 Very large diffs (>2000 lines) may need 300+.

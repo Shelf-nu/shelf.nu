@@ -49,7 +49,8 @@ See `apps/companion/README.md` for full setup guide (LAN IPs, HTTP mode, device 
 
 A Claude-powered security reviewer runs automatically on `git commit` against security-sensitive diffs (routes, `*.server.ts`, prisma, Supabase wiring, server middleware, new dependencies). It catches the regressions hit most often — cross-org IDORs, missing `requirePermission` gates, open redirects, missing Zod validation, audit-trail gaps — before code reaches review.
 
-- Subagent definition: `.claude/agents/shelf-security-reviewer.md`
+- Interactive subagent: `.claude/agents/shelf-security-reviewer.md` (full toolset — for manual `claude --agent shelf-security-reviewer ...` use with permission prompts).
+- Headless subagent: `.claude/agents/shelf-security-reviewer-headless.md` (`Skill`-only — what the pre-commit hook invokes; safe under `bypassPermissions` because there's no Bash/network channel to exfiltrate through).
 - Pre-commit wrapper: `scripts/security-review-staged.sh`
 - Wired into `lefthook.yml` at priority 5 (after typecheck)
 
