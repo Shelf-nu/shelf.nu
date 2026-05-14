@@ -21,6 +21,91 @@ import { tw } from "~/utils/tw";
 import { ReportEmptyState } from "./report-empty-state";
 import { ReportTable, DateCell } from "./report-table";
 
+/**
+ * Column definitions for the Overdue Items table, declared at module scope
+ * so cell function identities stay stable across renders. See
+ * `.claude/rules/react-render-stability.md` for the underlying rule.
+ */
+const OVERDUE_ITEMS_COLUMNS: ColumnDef<OverdueItemRow>[] = [
+  {
+    accessorKey: "bookingName",
+    header: "Booking",
+    cell: ({ row }) => (
+      <span className="font-medium">{row.original.bookingName}</span>
+    ),
+  },
+  {
+    accessorKey: "custodian",
+    header: "Booked by",
+    cell: ({ row }) =>
+      row.original.custodian || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "uncheckedCount",
+    header: "Assets",
+    cell: ({ row }) => {
+      const { uncheckedCount, assetCount, checkedInCount } = row.original;
+      const hasPartialReturns = checkedInCount > 0;
+      const progressPercent =
+        assetCount > 0 ? (checkedInCount / assetCount) * 100 : 0;
+
+      return (
+        <div className="flex items-center gap-2">
+          <span className="font-medium tabular-nums">
+            {uncheckedCount}
+            <span className="font-normal text-gray-400"> / {assetCount}</span>
+          </span>
+          {hasPartialReturns && (
+            <div className="h-2 w-12 overflow-hidden rounded-full bg-gray-200">
+              <div
+                className="h-full rounded-full bg-green-500"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "scheduledEnd",
+    header: "Due Date",
+    cell: ({ row }) => <DateCell date={row.original.scheduledEnd} />,
+  },
+  {
+    accessorKey: "daysOverdue",
+    header: "Days Overdue",
+    cell: ({ row }) => {
+      const days = row.original.daysOverdue;
+      return (
+        <span
+          className={tw(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+            days > 7
+              ? "bg-red-100 text-red-700"
+              : days > 3
+              ? "bg-orange-100 text-orange-700"
+              : "bg-yellow-100 text-yellow-700"
+          )}
+        >
+          {days} days
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "valueAtRisk",
+    header: "Value",
+    cell: ({ row }) =>
+      // `!= null` so a real $0 value-at-risk renders as "$0", not "—".
+      row.original.valueAtRisk != null ? (
+        `$${row.original.valueAtRisk.toLocaleString()}`
+      ) : (
+        <span className="text-gray-400">—</span>
+      ),
+  },
+];
+
 /** Props for the OverdueItemsContent component. */
 type Props = {
   /** Overdue booking rows currently in scope (already filtered by the loader). */
@@ -45,87 +130,7 @@ export function OverdueItemsContent({
   totalRows,
   onRowClick,
 }: Props) {
-  // Column definitions for overdue items table
-  const columns: ColumnDef<OverdueItemRow>[] = [
-    {
-      accessorKey: "bookingName",
-      header: "Booking",
-      cell: ({ row }) => (
-        <span className="font-medium">{row.original.bookingName}</span>
-      ),
-    },
-    {
-      accessorKey: "custodian",
-      header: "Booked by",
-      cell: ({ row }) =>
-        row.original.custodian || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "uncheckedCount",
-      header: "Assets",
-      cell: ({ row }) => {
-        const { uncheckedCount, assetCount, checkedInCount } = row.original;
-        const hasPartialReturns = checkedInCount > 0;
-        const progressPercent =
-          assetCount > 0 ? (checkedInCount / assetCount) * 100 : 0;
-
-        return (
-          <div className="flex items-center gap-2">
-            <span className="font-medium tabular-nums">
-              {uncheckedCount}
-              <span className="font-normal text-gray-400"> / {assetCount}</span>
-            </span>
-            {/* Progress bar - shows return progress (green = returned) */}
-            {hasPartialReturns && (
-              <div className="h-2 w-12 overflow-hidden rounded-full bg-gray-200">
-                <div
-                  className="h-full rounded-full bg-green-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "scheduledEnd",
-      header: "Due Date",
-      cell: ({ row }) => <DateCell date={row.original.scheduledEnd} />,
-    },
-    {
-      accessorKey: "daysOverdue",
-      header: "Days Overdue",
-      cell: ({ row }) => {
-        const days = row.original.daysOverdue;
-        return (
-          <span
-            className={tw(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-              days > 7
-                ? "bg-red-100 text-red-700"
-                : days > 3
-                ? "bg-orange-100 text-orange-700"
-                : "bg-yellow-100 text-yellow-700"
-            )}
-          >
-            {days} days
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "valueAtRisk",
-      header: "Value",
-      cell: ({ row }) =>
-        // `!= null` so a real $0 value-at-risk renders as "$0", not "—".
-        row.original.valueAtRisk != null ? (
-          `$${row.original.valueAtRisk.toLocaleString()}`
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-  ];
+  const columns = OVERDUE_ITEMS_COLUMNS;
 
   // Extract KPI values for hero display
   const totalOverdue =
