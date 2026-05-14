@@ -56,6 +56,20 @@ pre-commit:
         - merge
         - rebase
 
+    # Advisory AI security review of staged changes via the
+    # shelf-security-reviewer Claude subagent. Never blocks the commit by
+    # default — see scripts/security-review-staged.sh for env-var toggles
+    # (SHELF_SEC_REVIEW=0 to skip, SHELF_SEC_REVIEW_BLOCK=1 to enforce).
+    security-review:
+      priority: 5
+      # Broad glob — the script narrows further to routes / *.server.ts /
+      # prisma / package.json before invoking claude.
+      glob: "**/*.{ts,tsx,prisma,sql,json}"
+      run: ./scripts/security-review-staged.sh {staged_files}
+      skip:
+        - merge
+        - rebase
+
 commit-msg:
   commands:
     commitlint:
