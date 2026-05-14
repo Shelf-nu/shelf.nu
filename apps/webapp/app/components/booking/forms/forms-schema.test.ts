@@ -426,3 +426,156 @@ describe("BookingFormSchema - override timezone handling", () => {
     }
   });
 });
+
+/**
+ * Regression coverage for SHELF-WEBAPP-1HC.
+ *
+ * The HTML `<input type="datetime-local">` emits values like `"2026-05-01T16:10"`
+ * with no offset. Previously the schema fed that wire string into
+ * `z.coerce.date()`, which is interpreted in the server's local zone (UTC in
+ * production). For users west of UTC, valid future bookings were rejected as
+ * "Start date must be in the future". The fix parses the wire string with
+ * Luxon using `hints.timeZone`.
+ */
+describe("BookingFormSchema - datetime-local wire string (1HC regression)", () => {
+  const baseBookingSettings = {
+    bufferStartTime: 0,
+    tagsRequired: false,
+    maxBookingLength: null,
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  const disabledWorkingHours = {
+    enabled: false,
+    weeklySchedule: {},
+    overrides: [],
+  };
+
+  /**
+   * Helper: build a `yyyy-MM-dd'T'HH:mm` wire string a few hours ahead of
+   * the user's wall clock in the given zone.
+   */
+  function buildLocalWireString(
+    timeZone: string,
+    offsetHoursFromNow: number
+  ): string {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(
+      new Date(Date.now() + offsetHoursFromNow * 60 * 60 * 1000)
+    );
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((p) => p.type === type)?.value ?? "00";
+    // Intl `hour: "2-digit"` can emit `24:00` for midnight; normalize.
+    const hour = get("hour") === "24" ? "00" : get("hour");
+    return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get(
+      "minute"
+    )}`;
+  }
+
+  it("accepts a future-but-soon booking when the user is west of UTC (NY)", () => {
+    const hints = { timeZone: "America/New_York" } as any;
+    const schema = BookingFormSchema({
+      hints,
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    const startDate = buildLocalWireString("America/New_York", 3);
+    const endDate = buildLocalWireString("America/New_York", 6);
+
+    const result = schema.safeParse({
+      name: "TZ Booking",
+      startDate,
+      endDate,
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    if (!result.success) {
+      // Surface the actual messages so a regression is debuggable.
+      // eslint-disable-next-line no-console
+      console.error("Unexpected validation failure", result.error.errors);
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it("still rejects a past wire-string startDate", () => {
+    const hints = { timeZone: "America/New_York" } as any;
+    const schema = BookingFormSchema({
+      hints,
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    const startDate = buildLocalWireString("America/New_York", -3);
+    const endDate = buildLocalWireString("America/New_York", -1);
+
+    const result = schema.safeParse({
+      name: "TZ Booking",
+      startDate,
+      endDate,
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errorMessages = result.error.errors.map((e) => e.message);
+      expect(
+        errorMessages.some((msg) =>
+          msg.toLowerCase().includes("must be in the future")
+        )
+      ).toBe(true);
+    }
+  });
+
+  it("rejects an invalid wire-string format", () => {
+    const hints = { timeZone: "America/New_York" } as any;
+    const schema = BookingFormSchema({
+      hints,
+      action: "new",
+      workingHours: disabledWorkingHours,
+      bookingSettings: baseBookingSettings,
+      isAdminOrOwner: true,
+    });
+
+    const result = schema.safeParse({
+      name: "TZ Booking",
+      startDate: "not-a-date",
+      endDate: "2099-12-31T10:00",
+      custodian: JSON.stringify({
+        id: "tm-1",
+        name: "Test User",
+        userId: "user-1",
+      }),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errorMessages = result.error.errors.map((e) => e.message);
+      expect(
+        errorMessages.some((msg) =>
+          msg.toLowerCase().includes("invalid date format")
+        )
+      ).toBe(true);
+    }
+  });
+});
