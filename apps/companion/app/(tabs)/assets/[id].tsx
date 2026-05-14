@@ -68,7 +68,7 @@ export default function AssetDetailScreen() {
     setIsLoading,
     fetchAsset,
     onRefresh,
-  } = useAssetData(id);
+  } = useAssetData(id, currentOrg?.id);
 
   // Custody actions
   const {
@@ -130,9 +130,10 @@ export default function AssetDetailScreen() {
   // ── Notes Action ────────────────────────────────────
 
   const handlePostNote = async () => {
-    if (!asset || !noteText.trim() || isPostingNote) return;
+    const orgId = currentOrg?.id;
+    if (!asset || !noteText.trim() || isPostingNote || !orgId) return;
     setIsPostingNote(true);
-    const { error: err } = await api.addNote(asset.id, noteText.trim());
+    const { error: err } = await api.addNote(asset.id, noteText.trim(), orgId);
     if (err) {
       Alert.alert("Error", err);
     } else {
@@ -436,6 +437,11 @@ export default function AssetDetailScreen() {
             onChangeNoteText={setNoteText}
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
+            // why: surface the no-org-context state to the user. Without
+            // this, `handlePostNote` silently early-returns on missing
+            // orgId and the tap feels broken. The disabled state + hint
+            // label is the visible feedback.
+            canPostNote={!!currentOrg?.id}
           />
         </ScrollView>
       </KeyboardAvoidingView>

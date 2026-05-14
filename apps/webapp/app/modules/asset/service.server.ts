@@ -3595,8 +3595,27 @@ export async function bulkDeleteAssets({
     });
 
     try {
-      await db.asset.deleteMany({
-        where: { id: { in: assets.map((asset) => asset.id) } },
+      await db.$transaction(async (tx) => {
+        // Activity events — one ASSET_DELETED per asset, emitted before the
+        // delete so the rows still exist for any cross-ref checks. Mirrors
+        // singular `deleteAsset`.
+        if (assets.length > 0) {
+          await recordEvents(
+            assets.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_DELETED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+            })),
+            tx
+          );
+        }
+
+        await tx.asset.deleteMany({
+          where: { id: { in: assets.map((asset) => asset.id) } },
+        });
       });
 
       /** Deleting images of the assets (if any) */
@@ -4189,16 +4208,92 @@ export async function bulkUpdateAssetCategory({
       settings,
     });
 
-    await db.asset.updateMany({
+    if (resolvedIds.length === 0) {
+      return true;
+    }
+
+    // Fetch before-state so we can emit per-asset events and notes only for
+    // assets whose category actually changes.
+    const newCategoryId = categoryId || null;
+    const assetsBeforeUpdate = await db.asset.findMany({
       where: {
         id: { in: resolvedIds },
         organizationId,
       },
-      data: {
-        /** If nothing is selected then we have to remove the relation and set category to null */
-        categoryId: !categoryId ? null : categoryId,
+      select: {
+        id: true,
+        category: { select: { id: true, name: true, color: true } },
       },
     });
+
+    const assetsThatChange = assetsBeforeUpdate.filter(
+      (asset) => (asset.category?.id ?? null) !== newCategoryId
+    );
+
+    if (assetsThatChange.length === 0) {
+      return true;
+    }
+
+    // Fetch the new category once for note formatting AND to verify it
+    // belongs to this organization. Without this check, a crafted
+    // foreign-org `categoryId` would be written verbatim by `updateMany`.
+    const newCategory = newCategoryId
+      ? await db.category.findFirst({
+          where: { id: newCategoryId, organizationId },
+          select: { id: true, name: true, color: true },
+        })
+      : null;
+
+    if (newCategoryId && !newCategory) {
+      throw new ShelfError({
+        cause: null,
+        title: "Category not found",
+        message:
+          "The category you are trying to use does not exist or you do not have permission to access it.",
+        additionalData: { categoryId: newCategoryId, organizationId, userId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
+        where: { id: { in: assetsThatChange.map((a) => a.id) } },
+        data: { categoryId: newCategoryId },
+      });
+
+      // Activity events — one ASSET_CATEGORY_CHANGED per asset that changed.
+      await recordEvents(
+        assetsThatChange.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_CATEGORY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "categoryId",
+          fromValue: asset.category?.id ?? null,
+          toValue: newCategoryId,
+        })),
+        tx
+      );
+    });
+
+    // Notes can be created outside the transaction (not critical for atomicity).
+    // Mirrors the singular `updateAsset` flow.
+    const loadUserForNotes = createLoadUserForNotes(userId);
+    await Promise.all(
+      assetsThatChange.map((asset) =>
+        createAssetCategoryChangeNote({
+          assetId: asset.id,
+          userId,
+          previousCategory: asset.category,
+          newCategory,
+          loadUserForNotes,
+        })
+      )
+    );
 
     return true;
   } catch (cause) {
@@ -4241,6 +4336,29 @@ export async function bulkAssignAssetTags({
       return true;
     }
 
+    // Validate that every tag id belongs to this organization before
+    // wiring it into the `connect`/`disconnect` payload. Prisma's nested
+    // `connect: { id }` operation has no org scoping on its own, so a
+    // crafted foreign-org tag id would otherwise be attached/detached.
+    if (tagsIds.length > 0) {
+      const orgTags = await db.tag.findMany({
+        where: { id: { in: tagsIds }, organizationId },
+        select: { id: true },
+      });
+      if (orgTags.length !== new Set(tagsIds).size) {
+        throw new ShelfError({
+          cause: null,
+          title: "Tag not found",
+          message:
+            "One or more selected tags do not exist or you do not have permission to access them.",
+          additionalData: { tagsIds, organizationId, userId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const loadUserForNotes = createLoadUserForNotes(userId);
 
     const previousTagsByAssetId = await db.asset
@@ -4266,28 +4384,55 @@ export async function bulkAssignAssetTags({
         }, new Map())
       );
 
-    const updatePromises = resolvedIds.map((id) =>
-      db.asset.update({
-        where: { id, organizationId },
-        data: {
-          tags: {
-            [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
-              id: tagId,
-            })),
-          },
-        },
-        include: {
-          tags: {
-            select: {
-              id: true,
-              name: true,
+    const updatedAssets = await db.$transaction(async (tx) => {
+      const results = await Promise.all(
+        resolvedIds.map((id) =>
+          tx.asset.update({
+            where: { id, organizationId },
+            data: {
+              tags: {
+                [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
+                  id: tagId,
+                })),
+              },
             },
-          },
-        },
-      })
-    );
+            include: {
+              tags: { select: { id: true, name: true } },
+            },
+          })
+        )
+      );
 
-    const updatedAssets = await Promise.all(updatePromises);
+      // Activity events — one ASSET_TAGS_CHANGED per asset whose tag set
+      // actually changed. Same shape as the singular `updateAsset` flow.
+      const tagChangeEvents: Parameters<typeof recordEvents>[0] = [];
+      for (const asset of results) {
+        const previousTags = previousTagsByAssetId.get(asset.id) ?? [];
+        const previousTagIds = new Set(previousTags.map((t) => t.id));
+        const currentTagIds = new Set(asset.tags.map((t) => t.id));
+        const setsDiffer =
+          previousTagIds.size !== currentTagIds.size ||
+          [...previousTagIds].some((t) => !currentTagIds.has(t));
+        if (setsDiffer) {
+          tagChangeEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_TAGS_CHANGED",
+            entityType: "ASSET",
+            entityId: asset.id,
+            assetId: asset.id,
+            field: "tags",
+            fromValue: [...previousTagIds],
+            toValue: [...currentTagIds],
+          });
+        }
+      }
+      if (tagChangeEvents.length > 0) {
+        await recordEvents(tagChangeEvents, tx);
+      }
+
+      return results;
+    });
 
     await Promise.all(
       updatedAssets.map((asset) =>
@@ -4635,6 +4780,74 @@ export async function getEntitiesWithSelectedValues({
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
   };
+}
+
+/**
+ * Parses a raw valuation string from a form input into a finite number, or
+ * null when the field was left blank. Throws a 400 ShelfError for any input
+ * that cannot be coerced to a finite number.
+ *
+ * Used by the asset overview's inline-edit action so that browser-side
+ * `type="text" inputMode="decimal"` inputs surface a clear server error
+ * instead of a Prisma type error.
+ *
+ * @param raw - The raw string value from `formData.get("fieldValue")`
+ * @returns A finite number, or null when the input is blank
+ * @throws {ShelfError} 400 when the input is non-empty but not a finite number
+ */
+export function parseAssetValuation(raw: string | null): number | null {
+  if (!raw || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Value must be a valid number",
+      label: "Assets",
+      shouldBeCaptured: false,
+      status: 400,
+    });
+  }
+  return parsed;
+}
+
+/**
+ * Returns the active custom field definitions scoped to the given asset's
+ * category. Throws a 404 ShelfError when the asset does not exist in the
+ * given organization — this is the source of truth for the cross-org IDOR
+ * guard used by the asset overview inline-edit action.
+ *
+ * @param params.id - Asset id
+ * @param params.organizationId - Organization id (asset must belong to it)
+ * @returns The array of active custom-field definitions for the asset's category
+ * @throws {ShelfError} 404 when the asset is not found in the organization
+ */
+export async function getActiveCustomFieldsForAsset({
+  id,
+  organizationId,
+}: {
+  id: string;
+  organizationId: string;
+}) {
+  const asset = await db.asset.findUnique({
+    where: { id, organizationId },
+    select: { categoryId: true },
+  });
+
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Assets",
+      status: 404,
+      shouldBeCaptured: false,
+      additionalData: { id, organizationId },
+    });
+  }
+
+  return getActiveCustomFields({
+    organizationId,
+    category: asset.categoryId,
+  });
 }
 
 export async function getCategoriesForCreateAndEdit({

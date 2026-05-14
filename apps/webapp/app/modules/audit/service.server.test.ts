@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAuditSession,
   addAssetsToAudit,
@@ -12,8 +13,10 @@ import {
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
+  cancelAuditSession,
   deleteAuditSession,
   bulkDeleteAudits,
+  duplicateAuditSession,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -43,11 +46,32 @@ vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: cancellation triggers email + scheduler side effects we don't exercise in service unit tests
+vi.mock("./email-helpers", () => ({
+  sendAuditCancelledEmails: vi.fn(),
+  sendAuditCompletedEmail: vi.fn(),
+}));
+
+// why: cancelAuditReminders calls scheduler.cancel via QueueNames; mock the whole module to avoid pg-boss.
+// Keys mirror the real enum at apps/webapp/app/utils/scheduler.server.ts so tests touching
+// scheduleNextAuditJob (which references QueueNames.auditQueue) don't diverge from production shape.
+vi.mock("~/utils/scheduler.server", () => ({
+  scheduler: { cancel: vi.fn().mockResolvedValue(undefined) },
+  QueueNames: {
+    emailQueue: "email-queue",
+    bookingQueue: "booking-queue",
+    auditQueue: "audit-queue",
+    assetsQueue: "assets-queue",
+    addonTrialQueue: "addon-trial-queue",
+  },
+}));
+
 vi.mock("~/database/db.server", () => {
   const mockDb = {
     auditSession: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
@@ -91,6 +115,7 @@ const mockDb = db as unknown as {
   auditSession: {
     create: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -1347,6 +1372,531 @@ describe("audit service", () => {
           message: expect.stringMatching(/Failed to bulk delete audits/),
         });
       });
+    });
+  });
+
+  describe("duplicateAuditSession", () => {
+    const baseInput = {
+      auditSessionId: "audit-original",
+      organizationId: "org-1",
+      userId: "user-duplicator",
+    };
+
+    const originalAudit = {
+      id: "audit-original",
+      name: "Hull PC Bank Audit",
+      description: "Quarterly check",
+      organizationId: "org-1",
+      createdById: "user-1",
+      status: AuditStatus.COMPLETED,
+      scopeMeta: { contextType: "tag", contextName: "Canary PCs" },
+      targetId: null,
+      // Prisma's `where: { expected: true }` filter is applied at query time;
+      // the mock returns only the expected rows the service is meant to see.
+      assets: [
+        { assetId: "asset-1" },
+        { assetId: "asset-2" },
+        { assetId: "asset-3" },
+      ],
+    };
+
+    beforeEach(() => {
+      // Match the clearAllMocks pattern every other nested suite uses, so
+      // mock state can't leak in either direction. clearAllMocks resets
+      // call history; mockResolvedValue assignments below re-establish what
+      // each test relies on.
+      vi.clearAllMocks();
+
+      // Original audit lookup — overridden per test for not-found cases.
+      mockDb.auditSession.findFirst.mockResolvedValue(originalAudit);
+
+      // Default: all assets still exist.
+      mockDb.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+        { id: "asset-3", title: "PC #3" },
+      ]);
+
+      // createAuditSession internals (called by duplicateAuditSession).
+      mockDb.auditSession.create.mockResolvedValue({
+        id: "audit-copy",
+        name: `${originalAudit.name} (Copy)`,
+        description: originalAudit.description,
+        organizationId: "org-1",
+        createdById: baseInput.userId,
+        expectedAssetCount: 3,
+        foundAssetCount: 0,
+        missingAssetCount: 3,
+        unexpectedAssetCount: 0,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        status: AuditStatus.PENDING,
+        scopeMeta: originalAudit.scopeMeta,
+        targetId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-copy",
+        name: `${originalAudit.name} (Copy)`,
+        description: originalAudit.description,
+        organizationId: "org-1",
+        createdById: baseInput.userId,
+        expectedAssetCount: 3,
+        foundAssetCount: 0,
+        missingAssetCount: 3,
+        unexpectedAssetCount: 0,
+        status: AuditStatus.PENDING,
+        scopeMeta: originalAudit.scopeMeta,
+        targetId: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        assignments: [],
+      });
+      mockDb.auditAsset.createMany.mockResolvedValue({ count: 3 });
+      mockDb.auditAsset.findMany.mockResolvedValue([
+        { id: "aa-1", assetId: "asset-1" },
+        { id: "aa-2", assetId: "asset-2" },
+        { id: "aa-3", assetId: "asset-3" },
+      ]);
+    });
+
+    it("creates a (Copy) audit and reports zero dropped assets when all assets still exist", async () => {
+      const result = await duplicateAuditSession(baseInput);
+
+      // The include must filter to expected:true so unexpected scan rows
+      // don't get promoted into the duplicate's scope.
+      expect(mockDb.auditSession.findFirst).toHaveBeenCalledWith({
+        where: { id: "audit-original", organizationId: "org-1" },
+        include: {
+          assets: { where: { expected: true }, select: { assetId: true } },
+        },
+      });
+
+      // The validateExistingAssetIds query — drives dropped-asset counting.
+      expect(mockDb.asset.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ["asset-1", "asset-2", "asset-3"] },
+          organizationId: "org-1",
+        },
+        select: { id: true },
+      });
+
+      // createAuditSession received the (Copy) name and scopeMeta as-is.
+      expect(mockDb.auditSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: "Hull PC Bank Audit (Copy)",
+          description: "Quarterly check",
+          organizationId: "org-1",
+          createdById: baseInput.userId,
+          scopeMeta: originalAudit.scopeMeta,
+        }),
+      });
+
+      // Due date and assignments must NOT carry over (PRD).
+      const createCall = mockDb.auditSession.create.mock.calls[0][0];
+      expect(createCall.data.dueDate).toBeUndefined();
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        newSession: expect.objectContaining({ id: "audit-copy" }),
+        droppedAssetCount: 0,
+        originalAssetCount: 3,
+      });
+    });
+
+    it("succeeds with a non-zero droppedAssetCount when some assets no longer exist", async () => {
+      // Only 2 of 3 assets still exist in the org.
+      mockDb.asset.findMany.mockResolvedValueOnce([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+      ]);
+      // createAuditSession's own asset existence check — must match the
+      // filtered list it's called with.
+      mockDb.asset.findMany.mockResolvedValueOnce([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+      ]);
+
+      const result = await duplicateAuditSession(baseInput);
+
+      expect(result.droppedAssetCount).toBe(1);
+      expect(result.originalAssetCount).toBe(3);
+      expect(result.newSession).toMatchObject({ id: "audit-copy" });
+    });
+
+    it("throws a 400 ShelfError when no original assets remain", async () => {
+      mockDb.asset.findMany.mockResolvedValueOnce([]);
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringMatching(/None of the original assets/),
+      });
+
+      // Must not have attempted to create anything.
+      expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    });
+
+    it("throws a 404 ShelfError when the source audit is not found", async () => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce(null);
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 404,
+        message: expect.stringMatching(/Audit not found/),
+      });
+
+      expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    });
+
+    it("preserves scopeMeta as-is even when it is null", async () => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce({
+        ...originalAudit,
+        scopeMeta: null,
+      });
+
+      await duplicateAuditSession(baseInput);
+
+      expect(mockDb.auditSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ scopeMeta: undefined }),
+      });
+    });
+
+    it("wraps unknown causes in a 500 ShelfError", async () => {
+      mockDb.auditSession.findFirst.mockRejectedValueOnce(
+        new Error("DB exploded")
+      );
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 500,
+        message: expect.stringMatching(/Something went wrong/),
+      });
+    });
+
+    it.each([
+      ["PENDING", AuditStatus.PENDING],
+      ["ACTIVE", AuditStatus.ACTIVE],
+    ])(
+      "rejects duplication of a %s audit with a 400 (server-side guard)",
+      async (_label, status) => {
+        mockDb.auditSession.findFirst.mockResolvedValueOnce({
+          ...originalAudit,
+          status,
+        });
+
+        await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /completed, cancelled, or archived audits can be duplicated/
+          ),
+        });
+
+        expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      ["COMPLETED", AuditStatus.COMPLETED],
+      ["CANCELLED", AuditStatus.CANCELLED],
+      ["ARCHIVED", AuditStatus.ARCHIVED],
+    ])("allows duplication of a %s audit", async (_label, status) => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce({
+        ...originalAudit,
+        status,
+      });
+
+      await expect(duplicateAuditSession(baseInput)).resolves.toMatchObject({
+        newSession: expect.objectContaining({ id: "audit-copy" }),
+      });
+    });
+  });
+
+  describe("cancelAuditSession permission", () => {
+    const auditSessionId = "audit-1";
+    const organizationId = "org-1";
+    const creatorId = "user-creator";
+    const adminId = "user-admin";
+    const stranger = "user-stranger";
+    const hints = {
+      timeZone: "UTC",
+      hourFormat: "24",
+      locale: "en-US",
+    } as unknown as Parameters<typeof cancelAuditSession>[0]["hints"];
+
+    const baseAudit = {
+      id: auditSessionId,
+      name: "Floor 2 PC Audit",
+      organizationId,
+      createdById: creatorId,
+      status: AuditStatus.PENDING,
+      activeSchedulerReference: null,
+      createdBy: {
+        email: "creator@example.com",
+        firstName: "Created",
+        lastName: "By",
+        displayName: "Created By",
+      },
+      organization: { owner: { email: "owner@example.com" } },
+      assignments: [],
+      _count: { assets: 5 },
+    };
+
+    beforeEach(() => {
+      // Default: audit exists, has no scheduler ref so cancelAuditReminders no-ops.
+      mockDb.auditSession.findUnique.mockResolvedValue(baseAudit);
+      // Atomic transition succeeds (count: 1) and the post-update re-fetch
+      // returns the cancelled row.
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
+      mockDb.auditSession.findUniqueOrThrow.mockResolvedValue({
+        ...baseAudit,
+        status: AuditStatus.CANCELLED,
+        cancelledAt: new Date(),
+      });
+      mockDb.user.findFirst.mockResolvedValue({
+        firstName: "Acting",
+        lastName: "User",
+        displayName: null,
+      });
+      mockDb.auditNote.create.mockResolvedValue({ id: "note-1" });
+    });
+
+    it("lets the creator cancel their own audit (legacy behavior)", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: creatorId,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
+
+      // Atomic transition: status guard prevents overwriting a row that
+      // raced into a terminal state between the read-check and the write.
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: auditSessionId,
+          organizationId,
+          status: {
+            notIn: [
+              AuditStatus.COMPLETED,
+              AuditStatus.CANCELLED,
+              AuditStatus.ARCHIVED,
+            ],
+          },
+        },
+        data: { status: AuditStatus.CANCELLED, cancelledAt: expect.any(Date) },
+      });
+    });
+
+    it("lets an admin/owner cancel an audit they did not create", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: adminId,
+          isAdminOrOwner: true,
+          hints,
+        })
+      ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
+    });
+
+    it("rejects a non-creator non-admin with 403", async () => {
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: stranger,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).rejects.toMatchObject({
+        status: 403,
+        message: expect.stringMatching(/creator or a workspace admin/),
+      });
+
+      expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("still rejects when the audit is already COMPLETED, even for an admin", async () => {
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        status: AuditStatus.COMPLETED,
+      });
+
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: adminId,
+          isAdminOrOwner: true,
+          hints,
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("attributes the cancellation email to the actual canceller, not the creator", async () => {
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "Acting User" })
+      );
+    });
+
+    it("notifies the creator when an admin cancels their audit", async () => {
+      // Audit has one assignee (other than the admin or creator) so we can
+      // assert both the assignee and the creator end up in the notify list.
+      const assigneeUser = {
+        email: "assignee@example.com",
+        firstName: "Assigned",
+        lastName: "Person",
+        displayName: null,
+      };
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        assignments: [{ userId: "user-assignee", user: assigneeUser }],
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const recipientIds = call.assigneesToNotify.map(
+        (a: { userId: string }) => a.userId
+      );
+
+      expect(recipientIds).toContain("user-assignee");
+      expect(recipientIds).toContain(creatorId);
+      expect(recipientIds).not.toContain(adminId);
+    });
+
+    it("does not double-notify the creator when they are also an assignee", async () => {
+      const creatorAsAssignee = {
+        email: "creator@example.com",
+        firstName: "Created",
+        lastName: "By",
+        displayName: "Created By",
+      };
+      mockDb.auditSession.findUnique.mockResolvedValueOnce({
+        ...baseAudit,
+        assignments: [{ userId: creatorId, user: creatorAsAssignee }],
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const creatorEntries = call.assigneesToNotify.filter(
+        (a: { userId: string }) => a.userId === creatorId
+      );
+
+      expect(creatorEntries).toHaveLength(1);
+    });
+
+    it("does not notify the creator when the creator cancels their own audit", async () => {
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: creatorId,
+        isAdminOrOwner: false,
+        hints,
+      });
+
+      const call = (
+        sendAuditCancelledEmails as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0];
+      const recipientIds = call.assigneesToNotify.map(
+        (a: { userId: string }) => a.userId
+      );
+
+      expect(recipientIds).not.toContain(creatorId);
+    });
+
+    it("throws 409 when a concurrent transition wins the race (transition.count === 0)", async () => {
+      // Simulate: status read passed (PENDING), but between then and the
+      // updateMany call, another request flipped the audit to COMPLETED.
+      // The atomic where-clause guard refuses to overwrite, count returns 0.
+      mockDb.auditSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        cancelAuditSession({
+          auditSessionId,
+          organizationId,
+          userId: creatorId,
+          isAdminOrOwner: false,
+          hints,
+        })
+      ).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringMatching(/Audit status changed/),
+      });
+
+      // Side effects must not fire on a failed transition.
+      expect(mockDb.auditNote.create).not.toHaveBeenCalled();
+      expect(sendAuditCancelledEmails).not.toHaveBeenCalled();
+    });
+
+    it("falls back to 'a workspace admin' when an admin with no resolvable name cancels", async () => {
+      mockDb.user.findFirst.mockResolvedValueOnce({
+        firstName: null,
+        lastName: null,
+        displayName: null,
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: adminId,
+        isAdminOrOwner: true,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "a workspace admin" })
+      );
+    });
+
+    it("falls back to 'the audit creator' when the creator has no resolvable name", async () => {
+      mockDb.user.findFirst.mockResolvedValueOnce({
+        firstName: null,
+        lastName: null,
+        displayName: null,
+      });
+
+      await cancelAuditSession({
+        auditSessionId,
+        organizationId,
+        userId: creatorId,
+        isAdminOrOwner: false,
+        hints,
+      });
+
+      expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelledByName: "the audit creator" })
+      );
     });
   });
 });

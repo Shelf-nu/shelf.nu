@@ -15,11 +15,14 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { OverdueItemRow, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 import { ReportEmptyState } from "./report-empty-state";
-import { ReportTable, DateCell } from "./report-table";
+import { ReportTable, CurrencyCell, DateCell } from "./report-table";
 
 /**
  * Column definitions for the Overdue Items table, declared at module scope
@@ -96,13 +99,8 @@ const OVERDUE_ITEMS_COLUMNS: ColumnDef<OverdueItemRow>[] = [
   {
     accessorKey: "valueAtRisk",
     header: "Value",
-    cell: ({ row }) =>
-      // `!= null` so a real $0 value-at-risk renders as "$0", not "—".
-      row.original.valueAtRisk != null ? (
-        `$${row.original.valueAtRisk.toLocaleString()}`
-      ) : (
-        <span className="text-gray-400">—</span>
-      ),
+    // A real $0 value-at-risk renders as "$0" (or workspace equivalent), not "—".
+    cell: ({ row }) => <CurrencyCell value={row.original.valueAtRisk} />,
   },
 ];
 
@@ -130,6 +128,8 @@ export function OverdueItemsContent({
   totalRows,
   onRowClick,
 }: Props) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
   const columns = OVERDUE_ITEMS_COLUMNS;
 
   // Extract KPI values for hero display
@@ -183,7 +183,13 @@ export function OverdueItemsContent({
               <div className="flex flex-col">
                 <span className="text-xs text-gray-500">Total Value</span>
                 <span className="text-lg font-medium text-gray-900">
-                  {valueAtRisk > 0 ? `$${valueAtRisk.toLocaleString()}` : "—"}
+                  {valueAtRisk > 0
+                    ? formatCurrency({
+                        value: valueAtRisk,
+                        currency: currentOrganization?.currency ?? "USD",
+                        locale,
+                      })
+                    : "—"}
                 </span>
               </div>
               <div className="flex flex-col">
