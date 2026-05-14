@@ -85,6 +85,10 @@ export function getActionMethod(request: Request) {
  * `TypeError: Content-Type was not one of "multipart/form-data" or
  * "application/x-www-form-urlencoded".` into a non-captured `badRequest`.
  *
+ * Only `TypeError` (the malformed-body case) is downgraded to a 400 — any
+ * other exception is rethrown so genuine server/runtime faults stay visible
+ * to Sentry instead of being masked as client errors.
+ *
  * Use this in actions that may receive malformed bodies (auth endpoints
  * and other public routes that external/mobile clients could hit).
  *
@@ -97,13 +101,16 @@ export async function readFormData(request: Request): Promise<FormData> {
   try {
     return await request.formData();
   } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Invalid request body. Expected a form submission.",
-      label: "Request validation",
-      shouldBeCaptured: false,
-      status: 400,
-    });
+    if (cause instanceof TypeError) {
+      throw new ShelfError({
+        cause,
+        message: "Invalid request body. Expected a form submission.",
+        label: "Request validation",
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+    throw cause;
   }
 }
 
