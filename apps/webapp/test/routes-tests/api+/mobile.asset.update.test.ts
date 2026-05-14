@@ -318,6 +318,13 @@ describe("POST /api/mobile/asset/update", () => {
     // future client that drifts back to the wrapped shape fails loud
     // in tests instead of in customers' hands.
     it("rejects a wrapped { raw: ... } object as the value", async () => {
+      // why: seed a matching definition so the test path is unambiguously
+      // the Zod parse failure on `value`, not the unknown-id rejection
+      // that runs against an empty defs array.
+      (getActiveCustomFields as any).mockResolvedValue([
+        { id: "cf-text-1", name: "Notes", type: "TEXT", required: false },
+      ]);
+
       const request = createRequest({
         assetId: "asset-1",
         customFields: [{ id: "cf-text-1", value: { raw: "hello" } }],
@@ -325,8 +332,13 @@ describe("POST /api/mobile/asset/update", () => {
       const result = await action(createActionArgs({ request }));
 
       expect(result instanceof Response).toBe(true);
-      // Zod parse failure should bubble through `makeShelfError`.
-      expect((result as unknown as Response).status).not.toBe(200);
+      // Zod parse throws ZodError → caught by the route → makeShelfError
+      // wraps it. The mock at the top of this file (`vi.mock` for
+      // ~/utils/error) doesn't extract a status from ZodError, so the
+      // fallback `cause?.status || 500` returns 500. Assert that exact
+      // status — looser checks (e.g. `!= 200`) accept 401/403 and miss
+      // a future regression where auth fails before validation.
+      expect((result as unknown as Response).status).toBe(500);
       expect(updateAsset).not.toHaveBeenCalled();
     });
 
