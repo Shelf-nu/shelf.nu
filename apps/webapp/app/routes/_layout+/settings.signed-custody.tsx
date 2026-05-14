@@ -1,3 +1,12 @@
+/**
+ * Signed custody settings route.
+ *
+ * Provides read and update handlers for organization-level signed custody
+ * toggles, including compatibility guards that block personal workspaces.
+ *
+ * @see ~/utils/roles.server
+ * @see ~/utils/http.server
+ */
 import { useState } from "react";
 import { OrganizationType } from "@prisma/client";
 import type {
@@ -37,6 +46,14 @@ const SignedCustodySettingsSchema = z.object({
     .default("false"),
 });
 
+/**
+ * Loads current signed custody settings for the active organization.
+ *
+ * @param args - Route loader arguments containing session context and request.
+ * @returns Serialized page payload with signed custody settings state.
+ * @throws {Response} Throws a structured error response when authorization or
+ * data loading fails.
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -80,6 +97,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Updates signed custody settings for the active organization.
+ *
+ * @param args - Route action arguments containing session context and request.
+ * @returns Success payload with updated organization settings, or a structured
+ * error payload when the update cannot be completed.
+ * @throws {ShelfError} Throws for unsupported organization types before being
+ * mapped to an HTTP error payload.
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -146,16 +172,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Route handle metadata used by the settings breadcrumb UI.
+ *
+ * @returns Breadcrumb label for this route.
+ */
 export const handle = {
   breadcrumb: () => "Signed custody",
 };
 
+/**
+ * Builds the document title for the signed custody settings page.
+ *
+ * @param args - Meta function arguments with loader data.
+ * @returns Route metadata entries for the HTML head.
+ */
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
+/**
+ * Error boundary for signed custody settings route failures.
+ *
+ * @returns Error screen content for route-level failures.
+ */
 export const ErrorBoundary = () => <ErrorContent />;
 
+/**
+ * Renders the signed custody settings form.
+ *
+ * @returns The settings page form for toggling signed custody behavior.
+ */
 export default function SignedCustodySettingsPage() {
   const { organization } = useLoaderData<typeof loader>();
   const disabled = useDisabled();
