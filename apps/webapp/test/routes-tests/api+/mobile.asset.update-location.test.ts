@@ -32,9 +32,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobilePermission: vi.fn(),
 }));
 
-// why: external database — we don't want to hit the real database in tests
-vi.mock("~/database/db.server", () => ({
-  db: {
+// why: external database — we don't want to hit the real database in tests.
+// PR #2533 wraps the asset update + activity-event write in `db.$transaction`,
+// so the mock needs a `$transaction` that just invokes the callback with the
+// same mocked db as the tx client. Without this the route's tx call returns
+// undefined and the test sees `body.asset` undefined.
+vi.mock("~/database/db.server", () => {
+  const db: any = {
     asset: {
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -42,7 +46,18 @@ vi.mock("~/database/db.server", () => ({
     location: {
       findFirst: vi.fn(),
     },
-  },
+  };
+  db.$transaction = vi.fn((callback: (tx: typeof db) => Promise<unknown>) =>
+    callback(db)
+  );
+  return { db };
+});
+
+// why: the route records an `ASSET_LOCATION_CHANGED` activity event inside the
+// transaction. We mock the service so tests don't try to write to the real
+// `activityEvent` table.
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn(),
 }));
 
 // why: external service — we don't want to create real notes in the database
@@ -150,6 +165,43 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+  });
+
+  it("should short-circuit (no update, no event, no note) when location is unchanged", async () => {
+    // why: codified by `.claude/rules/bulk-event-parity.md` — the singular
+    // mobile path must filter out no-op location moves the same way
+    // `bulkUpdateAssetLocation` does, so reports don't count phantom
+    // `ASSET_LOCATION_CHANGED` events with fromValue === toValue.
+    const { recordEvent } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    (db.asset.findUnique as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Test Laptop",
+      location: { id: "loc-same", name: "Same Office" },
+      kit: null,
+    });
+    (db.location.findFirst as any).mockResolvedValue({
+      id: "loc-same",
+      name: "Same Office",
+    });
+
+    const request = createRequest({
+      assetId: "asset-1",
+      locationId: "loc-same",
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect(result instanceof Response).toBe(true);
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+    expect(body.asset.id).toBe("asset-1");
+    expect(body.asset.location.id).toBe("loc-same");
+
+    // No write, no event, no note when the location is unchanged.
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
   });
 
   it("should return 404 when asset is not found", async () => {

@@ -27,6 +27,7 @@ import {
   error,
   getCurrentSearchParams,
   parseData,
+  readFormData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 
@@ -79,7 +80,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
     const { intent } = parseData(
-      await request.clone().formData(),
+      await readFormData(request.clone()),
       z.object({ intent: z.enum(["request-otp", "confirm-otp"]) }),
       {
         message:
@@ -91,7 +92,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     switch (intent) {
       case "request-otp": {
         const { email } = parseData(
-          await request.formData(),
+          await readFormData(request),
           ForgotPasswordSchema,
           { shouldBeCaptured: false }
         );
@@ -135,7 +136,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
       case "confirm-otp": {
         const { email, otp, password } = parseData(
-          await request.clone().formData(),
+          await readFormData(request.clone()),
           OtpSchema,
           { shouldBeCaptured: false }
         );
