@@ -174,6 +174,8 @@ describe("POST /api/mobile/audits/record-scan", () => {
     const result = await action(createActionArgs({ request }));
 
     expect((result as unknown as Response).status).toBe(403);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("Audits add-on required");
     expect(recordAuditScan).not.toHaveBeenCalled();
   });
 });

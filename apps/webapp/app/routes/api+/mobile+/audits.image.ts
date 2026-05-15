@@ -37,6 +37,14 @@ import {
  *
  * The upload pipeline (resize/thumbnail/storage) is shared with the webapp
  * via `uploadAuditImage`.
+ *
+ * @param args - Remix action args; `request` carries the bearer auth
+ *   header, the query params, and the multipart body (`image` + optional
+ *   `content`)
+ * @returns A JSON `Response`: `{ image }` on success, otherwise
+ *   `{ error: { message } }` with a 4xx status (400/403/404)
+ * @throws Never — all failures are caught and returned as JSON error
+ *   responses via `makeShelfError`
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {

@@ -29,6 +29,13 @@ import {
  *   - auditSessionId: string
  *   - auditAssetId: string — the AuditAsset the note is condition evidence for
  *   - content: string — the note body
+ *
+ * @param args - Remix action args; `request` carries the bearer auth
+ *   header, the `orgId` query param, and the JSON body
+ * @returns A JSON `Response`: `{ note }` on success, otherwise
+ *   `{ error: { message } }` with a 4xx status (400/403/404)
+ * @throws Never — all failures are caught and returned as JSON error
+ *   responses via `makeShelfError`
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
