@@ -92,10 +92,13 @@ function createImageRequest(opts: {
   const params = new URLSearchParams({ orgId: "org-1" });
   if (opts.auditSessionId) params.set("auditSessionId", opts.auditSessionId);
   if (opts.auditAssetId) params.set("auditAssetId", opts.auditAssetId);
-  if (opts.content) params.set("content", opts.content);
+  // content travels in the multipart body now (not the query string)
+  const form = new FormData();
+  if (opts.content !== undefined) form.set("content", opts.content);
   return new Request(`http://localhost/api/mobile/audits/image?${params}`, {
     method: "POST",
     headers: { Authorization: "Bearer token" },
+    body: form,
   });
 }
 
@@ -173,6 +176,24 @@ describe("POST /api/mobile/audits/image", () => {
       })
     );
     expect(createAuditAssetImagesAddedNote).not.toHaveBeenCalled();
+  });
+
+  it("strips Markdoc delimiters from content so the audit_images tag can't be injected", async () => {
+    await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          content: 'evil {% audit_images ids="stolen-id" /%} text',
+        }),
+      })
+    );
+
+    const noteContent = (txAuditNoteCreate as any).mock.calls[0][0].data
+      .content as string;
+    // injected tag delimiters removed; only the trusted trailing tag remains
+    expect(noteContent).not.toContain('{% audit_images ids="stolen-id"');
+    expect(noteContent).toContain('{% audit_images count=1 ids="img-1" /%}');
   });
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {

@@ -28,11 +28,15 @@ import {
  *   - orgId (required): organization ID
  *   - auditSessionId (required)
  *   - auditAssetId (required): the AuditAsset this photo is evidence for
- *   - content (optional): note text to attach alongside the photo
  *
- * Body: multipart/form-data with field `image` (the photo file). The
- * upload pipeline (resize/thumbnail/storage) is shared with the webapp via
- * `uploadAuditImage`.
+ * Body: multipart/form-data with:
+ *   - `image` (required): the photo file
+ *   - `content` (optional): note text to attach alongside the photo. Sent
+ *     in the body (not the query) so a long note can't blow URL limits or
+ *     leak into request logs.
+ *
+ * The upload pipeline (resize/thumbnail/storage) is shared with the webapp
+ * via `uploadAuditImage`.
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -49,7 +53,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const url = new URL(request.url);
     const auditSessionId = url.searchParams.get("auditSessionId");
     const auditAssetId = url.searchParams.get("auditAssetId");
-    const content = url.searchParams.get("content");
 
     if (!auditSessionId || !auditAssetId) {
       return data(
@@ -87,6 +90,15 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // Read the optional note text from the multipart body, NOT the query
+    // string: a note can be up to 5000 chars, which risks URL-length
+    // limits (414/413) and leaks potentially-sensitive text into access /
+    // CDN logs. Clone so uploadAuditImage can still parse the file stream
+    // from the original request (mirrors the webapp sibling).
+    const formData = await request.clone().formData();
+    const contentRaw = formData.get("content");
+    const content = typeof contentRaw === "string" ? contentRaw : null;
+
     // Shared pipeline: parse multipart, resize, thumbnail, upload to
     // storage, create the AuditImage row tied to auditAssetId.
     const image = await uploadAuditImage({
@@ -107,7 +119,13 @@ export async function action({ request }: ActionFunctionArgs) {
             auditSessionId,
             auditAssetId,
             userId: user.id,
-            content: `${content.trim()}\n\n{% audit_images count=1 ids="${
+            // Strip Markdoc delimiters from user content so it can't break
+            // or inject the trailing {% audit_images %} tag. (The webapp
+            // sibling has the same unsanitized concat — flagged for a
+            // shared-helper follow-up rather than diverging silently.)
+            content: `${content
+              .trim()
+              .replace(/\{%|%\}/g, "")}\n\n{% audit_images count=1 ids="${
               image.id
             }" /%}`,
             type: "COMMENT",

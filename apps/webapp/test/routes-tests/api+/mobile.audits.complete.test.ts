@@ -170,4 +170,20 @@ describe("POST /api/mobile/audits/complete", () => {
 
     expect(completeAuditSession).not.toHaveBeenCalled();
   });
+
+  it("should return 403 when the Audits add-on is disabled", async () => {
+    const auditsError = new Error("Audits add-on required");
+    (auditsError as any).status = 403;
+    (requireMobileAuditsEnabled as any).mockRejectedValue(auditsError);
+    (makeShelfError as any).mockReturnValue({
+      message: "Audits add-on required",
+      status: 403,
+    });
+
+    const request = createCompleteRequest({ sessionId: "session-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(completeAuditSession).not.toHaveBeenCalled();
+  });
 });

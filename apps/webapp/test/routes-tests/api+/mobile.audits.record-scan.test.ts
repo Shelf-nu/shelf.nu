@@ -155,4 +155,25 @@ describe("POST /api/mobile/audits/record-scan", () => {
 
     expect(recordAuditScan).not.toHaveBeenCalled();
   });
+
+  it("should return 403 when the Audits add-on is disabled", async () => {
+    const auditsError = new Error("Audits add-on required");
+    (auditsError as any).status = 403;
+    (requireMobileAuditsEnabled as any).mockRejectedValue(auditsError);
+    (makeShelfError as any).mockReturnValue({
+      message: "Audits add-on required",
+      status: 403,
+    });
+
+    const request = createRecordScanRequest({
+      auditSessionId: "session-1",
+      qrId: "qr-abc",
+      assetId: "asset-1",
+      isExpected: true,
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(recordAuditScan).not.toHaveBeenCalled();
+  });
 });
