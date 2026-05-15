@@ -62,7 +62,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
       const text = checkoutReminderEmailContent({
         bookingName: booking.name,
-        assetsCount: booking._count.assets,
+        assetsCount: booking._count.bookingAssets,
         custodian,
         from: booking.from,
         to: booking.to,
@@ -78,7 +78,7 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
             new Date(booking.from),
             new Date()
           )}.`,
-          assetCount: booking._count.assets,
+          assetCount: booking._count.bookingAssets,
           hints: data.hints,
           recipientReason: recipient.reason,
           recipientEmail: recipient.email,
@@ -118,7 +118,7 @@ const checkinReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
   if (booking.from && booking.to && booking.status === BookingStatus.ONGOING) {
     await sendCheckinReminder(
       booking,
-      booking._count.assets,
+      booking._count.bookingAssets,
       data.hints,
       booking.organizationId
     );
@@ -197,7 +197,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
     const text = overdueBookingEmailContent({
       bookingName: booking.name,
-      assetsCount: booking._count.assets,
+      assetsCount: booking._count.bookingAssets,
       custodian,
       from: booking.from as Date,
       to: booking.to as Date,
@@ -210,7 +210,7 @@ const overdueHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
       const html = await bookingUpdatesTemplateString({
         booking,
         heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
-        assetCount: booking._count.assets,
+        assetCount: booking._count.bookingAssets,
         hints: data.hints,
         recipientReason: recipient.reason,
         recipientEmail: recipient.email,

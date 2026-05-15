@@ -26,6 +26,14 @@ type CheckoutDialogProps = {
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
+  /**
+   * Optional className override for the trigger button. Defaults to `"grow"`
+   * to match the original action-bar usage in `edit-booking-form`. Embedded
+   * contexts (e.g. the fulfil-and-checkout drawer) can pass a narrower class
+   * so the button doesn't stretch oddly when its sibling buttons aren't also
+   * `grow`.
+   */
+  triggerClassName?: string;
 };
 
 export default function CheckoutDialog({
@@ -33,6 +41,7 @@ export default function CheckoutDialog({
   booking,
   portalContainer,
   formId,
+  triggerClassName = "grow",
 }: CheckoutDialogProps) {
   const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
 
@@ -40,7 +49,7 @@ export default function CheckoutDialog({
     return (
       <Button
         disabled={disabled}
-        className="grow"
+        className={triggerClassName}
         size="sm"
         type="submit"
         name="intent"
@@ -54,7 +63,12 @@ export default function CheckoutDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button disabled={disabled} className="grow" size="sm" type="button">
+        <Button
+          disabled={disabled}
+          className={triggerClassName}
+          size="sm"
+          type="button"
+        >
           Check Out
         </Button>
       </AlertDialogTrigger>

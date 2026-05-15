@@ -115,7 +115,7 @@ export default function AssignCustodyDrawer({
 
   // Asset is part of a kit
   const assetsArePartOfKit = assets
-    .filter((asset) => !!asset && asset.kitId && asset.id)
+    .filter((asset) => !!asset && asset.assetKits.length > 0 && asset.id)
     .map((asset) => asset.id);
 
   // Kit blockers
@@ -127,7 +127,7 @@ export default function AssignCustodyDrawer({
   // Kit has assets inside that that are in custody
   const kitsWithAssetsInCustody = kits
     .filter((kit) =>
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     )
     .map((kit) => kit.id);
   // Kit is checked out
@@ -517,7 +517,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(!!asset.kitId),
+    assetLabelPresets.partOfKit(asset.assetKits.length > 0),
   ];
 
   // Create the availability labels component with max 2 labels
@@ -555,7 +555,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
     kitLabelPresets.checkedOut(kit.status === AssetStatus.CHECKED_OUT),
     kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
   ];
 
@@ -572,7 +572,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

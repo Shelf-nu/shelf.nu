@@ -327,7 +327,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

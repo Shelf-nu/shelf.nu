@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { act } from "react";
 import {
   fireEvent,
   render,
@@ -7,7 +8,6 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { act } from "react-dom/test-utils";
 import { TextSelection } from "prosemirror-state";
 import { describe, expect, it, beforeAll, vi } from "vitest";
 import type { Mark, Node as PMNode } from "prosemirror-model";

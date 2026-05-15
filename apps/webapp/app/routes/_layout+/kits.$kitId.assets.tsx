@@ -1,4 +1,9 @@
-import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import {
+  data,
+  useParams,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+} from "react-router";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -16,7 +21,9 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -47,14 +54,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const isManageAssetsUrl = request.url.includes("manage-assets");
 
-    const assets = await getAssetsForKits({
-      request,
-      organizationId,
-      kitId,
-      ignoreFilters: isManageAssetsUrl,
-    });
+    /**
+     * Run the assets query and a tiny kit-name lookup in parallel so the
+     * page can render `${kit.name}'s assets` (matches the sibling overview
+     * route's title pattern) without an extra round-trip.
+     */
+    const [assets, kit] = await Promise.all([
+      getAssetsForKits({
+        request,
+        organizationId,
+        kitId,
+        ignoreFilters: isManageAssetsUrl,
+      }),
+      db.kit.findFirst({
+        where: { id: kitId, organizationId },
+        select: { name: true },
+      }),
+    ]);
 
-    const header: HeaderData = { title: "Kit assets" };
+    const header: HeaderData = {
+      title: kit ? `${kit.name}'s assets` : "Kit assets",
+    };
 
     const modelName = {
       singular: "asset",
@@ -150,6 +170,11 @@ export default function KitAssets() {
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
+  // `kitId` from the URL — used below to pick this asset's pivot row out
+  // of `item.assetKits` (the asset can be in multiple kits since
+  // Phase 4a-Polish-2; we only care about THIS kit's slice here).
+  const { kitId } = useParams<{ kitId: string }>();
+
   const { roles } = useUserRoleHelper();
   return (
     <>
@@ -180,11 +205,39 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 >
                   {item.title}
                 </Button>
+                {isQuantityTracked(item)
+                  ? (() => {
+                      /**
+                       * Render `· N units in kit` for qty-tracked rows.
+                       *
+                       * Phase 4a-Polish-2: `AssetKit.quantity` is the
+                       * source of truth — the picker writes it, the
+                       * kit-custody inherit helper reads it, reports read
+                       * it. We surface the kit-specific count only; the
+                       * asset's total is irrelevant on the kit page (and
+                       * a user comparing N/M would be confused if the
+                       * same qty-tracked asset is split across multiple
+                       * kits). The `find()` is defensive — the asset was
+                       * fetched via `assetKits: { some: { kitId } }`, so
+                       * a missing row shouldn't happen.
+                       */
+                      const unit = item.unitOfMeasure || "units";
+                      const inKit =
+                        item.assetKits.find((ak) => ak.kitId === kitId)
+                          ?.quantity ?? 0;
+                      return (
+                        <span className="ml-2 text-xs text-gray-500">
+                          · {inKit} {unit} in kit
+                        </span>
+                      );
+                    })()
+                  : null}
               </span>
               <AssetStatusBadge
                 id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
+                asset={item}
               />
             </div>
           </div>

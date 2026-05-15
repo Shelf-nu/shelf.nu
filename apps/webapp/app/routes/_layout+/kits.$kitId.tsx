@@ -102,33 +102,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: kitId,
         organizationId,
         extraInclude: {
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              custody: { select: { id: true } },
-              bookings: {
-                where: {
-                  status: { in: ["ONGOING", "OVERDUE"] },
-                },
+              asset: {
                 select: {
                   id: true,
-                  name: true,
-                  from: true,
                   status: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
+                  // `type` powers the qty-aware unavailability guard in
+                  // ActionsDropdown — QUANTITY_TRACKED assets don't block
+                  // kit-custody assign (Option B handles partial pools).
+                  type: true,
+                  custody: { select: { id: true } },
+                  bookingAssets: {
+                    where: {
+                      booking: {
+                        status: { in: ["ONGOING", "OVERDUE"] },
+                      },
+                    },
                     select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                      email: true,
+                      booking: {
+                        select: {
+                          id: true,
+                          name: true,
+                          from: true,
+                          status: true,
+                          custodianTeamMember: true,
+                          custodianUser: {
+                            select: {
+                              firstName: true,
+                              lastName: true,
+                              displayName: true,
+                              profilePicture: true,
+                              email: true,
+                            },
+                          },
+                        },
+                      },
                     },
                   },
+                  availableToBook: true,
                 },
               },
-              availableToBook: true,
             },
           },
           qrCodes: true,
@@ -164,7 +178,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : null;
     const currentBooking = getKitCurrentBooking({
       id: kit.id,
-      assets: kit.assets,
+      assets: kit.assetKits.map((ak) => ak.asset),
     });
 
     const header: HeaderData = {
@@ -283,26 +297,57 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           { additionalData: { userId, organizationId, kitId } }
         );
 
-        const kit = await db.kit.update({
-          where: { id: kitId, organizationId },
-          data: {
-            assets: { disconnect: { id: assetId } },
-          },
-          select: { name: true, custody: { select: { custodianId: true } } },
-        });
-
         /**
-         * If kit was in custody then we have to make the asset available
+         * Wrap the kit disconnect + custody cleanup + status flip in a
+         * single transaction so that:
+         *   1. only the kit-allocated Custody row is removed (operator-
+         *      assigned custody on the same asset is preserved), and
+         *   2. the asset's status is only flipped back to AVAILABLE when
+         *      no custody rows remain — if operator custody still exists
+         *      on the asset, status stays IN_CUSTODY.
          */
-        if (kit.custody?.custodianId) {
-          await db.asset.update({
-            where: { id: assetId, organizationId },
+        const kit = await db.$transaction(async (tx) => {
+          const updatedKit = await tx.kit.update({
+            where: { id: kitId, organizationId },
             data: {
-              status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
+              // Remove the pivot row that links this asset to the kit.
+              assetKits: { deleteMany: { assetId } },
+            },
+            select: {
+              name: true,
+              custody: { select: { id: true, custodianId: true } },
             },
           });
-        }
+
+          /**
+           * If kit was in custody then we have to clean up the kit-
+           * allocated custody row on the asset. Filter the deleteMany by
+           * `kitCustodyId` so operator-assigned custody on the same asset
+           * (e.g. someone holding 10 of 50 batteries directly) is left
+           * untouched.
+           */
+          if (updatedKit.custody?.id) {
+            await tx.custody.deleteMany({
+              where: { assetId, kitCustodyId: updatedKit.custody.id },
+            });
+
+            // After removing only the kit-allocated rows, check whether
+            // any custody rows remain for this asset. The asset should
+            // only flip back to AVAILABLE if no custody is left.
+            const remainingCustody = await tx.custody.count({
+              where: { assetId },
+            });
+
+            if (remainingCustody === 0) {
+              await tx.asset.update({
+                where: { id: assetId, organizationId },
+                data: { status: AssetStatus.AVAILABLE },
+              });
+            }
+          }
+
+          return updatedKit;
+        });
 
         const actor = wrapUserLinkForNote({
           id: userId,
@@ -431,7 +476,9 @@ export default function KitDetails() {
   const { roles } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
 
-  const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
+  const kitHasUnavailableAssets = kit.assetKits.some(
+    (ak) => !ak.asset.availableToBook
+  );
 
   const items = [
     { to: "assets", content: "Assets" },
@@ -507,7 +554,7 @@ export default function KitDetails() {
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
-              custody={kit.custody}
+              custody={kit.custody ? [kit.custody] : null}
             />
           </When>
 

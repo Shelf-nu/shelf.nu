@@ -43,7 +43,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       extraInclude: {
-        _count: { select: { assets: true } },
+        _count: { select: { assetKits: true } },
       },
     });
 
@@ -118,12 +118,13 @@ export default function UpdateKitLocation() {
             Adjust the location of{" "}
             <span className="font-medium">{kit.name}</span>.
           </p>
-          {kit._count && kit._count.assets > 0 && (
+          {kit._count.assetKits > 0 && (
             <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3">
               <p className="text-sm text-blue-800">
                 <strong>Note:</strong> This will also update the location of all{" "}
                 <span className="font-medium">
-                  {kit._count.assets} asset{kit._count.assets > 1 ? "s" : ""}
+                  {kit._count.assetKits} asset
+                  {kit._count.assetKits > 1 ? "s" : ""}
                 </span>{" "}
                 within this kit.
               </p>

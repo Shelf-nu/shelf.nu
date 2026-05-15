@@ -12,7 +12,9 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
-import type { LoaderData } from "~/routes/_layout+/kits.$kitId.scan-assets";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import { hasCustody } from "~/modules/custody/utils";
+import type { loader } from "~/routes/_layout+/kits.$kitId.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -34,10 +36,13 @@ export const addScannedAssetsToKitSchema = z.object({
 
 /** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
 type AssetFromQrWithKit = AssetFromQr & {
-  kit: {
-    id: string;
-    name: string;
-  };
+  assetKits: Array<{
+    kitId: string;
+    kit: {
+      id: string;
+      name: string;
+    };
+  }>;
 };
 
 /**
@@ -54,8 +59,9 @@ export default function AddAssetsToKitDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { kit } = useLoaderData<LoaderData>();
-  const kitAssetsIds = kit.assets.map((a) => a.id) || [];
+  const { kit } = useLoaderData<typeof loader>();
+  const kitAssets = kit.assetKits?.map((ak) => ak.asset) ?? [];
+  const kitAssetsIds = kitAssets.map((a) => a.id);
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -80,12 +86,17 @@ export default function AddAssetsToKitDrawer({
   // Asset blockers
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => kit.assets.some((a) => a?.id === asset.id))
+    .filter((asset) => kitAssets.some((a) => a?.id === asset.id))
     .map((a) => !!a && a.id);
 
   // Asset has custody (unavailable for kit assignment) - matches server logic
   const assetsWithCustodyIds = assets
-    .filter((asset) => !!asset && asset.custody && asset.kitId !== kit.id)
+    .filter(
+      (asset) =>
+        !!asset &&
+        hasCustody(asset.custody) &&
+        asset.assetKits[0]?.kitId !== kit.id
+    )
     .map((asset) => asset.id);
 
   // Asset is checked out
@@ -194,10 +205,15 @@ export default function AddAssetsToKitDrawer({
         return null;
       }}
       assetExtraInclude={{
-        kit: {
+        assetKits: {
           select: {
-            id: true,
-            name: true,
+            kitId: true,
+            kit: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
       }}
@@ -232,15 +248,19 @@ export function AssetRow({
   kit,
 }: {
   asset: AssetFromQrWithKit;
-  kit: any;
+  kit: { id: string; assetKits: Array<{ asset: { id: string } }> };
 }) {
+  const assetKitLink = asset.assetKits[0];
+  const assetKitId = assetKitLink?.kitId;
+  const assetKit = assetKitLink?.kit;
+
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
     // Custom preset for assets with custody (unavailable for kits)
     {
-      condition: !!asset.custody && asset.kitId !== kit.id,
+      condition: hasCustody(asset.custody) && assetKitId !== kit.id,
       badgeText: "Has custody",
       tooltipTitle: "Asset has custody",
       tooltipContent:
@@ -249,29 +269,29 @@ export function AssetRow({
     },
     // Custom preset for "already in this kit"
     {
-      condition: kit.assets.some((a: any) => a?.id === asset.id),
+      condition: kit.assetKits.some((ak) => ak.asset.id === asset.id),
       badgeText: "Already added to this kit",
       tooltipTitle: "Asset is part of kit",
       tooltipContent: "This asset is already added to the current kit.",
       priority: 70,
     },
     {
-      condition: !!asset.kitId && asset.kitId !== kit.id,
+      condition: !!assetKitId && assetKitId !== kit.id,
       badgeText: "Part of another kit",
       tooltipTitle: "Asset is part of another kit",
       tooltipContent: (
         <>
           This asset is currently part of another kit
-          {asset?.kit ? (
+          {assetKit ? (
             <>
               :{" "}
               <Button
-                to={`/kits/${asset.kit.id}`}
+                to={`/kits/${assetKit.id}`}
                 target="_blank"
                 variant="link-gray"
                 className={"text-xs"}
               >
-                {asset.kit.name}
+                {assetKit.name}
               </Button>
               <br />
             </>
@@ -293,6 +313,11 @@ export function AssetRow({
     <div className="flex flex-col gap-1">
       <p className="word-break whitespace-break-spaces font-medium">
         {asset.title}
+        {isQuantityTracked(asset) && asset.quantity != null ? (
+          <span className="ml-2 text-xs font-normal text-gray-500">
+            · {asset.quantity} {asset.unitOfMeasure || "units"}
+          </span>
+        ) : null}
       </p>
 
       <div className="flex flex-wrap items-center gap-1">
@@ -334,7 +359,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

@@ -99,10 +99,12 @@ export type FailureReason = {
     | "Environment" // Related to the environment setup
     | "Image Import"
     | "Image Cache"
+    | "Asset Model"
     | "Asset Reminder"
     | "Asset Scheduler" // Error related to the image import
     | "Audit"
     | "Activity"
+    | "Consumption Log"
     | "Update";
   /**
    * The message intended for the user.

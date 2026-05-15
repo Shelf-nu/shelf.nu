@@ -35,7 +35,7 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: external service — we mock the custody assignment without hitting the database
 vitest.mock("~/modules/asset/service.server", () => ({
-  bulkAssignCustody: vitest.fn().mockResolvedValue(undefined),
+  bulkCheckOutAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -69,7 +69,7 @@ import {
   requireMobilePermission,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 
 const mockUser = {
@@ -134,14 +134,37 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
 
-    expect(bulkAssignCustody).toHaveBeenCalledWith(
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         assetIds: ["asset-1", "asset-2"],
         custodianId: "custodian-1",
         custodianName: "Jane Doe",
         organizationId: "org-1",
+        role: "ADMIN",
       })
+    );
+  });
+
+  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202162994)", async () => {
+    // Pre-fix the mobile route resolved `role` but never passed it to
+    // `bulkCheckOutAssets`; the service's "self-service can only assign
+    // to themselves" guard never ran. This regression guard asserts the
+    // route now plumbs `role` through.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1"],
+      custodianId: "custodian-1",
+    });
+
+    await action(createActionArgs({ request }));
+
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "SELF_SERVICE" })
     );
   });
 

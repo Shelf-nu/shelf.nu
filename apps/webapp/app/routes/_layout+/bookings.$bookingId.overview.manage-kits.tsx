@@ -81,23 +81,37 @@ export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+// asset shape now lives at `assetKits[].asset`.
 export type KitForBooking = Prisma.KitGetPayload<{
   include: {
     location: typeof LOCATION_WITH_HIERARCHY;
-    _count: { select: { assets: true } };
-    assets: {
+    _count: { select: { assetKits: true } };
+    assetKits: {
       select: {
-        id: true;
-        status: true;
-        availableToBook: true;
-        custody: true;
-        bookings: {
+        asset: {
           select: {
             id: true;
+            // `type` powers the qty-aware in-custody guard in
+            // `getKitAvailabilityStatus` — qty-tracked assets with
+            // partial operator custody must not flag the whole kit
+            // as in-custody.
+            type: true;
             status: true;
-            name: true;
-            from: true;
-            to: true;
+            availableToBook: true;
+            custody: true;
+            bookingAssets: {
+              include: {
+                booking: {
+                  select: {
+                    id: true;
+                    status: true;
+                    name: true;
+                    from: true;
+                    to: true;
+                  };
+                };
+              };
+            };
           };
         };
       };
@@ -155,7 +169,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(booking.assets);
+    const bookingKitIds = getKitIdsByAssets(
+      booking.bookingAssets.map((ba) => ba.asset)
+    );
 
     const { page, perPage, kits, search, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
@@ -164,44 +180,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentBookingId: bookingId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              availableToBook: true,
-              custody: true,
-              bookings: {
-                /**
-                 * Important to make sure the bookings are overlapping the period of the current booking
-                 */
-                where: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.from },
-                          to: { gte: booking.to },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.from },
-                        },
-                      ],
-                    }),
-                },
+              asset: {
                 select: {
                   id: true,
+                  type: true,
                   status: true,
-                  name: true,
-                  from: true,
-                  to: true,
+                  availableToBook: true,
+                  custody: true,
+                  bookingAssets: {
+                    /**
+                     * Important to make sure the bookings are overlapping the period of the current booking
+                     */
+                    where: {
+                      booking: {
+                        status: {
+                          in: [
+                            BookingStatus.RESERVED,
+                            BookingStatus.ONGOING,
+                            BookingStatus.OVERDUE,
+                          ],
+                        },
+                        ...(booking.from &&
+                          booking.to && {
+                            OR: [
+                              {
+                                from: { lte: booking.from },
+                                to: { gte: booking.to },
+                              },
+                              {
+                                from: { gte: booking.from },
+                                to: { lte: booking.from },
+                              },
+                            ],
+                          }),
+                      },
+                    },
+                    include: {
+                      booking: {
+                        select: {
+                          id: true,
+                          status: true,
+                          name: true,
+                          from: true,
+                          to: true,
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -268,8 +295,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         select: {
           id: true,
           status: true,
-          assets: {
-            select: { id: true },
+          bookingAssets: {
+            select: { asset: { select: { id: true } } },
           },
         },
       })
@@ -319,16 +346,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         id: true,
         name: true,
         status: true,
-        assets: { select: { id: true, status: true } },
+        assetKits: {
+          select: { asset: { select: { id: true, status: true } } },
+        },
       },
     });
 
     const allSelectedAssetIds = selectedKits.flatMap((k) =>
-      k.assets.map((a) => a.id)
+      k.assetKits.map((ak) => ak.asset.id)
     );
 
     // Get existing asset IDs from the booking
-    const existingAssetIds = booking.assets.map((asset) => asset.id);
+    const existingAssetIds = booking.bookingAssets.map((ba) => ba.asset.id);
 
     // Filter out existing assets to get only newly added ones
     const newAssetIds = allSelectedAssetIds.filter(
@@ -337,7 +366,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Only validate kits that are actually adding NEW assets to the booking
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assets.some((asset) => newAssetIds.includes(asset.id))
+      kit.assetKits.some((ak) => newAssetIds.includes(ak.asset.id))
     );
 
     // Get partial check-in details to determine actual availability using context-aware status
@@ -414,11 +443,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         select: {
           id: true,
           name: true,
-          assets: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       });
       const allRemovedAssetIds = removedKits.flatMap((k) =>
-        k.assets.map((a) => a.id)
+        k.assetKits.map((ak) => ak.asset.id)
       );
 
       await removeAssets({
@@ -501,7 +530,9 @@ export default function AddKitsToBooking() {
     unhideAssetsBookigIds: booking.id,
   })}`;
 
-  const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
+  const totalAssetsSelected = booking.bookingAssets.filter(
+    (ba) => ba.asset.assetKits.length === 0
+  ).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
 
   /**
@@ -682,9 +713,11 @@ function Row({ item: kit }: { item: KitForBooking }) {
   // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
   const isCheckedOutInCurrentBooking =
     isCheckedOut &&
-    kit.assets.some((asset) =>
-      asset.bookings.some(
-        (b) => b.id === booking.id && ["ONGOING", "OVERDUE"].includes(b.status)
+    kit.assetKits.some((ak) =>
+      ak.asset.bookingAssets.some(
+        (ba) =>
+          ba.booking.id === booking.id &&
+          ["ONGOING", "OVERDUE"].includes(ba.booking.status)
       )
     );
 
@@ -715,7 +748,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   <KitStatusBadge
                     status={KitStatus.CHECKED_OUT}
                     availableToBook={
-                      !kit.assets.some((a) => !a.availableToBook)
+                      !kit.assetKits.some((ak) => !ak.asset.availableToBook)
                     }
                   />
                 </When>
@@ -729,7 +762,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   <KitStatusBadge
                     status={kit.status}
                     availableToBook={
-                      !kit.assets.some((a) => !a.availableToBook)
+                      !kit.assetKits.some((ak) => !ak.asset.availableToBook)
                     }
                   />
                 </When>
@@ -762,7 +795,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
           />
         ) : null}
       </Td>
-      <Td>{kit._count.assets}</Td>
+      <Td>{kit._count.assetKits}</Td>
     </>
   );
 }

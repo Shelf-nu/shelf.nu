@@ -103,8 +103,12 @@ export const loader = async ({
         request,
         organizationId,
         extraInclude: {
-          assets: {
-            select: { id: true, availableToBook: true, status: true },
+          assetKits: {
+            select: {
+              asset: {
+                select: { id: true, availableToBook: true, status: true },
+              },
+            },
           },
         },
       }),

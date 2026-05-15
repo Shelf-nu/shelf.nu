@@ -95,7 +95,14 @@ export async function runKitsPhase(
         organizationId: ctx.orgId,
         status: "AVAILABLE",
         createdAt,
-        assets: { connect: memberIds.map((id) => ({ id })) },
+        // Create one pivot row per member asset; the unique constraint on
+        // `AssetKit.assetId` keeps the 1:1 invariant during seed.
+        assetKits: {
+          create: memberIds.map((assetId) => ({
+            assetId,
+            organizationId: ctx.orgId,
+          })),
+        },
       },
       select: { id: true },
     });

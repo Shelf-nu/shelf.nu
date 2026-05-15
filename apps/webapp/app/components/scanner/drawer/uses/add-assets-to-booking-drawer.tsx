@@ -75,7 +75,7 @@ export default function AddAssetsToBookingDrawer({
   // Separate asset IDs and kit IDs for the form
   // Extract asset IDs from kits and flatten with directly scanned assets
   const assetIdsFromKits = kits.flatMap((kit) =>
-    kit.assets.map((asset) => asset.id)
+    kit.assetKits.map((ak) => ak.asset.id)
   );
   const assetIdsForBooking = Array.from(
     new Set([...assetIds, ...assetIdsFromKits])
@@ -88,11 +88,13 @@ export default function AddAssetsToBookingDrawer({
   // Asset blockers
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => booking.assets.some((a) => a?.id === asset.id))
+    .filter((asset) =>
+      booking.bookingAssets.some((ba) => ba.assetId === asset.id)
+    )
     .map((a) => !!a && a.id);
 
   const assetsPartOfKitIds = assets
-    .filter((asset) => !!asset && asset.kitId && asset.id)
+    .filter((asset) => !!asset && asset.assetKits.length > 0 && asset.id)
     .map((asset) => asset.id);
 
   const unavailableAssetsIds = assets
@@ -101,7 +103,7 @@ export default function AddAssetsToBookingDrawer({
 
   // Kit blockers
   const kitsWithUnavailableAssets = kits
-    .filter((kit) => kit.assets.some((a) => !a.availableToBook))
+    .filter((kit) => kit.assetKits.some((ak) => !ak.asset.availableToBook))
     .map((kit) => kit.id);
 
   const qrIdsOfUnavailableKits = Object.entries(items)
@@ -285,10 +287,10 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     assetLabelPresets.unavailable(!asset.availableToBook),
-    assetLabelPresets.partOfKit(!!asset.kitId),
+    assetLabelPresets.partOfKit(asset.assetKits.length > 0),
     // Custom preset for "already in this booking"
     {
-      condition: booking.assets.some((a) => a?.id === asset.id),
+      condition: booking.bookingAssets.some((ba) => ba.assetId === asset.id),
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",
@@ -343,10 +345,10 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const availabilityConfigs = [
     kitLabelPresets.inCustody(kit.status === KitStatus.IN_CUSTODY),
     kitLabelPresets.hasAssetsInCustody(
-      kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
+      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
-      kit.assets.some((asset) => !asset.availableToBook)
+      kit.assetKits.some((ak) => !ak.asset.availableToBook)
     ),
     // Custom preset for "already checked out" - only show when booking is checked out
     {
@@ -369,7 +371,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       <p className="word-break whitespace-break-spaces font-medium">
         {kit.name}{" "}
         <span className="text-[12px] font-normal text-gray-700">
-          ({kit._count.assets} assets)
+          ({kit._count.assetKits} assets)
         </span>
       </p>
 

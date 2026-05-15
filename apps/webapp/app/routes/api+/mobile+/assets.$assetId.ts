@@ -64,7 +64,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             },
           },
         },
-        kit: { select: { id: true, name: true, status: true } },
+        assetKits: {
+          select: {
+            kit: { select: { id: true, name: true, status: true } },
+          },
+        },
         tags: { select: { id: true, name: true } },
         qrCodes: { select: { id: true } },
         organization: { select: { currency: true } },

@@ -120,7 +120,7 @@ export async function bookingComplianceReport(
     timeframe,
     statusFilter,
     custodianId,
-    locationId: _locationId, // TODO: Location filter requires join through assets
+    locationId,
     page = 1,
     pageSize = 50,
     sortBy = "scheduledEnd",
@@ -158,7 +158,14 @@ export async function bookingComplianceReport(
       where.custodianUserId = custodianId;
     }
 
-    // TODO: Location filter requires join through assets (see _locationId)
+    // Location filter — match bookings whose pivot rows include at
+    // least one asset at the given location. Phase 3a's `BookingAsset`
+    // pivot makes this join expressible directly in the where clause.
+    if (locationId) {
+      where.bookingAssets = {
+        some: { asset: { locationId } },
+      };
+    }
 
     // Fetch all data in parallel
     const [
@@ -324,9 +331,12 @@ async function fetchBookingComplianceRows(
           name: true,
         },
       },
+      // Phase 3a renamed the implicit `Asset <-> Booking` M2M to the
+      // explicit `BookingAsset` pivot. `_count.assets` no longer exists;
+      // count the pivot rows instead.
       _count: {
         select: {
-          assets: true,
+          bookingAssets: true,
         },
       },
     },
@@ -377,7 +387,7 @@ async function fetchBookingComplianceRows(
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
-      assetCount: b._count.assets,
+      assetCount: b._count.bookingAssets,
       scheduledStart: b.from!,
       scheduledEnd: b.to!,
       actualCheckout: null,
@@ -1015,10 +1025,13 @@ async function fetchOverdueRows(
           name: true,
         },
       },
-      assets: {
+      // Phase 3a: walk the BookingAsset pivot to reach the asset for
+      // valuation, and count pivot rows for asset count.
+      bookingAssets: {
         select: {
-          id: true,
-          valuation: true,
+          asset: {
+            select: { id: true, valuation: true },
+          },
         },
       },
       // Fetch partial check-ins to calculate outstanding assets
@@ -1029,7 +1042,7 @@ async function fetchOverdueRows(
       },
       _count: {
         select: {
-          assets: true,
+          bookingAssets: true,
         },
       },
     },
@@ -1043,23 +1056,29 @@ async function fetchOverdueRows(
       Math.ceil(msOverdue / (1000 * 60 * 60 * 24))
     );
 
-    // Calculate check-in progress from partial check-ins.
-    // Intersect with current b.assets so a partial-checkin row referencing an
-    // asset that was later removed from the booking doesn't overcount
-    // checkedInCount and desync it from valueAtRisk (which already filters via b.assets).
-    const currentAssetIds = new Set(b.assets.map((a) => a.id));
+    /**
+     * Calculate check-in progress from partial check-ins. Intersect with the
+     * booking's current pivot rows so a partial-checkin row referencing an
+     * asset that was later removed from the booking doesn't overcount
+     * `checkedInCount` and desync it from `valueAtRisk` (which already
+     * filters through `bookingAssets`).
+     */
+    const currentAssetIds = new Set(b.bookingAssets.map((ba) => ba.asset.id));
     const checkedInAssetIds = new Set(
       b.partialCheckins
         .flatMap((pc) => pc.assetIds)
         .filter((id) => currentAssetIds.has(id))
     );
     const checkedInCount = checkedInAssetIds.size;
-    const uncheckedCount = Math.max(0, b._count.assets - checkedInCount);
+    const uncheckedCount = Math.max(0, b._count.bookingAssets - checkedInCount);
 
-    // Sum valuations only for assets still outstanding (not yet checked in)
-    const valueAtRisk = b.assets
-      .filter((asset) => !checkedInAssetIds.has(asset.id))
-      .reduce((sum, asset) => sum + (asset.valuation || 0), 0);
+    /**
+     * Sum valuations only for assets still outstanding (not yet checked in),
+     * walking the Phase 3a `BookingAsset` pivot.
+     */
+    const valueAtRisk = b.bookingAssets
+      .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
+      .reduce((sum, ba) => sum + (ba.asset.valuation || 0), 0);
 
     return {
       id: b.id,
@@ -1075,7 +1094,7 @@ async function fetchOverdueRows(
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
       custodianId: b.custodianUserId,
-      assetCount: b._count.assets,
+      assetCount: b._count.bookingAssets,
       checkedInCount,
       uncheckedCount,
       scheduledEnd,
@@ -1086,20 +1105,25 @@ async function fetchOverdueRows(
 }
 
 async function computeOverdueKpis(
-  _organizationId: string,
+  organizationId: string,
   baseWhere: Prisma.BookingWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Fetch all overdue bookings with asset info and partial check-ins
+  // Fetch all overdue bookings with asset info via the BookingAsset pivot
+  // and partial check-ins.
+  // `organizationId` is spread into the where alongside `baseWhere` as a
+  // defense-in-depth guard — if a caller forgets to scope the base where
+  // we still won't leak across orgs.
   const overdueBookings = await db.booking.findMany({
-    where: baseWhere,
+    where: { ...baseWhere, organizationId },
     select: {
       to: true,
-      assets: {
+      bookingAssets: {
         select: {
-          id: true,
-          valuation: true,
+          asset: {
+            select: { id: true, valuation: true },
+          },
         },
       },
       partialCheckins: {
@@ -1109,7 +1133,7 @@ async function computeOverdueKpis(
       },
       _count: {
         select: {
-          assets: true,
+          bookingAssets: true,
         },
       },
     },
@@ -1117,13 +1141,16 @@ async function computeOverdueKpis(
 
   const totalOverdue = overdueBookings.length;
 
-  // Compute outstanding asset count and value at risk from the same filtered
-  // set of checked-in IDs (intersected with b.assets) so the two stay in sync
-  // when a partially-checked-in asset is later removed from the booking.
+  /**
+   * Compute outstanding asset count and value at risk from the same filtered
+   * set of checked-in IDs (intersected with the booking's current pivot
+   * rows) so the two stay in sync when a partially-checked-in asset is
+   * later removed from the booking.
+   */
   let totalAssetsOutstanding = 0;
   let totalValueAtRisk = 0;
   for (const b of overdueBookings) {
-    const currentAssetIds = new Set(b.assets.map((a) => a.id));
+    const currentAssetIds = new Set(b.bookingAssets.map((ba) => ba.asset.id));
     const checkedInAssetIds = new Set(
       b.partialCheckins
         .flatMap((pc) => pc.assetIds)
@@ -1131,16 +1158,16 @@ async function computeOverdueKpis(
     );
     totalAssetsOutstanding += Math.max(
       0,
-      b._count.assets - checkedInAssetIds.size
+      b._count.bookingAssets - checkedInAssetIds.size
     );
-    totalValueAtRisk += b.assets
-      .filter((asset) => !checkedInAssetIds.has(asset.id))
-      .reduce((assetSum, asset) => assetSum + (asset.valuation || 0), 0);
+    totalValueAtRisk += b.bookingAssets
+      .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
+      .reduce((assetSum, ba) => assetSum + (ba.asset.valuation || 0), 0);
   }
 
   // Also track total for context in hero subtitle
   const totalAssetsInBookings = overdueBookings.reduce(
-    (sum, b) => sum + b._count.assets,
+    (sum, b) => sum + b._count.bookingAssets,
     0
   );
 
@@ -1338,7 +1365,7 @@ export async function idleAssetsReport(
  * that was checked out since the cutoff date.
  */
 async function fetchIdleAssetRows(
-  _organizationId: string,
+  organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date,
   page: number,
@@ -1346,19 +1373,23 @@ async function fetchIdleAssetRows(
 ): Promise<IdleAssetRow[]> {
   const now = new Date();
 
-  // Get assets with their last booking checkout from ActivityEvent
-  // For efficiency, we'll use a subquery approach.
-  // `mainImage`, `mainImageExpiration`, `organizationId` are selected so we
-  // can pipe the assets through `refreshExpiredAssetImages` below without
-  // an extra round-trip to the DB.
+  // Get assets with their last booking checkout. Phase 3a: walk the
+  // `BookingAsset` pivot for both the exclusion filter and the
+  // most-recent-completed sub-query. `organizationId` is enforced
+  // explicitly here for defense-in-depth alongside the caller's
+  // `assetWhere`. `mainImage`, `mainImageExpiration`, `organizationId`
+  // are selected so we can pipe the assets through
+  // `refreshExpiredAssetImages` below without an extra round-trip.
   const assets = await db.asset.findMany({
     where: {
       ...assetWhere,
-      // Exclude assets that have been in an ONGOING or OVERDUE booking recently
+      organizationId,
       NOT: {
-        bookings: {
+        bookingAssets: {
           some: {
-            status: { in: ["ONGOING", "OVERDUE"] },
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+            },
           },
         },
       },
@@ -1386,14 +1417,17 @@ async function fetchIdleAssetRows(
           name: true,
         },
       },
-      bookings: {
+      // Pull the most-recent COMPLETE booking via the pivot. We sort
+      // pivot rows by their related booking's `to` desc and take the
+      // first one to find the last completed booking for this asset.
+      bookingAssets: {
         where: {
-          status: "COMPLETE",
+          booking: { status: "COMPLETE" },
         },
-        orderBy: { to: "desc" },
+        orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
-          to: true,
+          booking: { select: { to: true } },
         },
       },
     },
@@ -1401,7 +1435,7 @@ async function fetchIdleAssetRows(
 
   // Filter to only include assets that are actually idle (no recent booking)
   const idleAssets = assets.filter((asset) => {
-    const lastBookingEnd = asset.bookings[0]?.to;
+    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
     if (!lastBookingEnd) return true; // Never booked = idle
     return lastBookingEnd < cutoffDate;
   });
@@ -1411,7 +1445,7 @@ async function fetchIdleAssetRows(
   const refreshedAssets = await refreshExpiredAssetImages(idleAssets);
 
   return refreshedAssets.map((asset) => {
-    const lastBookedAt = asset.bookings[0]?.to || null;
+    const lastBookedAt = asset.bookingAssets[0]?.booking.to || null;
     const daysSinceLastUse = lastBookedAt
       ? Math.ceil(
           (now.getTime() - lastBookedAt.getTime()) / (1000 * 60 * 60 * 24)
@@ -1439,32 +1473,38 @@ async function fetchIdleAssetRows(
  * Count total idle assets matching the criteria.
  */
 async function countIdleAssets(
-  _organizationId: string,
+  organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
   cutoffDate: Date
 ): Promise<number> {
-  // Get all potentially idle assets
+  // Get all potentially idle assets — Phase 3a: walk the BookingAsset
+  // pivot for both the exclusion filter and the most-recent-completed
+  // sub-query. `organizationId` is enforced explicitly as a
+  // defense-in-depth guard alongside the caller-supplied `assetWhere`.
   const assets = await db.asset.findMany({
     where: {
       ...assetWhere,
+      organizationId,
       NOT: {
-        bookings: {
+        bookingAssets: {
           some: {
-            status: { in: ["ONGOING", "OVERDUE"] },
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+            },
           },
         },
       },
     },
     select: {
       id: true,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: "COMPLETE",
+          booking: { status: "COMPLETE" },
         },
-        orderBy: { to: "desc" },
+        orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
-          to: true,
+          booking: { select: { to: true } },
         },
       },
     },
@@ -1472,7 +1512,7 @@ async function countIdleAssets(
 
   // Filter to only truly idle assets
   return assets.filter((asset) => {
-    const lastBookingEnd = asset.bookings[0]?.to;
+    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
     if (!lastBookingEnd) return true;
     return lastBookingEnd < cutoffDate;
   }).length;
@@ -1492,14 +1532,20 @@ async function computeIdleAssetsKpis(
     },
   });
 
-  // Get idle assets with details
+  // Get idle assets with details — Phase 3a: walk the BookingAsset
+  // pivot for both the exclusion filter and the most-recent-completed
+  // sub-query. Org scoping is enforced explicitly here so the helper is
+  // safe even if `assetWhere` ever loses its organizationId clause.
   const idleAssets = await db.asset.findMany({
     where: {
       ...assetWhere,
+      organizationId,
       NOT: {
-        bookings: {
+        bookingAssets: {
           some: {
-            status: { in: ["ONGOING", "OVERDUE"] },
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+            },
           },
         },
       },
@@ -1508,14 +1554,14 @@ async function computeIdleAssetsKpis(
       id: true,
       valuation: true,
       updatedAt: true,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: "COMPLETE",
+          booking: { status: "COMPLETE" },
         },
-        orderBy: { to: "desc" },
+        orderBy: { booking: { to: "desc" } },
         take: 1,
         select: {
-          to: true,
+          booking: { select: { to: true } },
         },
       },
     },
@@ -1523,7 +1569,7 @@ async function computeIdleAssetsKpis(
 
   // Filter to truly idle and calculate metrics
   const trulyIdle = idleAssets.filter((asset) => {
-    const lastBookingEnd = asset.bookings[0]?.to;
+    const lastBookingEnd = asset.bookingAssets[0]?.booking.to;
     if (!lastBookingEnd) return true;
     return lastBookingEnd < cutoffDate;
   });
@@ -1540,7 +1586,7 @@ async function computeIdleAssetsKpis(
 
   // Calculate average days idle
   const daysIdleList = trulyIdle.map((asset) => {
-    const lastBookedAt = asset.bookings[0]?.to;
+    const lastBookedAt = asset.bookingAssets[0]?.booking.to;
     if (!lastBookedAt) {
       return Math.ceil(
         (now.getTime() - asset.updatedAt.getTime()) / (1000 * 60 * 60 * 24)
@@ -1794,14 +1840,16 @@ async function fetchCustodyRows(
 }
 
 async function computeCustodyKpis(
-  _organizationId: string,
+  organizationId: string,
   baseWhere: Prisma.CustodyWhereInput
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
-  // Fetch custody data for KPIs
+  // Fetch custody data for KPIs. `Custody` has no direct organizationId
+  // column, so we scope through the related asset as a defense-in-depth
+  // guard alongside the caller-supplied `baseWhere`.
   const custodyRecords = await db.custody.findMany({
-    where: baseWhere,
+    where: { ...baseWhere, asset: { organizationId } },
     select: {
       createdAt: true,
       teamMemberId: true,
@@ -1984,9 +2032,12 @@ async function fetchTopBookedAssetRows(
   totalCount: number;
   topAsset: TopBookedAssetRow | null;
 }> {
-  // Get all bookings in the timeframe with their assets.
-  // The nested asset select includes `mainImage`, `mainImageExpiration`,
-  // and `organizationId` so we can pipe assets through
+  // Get all bookings in the timeframe with their assets — Phase 3a:
+  // walk the BookingAsset pivot. The `where: assetWhere` on the pivot
+  // is expressed as a nested `asset:` filter; the same shape applies to
+  // the `select` so we can pick fields off the asset. The nested asset
+  // select includes `mainImage`, `mainImageExpiration`, and
+  // `organizationId` so we can pipe assets through
   // `refreshExpiredAssetImages` below without an extra round-trip.
   const bookings = await db.booking.findMany({
     where: {
@@ -2000,17 +2051,21 @@ async function fetchTopBookedAssetRows(
     select: {
       from: true,
       to: true,
-      assets: {
-        where: assetWhere,
+      bookingAssets: {
+        where: { asset: assetWhere },
         select: {
-          id: true,
-          organizationId: true,
-          title: true,
-          mainImage: true,
-          mainImageExpiration: true,
-          thumbnailImage: true,
-          category: { select: { name: true } },
-          location: { select: { name: true } },
+          asset: {
+            select: {
+              id: true,
+              organizationId: true,
+              title: true,
+              mainImage: true,
+              mainImageExpiration: true,
+              thumbnailImage: true,
+              category: { select: { name: true } },
+              location: { select: { name: true } },
+            },
+          },
         },
       },
     },
@@ -2037,10 +2092,11 @@ async function fetchTopBookedAssetRows(
   );
 
   // Collect unique assets keyed by id so we can refresh once per asset even
-  // when the same asset appears in many bookings.
+  // when the same asset appears in many bookings. Walks the Phase 3a
+  // BookingAsset pivot.
   const uniqueAssetsById = new Map<
     string,
-    (typeof bookings)[number]["assets"][number]
+    (typeof bookings)[number]["bookingAssets"][number]["asset"]
   >();
 
   for (const booking of bookings) {
@@ -2056,7 +2112,8 @@ async function fetchTopBookedAssetRows(
           )
         : 1;
 
-    for (const asset of booking.assets) {
+    for (const ba of booking.bookingAssets) {
+      const asset = ba.asset;
       if (!uniqueAssetsById.has(asset.id)) {
         uniqueAssetsById.set(asset.id, asset);
       }
@@ -2138,21 +2195,24 @@ async function computeTopBookedKpis(
       status: { notIn: ["DRAFT", "CANCELLED"] },
     },
     select: {
-      assets: {
-        where: assetWhere,
-        select: { id: true, title: true },
+      bookingAssets: {
+        where: { asset: assetWhere },
+        select: {
+          asset: { select: { id: true, title: true } },
+        },
       },
     },
   });
 
   const totalBookings = bookings.length;
 
-  // Count unique assets booked
+  // Count unique assets booked — Phase 3a: walk the BookingAsset pivot.
   const uniqueAssets = new Set<string>();
   const assetBookingCounts = new Map<string, { name: string; count: number }>();
 
   for (const booking of bookings) {
-    for (const asset of booking.assets) {
+    for (const ba of booking.bookingAssets) {
+      const asset = ba.asset;
       uniqueAssets.add(asset.id);
 
       if (!assetBookingCounts.has(asset.id)) {
@@ -2252,15 +2312,13 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel
-    const [_totalAssets, byCategory, byLocation, byStatus, kpis] =
-      await Promise.all([
-        db.asset.count({ where: { organizationId } }),
-        computeDistributionByCategory(organizationId),
-        computeDistributionByLocation(organizationId),
-        computeDistributionByStatus(organizationId),
-        computeDistributionKpis(organizationId),
-      ]);
+    // Fetch all distribution data in parallel.
+    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
+      computeDistributionByCategory(organizationId),
+      computeDistributionByLocation(organizationId),
+      computeDistributionByStatus(organizationId),
+      computeDistributionKpis(organizationId),
+    ]);
 
     const computedMs = Math.round(performance.now() - startTime);
 
@@ -2615,8 +2673,11 @@ async function fetchInventoryRows(
     category: a.category?.name || null,
     location: a.location?.name || null,
     status: a.status,
-    custodian: a.custody?.custodian?.name
-      ? stripNameSuffix(a.custody.custodian.name)
+    // Phase 2 turned `Asset.custody` into a `Custody[]` array, so we
+    // pick the first row (assets with no custody resolve to `null`
+    // through the optional chain).
+    custodian: a.custody[0]?.custodian?.name
+      ? stripNameSuffix(a.custody[0].custodian.name)
       : null,
     valuation: a.valuation,
     createdAt: a.createdAt,
@@ -2625,18 +2686,22 @@ async function fetchInventoryRows(
 }
 
 async function computeInventoryKpis(
-  _organizationId: string,
+  organizationId: string,
   where: Prisma.AssetWhereInput
 ): Promise<ReportKpi[]> {
+  // Defense-in-depth: enforce organizationId on every query even though
+  // callers' `where` already includes it. Cheap to add, prevents an
+  // accidental cross-org leak if the where-builder ever regresses.
+  const scopedWhere: Prisma.AssetWhereInput = { ...where, organizationId };
   const [totalAssets, totalValue, statusCounts] = await Promise.all([
-    db.asset.count({ where }),
+    db.asset.count({ where: scopedWhere }),
     db.asset.aggregate({
-      where,
+      where: scopedWhere,
       _sum: { valuation: true },
     }),
     db.asset.groupBy({
       by: ["status"],
-      where,
+      where: scopedWhere,
       _count: { id: true },
     }),
   ]);
@@ -2993,10 +3058,12 @@ export async function assetUtilizationReport(
         (1000 * 60 * 60 * 24)
     );
 
-    // Fetch assets with their bookings in the timeframe.
-    // `mainImage`, `mainImageExpiration`, `organizationId` are selected so
-    // we can pipe assets through `refreshExpiredAssetImages` below without
-    // an extra round-trip.
+    // Fetch assets with their bookings in the timeframe — Phase 3a:
+    // walk the BookingAsset pivot. Filter pivot rows by their related
+    // booking's date window so utilization only counts in-window
+    // bookings. `mainImage`, `mainImageExpiration`, `organizationId` are
+    // selected so we can pipe assets through `refreshExpiredAssetImages`
+    // below without an extra round-trip.
     const assets = await db.asset.findMany({
       where: assetWhere,
       select: {
@@ -3009,15 +3076,21 @@ export async function assetUtilizationReport(
         valuation: true,
         category: { select: { name: true } },
         location: { select: { name: true } },
-        bookings: {
+        bookingAssets: {
           where: {
-            from: { lte: timeframe.to },
-            to: { gte: timeframe.from },
+            booking: {
+              from: { lte: timeframe.to },
+              to: { gte: timeframe.from },
+            },
           },
           select: {
-            id: true,
-            from: true,
-            to: true,
+            booking: {
+              select: {
+                id: true,
+                from: true,
+                to: true,
+              },
+            },
           },
         },
       },
@@ -3032,7 +3105,9 @@ export async function assetUtilizationReport(
       let daysInUse = 0;
       const bookingIds = new Set<string>();
 
-      for (const booking of asset.bookings) {
+      for (const ba of asset.bookingAssets) {
+        const booking = ba.booking;
+        if (!booking.from || !booking.to) continue;
         bookingIds.add(booking.id);
 
         // Calculate overlap with timeframe

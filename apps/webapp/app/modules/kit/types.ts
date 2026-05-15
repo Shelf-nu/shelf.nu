@@ -51,7 +51,9 @@ export const GET_KIT_STATIC_INCLUDES = {
 };
 
 export const KITS_INCLUDE_FIELDS = {
-  _count: { select: { assets: true } },
+  // The count semantics are identical (rows per kit) since today's
+  // unique constraint on `AssetKit.assetId` keeps it 1:1.
+  _count: { select: { assetKits: true } },
   custody: {
     select: {
       custodian: {
@@ -83,6 +85,24 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImageExpiration: true,
   status: true,
   availableToBook: true,
+  type: true,
+  quantity: true,
+  unitOfMeasure: true,
+  // why: Phase 4a-Polish-2 makes `AssetKit.quantity` the source of truth
+  // for "how many units this kit holds". The kit-page row reads the
+  // matching pivot row (filter by this route's kitId client-side) and
+  // renders `N / total units in kit`. Before Polish-2 the count was
+  // derived from `asset.quantity − operator custody`, which is now wrong
+  // once the kit can hold a strict subset of the pool.
+  assetKits: {
+    select: { kitId: true, quantity: true },
+  },
+  custody: {
+    select: {
+      quantity: true,
+      kitCustodyId: true,
+    },
+  },
   category: {
     select: {
       id: true,

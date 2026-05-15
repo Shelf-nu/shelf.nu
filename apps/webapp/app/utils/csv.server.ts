@@ -26,6 +26,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   BarcodeField,
   Column,
@@ -41,6 +42,7 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
@@ -415,11 +417,13 @@ export const buildCsvExportDataFromAssets = ({
           case "kit":
             value = asset.kit?.name;
             break;
-          case "custody":
-            value = asset.custody
-              ? resolveTeamMemberName(asset.custody.custodian)
+          case "custody": {
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            value = primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
               : "";
             break;
+          }
           case "tags":
             value = asset.tags?.map((t) => t.name).join(", ") ?? "";
             break;
@@ -484,6 +488,23 @@ export const buildCsvExportDataFromAssets = ({
             break;
           }
 
+          case "quantity":
+            value =
+              isQuantityTracked(asset) && asset.quantity != null
+                ? `${asset.quantity}${
+                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
+                  }`
+                : "";
+            break;
+          case "type":
+            // Handled by default column logic — asset.type is a direct string field
+            value = isQuantityTracked(asset)
+              ? "Tracked by quantity"
+              : "Individual";
+            break;
+          case "assetModel":
+            value = asset.assetModelName ?? "";
+            break;
           case "actions":
             value = "";
             break;
@@ -658,9 +679,21 @@ export async function exportBookingsFromIndexToCsv({
         where: { id: { in: bookingsIds }, organizationId },
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          assets: {
+          bookingAssets: {
             select: {
-              title: true,
+              /**
+               * `quantity` and `asset.type` are needed so the CSV builder
+               * can render `"Title × N"` for QUANTITY_TRACKED assets.
+               * Without these the row would silently show just the
+               * title and drop the booked quantity.
+               */
+              quantity: true,
+              asset: {
+                select: {
+                  title: true,
+                  type: true,
+                },
+              },
             },
           },
           tags: { select: { name: true } },
@@ -880,8 +913,13 @@ type FlexibleAsset = Partial<Asset> & {
   title: string;
 };
 
-type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
-  assets: FlexibleAsset[];
+type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
+  /**
+   * `quantity` is optional so the type accepts bookings fetched without it
+   * (falls back to "no quantity annotation" in the renderer), but both
+   * query paths in `exportBookingsFromIndexToCsv` now populate it.
+   */
+  bookingAssets: { quantity?: number; asset: FlexibleAsset }[];
   tags: Pick<Tag, "name">[];
 };
 
@@ -891,6 +929,29 @@ type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
  * @param request - Request object for locale/timezone formatting
  * @returns Array of string arrays representing CSV rows, including headers
  */
+/**
+ * Render a booking-asset row label for the CSV "Assets" column.
+ *
+ * For QUANTITY_TRACKED assets we append `" × N"` so the exported sheet
+ * shows the booked quantity — matching the display convention used in
+ * booking emails and the booking PDF. INDIVIDUAL assets render as just
+ * the title (quantity is implicitly 1).
+ *
+ * Falls back gracefully when the asset type or quantity is missing
+ * (e.g. older tests or legacy fixtures that don't provide those fields).
+ */
+const formatBookingAssetForCsv = (ba: {
+  quantity?: number;
+  asset: FlexibleAsset;
+}): string => {
+  const title = ba.asset.title || "Unnamed Asset";
+  const isQtyTracked = ba.asset.type === "QUANTITY_TRACKED";
+  if (isQtyTracked && ba.quantity != null && ba.quantity > 0) {
+    return `${title} × ${ba.quantity}`;
+  }
+  return title;
+};
+
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
   request: Request
@@ -923,11 +984,11 @@ export const buildCsvExportDataFromBookings = (
   const rows: string[][] = [];
 
   bookings.forEach((booking) => {
-    // Get the first asset's title if available
-    const firstAsset =
-      booking.assets && booking.assets.length > 0
-        ? booking.assets[0]
-        : { title: "No assets" };
+    // Get the first asset label (with qty annotation for qty-tracked assets)
+    const firstAssetLabel =
+      booking.bookingAssets && booking.bookingAssets.length > 0
+        ? formatBookingAssetForCsv(booking.bookingAssets[0])
+        : "No assets";
 
     // First add the main booking row (including the first asset)
     const bookingRow = Object.keys(headers).map((column) => {
@@ -990,8 +1051,8 @@ export const buildCsvExportDataFromBookings = (
           value = booking.description ?? "";
           break;
         case "asset":
-          // Include the first asset title in the main booking row
-          value = firstAsset ? firstAsset.title || "Unnamed Asset" : "";
+          // Include the first asset label (with "× N" for qty-tracked) in the main row
+          value = firstAssetLabel;
           break;
 
         case "tags":
@@ -1008,14 +1069,14 @@ export const buildCsvExportDataFromBookings = (
     rows.push(bookingRow);
 
     // Then add remaining asset rows if the booking has more than one asset
-    if (booking.assets && booking.assets.length > 1) {
+    if (booking.bookingAssets && booking.bookingAssets.length > 1) {
       // Start from the second asset (index 1)
-      booking.assets.slice(1).forEach((asset) => {
+      booking.bookingAssets.slice(1).forEach((ba) => {
         // Create an asset row with empty values for all columns except 'asset'
         const assetRow = Object.keys(headers).map((column) => {
           if (column === "asset") {
-            // Assuming asset has a title property
-            return formatValueForCsv(asset.title || "Unnamed Asset", false);
+            // Renders "× N" suffix for qty-tracked assets via the shared helper
+            return formatValueForCsv(formatBookingAssetForCsv(ba), false);
           }
           // Empty values for all other columns
           return formatValueForCsv("", false);

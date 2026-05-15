@@ -281,12 +281,14 @@ describe("buildCsvExportDataFromAssets", () => {
         valuation: 1234.5,
         availableToBook: true,
         createdAt: new Date("2024-01-02T03:04:05Z"),
-        custody: {
-          custodian: {
-            name: "Fallback Name",
-            user: { firstName: "Jane", lastName: "Doe" },
+        custody: [
+          {
+            custodian: {
+              name: "Fallback Name",
+              user: { firstName: "Jane", lastName: "Doe" },
+            },
           },
-        },
+        ],
         customFields: [
           {
             customField: { name: "isInsured" },
@@ -422,7 +424,10 @@ describe("buildCsvExportDataFromBookings", () => {
       },
       description: "Studio session",
       tags: [{ name: "commercial" }],
-      assets: [{ title: "Primary Asset" }, { title: "Secondary Asset" }],
+      bookingAssets: [
+        { asset: { title: "Primary Asset" } },
+        { asset: { title: "Secondary Asset" } },
+      ],
     };
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(

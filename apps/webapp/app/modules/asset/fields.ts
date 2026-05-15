@@ -14,7 +14,7 @@ export const LOCATION_WITH_HIERARCHY = {
 } satisfies Prisma.LocationDefaultArgs;
 
 export const KITS_INCLUDE_FIELDS = {
-  _count: { select: { assets: true } },
+  _count: { select: { assetKits: true } },
   custody: {
     select: {
       custodian: {
@@ -47,6 +47,17 @@ export const getAssetOverviewFields = (
     custody: {
       select: {
         createdAt: true,
+        quantity: true,
+        // why: kit-allocated custody rows must not be released directly
+        // from the asset's custody-breakdown card. The UI uses
+        // `kitCustodyId` to swap the Release button for a "held via kit"
+        // badge — releasing the parent kit is the only correct path.
+        kitCustodyId: true,
+        kitCustody: {
+          select: {
+            kit: { select: { id: true, name: true } },
+          },
+        },
         custodian: {
           include: {
             user: true,
@@ -80,25 +91,41 @@ export const getAssetOverviewFields = (
         },
       },
     },
-    kit: { select: { id: true, name: true, status: true } },
-    bookings: {
+    assetModel: { select: { id: true, name: true } },
+    // Phase 4a-Polish-2: a QUANTITY_TRACKED asset can sit in multiple kits at
+    // distinct slices. Pull `quantity` so the asset-overview sidebar can list
+    // each kit with its allocation and so the loader can derive a true
+    // "available" pool (units NOT in any kit, custody, or active booking).
+    assetKits: {
+      select: {
+        quantity: true,
+        kit: { select: { id: true, name: true, status: true } },
+      },
+    },
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
-        // Exclude bookings where this asset has been partially checked in
-        NOT: {
-          partialCheckins: {
-            some: {
-              assetIds: { has: assetId },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+          // Exclude bookings where this asset has been partially checked in
+          NOT: {
+            partialCheckins: {
+              some: {
+                assetIds: { has: assetId },
+              },
             },
           },
         },
       },
-      select: {
-        id: true,
-        name: true,
-        from: true,
-        custodianTeamMember: true,
-        custodianUser: true,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            name: true,
+            from: true,
+            custodianTeamMember: true,
+            custodianUser: true,
+          },
+        },
       },
     },
   } satisfies Prisma.AssetInclude;
@@ -142,12 +169,13 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
     location: LOCATION_WITH_HIERARCHY,
     custody: {
       select: {
+        quantity: true,
         custodian: {
           select: {
             name: true,
@@ -195,21 +223,27 @@ export const assetIndexFields = ({
      * eliminating the N+1 re-query in updateAssetsWithBookingCustodians().
      * Only ONGOING/OVERDUE bookings have custodian info relevant to display.
      */
-    bookings: {
+    bookingAssets: {
       where: {
-        status: { in: ["ONGOING", "OVERDUE"] },
+        booking: {
+          status: { in: ["ONGOING", "OVERDUE"] },
+        },
       },
       take: 1,
-      select: {
-        id: true,
-        status: true,
-        custodianTeamMember: true,
-        custodianUser: {
+      include: {
+        booking: {
           select: {
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            profilePicture: true,
+            id: true,
+            status: true,
+            custodianTeamMember: true,
+            custodianUser: {
+              select: {
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                profilePicture: true,
+              },
+            },
           },
         },
       },
@@ -220,34 +254,40 @@ export const assetIndexFields = ({
   if (bookingTo && bookingFrom && unavailableBookingStatuses) {
     return {
       ...fields,
-      bookings: {
+      bookingAssets: {
         where: {
-          status: { in: unavailableBookingStatuses },
-          OR: [
-            {
-              from: { lte: bookingTo },
-              to: { gte: bookingFrom },
-            },
-            {
-              from: { gte: bookingFrom },
-              to: { lte: bookingTo },
-            },
-          ],
+          booking: {
+            status: { in: unavailableBookingStatuses },
+            OR: [
+              {
+                from: { lte: bookingTo },
+                to: { gte: bookingFrom },
+              },
+              {
+                from: { gte: bookingFrom },
+                to: { lte: bookingTo },
+              },
+            ],
+          },
         },
-        select: {
-          from: true,
-          to: true,
-          status: true,
-          id: true,
-          name: true,
-          // Custodian fields needed by updateAssetsWithBookingCustodians()
-          custodianTeamMember: true,
-          custodianUser: {
+        include: {
+          booking: {
             select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              profilePicture: true,
+              from: true,
+              to: true,
+              status: true,
+              id: true,
+              name: true,
+              // Custodian fields needed by updateAssetsWithBookingCustodians()
+              custodianTeamMember: true,
+              custodianUser: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  profilePicture: true,
+                },
+              },
             },
           },
         },
@@ -260,7 +300,7 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    kit: true,
+    assetKits: { select: { kit: true } },
     category: true,
     tags: true,
     location: {

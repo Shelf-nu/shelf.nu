@@ -1,11 +1,31 @@
 import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
+import { Package as PackageIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import { BADGE_COLORS } from "~/utils/badge-colors";
+import { BookingAssetsFilters } from "./booking-assets-filters";
+import { BookingPagination } from "./booking-pagination";
+import KitRow from "./kit-row";
+import ListAssetContent from "./list-asset-content";
+import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
+import { ModelRequestRowActionsDropdown } from "./model-request-row-actions-dropdown";
+import type { LoaderData } from "../list/bulk-actions/bulk-list-header";
+import BulkListHeader from "../list/bulk-actions/bulk-list-header";
+import { EmptyState } from "../list/empty-state";
+import { ListHeader } from "../list/list-header";
+import { ListItem } from "../list/list-item";
+import ListTitle from "../list/list-title";
+import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
+import { InfoTooltip } from "../shared/info-tooltip";
+import TextualDivider from "../shared/textual-divider";
+import { Table, Td, Th } from "../table";
+import When from "../when/when";
 
 /**
  * Type assertion helper for booking assets.
@@ -20,22 +40,6 @@ function asEnrichedAssets<T>(assets: T[]): AssetWithBooking[] {
 function asEnrichedAsset<T>(asset: T): AssetWithBooking {
   return asset as unknown as AssetWithBooking;
 }
-import { BookingAssetsFilters } from "./booking-assets-filters";
-import KitRow from "./kit-row";
-import ListAssetContent from "./list-asset-content";
-import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
-import type { LoaderData } from "../list/bulk-actions/bulk-list-header";
-import BulkListHeader from "../list/bulk-actions/bulk-list-header";
-import { EmptyState } from "../list/empty-state";
-import { ListHeader } from "../list/list-header";
-import { ListItem } from "../list/list-item";
-import ListTitle from "../list/list-title";
-import { Button } from "../shared/button";
-import { InfoTooltip } from "../shared/info-tooltip";
-import TextualDivider from "../shared/textual-divider";
-import { Table, Th } from "../table";
-import { BookingPagination } from "./booking-pagination";
-import When from "../when/when";
 
 export function BookingAssetsColumn() {
   const {
@@ -47,7 +51,15 @@ export function BookingAssetsColumn() {
   } = useLoaderData<BookingPageLoaderData>();
   // const [searchParams] = useSearchParams();
 
-  const hasItems = paginatedItems?.length > 0;
+  // Count the actual content rendered in the table: concrete assets/kits
+  // (paginated) + any outstanding model-level reservations. Without
+  // counting model requests, a "book-by-model only" booking would fall
+  // into the empty state and hide its reservations entirely.
+  const hasItems =
+    paginatedItems?.length > 0 ||
+    (booking.modelRequests ?? []).some(
+      (req: { fulfilledAt: Date | string | null }) => req.fulfilledAt === null
+    );
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
   const { isCompleted, isArchived, isCancelled } = useBookingStatusHelpers(
     booking.status
@@ -148,11 +160,26 @@ export function BookingAssetsColumn() {
       .flat();
   }
 
+  // Phase 3d: surface any outstanding model-level reservations in a
+  // dedicated section above the asset filters. Rows where every unit
+  // has been materialised into a concrete BookingAsset carry a
+  // `fulfilledAt` timestamp and are hidden here — they're history,
+  // not active work. The Models tab in manage-assets shows both
+  // active and fulfilled rows for audit.
+  const outstandingModelRequests = useMemo(
+    () =>
+      (booking.modelRequests ?? []).filter(
+        (req: { fulfilledAt: Date | string | null }) => req.fulfilledAt === null
+      ),
+    [booking.modelRequests]
+  );
+
   return (
     <div className="flex-1">
       <div className="w-full">
         <TextualDivider text="Assets & Kits" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden"></div>
+
         <div className="flex flex-col">
           {/* Filters */}
           <div className="mb-2">
@@ -189,6 +216,7 @@ export function BookingAssetsColumn() {
                   <ListHeader hideFirstColumn>
                     <BulkListHeader itemsGetter={itemsGetter} />
                     <Th>Name</Th>
+                    <Th>Qty</Th>
                     <Th> </Th>
                     <Th>Category</Th>
                     <Th>Tags</Th>
@@ -223,6 +251,24 @@ export function BookingAssetsColumn() {
                     <Th> </Th>
                   </ListHeader>
                   <tbody>
+                    {/* Outstanding model-level reservations render as
+                        regular list rows at the top of the table so
+                        operators see them alongside concrete assets/kits
+                        with a distinguishing "Reserved model" label. See
+                        {@link ModelRequestRow}. Fulfilled rows are
+                        suppressed here — they live in the Models tab of
+                        manage-assets as an audit trail. */}
+                    {outstandingModelRequests.map((req) => (
+                      <ModelRequestRow
+                        key={`model-request-${req.id}`}
+                        request={req}
+                        bookingStatus={booking.status}
+                        bookingId={booking.id}
+                        shouldShowCheckinColumns={shouldShowCheckinColumns}
+                        canScanToAssign={!manageAssetsButtonDisabled}
+                      />
+                    ))}
+
                     {/* Render paginated items (kits and individual assets) */}
                     {paginatedItems.map((item) => {
                       if (item.type === "kit") {
@@ -373,5 +419,127 @@ function BookingAssetsHeader({
         </div>
       </When>
     </div>
+  );
+}
+
+/**
+ * Single outstanding `BookingModelRequest` rendered as a row inside the
+ * Assets & Kits list (Phase 3d — Book-by-Model).
+ *
+ * Uses the same table-cell structure as `KitRow` and the regular asset
+ * row so model reservations live alongside concrete items rather than
+ * in a separate Card above the list. The distinguishing affordances are:
+ *
+ *   - A neutral `Package` placeholder icon (no model image in the DB)
+ *   - An amber "Reserved model" badge under the name
+ *   - A `× N` quantity derived from `quantity - fulfilledQuantity` so
+ *     partially-fulfilled requests show only the still-outstanding count
+ *   - A right-column "Scan to assign" link visible on any manage-eligible
+ *     status (DRAFT / RESERVED / ONGOING / OVERDUE). Routes to the
+ *     generic scan-assets drawer; the checkout flow (with fulfil
+ *     enforcement) still lives on the main Check Out button.
+ *
+ * The row is informational / actionable but **not selectable** — bulk
+ * actions apply to concrete `BookingAsset` rows only. The bulk checkbox
+ * cell is an empty spacer so the columns align with the rest of the
+ * table.
+ */
+function ModelRequestRow({
+  request,
+  bookingStatus,
+  bookingId,
+  shouldShowCheckinColumns,
+  canScanToAssign,
+}: {
+  request: {
+    id: string;
+    assetModelId: string;
+    quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: Date | string | null;
+    assetModel: { id: string; name: string };
+  };
+  bookingStatus: BookingStatus;
+  bookingId: string;
+  shouldShowCheckinColumns: boolean;
+  canScanToAssign: boolean;
+}) {
+  const remaining = Math.max(0, request.quantity - request.fulfilledQuantity);
+
+  return (
+    <tr className="relative border-b border-gray-200">
+      {/* Bulk-select cell — empty because models aren't selectable as
+          bulk items, but padded with the SAME `md:pl-4 md:pr-3` that
+          `BulkListItemCheckbox` uses on asset/kit rows. Without this
+          override, the cell inherits `Td`'s default `md:px-6` padding
+          (~48px) and ends up ~20px wider than the bulk cell on asset
+          rows — which shifts every subsequent column out of alignment
+          with the other rows' columns. */}
+      <Td className="md:pl-4 md:pr-3"> </Td>
+
+      <Td className="w-full whitespace-normal p-0 md:p-0">
+        <div className="flex items-center gap-3 py-4 md:justify-normal md:pr-6">
+          <div
+            aria-hidden
+            className="flex size-12 shrink-0 items-center justify-center rounded-[4px] border border-gray-200 bg-gray-50"
+          >
+            <PackageIcon className="size-5 text-gray-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="block truncate font-medium text-gray-900">
+              {request.assetModel.name}
+            </span>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <Badge
+                color={BADGE_COLORS.amber.bg}
+                textColor={BADGE_COLORS.amber.text}
+                withDot={false}
+              >
+                Reserved model
+              </Badge>
+              {request.fulfilledQuantity > 0 ? (
+                <span className="text-xs text-gray-500">
+                  {request.fulfilledQuantity} of {request.quantity} fulfilled
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </Td>
+
+      {/* Qty: outstanding units still needing assignment. Same
+          `text-center` alignment as the asset-row qty cell so the
+          column stays visually level row-to-row. */}
+      <Td className="text-center text-sm tabular-nums text-gray-700">
+        × {remaining}
+      </Td>
+
+      {/* Availability spacer — always empty for model rows */}
+      <Td> </Td>
+
+      {/* Category — models don't surface a category in this row (keeping
+          the loader cheap; `assetModel` is included but without
+          `defaultCategory`) */}
+      <Td> </Td>
+
+      {/* Tags — n/a for model rows */}
+      <Td> </Td>
+
+      {shouldShowCheckinColumns ? (
+        <>
+          <Td> </Td>
+          <Td> </Td>
+        </>
+      ) : null}
+
+      <Td className="pr-4 text-right align-middle">
+        <ModelRequestRowActionsDropdown
+          request={request}
+          bookingId={bookingId}
+          bookingStatus={bookingStatus}
+          canManage={canScanToAssign}
+        />
+      </Td>
+    </tr>
   );
 }

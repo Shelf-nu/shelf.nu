@@ -160,8 +160,24 @@ const BookingPDFPreview = ({
 }) => {
   if (!pdfMeta) return null;
 
-  const { booking, organization, assets, assetIdToQrCodeMap, totalValue } =
-    pdfMeta;
+  const {
+    booking,
+    organization,
+    assets,
+    assetIdToQrCodeMap,
+    assetIdToQuantityMap,
+    totalValue,
+    modelRequests,
+  } = pdfMeta;
+
+  // Phase 3d (Book-by-Model): defensively re-filter here so a caller
+  // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
+  // model request was fulfilled concurrently) can't leak a fulfilled
+  // historical row into the printed PDF. `fulfilledAt IS NULL` is the
+  // canonical outstanding filter.
+  const outstandingModelRequests = (modelRequests ?? []).filter(
+    (req) => req.fulfilledAt === null
+  );
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
         booking.custodianUser.email
@@ -312,6 +328,9 @@ const BookingPDFPreview = ({
               <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Name
               </th>
+              <th className="w-12 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+                Qty
+              </th>
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Kit
               </th>
@@ -354,6 +373,9 @@ const BookingPDFPreview = ({
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.title}
                   </td>
+                  <td className="border-r border-gray-300 p-2.5 text-center text-sm text-gray-600">
+                    {assetIdToQuantityMap[asset.id] ?? 1}
+                  </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.kit?.name}
                   </td>
@@ -377,7 +399,7 @@ const BookingPDFPreview = ({
 
                 <When truthy={!!asset.description}>
                   <tr className="border-b border-gray-300 align-top">
-                    <td colSpan={7} className="m-2 p-2">
+                    <td colSpan={8} className="m-2 p-2">
                       <div className="flex items-start gap-4 bg-gray-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">
@@ -391,6 +413,34 @@ const BookingPDFPreview = ({
             ))}
           </tbody>
         </table>
+
+        {/*
+         * Phase 3d (Book-by-Model): outstanding model-level reservations
+         * that have not yet been fulfilled by a scan. Rendered after the
+         * concrete assets table in natural reading order; omitted
+         * entirely (no heading) when the booking has no active model
+         * requests so PDFs for model-free bookings are unchanged.
+         */}
+        <When truthy={outstandingModelRequests.length > 0}>
+          <section className="mt-5 border border-gray-300">
+            <div className="border-b border-gray-300 bg-gray-50 p-2.5">
+              <h2 className="m-0 text-sm font-medium">Requested models</h2>
+            </div>
+            <ul className="m-0 list-none p-0">
+              {outstandingModelRequests.map((req) => (
+                <li
+                  key={req.id}
+                  className="flex items-center gap-2 border-b border-gray-300 p-2.5 text-sm text-gray-600 last:border-b-0"
+                >
+                  <span className="font-medium text-gray-900">
+                    {req.quantity - req.fulfilledQuantity} ×
+                  </span>
+                  <span>{req.assetModel.name}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </When>
       </div>
     </div>
   );

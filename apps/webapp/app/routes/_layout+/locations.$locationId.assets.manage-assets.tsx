@@ -48,6 +48,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { updateLocationAssets } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -473,11 +474,17 @@ const RowComponent = ({
             <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
+                {isQuantityTracked(item) && item.quantity != null ? (
+                  <span className="ml-2 text-xs font-normal text-gray-500">
+                    · {item.quantity} {item.unitOfMeasure || "units"}
+                  </span>
+                ) : null}
               </p>
               <AssetStatusBadge
                 id={item.id}
                 status={item.status}
                 availableToBook={item.availableToBook}
+                asset={item}
               />
             </div>
           </div>

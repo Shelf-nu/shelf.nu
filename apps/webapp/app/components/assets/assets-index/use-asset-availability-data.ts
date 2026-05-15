@@ -42,13 +42,17 @@ export function useAssetAvailabilityData(items: Items) {
 
     const events = safeItems
       .map((asset) => {
-        if (!asset.bookings) {
+        if (!("bookingAssets" in asset) || !asset.bookingAssets) {
           return [];
         }
 
         return [
-          ...asset.bookings.map((b) => {
-            const booking = b as AdvancedAssetBooking;
+          ...(
+            asset.bookingAssets as unknown as {
+              booking: AdvancedAssetBooking;
+            }[]
+          ).map((ba) => {
+            const booking = ba.booking;
             const custodianName = booking?.custodianUser
               ? resolveUserDisplayName(booking.custodianUser)
               : booking.custodianTeamMember?.name;

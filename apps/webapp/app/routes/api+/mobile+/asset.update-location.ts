@@ -48,7 +48,9 @@ export async function action({ request }: ActionFunctionArgs) {
         id: true,
         title: true,
         location: { select: { id: true, name: true } },
-        kit: { select: { id: true, name: true } },
+        assetKits: {
+          select: { kit: { select: { id: true, name: true } } },
+        },
       },
     });
 
@@ -57,11 +59,12 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Prevent location update if asset belongs to a kit
-    if (asset.kit) {
+    const parentKit = asset.assetKits[0]?.kit;
+    if (parentKit) {
       return data(
         {
           error: {
-            message: `This asset's location is managed by its parent kit "${asset.kit.name}". Please update the kit's location instead.`,
+            message: `This asset's location is managed by its parent kit "${parentKit.name}". Please update the kit's location instead.`,
           },
         },
         { status: 400 }

@@ -1,20 +1,30 @@
+import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { recordEvents } from "~/modules/activity-event/service.server";
+import {
+  recordEvent,
+  recordEvents,
+} from "~/modules/activity-event/service.server";
 import { getCategory } from "~/modules/category/service.server";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   bulkAssignAssetTags,
+  bulkCheckOutAssets,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
+  checkOutQuantity,
+  createAsset,
   getActiveCustomFieldsForAsset,
   parseAssetValuation,
   refreshExpiredAssetImages,
+  releaseQuantity,
   relinkAssetQrCode,
   updateAsset,
   uploadDuplicateAssetMainImage,
@@ -23,17 +33,28 @@ import {
 // why: isolating asset service logic from actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
+    // why: checkOutQuantity wraps its work in an interactive transaction — we
+    // route callbacks to the same mocked db so inner tx.* calls hit our stubs.
+    // Falls back to Promise.all for the array form so older suites still pass.
     $transaction: vitest
       .fn()
-      .mockImplementation((callback: (tx: unknown) => unknown) => callback(db)),
+      .mockImplementation((callbackOrArray: unknown) =>
+        typeof callbackOrArray === "function"
+          ? (callbackOrArray as (tx: unknown) => unknown)(db)
+          : Promise.all(callbackOrArray as Promise<unknown>[])
+      ),
     asset: {
       findFirst: vitest.fn().mockResolvedValue(null),
-      findUnique: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: checkOutQuantity returns the refreshed asset at the end of its tx
+      findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
     },
+    // why: bulkUpdateAssetCategory + updateAsset cross-org guards verify the
+    // categoryId belongs to the caller's org
     category: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
@@ -46,7 +67,42 @@ vitest.mock("~/database/db.server", () => ({
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
+    // why: checkOutQuantity upserts custody rows and aggregates custody/booking totals;
+    // releaseQuantity additionally reads / decrements / deletes them, and
+    // counts remaining rows after a release to decide whether to flip
+    // Asset.status back to AVAILABLE.
+    custody: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      upsert: vitest.fn().mockResolvedValue({}),
+      findUnique: vitest.fn().mockResolvedValue(null),
+      delete: vitest.fn().mockResolvedValue({}),
+      update: vitest.fn().mockResolvedValue({}),
+      // Default: pretend other custody rows still exist so the
+      // status-flip branch doesn't fire — tests that exercise the
+      // "last release" branch override this.
+      count: vitest.fn().mockResolvedValue(1),
+    },
+    // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
+    bookingAsset: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
+    // why: checkOutQuantity / releaseQuantity look up the custodian's user.id so
+    // the CUSTODY_ASSIGNED / CUSTODY_RELEASED activity event can carry targetUserId
+    teamMember: {
+      findUnique: vitest.fn().mockResolvedValue({ user: null }),
+    },
   },
+}));
+
+// why: lockAssetForQuantityUpdate runs a raw SELECT ... FOR UPDATE that we
+// cannot execute against a mocked tx — stub it to return a controlled asset
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vitest.fn(),
+}));
+
+// why: avoid touching real consumption log writes during checkOutQuantity tests
+vitest.mock("~/modules/consumption-log/service.server", () => ({
+  createConsumptionLog: vitest.fn().mockResolvedValue({}),
 }));
 
 // why: avoid emitting real activity events during asset service tests; assert
@@ -123,7 +179,8 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
-// why: avoid creating actual notes during relink tests
+// why: avoid creating actual notes during relink tests and during the
+// inline-edit note helpers added by main.
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
   createAssetCategoryChangeNote: vitest.fn().mockResolvedValue({}),
@@ -440,12 +497,589 @@ describe("refreshExpiredAssetImages", () => {
   });
 });
 
+describe("createAsset quantity validation", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no quantity", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        consumptionType: "ONE_WAY",
+        // quantity intentionally omitted
+      })
+    ).rejects.toThrow("Quantity is required for quantity-tracked assets");
+  });
+
+  it("throws when QUANTITY_TRACKED asset has no consumptionType", async () => {
+    await expect(
+      createAsset({
+        title: "Test Cables",
+        description: "USB cables",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "QUANTITY_TRACKED",
+        quantity: 100,
+        // consumptionType intentionally omitted
+      })
+    ).rejects.toThrow(
+      "Consumption type is required for quantity-tracked assets"
+    );
+  });
+
+  it("does not throw quantity validation for INDIVIDUAL assets", async () => {
+    // This test verifies that INDIVIDUAL assets skip quantity validation.
+    // The function will proceed past validation but will fail on
+    // other operations (e.g., sequential ID generation) which is expected.
+    // We assert the thrown error is NOT a quantity validation error.
+    await expect(
+      createAsset({
+        title: "Test Laptop",
+        description: "A laptop",
+        userId: "user-1",
+        categoryId: null,
+        valuation: null,
+        organizationId: "org-1",
+        type: "INDIVIDUAL",
+        // No quantity or consumptionType — should not throw validation error
+      })
+    ).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining("Quantity is required"),
+      })
+    );
+  });
+});
+
+describe("checkOutQuantity — availability accounting", () => {
+  // Typed handles for the mocks we set up at the top of the file. Using the
+  // returned-type of vitest.fn keeps IntelliSense happy without casting on
+  // every call.
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCreateConsumptionLog = createConsumptionLog as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyAggregate = db.custody.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyUpsert = db.custody.upsert as ReturnType<typeof vitest.fn>;
+  const mockBookingAssetAggregate = db.bookingAsset.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetFindUniqueOrThrow = db.asset.findUniqueOrThrow as ReturnType<
+    typeof vitest.fn
+  >;
+
+  // A realistic asset stub returned by the row-level lock. The service only
+  // reads id, organizationId, type, quantity, and title from it.
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    mockAssetFindUniqueOrThrow.mockResolvedValue({
+      ...lockedAsset,
+    });
+    // why: the `refreshExpiredAssetImages` suite earlier in this file
+    // sets `db.asset.update.mockRejectedValue(P2025)`. `clearAllMocks`
+    // only resets call history — the rejection implementation persists
+    // and breaks the new symmetric `tx.asset.update` step inside
+    // `checkOutQuantity`. Restore the resolve.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+  });
+
+  it("rejects when booking-reserved units push requested qty over available", async () => {
+    // Regression guard for the Phase 3c fix: availability must subtract
+    // BOTH direct custody AND units tied to ONGOING/OVERDUE bookings.
+    // Pre-fix math was `100 - 0 = 100` and this checkout would have
+    // silently succeeded even though only 20 units are physically free.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 80 } });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 25,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ShelfError);
+    expect((caught as ShelfError).status).toBe(400);
+    // why: "Only 20" is the single most operator-meaningful substring — it
+    // encodes the post-fix math (100 - 0 - 80 = 20) and would not appear if
+    // the service regressed to "Only 100 available" (custody-only math).
+    expect((caught as ShelfError).message).toContain("Only 20");
+    // The service must not create a custody row or log entry on rejection.
+    expect(mockCustodyUpsert).not.toHaveBeenCalled();
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("accepts a checkout that fits within (total − custody − booked) availability", async () => {
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 80 } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 15,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CHECKOUT" })
+    );
+  });
+
+  it("ignores RESERVED bookings when computing availability", async () => {
+    // The service's bookingAsset.aggregate call filters on
+    // `status: { in: ["ONGOING", "OVERDUE"] }`, so RESERVED bookings are
+    // excluded at the DB layer. We mirror that by returning 0 from the
+    // aggregate mock — a RESERVED-only booking contributes nothing.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 90,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Assert the aggregate was invoked with the ONGOING/OVERDUE filter —
+    // this is what makes RESERVED invisible to availability math.
+    expect(mockBookingAssetAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetId: "asset-1",
+          booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+        }),
+        _sum: { quantity: true },
+      })
+    );
+    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("checkOutQuantity — activity events", () => {
+  // Typed handles. The CUSTODY_ASSIGNED event is emitted inside the tx
+  // after the custody upsert succeeds.
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockTeamMemberFindUnique = db.teamMember.findUnique as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // See note on the sibling availability-accounting suite — the
+    // `refreshExpiredAssetImages` test earlier rejects `asset.update`
+    // and that implementation survives `clearAllMocks`.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+  });
+
+  it("emits CUSTODY_ASSIGNED with quantity + viaQuantity meta on successful checkout", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "CUSTODY_ASSIGNED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        // Resolved through the team-member → user lookup
+        targetUserId: "user-42",
+        meta: { quantity: 5, viaQuantity: true },
+      }),
+      // Second arg is the tx client — assert it's truthy (the mocked db).
+      expect.anything()
+    );
+  });
+
+  it("falls back to undefined targetUserId when team member has no linked user", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: null });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 3,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "CUSTODY_ASSIGNED",
+        targetUserId: undefined,
+      }),
+      expect.anything()
+    );
+  });
+});
+
+describe("releaseQuantity — activity events", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockCustodyFindUnique = db.custody.findUnique as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockTeamMemberFindUnique = db.teamMember.findUnique as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // Existing custody row with 10 units — release of 4 is valid.
+    mockCustodyFindUnique.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+    });
+  });
+
+  it("emits CUSTODY_RELEASED with quantity + viaQuantity meta on partial release", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 4,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "CUSTODY_RELEASED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        targetUserId: "user-42",
+        meta: { quantity: 4, viaQuantity: true },
+      }),
+      expect.anything()
+    );
+  });
+
+  it("flips Asset.status to AVAILABLE when the last custody row is removed", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    // Full release of the existing 10-unit custody row.
+    mockCustodyFindUnique.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+    });
+    // After delete, no rows remain → status should flip.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+    mockAssetUpdate.mockResolvedValue({});
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-1" },
+      data: { status: "AVAILABLE" },
+    });
+  });
+
+  it("does NOT flip Asset.status when other custody rows remain", async () => {
+    mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
+    mockCustodyFindUnique.mockResolvedValue({
+      id: "custody-1",
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 10,
+    });
+    // Partial release: 4 of 10 → row decremented, not deleted; count is 1.
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+    const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+    mockAssetUpdate.mockResolvedValue({});
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 4,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "AVAILABLE" }),
+      })
+    );
+  });
+});
+
+describe("bulkDeleteAssets — activity events", () => {
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockAssetDeleteMany = db.asset.deleteMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockAssetDeleteMany.mockResolvedValue({ count: 2 });
+  });
+
+  it("emits one ASSET_DELETED per deleted asset, with title meta", async () => {
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", mainImage: null, title: "Asset One" },
+      { id: "asset-2", mainImage: null, title: "Asset Two" },
+    ]);
+
+    await bulkDeleteAssets({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      // settings is required by the function but only consumed by the
+      // mocked resolveAssetIdsForBulkOperation, which echoes assetIds back.
+      settings: {} as never,
+    });
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "ASSET_DELETED",
+        entityType: "ASSET",
+        entityId: "asset-1",
+        assetId: "asset-1",
+        meta: { title: "Asset One" },
+      }),
+      expect.objectContaining({
+        action: "ASSET_DELETED",
+        entityId: "asset-2",
+        meta: { title: "Asset Two" },
+      }),
+    ]);
+  });
+});
+
+describe("bulkUpdateAssetCategory — activity events", () => {
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits ASSET_CATEGORY_CHANGED only for assets whose category actually changed", async () => {
+    // asset-1: cat-a → cat-b (changed)
+    // asset-2: cat-b → cat-b (no-op, must be skipped)
+    // asset-3: null → cat-b (changed; previous null)
+    // Service now selects `category: { id, name, color }` (PR 0e53b1d04
+    // added an IDOR-style cross-org check); update mocks to match the
+    // nested shape and stub `db.category.findFirst` so the guard passes.
+    mockAssetFindMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        category: { id: "cat-a", name: "A", color: "#111" },
+      },
+      {
+        id: "asset-2",
+        category: { id: "cat-b", name: "B", color: "#222" },
+      },
+      { id: "asset-3", category: null },
+    ]);
+    (db.category.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "cat-b",
+      name: "B",
+      color: "#222",
+    });
+
+    await bulkUpdateAssetCategory({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      categoryId: "cat-b",
+      settings: {} as never,
+    });
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toHaveLength(2);
+    expect(events).toEqual([
+      expect.objectContaining({
+        action: "ASSET_CATEGORY_CHANGED",
+        entityId: "asset-1",
+        field: "categoryId",
+        fromValue: "cat-a",
+        toValue: "cat-b",
+      }),
+      expect.objectContaining({
+        action: "ASSET_CATEGORY_CHANGED",
+        entityId: "asset-3",
+        field: "categoryId",
+        fromValue: null,
+        toValue: "cat-b",
+      }),
+    ]);
+  });
+
+  it("propagates null toValue when category is being cleared", async () => {
+    mockAssetFindMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        category: { id: "cat-a", name: "A", color: "#111" },
+      },
+    ]);
+    // categoryId: null skips the IDOR check, no need to mock category.findFirst
+
+    await bulkUpdateAssetCategory({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      categoryId: null,
+      settings: {} as never,
+    });
+
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({
+        action: "ASSET_CATEGORY_CHANGED",
+        fromValue: "cat-a",
+        toValue: null,
+      }),
+    ]);
+  });
+});
+
+describe("bulkAssignAssetTags — activity events", () => {
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockAssetUpdate = db.asset.update as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits ASSET_TAGS_CHANGED per asset whose tag set actually changed", async () => {
+    // Pre-fetch returns previous tag arrays per asset.
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", tags: [{ id: "tag-a", name: "A" }] },
+      // asset-2 already has tag-b — connecting tag-b is a no-op
+      { id: "asset-2", tags: [{ id: "tag-b", name: "B" }] },
+    ]);
+    // The per-asset update returns the asset with the post-update tag set.
+    mockAssetUpdate.mockResolvedValueOnce({
+      id: "asset-1",
+      tags: [
+        { id: "tag-a", name: "A" },
+        { id: "tag-b", name: "B" },
+      ],
+    });
+    mockAssetUpdate.mockResolvedValueOnce({
+      id: "asset-2",
+      // Same set as before — must be filtered out
+      tags: [{ id: "tag-b", name: "B" }],
+    });
+
+    // IDOR check verifies every tagId belongs to this org via tag.findMany.
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { id: "tag-b" },
+    ]);
+
+    await bulkAssignAssetTags({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      tagsIds: ["tag-b"],
+      remove: false,
+      settings: {} as never,
+    });
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        action: "ASSET_TAGS_CHANGED",
+        entityId: "asset-1",
+        field: "tags",
+        fromValue: ["tag-a"],
+        toValue: ["tag-a", "tag-b"],
+      })
+    );
+  });
+});
+
 describe("updateAsset cross-org guards", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
     // Asset itself is in-org so kit-block lookup and assetBeforeUpdate succeed.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockResolvedValueOnce({ kit: null }) // kit-block check
+      .mockResolvedValueOnce({ assetKits: [] }) // kit-block check
       .mockResolvedValueOnce({
         id: "asset-1",
         title: "Asset 1",
@@ -503,6 +1137,175 @@ describe("updateAsset cross-org guards", () => {
       where: { id: "location-from-org-B", organizationId: "org-A" },
       select: { id: true },
     });
+  });
+});
+
+/**
+ * Centralised SELF_SERVICE guards for the bulk custody flows.
+ *
+ * Both web and mobile bulk-assign / bulk-release routes funnel through
+ * `bulkCheckOutAssets` / `bulkCheckInAssets`. Pre-fix the
+ * "self-service can only assign-to-self" check lived inline in the
+ * web route only — the mobile route shipped without it (hex-security
+ * r3202162994 / r3202161632). Moving the check into the service makes
+ * both callers safe by default; these tests are the regression guard.
+ */
+describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // Re-arm `db.asset.update` after the refreshExpiredAssetImages suite
+    // (see notes on the checkOutQuantity suites).
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+  });
+
+  it("rejects when SELF_SERVICE assigns to a custodian whose user is not the actor", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Other Person",
+      user: {
+        id: "other-user",
+        firstName: "Other",
+        lastName: "Person",
+        displayName: null,
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ShelfError);
+    expect((caught as ShelfError).status).toBe(403);
+    expect((caught as ShelfError).message).toContain(
+      "Self user can only assign custody to themselves"
+    );
+  });
+
+  it("allows SELF_SERVICE assigning to a custodian whose user IS the actor", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Self",
+      user: {
+        id: "user-current",
+        firstName: "Self",
+        lastName: "User",
+        displayName: null,
+      },
+    });
+
+    // Should not throw the 403; downstream calls may stub-fail but the
+    // SELF_SERVICE branch is past by the time that happens.
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-self",
+        custodianName: "Self",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
+  });
+
+  it("does not run the SELF_SERVICE check when role is ADMIN", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Anyone",
+      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
+    });
+
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-anyone",
+        custodianName: "Anyone",
+        organizationId: "org-1",
+        settings: {} as any,
+        role: OrganizationRoles.ADMIN,
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
+  });
+
+  it("does not run the SELF_SERVICE check when role is omitted (back-compat)", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (
+      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      name: "Anyone",
+      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
+    });
+
+    let threw403 = false;
+    try {
+      await bulkCheckOutAssets({
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-anyone",
+        custodianName: "Anyone",
+        organizationId: "org-1",
+        settings: {} as any,
+        // role intentionally omitted — old call sites that haven't
+        // been updated must not start throwing 403s.
+      });
+    } catch (err) {
+      if (err instanceof ShelfError && err.status === 403) threw403 = true;
+    }
+    expect(threw403).toBe(false);
   });
 });
 

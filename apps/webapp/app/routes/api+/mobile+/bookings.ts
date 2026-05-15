@@ -83,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: { name: true },
           },
           _count: {
-            select: { assets: true },
+            select: { bookingAssets: true },
           },
         },
         orderBy: [{ from: "asc" }],
@@ -108,7 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             .join(" ") ||
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
-        assetCount: b._count.assets,
+        assetCount: b._count.bookingAssets,
       })),
       page,
       perPage,

@@ -13,13 +13,13 @@ import type {
 } from "@prisma/client";
 import {
   AssetStatus,
+  AssetType,
   BookingStatus,
   ErrorCorrection,
   KitStatus,
   NoteType,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
-import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -66,6 +66,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createBulkKitChangeNotes,
@@ -76,6 +77,149 @@ import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
+
+/**
+ * Build per-asset Custody rows that inherit a KitCustody assignment.
+ *
+ * When a kit is in custody, every asset in the kit gets a child Custody row
+ * tagged with `kitCustodyId` so the row's origin is traceable. The rule for
+ * `quantity`:
+ * - INDIVIDUAL assets always inherit `quantity: 1`.
+ * - QUANTITY_TRACKED assets inherit only the **remaining** pool — the asset's
+ *   total `quantity` minus any already-allocated Custody rows (operator
+ *   custody and pre-existing kit-allocated custody are both subtracted; the
+ *   helper does not distinguish — what matters is "how many units are not
+ *   already spoken for"). When remaining <= 0 the asset is silently skipped
+ *   (no child row created), so the kit-custody flow degrades gracefully when
+ *   an asset is fully allocated to operators.
+ *
+ * Tagging the child rows with `kitCustodyId` is what allows us to delete only
+ * kit-allocated custody (filter by `kitCustodyId`) without disturbing
+ * operator-assigned per-unit custody on the same asset, and lets the FK
+ * cascade clean them up automatically when the parent KitCustody is deleted.
+ *
+ * @param args.tx - Transactional Prisma client (so the existing-custody read
+ *   sees rows written earlier in the same tx).
+ * @param args.kitCustodyId - The parent KitCustody row this inheritance points back to.
+ * @param args.teamMemberId - The custodian team member, copied to every child row.
+ * @param args.assetIds - Assets in the kit that should receive inherited custody.
+ * @returns A flat array suitable for `tx.custody.createMany({ data })`. Empty
+ *   when every asset is fully operator-allocated.
+ */
+/**
+ * Structural type for the only Prisma surface we need from the tx. Typed this
+ * way (rather than `Prisma.TransactionClient`) because the project uses an
+ * extended Prisma client, and the extended tx is not directly assignable to
+ * the generated `Prisma.TransactionClient`. Mirrors the `RecordEventTxClient`
+ * pattern used in `activity-event/service.server.ts`.
+ */
+type KitCustodyInheritTxClient = {
+  asset: {
+    findMany: (args: {
+      where: { id: { in: string[] } };
+      select: {
+        id: true;
+        type: true;
+        quantity: true;
+        custody: { select: { quantity: true } };
+        assetKits: {
+          where: { kitId: string };
+          select: { quantity: true };
+        };
+      };
+    }) => Promise<
+      Array<{
+        id: string;
+        type: AssetType;
+        quantity: number | null;
+        custody: Array<{ quantity: number }>;
+        assetKits: Array<{ quantity: number }>;
+      }>
+    >;
+  };
+};
+
+export async function buildKitCustodyInheritData({
+  tx,
+  kitId,
+  kitCustodyId,
+  teamMemberId,
+  assetIds,
+}: {
+  tx: KitCustodyInheritTxClient;
+  /** The Kit whose custody is being assigned. Used to find each asset's
+   * per-kit AssetKit.quantity (Phase 4a-Polish-2). */
+  kitId: string;
+  kitCustodyId: string;
+  teamMemberId: string;
+  assetIds: string[];
+}): Promise<Prisma.CustodyCreateManyInput[]> {
+  if (assetIds.length === 0) return [];
+
+  const assets = await tx.asset.findMany({
+    where: { id: { in: assetIds } },
+    select: {
+      id: true,
+      type: true,
+      quantity: true,
+      // Pre-existing Custody rows (operator-allocated + any kit-allocated
+      // from previously-assigned kits) — needed for the strict cap below.
+      custody: { select: { quantity: true } },
+      // The kit's allocated slice. Phase 4a-Polish-2 makes this the
+      // primary source of truth; defensive `?.[0]` handles the case where
+      // the row is missing (shouldn't happen — caller passes assetIds
+      // that belong to this kit — but we'd rather skip than crash).
+      assetKits: {
+        where: { kitId },
+        select: { quantity: true },
+      },
+    },
+  });
+
+  const rows: Prisma.CustodyCreateManyInput[] = [];
+  for (const asset of assets) {
+    if (asset.type !== AssetType.QUANTITY_TRACKED) {
+      rows.push({
+        teamMemberId,
+        assetId: asset.id,
+        kitCustodyId,
+        quantity: 1,
+      });
+      continue;
+    }
+
+    // Phase 4a-Polish-2: read the kit's allocated slice from `AssetKit`.
+    // Cap by `Asset.quantity − sum(pre-existing Custody)` to stay safe
+    // during the transitional period before the picker enforces strict
+    // non-overlap. Once the picker is the only way to mutate
+    // `AssetKit.quantity`, the cap is a no-op (`AssetKit.quantity` will
+    // already be ≤ that ceiling), but it keeps Option B correct today
+    // when `AssetKit.quantity` is still `Asset.quantity` from the
+    // backfill while operator custody may exist separately.
+    //
+    // Defensive `?.` on `assetKits` itself — older test fixtures don't
+    // include the relation in their mock asset shape; the production
+    // code path always pulls it via the select above.
+    const kitSlice = asset.assetKits?.[0]?.quantity ?? 0;
+    if (kitSlice <= 0) continue;
+
+    const preExistingCustody = asset.custody.reduce(
+      (sum, row) => sum + (row.quantity ?? 0),
+      0
+    );
+    const availableCeiling = (asset.quantity ?? 0) - preExistingCustody;
+    const quantity = Math.max(0, Math.min(kitSlice, availableCeiling));
+    if (quantity <= 0) continue;
+
+    rows.push({
+      teamMemberId,
+      assetId: asset.id,
+      kitCustodyId,
+      quantity,
+    });
+  }
+  return rows;
+}
 
 export async function createKit({
   name,
@@ -368,10 +512,14 @@ export async function getPaginatedAndFilterableKits<
   extraInclude?: T;
   currentBookingId?: Booking["id"];
 }) {
+  // include. Treat either `assets` (legacy callers passing typed shapes
+  // that may still reference the old relation) or `assetKits` as the
+  // signal that the caller wants the asset list available for the
+  // hide-empty filter below.
   function hasAssetsIncluded(
     extraInclude?: Prisma.KitInclude
-  ): extraInclude is Prisma.KitInclude & { assets: boolean } {
-    return !!extraInclude?.assets;
+  ): extraInclude is Prisma.KitInclude & { assetKits: boolean } {
+    return !!extraInclude?.assetKits;
   }
 
   const searchParams = getCurrentSearchParams(request);
@@ -426,11 +574,25 @@ export async function getPaginatedAndFilterableKits<
     }
 
     if (currentBookingId && hideUnavailable) {
-      // Basic filters that apply to all kits
-      where.assets = {
+      // "every asset in this kit matches X" predicate becomes
+      // "every AssetKit row's asset matches X".
+      //
+      // QUANTITY_TRACKED assets carry Custody rows for partial operator
+      // allocations on a single pooled asset (e.g. Pleb holds 4 of 80
+      // Pens). Those rows do *not* make the kit unavailable for
+      // booking — the booking system's own availability formula
+      // handles the math at checkout time. Only INDIVIDUAL custody
+      // means the physical item is unavailable. Mirrors the
+      // `getKitAvailabilityStatus` exemption + the kit picker fixes.
+      where.assetKits = {
         every: {
-          organizationId,
-          custody: null,
+          asset: {
+            organizationId,
+            OR: [
+              { type: AssetType.QUANTITY_TRACKED },
+              { custody: { none: {} } },
+            ],
+          },
         },
       };
 
@@ -439,16 +601,26 @@ export async function getPaginatedAndFilterableKits<
         const kitWhere: Prisma.KitWhereInput[] = [
           // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
           {
-            assets: {
+            assetKits: {
               none: {
-                bookings: {
-                  some: {
-                    id: { not: currentBookingId },
-                    status: BookingStatus.RESERVED,
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
+                asset: {
+                  bookingAssets: {
+                    some: {
+                      booking: {
+                        id: { not: currentBookingId },
+                        status: BookingStatus.RESERVED,
+                        OR: [
+                          {
+                            from: { lte: bookingTo },
+                            to: { gte: bookingFrom },
+                          },
+                          {
+                            from: { gte: bookingFrom },
+                            to: { lte: bookingTo },
+                          },
+                        ],
+                      },
+                    },
                   },
                 },
               },
@@ -461,24 +633,31 @@ export async function getPaginatedAndFilterableKits<
               { status: KitStatus.AVAILABLE },
               // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
               {
-                assets: {
+                assetKits: {
                   none: {
-                    bookings: {
-                      some: {
-                        id: { not: currentBookingId },
-                        status: {
-                          in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    asset: {
+                      bookingAssets: {
+                        some: {
+                          booking: {
+                            id: { not: currentBookingId },
+                            status: {
+                              in: [
+                                BookingStatus.ONGOING,
+                                BookingStatus.OVERDUE,
+                              ],
+                            },
+                            OR: [
+                              {
+                                from: { lte: bookingTo },
+                                to: { gte: bookingFrom },
+                              },
+                              {
+                                from: { gte: bookingFrom },
+                                to: { lte: bookingTo },
+                              },
+                            ],
+                          },
                         },
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
                       },
                     },
                   },
@@ -520,14 +699,20 @@ export async function getPaginatedAndFilterableKits<
         orderBy: { createdAt: "desc" },
       }),
       db.kit.count({ where }),
-      db.kit.count({ where: { organizationId, assets: { none: {} } } }),
+      // rows.
+      db.kit.count({
+        where: { organizationId, assetKits: { none: {} } },
+      }),
     ]);
 
     if (hideUnavailable && hasAssetsIncluded(extraInclude)) {
-      kits = kits.filter(
-        // @ts-ignore
-        (kit) => Array.isArray(kit.assets) && kit?.assets?.length > 0
-      );
+      kits = kits.filter((kit) => {
+        // extraInclude is dynamic, so the kit shape is widened here.
+        // Cast to a minimal pivot shape rather than disabling type
+        // checks file-wide.
+        const ak = (kit as { assetKits?: unknown[] }).assetKits;
+        return Array.isArray(ak) && ak.length > 0;
+      });
     }
 
     const totalPages = Math.ceil(totalKits / perPage);
@@ -559,7 +744,11 @@ type KitWithInclude<T extends Prisma.KitInclude | undefined> =
       }>
     : Prisma.KitGetPayload<{ include: typeof GET_KIT_STATIC_INCLUDES }>;
 
-export async function getKit<T extends Prisma.KitInclude | undefined>({
+// why: `const T` (TS 5.0+) preserves the literal type of the inline
+// `extraInclude` passed at the call site. Without it, T widens to
+// `Prisma.KitInclude` and consumers lose the deep shape (e.g.
+// `kit.assetKits[0].asset.status`), forcing `as unknown as {…}` casts.
+export async function getKit<const T extends Prisma.KitInclude | undefined>({
   id,
   organizationId,
   extraInclude,
@@ -667,7 +856,11 @@ export async function getAssetsForKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
-    const where: Prisma.AssetWhereInput = { organizationId, kitId };
+    // `AssetKit` pivot. Filter through the pivot instead.
+    const where: Prisma.AssetWhereInput = {
+      organizationId,
+      assetKits: { some: { kitId } },
+    };
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();
@@ -715,6 +908,214 @@ export async function getAssetsForKits({
   }
 }
 
+/**
+ * Pre-fetched kit shape consumed by `performKitDeletion`. Kept loose
+ * (just the fields the helper actually reads) so both single + bulk
+ * call sites can share the same pipeline.
+ */
+type KitForDeletion = {
+  id: Kit["id"];
+  name: Kit["name"];
+  image: Kit["image"];
+  assets: Array<{ id: string; title: string }>;
+  custody: {
+    id: string;
+    custodian: {
+      id: string;
+      name: string;
+      user: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        displayName: string | null;
+      } | null;
+    };
+  } | null;
+};
+
+/**
+ * Shared deletion pipeline for `deleteKit` + `bulkDeleteKits`.
+ *
+ * Whether you're deleting one kit or many, the steps are identical:
+ *   1. Pre-read inherited Custody rows (so we can emit
+ *      `CUSTODY_RELEASED` events before the FK cascade wipes them).
+ *   2. Inside a transaction:
+ *      a. Emit one `CUSTODY_RELEASED` event per inherited row, tagged
+ *         with the source kit + custodian for audit.
+ *      b. Delete the kits — FK cascades clean up
+ *         `Kit → KitCustody → Custody` and `Asset.kitId` is set null.
+ *      c. Conditional status flip: only assets with **zero** remaining
+ *         Custody rows after the cascade drop to `AVAILABLE`. Assets
+ *         with surviving operator custody (Phase 2 multi-custodian)
+ *         keep `IN_CUSTODY` so we don't lie about state.
+ *   3. Outside the tx (best-effort, audit-only):
+ *      a. Write asset notes — one `createNotes` call per in-custody
+ *        kit so each group gets its kit's correct custodian.
+ *      b. Delete kit images.
+ *
+ * @param args.kits - Pre-fetched kits with the shape above. Caller is
+ *   responsible for org-scoping the read.
+ * @param args.organizationId - Used for status-flip scoping + event meta.
+ * @param args.userId - Actor for events + note attribution.
+ */
+async function performKitDeletion({
+  kits,
+  organizationId,
+  userId,
+}: {
+  kits: KitForDeletion[];
+  organizationId: Kit["organizationId"];
+  userId: string;
+}) {
+  if (kits.length === 0) return;
+
+  const kitIdsToDelete = kits.map((k) => k.id);
+  const inCustodyKits = kits.filter((k) => !!k.custody);
+  const allAssetIds = kits.flatMap((k) => k.assets.map((a) => a.id));
+
+  // Resolve the actor once for note text — only needed when at least
+  // one kit was in custody (an AVAILABLE kit emits nothing).
+  let actorLink = "";
+  if (inCustodyKits.length > 0) {
+    const actor = await getUserByID(userId, {
+      select: {
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    actorLink = wrapUserLinkForNote({
+      id: userId,
+      firstName: actor?.firstName,
+      lastName: actor?.lastName,
+    });
+  }
+
+  await db.$transaction(async (tx) => {
+    const kitCustodyIds = inCustodyKits
+      .map((k) => k.custody?.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (kitCustodyIds.length > 0) {
+      const inheritedCustodyRows = await tx.custody.findMany({
+        where: { kitCustodyId: { in: kitCustodyIds } },
+        select: {
+          assetId: true,
+          teamMemberId: true,
+          kitCustodyId: true,
+        },
+      });
+
+      if (inheritedCustodyRows.length > 0) {
+        // Map each row's source kit so events carry the correct
+        // `kitId` + `targetUserId`.
+        const kitByKitCustodyId = new Map(
+          inCustodyKits.map((k) => [k.custody!.id, k])
+        );
+
+        await recordEvents(
+          inheritedCustodyRows.map((row) => {
+            const sourceKit = kitByKitCustodyId.get(row.kitCustodyId!);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: sourceKit?.id,
+              teamMemberId: row.teamMemberId,
+              targetUserId:
+                sourceKit?.custody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true, viaKitDelete: true },
+            };
+          }),
+          tx
+        );
+      }
+    }
+
+    // Activity events — one ASSET_KIT_CHANGED per asset that loses its
+    // kit on cascade. Emitted before the deleteMany so the AssetKit
+    // pivot rows are still readable for context if a future report
+    // needs them. Folded in from main's PR #2535 which emitted these
+    // inline in both `deleteKit` and `bulkDeleteKits`; the shared
+    // helper deduplicates that.
+    const kitByAssetId = new Map<string, KitForDeletion>();
+    for (const k of kits) {
+      for (const a of k.assets) {
+        kitByAssetId.set(a.id, k);
+      }
+    }
+    if (allAssetIds.length > 0) {
+      await recordEvents(
+        allAssetIds.map((assetId) => {
+          const sourceKit = kitByAssetId.get(assetId);
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_KIT_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            kitId: sourceKit?.id,
+            field: "kitId",
+            fromValue: sourceKit?.id ?? null,
+            toValue: null,
+          };
+        }),
+        tx
+      );
+    }
+
+    await tx.kit.deleteMany({
+      where: { id: { in: kitIdsToDelete }, organizationId },
+    });
+
+    if (allAssetIds.length > 0) {
+      const assetsWithRemainingCustody = await tx.custody.findMany({
+        where: { assetId: { in: allAssetIds } },
+        select: { assetId: true },
+      });
+      const stillCustodiedAssetIds = new Set(
+        assetsWithRemainingCustody.map((c) => c.assetId)
+      );
+      const assetsToFlipAvailable = allAssetIds.filter(
+        (assetId) => !stillCustodiedAssetIds.has(assetId)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable }, organizationId },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
+    }
+  });
+
+  if (inCustodyKits.length > 0) {
+    await Promise.all(
+      inCustodyKits
+        .filter((k) => k.assets.length > 0)
+        .map((k) => {
+          const custodianDisplay = k.custody?.custodian
+            ? wrapCustodianForNote({ teamMember: k.custody.custodian })
+            : "**Unknown Custodian**";
+          return createNotes({
+            content: `${actorLink} released ${custodianDisplay}'s custody when kit **${k.name.trim()}** was deleted.`,
+            type: "UPDATE",
+            userId,
+            assetIds: k.assets.map((a) => a.id),
+          });
+        })
+    );
+  }
+
+  const kitWithImages = kits.filter((k) => !!k.image);
+  await Promise.all(
+    kitWithImages.map((k) => deleteKitImage({ url: k.image! }))
+  );
+}
+
 export async function deleteKit({
   id,
   organizationId,
@@ -722,42 +1123,70 @@ export async function deleteKit({
 }: {
   id: Kit["id"];
   organizationId: Kit["organizationId"];
-  /** Optional — caller-supplied userId for the activity event actor. */
-  actorUserId?: User["id"];
+  /**
+   * Actor for the activity events + system notes emitted when a
+   * **kit-in-custody** is deleted, and for the per-asset
+   * `ASSET_KIT_CHANGED` events fired for every asset that loses its
+   * kit on cascade. Renamed from `userId` to align with the rest of
+   * the activity-event call sites (see PR #2535).
+   */
+  actorUserId: string;
 }) {
   try {
-    // Fetch assets currently in this kit so we can emit ASSET_KIT_CHANGED
-    // events before the cascade SetNull unkits them.
-    const assetsInKit = await db.asset.findMany({
-      where: { kitId: id, organizationId },
-      select: { id: true },
+    const kitRow = await db.kit.findUniqueOrThrow({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        assetKits: {
+          select: { asset: { select: { id: true, title: true } } },
+        },
+        custody: {
+          select: {
+            id: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                // why: wrapCustodianForNote / wrapUserLinkForNote use the
+                // first/last/displayName to render the linked-text in the
+                // resulting note; without them the fallback reads
+                // "Unknown User".
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
-    return await db.$transaction(async (tx) => {
-      if (assetsInKit.length > 0) {
-        await recordEvents(
-          assetsInKit.map((asset) => ({
-            organizationId,
-            actorUserId: actorUserId ?? null,
-            action: "ASSET_KIT_CHANGED" as const,
-            entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
-            kitId: id,
-            field: "kitId",
-            fromValue: id,
-            toValue: null,
-          })),
-          tx
-        );
-      }
-      return tx.kit.delete({ where: { id, organizationId } });
+    // Flatten pivot rows into the in-memory `assets` shape that
+    // `performKitDeletion` consumes.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
+
+    await performKitDeletion({
+      kits: [kit],
+      organizationId,
+      userId: actorUserId,
     });
+
+    return kit;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting kit",
-      additionalData: { id, organizationId },
+      additionalData: { id, organizationId, userId: actorUserId },
       label,
     });
   }
@@ -812,13 +1241,15 @@ export async function releaseCustody({
   organizationId: Kit["organizationId"];
 }) {
   try {
-    const [kit, actor] = await Promise.all([
+    const [kitRow, actor] = await Promise.all([
       db.kit.findUniqueOrThrow({
         where: { id: kitId, organizationId },
         select: {
           id: true,
           name: true,
-          assets: { select: { id: true, title: true } },
+          assetKits: {
+            select: { asset: { select: { id: true, title: true } } },
+          },
           createdBy: {
             select: {
               id: true,
@@ -827,7 +1258,12 @@ export async function releaseCustody({
               displayName: true,
             },
           },
-          custody: { select: { custodian: { include: { user: true } } } },
+          custody: {
+            select: {
+              id: true,
+              custodian: { include: { user: true } },
+            },
+          },
         },
       }),
       getUserByID(userId, {
@@ -838,6 +1274,14 @@ export async function releaseCustody({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // Flatten pivot rows so downstream code reads the same shape it
+    // did pre-pivot. Optional chaining tolerates fixtures / payloads
+    // that omit the pivot relation entirely.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const actorLink = wrapUserLinkForNote({
       id: userId,
@@ -852,7 +1296,45 @@ export async function releaseCustody({
     // Use transaction for atomicity - prevents orphaned custody records on partial failure
     // Activity events must be inside to ensure audit trail consistency
     await db.$transaction(async (tx) => {
-      // Delete kit custody and update kit status
+      // Capture the kit-allocated Custody rows BEFORE the cascade so we can
+      // emit `CUSTODY_RELEASED` events for them. Filtering by `kitCustodyId`
+      // means operator-assigned custody on the same assets is left untouched
+      // when the FK cascade fires.
+      const kitCustodyId = kit.custody?.id;
+      const inheritedCustodyRows = kitCustodyId
+        ? await tx.custody.findMany({
+            where: { kitCustodyId },
+            select: {
+              assetId: true,
+              teamMemberId: true,
+              kitCustodyId: true,
+            },
+          })
+        : [];
+
+      // Activity events emitted FIRST — recordEvents runs inside the tx so
+      // they roll back atomically if the kit-update below fails.
+      if (inheritedCustodyRows.length > 0) {
+        await recordEvents(
+          inheritedCustodyRows.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: kit.id,
+            teamMemberId: row.teamMemberId,
+            targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+      }
+
+      // Delete kit custody and update kit status. Deleting the KitCustody
+      // row cascades to its child Custody rows (kitCustodyId FK) — no
+      // explicit `tx.custody.deleteMany` is needed any more.
       await tx.kit.update({
         where: { id: kitId, organizationId },
         data: {
@@ -861,35 +1343,25 @@ export async function releaseCustody({
         },
       });
 
-      // Delete asset custody records first, then update asset status
+      // Only mark assets AVAILABLE if no operator-assigned custody remains.
+      // If an asset still has direct (non-kit) custody, it keeps IN_CUSTODY.
       const assetIds = kit.assets.map((a) => a.id);
-
-      await tx.custody.deleteMany({
+      const assetsWithRemainingCustody = await tx.custody.findMany({
         where: { assetId: { in: assetIds } },
+        select: { assetId: true },
       });
-
-      await tx.asset.updateMany({
-        where: { id: { in: assetIds }, organizationId },
-        data: { status: AssetStatus.AVAILABLE },
-      });
-
-      // Activity events — one CUSTODY_RELEASED per asset in the kit.
-      // Must be inside transaction to ensure atomicity with custody release
-      await recordEvents(
-        kit.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: kit.id,
-          teamMemberId: kit.custody?.custodian?.id ?? undefined,
-          targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
+      const stillCustodiedAssetIds = new Set(
+        assetsWithRemainingCustody.map((c) => c.assetId)
       );
+      const assetsToFlipAvailable = assetIds.filter(
+        (id) => !stillCustodiedAssetIds.has(id)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable }, organizationId },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
     });
 
     // Notes can be created outside transaction (not critical for consistency)
@@ -935,27 +1407,32 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
 
       /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit.
        * We filter for assets that have an active booking to avoid picking
-       * an asset in the kit that is AVAILABLE and has no relevant booking. */
+       * an asset in the kit that is AVAILABLE and has no relevant booking.
+       * Kit membership is read through the `AssetKit` pivot. */
       const kitAsset = await db.asset.findFirst({
         where: {
-          kitId: kit.id,
-          bookings: {
-            some: { status: { in: ["ONGOING", "OVERDUE"] } },
+          assetKits: { some: { kitId: kit.id } },
+          bookingAssets: {
+            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
           },
         },
         select: {
           id: true,
-          bookings: {
-            where: { status: { in: ["ONGOING", "OVERDUE"] } },
-            select: {
-              id: true,
-              custodianTeamMember: true,
-              custodianUser: {
+          bookingAssets: {
+            where: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+            include: {
+              booking: {
                 select: {
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                  profilePicture: true,
+                  id: true,
+                  custodianTeamMember: true,
+                  custodianUser: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      displayName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             },
@@ -963,7 +1440,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
         },
       });
 
-      const booking = kitAsset?.bookings[0];
+      const booking = kitAsset?.bookingAssets[0]?.booking;
       const custodianUser = booking?.custodianUser;
       const custodianTeamMember = booking?.custodianTeamMember;
 
@@ -1042,26 +1519,26 @@ export function getKitCurrentBooking(kit: {
   id: string;
   assets: {
     status: AssetStatus;
-    bookings: CurrentBookingType[];
+    bookingAssets: { booking: CurrentBookingType }[];
   }[];
 }) {
   const ongoingBookingAsset = kit.assets
-    // Filter each asset's bookings to only ongoing or overdue ones
+    // Filter each asset's bookingAssets to only ongoing or overdue ones
     .map((a) => ({
       ...a,
-      bookings: a.bookings.filter(
-        (b) =>
-          b.status === BookingStatus.ONGOING ||
-          b.status === BookingStatus.OVERDUE
+      bookingAssets: a.bookingAssets.filter(
+        (ba) =>
+          ba.booking.status === BookingStatus.ONGOING ||
+          ba.booking.status === BookingStatus.OVERDUE
       ),
     }))
     // Only consider assets that are actually checked out
     .filter((a) => a.status === AssetStatus.CHECKED_OUT)
     // Find the first asset that has any ongoing/overdue bookings
-    .find((a) => a.bookings.length > 0);
+    .find((a) => a.bookingAssets.length > 0);
 
   const ongoingBooking = ongoingBookingAsset
-    ? ongoingBookingAsset.bookings[0]
+    ? ongoingBookingAsset.bookingAssets[0].booking
     : undefined;
 
   return ongoingBooking;
@@ -1086,51 +1563,56 @@ export async function bulkDeleteKits({
       ? getKitsWhereInput({ organizationId, currentSearchParams })
       : { id: { in: kitIds }, organizationId };
 
-    /** We have to remove the images of the kits and emit per-asset
-     * ASSET_KIT_CHANGED events for the cascade unkit, so we need the
-     * assets of each kit in this query. */
-    const kits = await db.kit.findMany({
+    const kitRows = await db.kit.findMany({
       where,
       select: {
         id: true,
+        name: true,
         image: true,
-        assets: { select: { id: true } },
+        assetKits: {
+          select: { asset: { select: { id: true, title: true } } },
+        },
+        custody: {
+          select: {
+            id: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                // why: wrapCustodianForNote / wrapUserLinkForNote use the
+                // first/last/displayName to render the linked-text in the
+                // resulting note; without them the fallback reads
+                // "Unknown User".
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
-    return await db.$transaction(async (tx) => {
-      // Activity events — one ASSET_KIT_CHANGED per asset that was in a
-      // deleted kit. The asset's kitId becomes null via `onDelete: SetNull`.
-      const unkitEvents: Parameters<typeof recordEvents>[0] = kits.flatMap(
-        (kit) =>
-          kit.assets.map((asset) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_KIT_CHANGED" as const,
-            entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
-            kitId: kit.id,
-            field: "kitId",
-            fromValue: kit.id,
-            toValue: null,
-          }))
-      );
-      if (unkitEvents.length > 0) {
-        await recordEvents(unkitEvents, tx);
-      }
+    // Flatten pivot rows into the in-memory `assets` shape that
+    // `performKitDeletion` consumes. Main's PR #2535 added per-asset
+    // ASSET_KIT_CHANGED emission for the cascade unkit inside
+    // `bulkDeleteKits` — on our branch the equivalent emission lives in
+    // `performKitDeletion` so single + bulk paths share one
+    // implementation (see the recordEvents call there).
+    const kits = kitRows.map((k) => ({
+      ...k,
+      assets: (k.assetKits ?? []).map((ak) => ak.asset),
+    }));
 
-      /** Deleting all kits */
-      await tx.kit.deleteMany({
-        where: { id: { in: kits.map((kit) => kit.id) } },
-      });
-
-      /** Deleting images of the kits (if any) */
-      const kitWithImages = kits.filter((kit) => !!kit.image);
-
-      await Promise.all(
-        kitWithImages.map((kit) => deleteKitImage({ url: kit.image! }))
-      );
+    await performKitDeletion({
+      kits,
+      organizationId,
+      userId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1166,7 +1648,10 @@ export async function bulkAssignKitCustody({
       : { id: { in: kitIds }, organizationId };
 
     /**
-     * We have to make notes and assign custody to all assets of a kit so we have to make this query
+     * We have to make notes and assign custody to all assets of a kit so we have to make this query.
+     * `type` and `quantity` are needed so qty-tracked assets get the asset's
+     * full tracked quantity on the inherited Custody row (Site 3 of the kit
+     * custody correctness fixes).
      */
     const [kits, user, custodianTeamMember] = await Promise.all([
       db.kit.findMany({
@@ -1175,12 +1660,20 @@ export async function bulkAssignKitCustody({
           id: true,
           name: true,
           status: true,
-          assets: {
+          // We include the kit's id/name on each asset row by
+          // re-projecting the parent kit, since the helper needs a
+          // {kit: {id, name}} shape downstream to render the note link.
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              status: true,
-              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  status: true,
+                  type: true,
+                  quantity: true,
+                },
+              },
             },
           },
         },
@@ -1220,10 +1713,25 @@ export async function bulkAssignKitCustody({
       });
     }
 
-    const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
+    // Flatten the pivot rows into {asset, kit} pairs so downstream code
+    // (notes, activity events) can read both sides without changing
+    // shape.
+    const allAssetsOfAllKits = kits.flatMap((kit) =>
+      (kit.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kit: { id: kit.id, name: kit.name },
+      }))
+    );
 
+    // INDIVIDUAL assets block the assign; QUANTITY_TRACKED don't.
+    // Phase 3d-Polish-2's `buildKitCustodyInheritData` (Option B) writes
+    // the *remaining* pool per asset, so a qty-tracked asset whose
+    // row-level status is IN_CUSTODY (some units operator-held) still
+    // assigns the leftover quantity, and fully-allocated assets are
+    // silently skipped — neither needs to block here.
     const someAssetsUnavailable = allAssetsOfAllKits.some(
-      (asset) => asset.status !== "AVAILABLE"
+      (asset) =>
+        asset.type !== "QUANTITY_TRACKED" && asset.status !== "AVAILABLE"
     );
     if (someAssetsUnavailable) {
       throw new ShelfError({
@@ -1255,15 +1763,40 @@ export async function bulkAssignKitCustody({
         data: { status: KitStatus.IN_CUSTODY },
       });
 
+      /**
+       * `createMany` doesn't return rows, so re-query the just-created
+       * KitCustody rows to get their IDs. Each child Custody row is tagged
+       * with its parent's `kitCustodyId` so the kit→assets relationship is
+       * traceable and FK cascade can clean up on release.
+       */
+      const kitCustodyRows = await tx.kitCustody.findMany({
+        where: { kitId: { in: kits.map((kit) => kit.id) } },
+        select: { id: true, kitId: true },
+      });
+      const kitCustodyByKitId = new Map(
+        kitCustodyRows.map((kc) => [kc.kitId, kc.id])
+      );
+
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
 
-      /** Creating custodies over assets of kits */
-      await tx.custody.createMany({
-        data: allAssetsOfAllKits.map((asset) => ({
-          teamMemberId: custodianId,
-          assetId: asset.id,
-        })),
-      });
+      /** Creating custodies over assets of kits — one row per (asset, kit-custody) */
+      const inheritDataPerKit = await Promise.all(
+        kits.map(async (kit) => {
+          const kitCustodyId = kitCustodyByKitId.get(kit.id);
+          if (!kitCustodyId) return [];
+          return buildKitCustodyInheritData({
+            tx,
+            kitId: kit.id,
+            kitCustodyId,
+            teamMemberId: custodianId,
+            assetIds: (kit.assetKits ?? []).map((ak) => ak.asset.id),
+          });
+        })
+      );
+      const inheritData = inheritDataPerKit.flat();
+      if (inheritData.length > 0) {
+        await tx.custody.createMany({ data: inheritData });
+      }
 
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
@@ -1295,6 +1828,8 @@ export async function bulkAssignKitCustody({
       });
 
       // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      // `meta.quantity` mirrors the quantity persisted on the child Custody
+      // row so reports can aggregate by units, not just rows.
       await recordEvents(
         allAssetsOfAllKits.map((asset) => ({
           organizationId,
@@ -1306,7 +1841,13 @@ export async function bulkAssignKitCustody({
           kitId: asset.kit?.id ?? undefined,
           teamMemberId: custodianId,
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: { viaKit: true },
+          meta: {
+            viaKit: true,
+            quantity:
+              asset.type === AssetType.QUANTITY_TRACKED
+                ? asset.quantity ?? 1
+                : 1,
+          },
         })),
         tx
       );
@@ -1350,24 +1891,33 @@ export async function bulkReleaseKitCustody({
       : { id: { in: kitIds }, organizationId };
 
     /**
-     * To make notes and release assets of kits we have to make this query
+     * To make notes and release assets of kits we have to make this query.
+     *
+     * Kit assets come through the `AssetKit` pivot; we pull each asset
+     * row via `assetKits.asset` and re-attach the parent kit's
+     * `{ id, name }` to it so the downstream note creation can render
+     * a kit link without changing shape.
      */
-    const [kits, user] = await Promise.all([
+    const [kitRows, user] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
           id: true,
+          name: true,
           status: true,
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              status: true,
-              title: true,
-              custody: { select: { id: true } },
-              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+              asset: {
+                select: {
+                  id: true,
+                  status: true,
+                  title: true,
+                  custody: { select: { id: true } },
+                },
+              },
             },
           },
         },
@@ -1381,6 +1931,17 @@ export async function bulkReleaseKitCustody({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // Flatten pivot rows back into kit-shaped {..., assets: [...]} so the
+    // existing code path reads the same. Each asset carries a
+    // synthetic `kit` field used for the note-link rendering below.
+    const kits = kitRows.map((kit) => ({
+      ...kit,
+      assets: (kit.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kit: { id: kit.id, name: kit.name },
+      })),
+    }));
 
     const custodian = kits[0].custody?.custodian;
 
@@ -1398,7 +1959,66 @@ export async function bulkReleaseKitCustody({
     const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
 
     return await db.$transaction(async (tx) => {
-      /** Deleting all custodies of kits */
+      /**
+       * Capture the kit-allocated Custody rows BEFORE the cascade fires so we
+       * can emit one `CUSTODY_RELEASED` event per row. Filtering by the
+       * KitCustody IDs (rather than just `assetId`) keeps operator-assigned
+       * custody on the same assets safe — it has `kitCustodyId IS NULL` and
+       * is not affected by the cascade.
+       */
+      const kitCustodyRows = await tx.kitCustody.findMany({
+        where: { kitId: { in: kits.map((kit) => kit.id) } },
+        select: { id: true, kitId: true, custodianId: true },
+      });
+      const releasedCustodyRows =
+        kitCustodyRows.length > 0
+          ? await tx.custody.findMany({
+              where: {
+                kitCustodyId: { in: kitCustodyRows.map((kc) => kc.id) },
+              },
+              select: {
+                assetId: true,
+                teamMemberId: true,
+                kitCustodyId: true,
+              },
+            })
+          : [];
+
+      // Map each released asset back to its kit (for the kitId field on the
+      // event). This is one tiny lookup map; we already have everything in
+      // memory.
+      const kitIdByKitCustodyId = new Map(
+        kitCustodyRows.map((kc) => [kc.id, kc.kitId])
+      );
+
+      // Activity events emitted FIRST so they roll back atomically with the
+      // mutation if anything below fails. Cascade-driven deletes happen
+      // after this point.
+      if (releasedCustodyRows.length > 0) {
+        await recordEvents(
+          releasedCustodyRows.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: row.kitCustodyId
+              ? kitIdByKitCustodyId.get(row.kitCustodyId)
+              : undefined,
+            teamMemberId: row.teamMemberId,
+            targetUserId: custodian?.user?.id ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+      }
+
+      /**
+       * Deleting all custodies of kits — FK cascade (kitCustodyId on Custody)
+       * removes the child Custody rows automatically, so no explicit
+       * `tx.custody.deleteMany` is needed any more.
+       */
       await tx.kitCustody.deleteMany({
         where: {
           kitId: { in: kits.map((kit) => kit.id) },
@@ -1411,18 +2031,26 @@ export async function bulkReleaseKitCustody({
         data: { status: KitStatus.AVAILABLE },
       });
 
-      /** Deleting all custodies of all assets of kits */
-      await tx.custody.deleteMany({
-        where: {
-          assetId: { in: allAssetsOfAllKits.map((asset) => asset.id) },
-        },
+      /**
+       * Only flip assets to AVAILABLE if no operator-assigned custody
+       * remains. Direct per-unit custody (kitCustodyId IS NULL) keeps the
+       * asset IN_CUSTODY for that custodian.
+       */
+      const allAssetIds = allAssetsOfAllKits.map((asset) => asset.id);
+      const stillCustodied = await tx.custody.findMany({
+        where: { assetId: { in: allAssetIds } },
+        select: { assetId: true },
       });
-
-      /** Making all the assets of the kit AVAILABLE */
-      await tx.asset.updateMany({
-        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
-        data: { status: AssetStatus.AVAILABLE },
-      });
+      const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+      const assetsToFlipAvailable = allAssetIds.filter(
+        (id) => !stillCustodiedIds.has(id)
+      );
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({
@@ -1446,22 +2074,6 @@ export async function bulkReleaseKitCustody({
           };
         }),
       });
-
-      // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
-      await recordEvents(
-        allAssetsOfAllKits.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: asset.kit?.id ?? undefined,
-          teamMemberId: custodian?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
-      );
     });
   } catch (cause) {
     const message =
@@ -1700,10 +2312,16 @@ export async function getAvailableKitAssetForBooking(
   try {
     const selectedKits = await db.kit.findMany({
       where: { id: { in: kitIds } },
-      select: { assets: { select: { id: true, status: true } } },
+      select: {
+        assetKits: {
+          select: { asset: { select: { id: true, status: true } } },
+        },
+      },
     });
 
-    const allAssets = selectedKits.flatMap((kit) => kit.assets);
+    const allAssets = selectedKits.flatMap((kit) =>
+      (kit.assetKits ?? []).map((ak) => ak.asset)
+    );
 
     return allAssets.map((asset) => asset.id);
   } catch (cause: any) {
@@ -1731,23 +2349,27 @@ export async function updateKitLocation({
   userId?: User["id"];
 }) {
   try {
-    // Get kit with its assets first
-    const kit = await db.kit.findUnique({
+    // Get kit with its assets first.
+    const kitRow = await db.kit.findUnique({
       where: { id, organizationId },
       select: {
         id: true,
         name: true,
-        assets: {
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            location: { select: { id: true, name: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                location: { select: { id: true, name: true } },
+              },
+            },
           },
         },
       },
     });
 
-    if (!kit) {
+    if (!kitRow) {
       throw new ShelfError({
         cause: null,
         message: "Kit not found",
@@ -1755,6 +2377,12 @@ export async function updateKitLocation({
         shouldBeCaptured: false,
       });
     }
+
+    // Flatten pivot rows into the in-memory `assets` shape used below.
+    const kit = {
+      ...kitRow,
+      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const assetIds = kit.assets.map((asset) => asset.id);
 
@@ -1942,23 +2570,35 @@ export async function bulkUpdateKitLocation({
       ? getKitsWhereInput({ organizationId, currentSearchParams })
       : { id: { in: kitIds }, organizationId };
 
-    // Get kits with their assets before updating
-    const kitsWithAssets = await db.kit.findMany({
+    // Get kits with their assets before updating.
+    // flatten back into a `.assets` shape downstream.
+    const kitsWithAssetsRows = await db.kit.findMany({
       where,
       select: {
         id: true,
         name: true,
         locationId: true,
         location: { select: { id: true, name: true } },
-        assets: {
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            location: { select: { id: true, name: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                location: { select: { id: true, name: true } },
+              },
+            },
           },
         },
       },
     });
+
+    // Flatten pivot rows back into a kit-shaped `.assets` array so the
+    // rest of this function reads as it did pre-pivot.
+    const kitsWithAssets = kitsWithAssetsRows.map((kit) => ({
+      ...kit,
+      assets: (kit.assetKits ?? []).map((ak) => ak.asset),
+    }));
 
     const actualKitIds = kitsWithAssets.map((kit) => kit.id);
     const allAssets = kitsWithAssets.flatMap((kit) => kit.assets);
@@ -2243,6 +2883,7 @@ export async function updateKitAssets({
   organizationId,
   userId,
   assetIds,
+  assetQuantities = {},
   request,
   addOnly = false,
 }: {
@@ -2250,6 +2891,13 @@ export async function updateKitAssets({
   organizationId: Organization["id"];
   userId: User["id"];
   assetIds: Asset["id"][];
+  /**
+   * Phase 4a-Polish-2: per-asset quantity for QUANTITY_TRACKED rows in the
+   * picker. Missing entries default to the asset's full pool (today's
+   * "kit owns the whole asset" semantics). INDIVIDUAL assets always
+   * write quantity = 1 regardless of this map.
+   */
+  assetQuantities?: Record<Asset["id"], number>;
   request: Request;
   addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
@@ -2268,21 +2916,34 @@ export async function updateKitAssets({
       lastName: user?.lastName,
     });
 
-    const kit = await db.kit
+    const kitWithRelations = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
           location: { select: { id: true, name: true } },
-          assets: {
+          // Each pivot row carries the kitId (denormalised) so the
+          // `asset.kit?.id` checks downstream can map to
+          // `asset.assetKits[0]?.kitId`.
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              kit: true,
-              bookings: { select: { id: true, status: true } },
+              kitId: true,
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  assetKits: { select: { kitId: true } },
+                  bookingAssets: {
+                    include: {
+                      booking: { select: { id: true, status: true } },
+                    },
+                  },
+                },
+              },
             },
           },
           custody: {
             select: {
+              id: true,
               custodian: {
                 select: {
                   id: true,
@@ -2313,6 +2974,13 @@ export async function updateKitAssets({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // Flatten the AssetKit pivot rows back into a list of assets so the
+    // rest of this function reads the same way it did pre-pivot.
+    const kit = {
+      ...kitWithRelations,
+      assets: (kitWithRelations.assetKits ?? []).map((ak) => ak.asset),
+    };
 
     const kitCustodianDisplay = kit.custody?.custodian
       ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
@@ -2354,15 +3022,38 @@ export async function updateKitAssets({
       ];
     }
 
-    // Get all assets that should be in the kit (based on assetIds) with organization scoping
+    // Get all assets that should be in the kit (based on assetIds) with organization scoping.
+    // `type` and `quantity` are required so that inheriting kit-custody on
+    // qty-tracked assets writes the asset's full tracked quantity into the
+    // child Custody row instead of defaulting to 1.
     const allAssetsForKit = await db.asset
       .findMany({
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
           title: true,
-          kit: true,
+          type: true,
+          quantity: true,
+          // Pull all of the asset's AssetKit rows. Pre-polish there was at
+          // most one (the @@unique held); post-polish a QUANTITY_TRACKED
+          // asset can be in multiple kits. We need:
+          //   - kitId (cross-kit detection)
+          //   - quantity (this kit's slice for qty-change diff)
+          assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
+          // Ongoing/overdue booking allocations subtract from the strict-
+          // available pool checked below — pull them here so the
+          // validation pass doesn't need a second round-trip.
+          bookingAssets: {
+            where: {
+              booking: {
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
+              },
+            },
+            select: { quantity: true },
+          },
           location: { select: { id: true, name: true } },
         },
       })
@@ -2382,9 +3073,154 @@ export async function updateKitAssets({
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
 
-    /** An asset already in custody cannot be added to a kit */
+    /**
+     * Phase 4a-Polish-2: detect existing-in-kit assets whose submitted
+     * quantity differs from the current `AssetKit.quantity`. These trigger
+     * an `assetKit.update` + (if the kit is in custody) a cascade to the
+     * kit-allocated `Custody` row, with a paired `CUSTODY_ASSIGNED`
+     * (increase) or `CUSTODY_RELEASED` (decrease) event.
+     *
+     * Today the picker doesn't yet expose a qty input, so the
+     * `assetQuantities` map is typically empty and this bucket stays
+     * empty too — keeps the new code path dormant until T5 wires the UI.
+     */
+    type QtyChangedAsset = {
+      id: string;
+      title: string;
+      previousQuantity: number;
+      newQuantity: number;
+    };
+    const qtyChangedAssets: QtyChangedAsset[] = allAssetsForKit.flatMap(
+      (asset) => {
+        // Only consider assets that are already in this kit AND have a
+        // submitted quantity that differs from the current pivot value.
+        const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
+        if (!currentPivot) return [];
+
+        const submitted = assetQuantities[asset.id];
+        if (submitted == null) return [];
+
+        // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
+        // but defensively coerce.
+        const newQty =
+          asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
+        if (newQty === currentPivot.quantity) return [];
+
+        // Submitting qty=0 for an existing-in-kit asset is treated as a
+        // no-op here. The picker contract is: to remove an asset from the
+        // kit, omit its id from `assetIds` — that routes through
+        // `removedAssets` (which deletes the pivot row + cascades to
+        // kit-allocated Custody).
+        if (newQty <= 0) return [];
+
+        return [
+          {
+            id: asset.id,
+            title: asset.title,
+            previousQuantity: currentPivot.quantity,
+            newQuantity: newQty,
+          },
+        ];
+      }
+    );
+
+    /**
+     * Phase 4a-Polish-2 server-side strict-available validation. The
+     * picker enforces this client-side and the DEFERRED constraint
+     * trigger catches over-allocation at COMMIT, but a tampered request
+     * would otherwise surface as a generic 500. Re-check the
+     * strict-available pool here for any qty-tracked submission and
+     * return a clean 400.
+     *
+     * Strict-available formula (matches the picker loader):
+     *   spaceWithoutMe = Asset.quantity
+     *                  − sum(other kits' AssetKit.quantity)
+     *                  − sum(operator-only Custody.quantity)
+     *                  − sum(ongoing/overdue BookingAsset.quantity)
+     *   max            = max(currentInThisKit, spaceWithoutMe)
+     *
+     * `operator-only` filters by `kitCustodyId IS NULL` — kit-allocated
+     * Custody rows mirror the source kit's AssetKit slice and would
+     * otherwise double-count against the multi-kit + in-custody case.
+     *
+     * `max(current, spaceWithoutMe)` lets the user keep their existing
+     * slice in the overcommitted edge case (operator / booking growth
+     * pushed the pool below the kit's current allocation).
+     */
+    const oversubscribed: Array<{
+      assetId: string;
+      title: string;
+      submitted: number;
+      max: number;
+    }> = [];
+    for (const asset of allAssetsForKit) {
+      if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
+      const submitted = assetQuantities[asset.id];
+      if (submitted == null) continue;
+
+      const totalQty = asset.quantity ?? 0;
+      const currentInThisKit =
+        asset.assetKits.find((ak) => ak.kitId === kit.id)?.quantity ?? 0;
+      const otherKitsQty = asset.assetKits
+        .filter((ak) => ak.kitId !== kit.id)
+        .reduce((sum, ak) => sum + (ak.quantity ?? 0), 0);
+      const operatorOnlyCustody = (asset.custody ?? [])
+        .filter((c) => c.kitCustodyId == null)
+        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
+      const ongoingBookings = (asset.bookingAssets ?? []).reduce(
+        (sum, ba) => sum + (ba.quantity ?? 0),
+        0
+      );
+
+      const spaceWithoutMe = Math.max(
+        0,
+        totalQty - otherKitsQty - operatorOnlyCustody - ongoingBookings
+      );
+      const max = Math.max(currentInThisKit, spaceWithoutMe);
+
+      if (submitted > max) {
+        oversubscribed.push({
+          assetId: asset.id,
+          title: asset.title,
+          submitted,
+          max,
+        });
+      }
+    }
+    if (oversubscribed.length > 0) {
+      const detail = oversubscribed
+        .map((o) => `${o.title} (requested ${o.submitted}, max ${o.max})`)
+        .join("; ");
+      throw new ShelfError({
+        cause: null,
+        title: "Quantity exceeds available pool",
+        message: `Submitted quantity exceeds the strict-available pool for: ${detail}.`,
+        additionalData: {
+          kitId,
+          userId,
+          organizationId,
+          oversubscribed,
+        },
+        label: "Kit",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * An INDIVIDUAL asset already in custody cannot be added to a kit.
+     * QUANTITY_TRACKED assets are exempt: their `custody` array can carry
+     * operator-allocated rows for *some* units while the rest of the pool
+     * is free. Option B math in `buildKitCustodyInheritData` allocates
+     * only the remaining pool when the kit is later put in custody, and
+     * silently skips fully-allocated assets. Mirrors the client-side
+     * picker exemption + the kit-custody assign-button exemption.
+     */
     const isSomeAssetInCustody = newlyAddedAssets.some(
-      (asset) => asset.custody && asset.kit?.id !== kit.id
+      (asset) =>
+        asset.type !== AssetType.QUANTITY_TRACKED &&
+        hasCustody(asset.custody) &&
+        asset.assetKits[0]?.kitId !== kit.id
     );
     if (isSomeAssetInCustody) {
       throw new ShelfError({
@@ -2398,31 +3234,116 @@ export async function updateKitAssets({
     }
 
     const kitBookings =
-      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+      kit.assets
+        .find((a) => a.bookingAssets.length > 0)
+        ?.bookingAssets.map((ba) => ba.booking) ?? [];
 
-    await db.kit.update({
-      where: { id: kit.id, organizationId },
-      data: {
-        assets: {
-          /**
-           * Only disconnect assets if not in addOnly mode and there are assets to remove
-           * In addOnly mode (bulk-add), we preserve all existing assets
-           */
-          ...(addOnly || removedAssets.length === 0
-            ? {}
-            : { disconnect: removedAssets.map(({ id }) => ({ id })) }),
-          /**
-           * Connect assets that should be added (only the new ones)
-           */
-          connect: newlyAddedAssets.map(({ id }) => ({ id })),
-        },
-      },
+    // The old kit.update({ data: { assets: { connect, disconnect } } })
+    // block becomes direct pivot writes inside a single $transaction so
+    // remove + add + qty-edit are atomic.
+    await db.$transaction(async (tx) => {
+      // Disconnect: drop the pivot rows for removed assets (only when not
+      // in addOnly mode).
+      if (!addOnly && removedAssets.length > 0) {
+        await tx.assetKit.deleteMany({
+          where: {
+            kitId: kit.id,
+            assetId: { in: removedAssets.map(({ id }) => id) },
+          },
+        });
+      }
+
+      // Cross-kit move (INDIVIDUAL only): an INDIVIDUAL asset can only
+      // belong to one kit at a time. If the user selects an INDIVIDUAL
+      // asset that already lives in another kit, drop that pivot row
+      // first so the createMany below succeeds (the
+      // `enforce_individual_asset_single_kit` trigger would otherwise
+      // reject the insert with check_violation).
+      //
+      // QUANTITY_TRACKED assets can co-exist in multiple kits as of
+      // Phase 4a-Polish-2 — their pivot rows in OTHER kits stay intact,
+      // and the picker will have set this kit's quantity in
+      // `assetQuantities[id]`.
+      const movedFromOtherKitIds = newlyAddedAssets
+        .filter(
+          (asset) =>
+            asset.type === AssetType.INDIVIDUAL &&
+            (asset.assetKits?.length ?? 0) > 0
+        )
+        .map((asset) => asset.id);
+      if (movedFromOtherKitIds.length > 0) {
+        await tx.assetKit.deleteMany({
+          where: { assetId: { in: movedFromOtherKitIds } },
+        });
+      }
+
+      // Connect: create one pivot row per newly added asset. Quantity
+      // comes from the submitted `assetQuantities` map for QTY_TRACKED;
+      // INDIVIDUAL is always 1. Missing map entries (today's behaviour
+      // before the picker UI ships in T5) default QTY_TRACKED to the
+      // asset's full pool — matches the Phase 4a-Polish-2 backfill so
+      // there's no observable change until the picker is wired up.
+      if (newlyAddedAssets.length > 0) {
+        await tx.assetKit.createMany({
+          data: newlyAddedAssets.map((asset) => {
+            const submitted = assetQuantities[asset.id];
+            const quantity =
+              asset.type === AssetType.QUANTITY_TRACKED
+                ? Math.max(1, submitted ?? asset.quantity ?? 1)
+                : 1;
+            return {
+              assetId: asset.id,
+              kitId: kit.id,
+              organizationId,
+              quantity,
+            };
+          }),
+        });
+      }
+
+      // Update: existing-in-kit assets whose submitted quantity differs
+      // from the current pivot value. Each row needs its own update
+      // because Prisma's updateMany doesn't support per-row data.
+      if (qtyChangedAssets.length > 0) {
+        for (const change of qtyChangedAssets) {
+          await tx.assetKit.update({
+            where: {
+              assetId_kitId: { assetId: change.id, kitId: kit.id },
+            },
+            data: { quantity: change.newQuantity },
+          });
+        }
+      }
     });
+
+    // We synthesise the `{ kit }` field the note helper consumes from
+    // each asset's current `assetKits` pivot rows.
+    const newlyAddedAssetsForNotes = newlyAddedAssets.map((asset) => ({
+      id: asset.id,
+      title: asset.title,
+      kit: asset.assetKits[0]?.kitId
+        ? // For freshly-attached assets we don't have the source kit's
+          // name in scope; the note helper's `currentKit` path only
+          // uses `id` + `name`, so fall back to "" for the latter — the
+          // helper still renders a sane link.
+          { id: asset.assetKits[0].kitId, name: "" }
+        : null,
+    }));
+    const removedAssetsForNotes = (addOnly ? [] : removedAssets).map(
+      (asset) => ({
+        id: asset.id,
+        title: asset.title,
+        // Removed assets came from `kit.assets`, which itself was
+        // flattened off `assetKits` for this kit — so the source kit
+        // is the parent kit we're editing.
+        kit: { id: kit.id, name: kit.name },
+      })
+    );
 
     await createBulkKitChangeNotes({
       kit,
-      newlyAddedAssets,
-      removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
+      newlyAddedAssets: newlyAddedAssetsForNotes,
+      removedAssets: removedAssetsForNotes,
       userId,
     });
 
@@ -2437,7 +3358,9 @@ export async function updateKitAssets({
         assetId: asset.id,
         kitId: kit.id,
         field: "kitId",
-        fromValue: asset.kit?.id ?? null,
+        // (the 1:1 FK). With the pivot, an asset already in another kit
+        // has its kit-id in `assetKits[0].kitId`.
+        fromValue: asset.assetKits[0]?.kitId ?? null,
         toValue: kit.id,
       })),
       ...(addOnly ? [] : removedAssets).map((asset) => ({
@@ -2447,6 +3370,10 @@ export async function updateKitAssets({
         entityType: "ASSET" as const,
         entityId: asset.id,
         assetId: asset.id,
+        // The removal is still "about" this kit — populate the cross-ref so
+        // "all activity for kit X" report queries see both adds and removes.
+        // Flagged but deferred on PR #2495; picked up during Phase 4a testing.
+        kitId: kit.id,
         field: "kitId",
         fromValue: kit.id,
         toValue: null,
@@ -2589,62 +3516,161 @@ export async function updateKitAssets({
      * If a kit is in custody then the assets added to kit will also inherit the status
      */
     const assetsToInheritStatus = newlyAddedAssets.filter(
-      (asset) => !asset.custody
+      (asset) => !hasCustody(asset.custody)
     );
 
     if (
       kit.custody &&
+      kit.custody.id &&
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
-      const inheritedCustodianId = kit.custody.custodian.id;
-      const inheritedTargetUserId = kit.custody.custodian.user?.id;
+      // Phase 3d-Polish-2 logic kept — uses `buildKitCustodyInheritData`
+      // below to write child Custody rows with `kitCustodyId` set and the
+      // *remaining* tracked quantity per asset (Option B). Main's PR #2535
+      // version regressed to a per-asset `Asset.update` with a default
+      // `quantity: 1` and no `kitCustodyId`; that would orphan
+      // operator-assigned custody on qty-tracked assets and break the
+      // Phase 3d-Polish-2 invariants. The CUSTODY_ASSIGNED events main
+      // emits inline are emitted further below alongside the inheritData.
+      const kitCustodyId = kit.custody.id;
+      const teamMemberId = kit.custody.custodian.id;
 
-      // Update custody for all assets to inherit kit's custody, atomically
-      // with the CUSTODY_ASSIGNED events.
-      await db.$transaction(async (tx) => {
-        await Promise.all(
-          assetsToInheritStatus.map((asset) =>
-            tx.asset.update({
-              where: { id: asset.id, organizationId },
-              data: {
-                status: AssetStatus.IN_CUSTODY,
-                custody: {
-                  create: {
-                    custodian: { connect: { id: inheritedCustodianId } },
-                  },
-                },
-              },
-            })
-          )
-        );
+      // Build child Custody rows tagged with `kitCustodyId` and threaded with
+      // the asset's *remaining* tracked quantity (qty-tracked) or 1
+      // (individual). The helper subtracts already-allocated custody so the
+      // kit-allocated row never over-allocates the asset's pool. See
+      // `buildKitCustodyInheritData`. Must run inside the tx — its read of
+      // existing custody must see rows written earlier in this tx.
+      const inheritedAssetIds = await db.$transaction(async (tx) => {
+        const inheritData = await buildKitCustodyInheritData({
+          tx,
+          kitId: kit.id,
+          kitCustodyId,
+          teamMemberId,
+          assetIds: assetsToInheritStatus.map((a) => a.id),
+        });
 
-        // Activity events — one CUSTODY_ASSIGNED per asset that inherited
-        // kit custody on join. `meta.viaKit` mirrors `bulkAssignKitCustody`.
+        if (inheritData.length === 0) return [];
+
+        await tx.custody.createMany({ data: inheritData });
+
+        const inheritedIds = inheritData.map((row) => row.assetId);
+        await tx.asset.updateMany({
+          where: { id: { in: inheritedIds }, organizationId },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        // Activity events — one CUSTODY_ASSIGNED per asset that inherited custody.
         await recordEvents(
-          assetsToInheritStatus.map((asset) => ({
+          inheritData.map((row) => ({
             organizationId,
             actorUserId: userId,
             action: "CUSTODY_ASSIGNED" as const,
             entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
+            entityId: row.assetId,
+            assetId: row.assetId,
             kitId: kit.id,
-            teamMemberId: inheritedCustodianId,
-            targetUserId: inheritedTargetUserId,
-            meta: { viaKit: true },
+            teamMemberId,
+            targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+            meta: { viaKit: true, quantity: row.quantity },
           })),
           tx
         );
+        return inheritedIds;
       });
 
-      // Create notes for all assets that inherited custody
-      const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
-      await createNotes({
-        content: `${actor} granted ${custodianDisplay} custody.`,
-        type: NoteType.UPDATE,
-        userId,
-        assetIds: assetsToInheritStatus.map((asset) => asset.id),
+      // Create notes only for assets that actually received an inherited
+      // custody row. Fully operator-allocated qty-tracked assets are skipped
+      // (no kit-custody row → no "granted custody" note for that asset).
+      if (inheritedAssetIds.length > 0) {
+        const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
+        await createNotes({
+          content: `${actor} granted ${custodianDisplay} custody.`,
+          type: NoteType.UPDATE,
+          userId,
+          assetIds: inheritedAssetIds,
+        });
+      }
+    }
+
+    /**
+     * Phase 4a-Polish-2: in-custody kit qty-edit cascade.
+     *
+     * When the user changes a QUANTITY_TRACKED asset's quantity inside a
+     * kit that's currently in custody, the kit-allocated `Custody.quantity`
+     * needs to track the new `AssetKit.quantity`. Otherwise the custodian's
+     * apparent allocation drifts out of sync with the kit's composition.
+     *
+     * For each qty-changed asset:
+     * - Look up the kit-allocated Custody row (`kitCustodyId =
+     *   kit.custody.id`).
+     * - Update its quantity to match.
+     * - Emit `CUSTODY_ASSIGNED` (increase) or `CUSTODY_RELEASED` (decrease)
+     *   with `meta: { viaKit: true, quantity: <delta> }` so reports see
+     *   the size of the change.
+     *
+     * If no kit-allocated Custody row exists (e.g. asset was fully
+     * operator-allocated when the kit got custody, so `buildKitCustodyInheritData`
+     * skipped it), we don't create one here — the qty-change alone
+     * doesn't grant new custody. Picker UX should explain this case to
+     * the user when it arises.
+     */
+    if (
+      kit.custody &&
+      kit.custody.id &&
+      kit.custody.custodian.id &&
+      qtyChangedAssets.length > 0
+    ) {
+      const kitCustodyId = kit.custody.id;
+      const targetUserId = kit.custody.custodian.user?.id ?? undefined;
+      const teamMemberId = kit.custody.custodian.id;
+
+      await db.$transaction(async (tx) => {
+        // Pre-fetch existing kit-allocated rows so we know which assets
+        // actually have something to cascade (and what the previous
+        // quantity was, in case it's drifted from `currentPivot.quantity`).
+        const existingRows = await tx.custody.findMany({
+          where: {
+            assetId: { in: qtyChangedAssets.map((c) => c.id) },
+            kitCustodyId,
+          },
+          select: { id: true, assetId: true, quantity: true },
+        });
+        const existingByAssetId = new Map(
+          existingRows.map((r) => [r.assetId, r])
+        );
+
+        const events: Parameters<typeof recordEvents>[0] = [];
+        for (const change of qtyChangedAssets) {
+          const existing = existingByAssetId.get(change.id);
+          if (!existing) continue;
+
+          const delta = change.newQuantity - existing.quantity;
+          if (delta === 0) continue;
+
+          await tx.custody.update({
+            where: { id: existing.id },
+            data: { quantity: change.newQuantity },
+          });
+
+          events.push({
+            organizationId,
+            actorUserId: userId,
+            action: delta > 0 ? "CUSTODY_ASSIGNED" : "CUSTODY_RELEASED",
+            entityType: "ASSET" as const,
+            entityId: change.id,
+            assetId: change.id,
+            kitId: kit.id,
+            teamMemberId,
+            targetUserId,
+            meta: { viaKit: true, quantity: Math.abs(delta) },
+          });
+        }
+
+        if (events.length > 0) {
+          await recordEvents(events, tx);
+        }
       });
     }
 
@@ -2653,40 +3679,76 @@ export async function updateKitAssets({
      * then we have to make the removed assets Available
      * Only apply this when not in addOnly mode
      */
-    if (!addOnly && removedAssets.length && kit.custody?.custodian.id) {
+    if (
+      !addOnly &&
+      removedAssets.length &&
+      kit.custody?.id &&
+      kit.custody.custodian.id
+    ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
-      const releasedCustodianId = kit.custody.custodian.id;
-      const releasedTargetUserId = kit.custody.custodian.user?.id;
+      // Phase 3d-Polish-2: filter the kit-custody delete by `kitCustodyId`
+      // so only the kit-allocated rows are removed; operator-assigned
+      // per-unit custody on the same asset stays. Main's PR #2535
+      // emitted events using only the kit's primary custodian id —
+      // that would mis-attribute multi-custodian qty-tracked rows.
+      const kitCustodyId = kit.custody.id;
 
-      // Use transaction for atomicity - prevents orphaned custody records
+      // Use transaction for atomicity - prevents orphaned custody records.
+      // Filter the deleteMany by `kitCustodyId` so only kit-allocated rows
+      // are removed. Operator-assigned per-unit custody on the same asset
+      // (`kitCustodyId IS NULL`) stays — that's separate ownership.
       await db.$transaction(async (tx) => {
+        // Capture the kit-allocated rows before deletion to emit events.
+        const removedKitCustodyRows = await tx.custody.findMany({
+          where: { assetId: { in: assetIds }, kitCustodyId },
+          select: { assetId: true, teamMemberId: true },
+        });
+
+        if (removedKitCustodyRows.length > 0) {
+          await recordEvents(
+            removedKitCustodyRows.map((row) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: kit.id,
+              teamMemberId: row.teamMemberId,
+              targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true },
+            })),
+            tx
+          );
+        }
+
         await tx.custody.deleteMany({
+          where: { assetId: { in: assetIds }, kitCustodyId },
+        });
+
+        // Phase 3d-Polish-2: only flip the asset to AVAILABLE when no
+        // remaining Custody rows exist after deleting the kit-allocated
+        // ones (operator-assigned per-unit custody keeps it IN_CUSTODY).
+        // Main's PR #2535 added a CUSTODY_RELEASED emission *after* the
+        // delete that mis-attributed every removed asset to the kit's
+        // primary custodian — we already emit those events above keyed
+        // on each Custody row's `teamMemberId`, so main's version is
+        // dropped here.
+        const stillCustodied = await tx.custody.findMany({
           where: { assetId: { in: assetIds } },
+          select: { assetId: true },
         });
-
-        await tx.asset.updateMany({
-          where: { id: { in: assetIds }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
-        });
-
-        // Activity events — one CUSTODY_RELEASED per asset that lost its
-        // kit-inherited custody. `meta.viaKit` mirrors `bulkReleaseKitCustody`.
-        await recordEvents(
-          removedAssets.map((asset) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "CUSTODY_RELEASED" as const,
-            entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
-            kitId: kit.id,
-            teamMemberId: releasedCustodianId,
-            targetUserId: releasedTargetUserId,
-            meta: { viaKit: true },
-          })),
-          tx
+        const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+        const assetsToFlipAvailable = assetIds.filter(
+          (id) => !stillCustodiedIds.has(id)
         );
+        if (assetsToFlipAvailable.length > 0) {
+          await tx.asset.updateMany({
+            where: { id: { in: assetsToFlipAvailable }, organizationId },
+            data: { status: AssetStatus.AVAILABLE },
+          });
+        }
       });
 
       // Notes can be created outside transaction (not critical for consistency)
@@ -2712,17 +3774,31 @@ export async function updateKitAssets({
 
     if (bookingsToUpdate?.length) {
       await Promise.all(
-        bookingsToUpdate.map((booking) =>
-          db.booking.update({
-            where: { id: booking.id },
-            data: {
-              assets: {
-                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
-                disconnect: removedAssets.map((a) => ({ id: a.id })),
-              },
-            },
-          })
-        )
+        bookingsToUpdate.flatMap((booking) => {
+          const ops = [];
+          if (newlyAddedAssets.length > 0) {
+            ops.push(
+              db.bookingAsset.createMany({
+                data: newlyAddedAssets.map((a) => ({
+                  bookingId: booking.id,
+                  assetId: a.id,
+                })),
+                skipDuplicates: true,
+              })
+            );
+          }
+          if (removedAssets.length > 0) {
+            ops.push(
+              db.bookingAsset.deleteMany({
+                where: {
+                  bookingId: booking.id,
+                  assetId: { in: removedAssets.map((a) => a.id) },
+                },
+              })
+            );
+          }
+          return ops;
+        })
       );
     }
 
@@ -2789,17 +3865,30 @@ export async function bulkRemoveAssetsFromKits({
       settings,
     });
 
-    const assets = await db.asset.findMany({
+    // We pull the parent kit (today: ≤1 pivot row per asset) through
+    // `assetKits.kit`, then flatten back into a synthetic `asset.kit`
+    // shape so the rest of this function reads as it did pre-pivot.
+    const assetRows = await db.asset.findMany({
       where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,
         title: true,
-        kit: {
-          select: { id: true, name: true, custody: { select: { id: true } } },
+        assetKits: {
+          select: {
+            kit: {
+              select: {
+                id: true,
+                name: true,
+                custody: { select: { id: true } },
+              },
+            },
+          },
         },
         custody: {
           select: {
             id: true,
+            teamMemberId: true,
+            kitCustodyId: true,
             custodian: {
               select: {
                 id: true,
@@ -2819,39 +3908,112 @@ export async function bulkRemoveAssetsFromKits({
       },
     });
 
+    const assets = assetRows.map((asset) => ({
+      ...asset,
+      // Defensive `?.` — test fixtures from main's PR #2535 mock the legacy
+      // `kit` directly and omit the `assetKits` array entirely; this avoids a
+      // TypeError reading [0] of undefined for those rows.
+      kit: asset.assetKits?.[0]?.kit ?? null,
+    }));
+
     await db.$transaction(async (tx) => {
       /**
-       * If there are assets whose kits were in custody, then we have to remove the custody FIRST
-       * to avoid orphaned custody records when status is set to AVAILABLE
+       * If there are assets whose kits were in custody, then we have to remove
+       * the custody FIRST to avoid orphaned custody records when status is set
+       * to AVAILABLE.
+       *
+       * Important: only the Custody rows whose `kitCustodyId` matches the
+       * asset's kit's KitCustody.id are kit-allocated. Operator-assigned
+       * per-unit custody (`kitCustodyId IS NULL`, or pointing to a different
+       * kit) must be left alone — that's separate ownership and not part of
+       * this kit-removal.
        */
       const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && asset.custody
+        (asset) => !!asset.kit?.custody && hasCustody(asset.custody)
       );
 
-      const custodyIdsToDelete = assetsWhoseKitsInCustody.map((a) => {
-        invariant(a.custody, "Custody not found over asset");
-        return a.custody.id;
-      });
+      /** Pairs of (asset, kit-allocated custody row) to delete */
+      const kitAllocatedCustodyToDelete = assetsWhoseKitsInCustody.flatMap(
+        (asset) => {
+          const kitCustodyId = asset.kit?.custody?.id;
+          if (!kitCustodyId) return [];
+          return (asset.custody ?? [])
+            .filter((c) => c.kitCustodyId === kitCustodyId)
+            .map((c) => ({
+              custodyId: c.id,
+              assetId: asset.id,
+              kitId: asset.kit?.id,
+              teamMemberId: c.teamMemberId,
+              targetUserId: c.custodian?.user?.id,
+            }));
+        }
+      );
 
-      if (custodyIdsToDelete.length > 0) {
+      if (kitAllocatedCustodyToDelete.length > 0) {
+        // Emit CUSTODY_RELEASED events BEFORE deletion so they roll back
+        // atomically with the mutation if anything fails.
+        await recordEvents(
+          kitAllocatedCustodyToDelete.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: row.kitId ?? undefined,
+            teamMemberId: row.teamMemberId,
+            targetUserId: row.targetUserId ?? undefined,
+            meta: { viaKit: true },
+          })),
+          tx
+        );
+
         await tx.custody.deleteMany({
-          where: { id: { in: custodyIdsToDelete } },
+          where: {
+            id: { in: kitAllocatedCustodyToDelete.map((r) => r.custodyId) },
+          },
         });
       }
 
-      /** Removing assets from kits - AFTER custody is deleted */
-      await tx.asset.updateMany({
-        where: { id: { in: assets.map((a) => a.id) } },
-        data: { kitId: null, status: AssetStatus.AVAILABLE },
+      /**
+       * Removing assets from kits — AFTER custody is deleted. Only flip
+       * status to AVAILABLE when no remaining custody exists for the asset
+       * (operator-assigned per-unit custody keeps it IN_CUSTODY).
+       */
+      const allRemovedAssetIds = assets.map((a) => a.id);
+      const stillCustodied = await tx.custody.findMany({
+        where: { assetId: { in: allRemovedAssetIds } },
+        select: { assetId: true },
       });
+      const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
+      const assetsToFlipAvailable = allRemovedAssetIds.filter(
+        (id) => !stillCustodiedIds.has(id)
+      );
+
+      // Detach all from the kit regardless of remaining custody.
+      // "detach from kit" means deleting the pivot rows for these
+      // assets within this organization.
+      await tx.assetKit.deleteMany({
+        where: {
+          assetId: { in: allRemovedAssetIds },
+          organizationId,
+        },
+      });
+      if (assetsToFlipAvailable.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: assetsToFlipAvailable } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
 
       /** Create notes for assets released from custody */
       if (assetsWhoseKitsInCustody.length > 0) {
         await tx.note.createMany({
           data: assetsWhoseKitsInCustody.map((asset) => {
-            const custodianDisplay = asset.custody?.custodian
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            const custodianDisplay = primaryCustody?.custodian
               ? wrapCustodianForNote({
-                  teamMember: asset.custody.custodian,
+                  teamMember: primaryCustody.custodian,
                 })
               : "**Unknown Custodian**";
             return {
@@ -2904,21 +4066,26 @@ export async function bulkRemoveAssetsFromKits({
 
       // Activity events — one CUSTODY_RELEASED per asset whose kit-inherited
       // custody was cleaned up. `meta.viaKit` mirrors the kit-custody flows
-      // in `releaseCustody` / `bulkReleaseKitCustody`.
+      // in `releaseCustody` / `bulkReleaseKitCustody`. Phase 2 turned Custody
+      // from 1:1 into 1:N so `asset.custody` is an array now — read the
+      // primary row via the helper.
       if (assetsWhoseKitsInCustody.length > 0) {
         await recordEvents(
-          assetsWhoseKitsInCustody.map((asset) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "CUSTODY_RELEASED" as const,
-            entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
-            kitId: asset.kit?.id,
-            teamMemberId: asset.custody?.custodian.id,
-            targetUserId: asset.custody?.custodian.user?.id ?? undefined,
-            meta: { viaKit: true },
-          })),
+          assetsWhoseKitsInCustody.map((asset) => {
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              kitId: asset.kit?.id,
+              teamMemberId: primaryCustody?.custodian?.id,
+              targetUserId: primaryCustody?.custodian?.user?.id ?? undefined,
+              meta: { viaKit: true },
+            };
+          }),
           tx
         );
       }

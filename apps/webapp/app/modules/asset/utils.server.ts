@@ -475,7 +475,26 @@ export function getAssetsWhereInput({
   }
 
   if (status) {
-    where.status = status;
+    // why: see asset/service.server.ts — qty-tracked rows whose row-level
+    // status flipped to IN_CUSTODY/CHECKED_OUT can still have available
+    // units, so AVAILABLE filter must include them.
+    if (status === "AVAILABLE") {
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [
+            { type: "INDIVIDUAL", status: "AVAILABLE" },
+            { type: "QUANTITY_TRACKED" },
+          ],
+        },
+      ];
+    } else {
+      where.status = status;
+    }
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -533,14 +552,28 @@ export function getAssetsWhereInput({
     where.OR = [
       ...(where.OR ?? []),
       {
-        custody: { teamMemberId: { in: teamMemberIds } },
+        custody: { some: { teamMemberId: { in: teamMemberIds } } },
       },
-      { custody: { custodian: { userId: { in: teamMemberIds } } } },
       {
-        bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+        custody: {
+          some: { custodian: { userId: { in: teamMemberIds } } },
+        },
       },
-      { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
-      ...(teamMemberIds.includes("without-custody") ? [{ custody: null }] : []),
+      {
+        bookingAssets: {
+          some: {
+            booking: { custodianTeamMemberId: { in: teamMemberIds } },
+          },
+        },
+      },
+      {
+        bookingAssets: {
+          some: { booking: { custodianUserId: { in: teamMemberIds } } },
+        },
+      },
+      ...(teamMemberIds.includes("without-custody")
+        ? [{ custody: { none: {} } }]
+        : []),
     ];
   }
 
@@ -629,6 +662,7 @@ type AllSelectedValues = {
   selectedTags: string[];
   selectedCategory: string[];
   selectedLocation: string[];
+  selectedAssetModel: string[];
 };
 
 /**

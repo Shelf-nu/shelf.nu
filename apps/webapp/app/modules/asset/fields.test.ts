@@ -31,7 +31,7 @@ describe("getAssetOverviewFields", () => {
     expect(result).not.toHaveProperty("barcodes");
   });
 
-  it("always includes base fields (qrCodes, bookings, custody, etc.) regardless of flag", () => {
+  it("always includes base fields (qrCodes, bookingAssets, custody, etc.) regardless of flag", () => {
     const baseKeys = [
       "category",
       "qrCodes",
@@ -40,8 +40,8 @@ describe("getAssetOverviewFields", () => {
       "custody",
       "organization",
       "customFields",
-      "kit",
-      "bookings",
+      "assetKits",
+      "bookingAssets",
     ];
 
     const withBarcodes = getAssetOverviewFields(testAssetId, true);
@@ -53,18 +53,22 @@ describe("getAssetOverviewFields", () => {
     }
   });
 
-  it("bookings NOT filter uses the provided assetId", () => {
+  it("bookingAssets NOT filter uses the provided assetId", () => {
     const assetId = "my-unique-asset-id";
     const result = getAssetOverviewFields(assetId, false);
 
-    const bookings = result.bookings as {
+    const bookingAssets = result.bookingAssets as {
       where: {
-        NOT: {
-          partialCheckins: { some: { assetIds: { has: string } } };
+        booking: {
+          NOT: {
+            partialCheckins: { some: { assetIds: { has: string } } };
+          };
         };
       };
     };
 
-    expect(bookings.where.NOT.partialCheckins.some.assetIds.has).toBe(assetId);
+    expect(
+      bookingAssets.where.booking.NOT.partialCheckins.some.assetIds.has
+    ).toBe(assetId);
   });
 });

@@ -40,6 +40,8 @@ export interface UpdateAssetPayload {
   description?: Asset["description"];
   /** Pass 'uncategorized' to clear the category */
   categoryId?: Asset["categoryId"];
+  /** Pass null to clear the asset model association */
+  assetModelId?: string | null;
   newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
@@ -52,6 +54,10 @@ export interface UpdateAssetPayload {
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
   request: Request;
+  quantity?: Asset["quantity"];
+  minQuantity?: Asset["minQuantity"];
+  consumptionType?: Asset["consumptionType"];
+  unitOfMeasure?: Asset["unitOfMeasure"];
 }
 
 export interface CreateAssetFromContentImportPayload
@@ -142,11 +148,15 @@ export type AdvancedIndexAsset = Pick<
   | "locationId"
   | "organizationId"
   | "status"
+  | "type"
   | "valuation"
+  | "quantity"
+  | "unitOfMeasure"
   | "availableToBook"
-  | "kitId"
 > & {
   qrId: string; // QR code will always be available
+  assetModelId?: string | null;
+  assetModelName?: string | null;
   kit: Pick<Kit, "id" | "name"> | null;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name" | "color">[];
@@ -156,18 +166,28 @@ export type AdvancedIndexAsset = Pick<
         childCount?: number;
       })
     | null;
-  custody: {
-    custodian: {
-      name: string;
-      user: {
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-        profilePicture: string | null;
-        email: string;
-      } | null;
-    };
-  } | null;
+  custody:
+    | {
+        /** Custodian display name; mirrored at the top level so callers
+         * can read it without descending into `custodian`. */
+        name?: string;
+        /** Per-custody quantity; meaningful for QUANTITY_TRACKED assets
+         * where the same asset can be split across multiple custodians.
+         * Optional because the booking-derived synthetic custody case
+         * does not project a quantity. */
+        quantity?: number;
+        custodian: {
+          name: string;
+          user: {
+            id: string;
+            firstName: string | null;
+            lastName: string | null;
+            profilePicture: string | null;
+            email: string;
+          } | null;
+        };
+      }[]
+    | null;
   customFields: (AssetCustomFieldValue & {
     customField: Pick<
       CustomField,

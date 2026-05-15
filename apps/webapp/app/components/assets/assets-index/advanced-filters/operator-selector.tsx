@@ -86,9 +86,13 @@ export function OperatorSelector({
     "containsAny",
     "isNot",
   ];
+  /** Tracking type only has 2 values — restrict to is/isNot */
+  const typeOnlyOperators: FilterOperator[] = ["is", "isNot"];
   const operators =
     filter.name === "location"
       ? locationOperatorOrder.filter((op) => baseOperators.includes(op))
+      : filter.name === "type"
+      ? typeOnlyOperators
       : baseOperators.filter((op) => op !== "withinHierarchy");
 
   /** Scroll an option index into view inside the popover list. */

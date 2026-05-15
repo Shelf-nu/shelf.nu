@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustomFieldType,
+  OrganizationRoles,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -11,6 +15,8 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
+import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import { UnlockBarcodesBanner } from "~/components/barcode/unlock-barcodes-banner";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -33,6 +39,7 @@ import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -46,11 +53,14 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -65,7 +75,10 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import {
+  userCanViewSpecificCustody,
+  userHasCustodyViewPermission,
+} from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -110,6 +123,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      role,
     } = await requirePermission({
       userId,
       request,
@@ -168,11 +182,116 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       assetId: id,
       organizationId,
     });
-    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    /**
+     * Compute quantity availability for QUANTITY_TRACKED assets.
+     * Sums custody records AND booking reservations to determine how many
+     * units are currently available. Booking reservations are split into
+     * "reserved" (RESERVED status) and "checked out" (ONGOING/OVERDUE).
+     */
+    let quantityData: {
+      total: number;
+      /**
+       * Operator-only custody — sum of `Custody.quantity` where
+       * `kitCustodyId IS NULL`. Kit-allocated custody rows mirror
+       * `AssetKit.quantity` and are already counted via `inKits`;
+       * including them here would double-count post-Polish-2.
+       */
+      inCustody: number;
+      /**
+       * Phase 4a-Polish-2: sum of `AssetKit.quantity` across every kit
+       * this asset participates in. Surfaced on the sidebar so users
+       * can see how many units are earmarked for kit use, and used in
+       * the `available` / `custodyAvailable` formulas so kit-earmarked
+       * units don't masquerade as free stock.
+       */
+      inKits: number;
+      reserved: number;
+      checkedOut: number;
+      /**
+       * Booking-aware availability: how many units can be reserved for a
+       * *future* booking. Subtracts everything that's already spoken for —
+       * kits + operator custody + reserved in other bookings + checked-out.
+       */
+      available: number;
+      /**
+       * Physical availability: how many units are *actually* on the shelf
+       * right now — not in a kit, not held by a custodian, and not
+       * currently checked out on an active booking. Used to cap custody
+       * assignment and total-quantity adjustments. Reservations (future
+       * bookings) do NOT subtract from this because the units are still
+       * physically present until that booking is checked out.
+       */
+      custodyAvailable: number;
+    } | null = null;
+
+    if (isQuantityTracked(asset)) {
+      const [reservedSum, checkedOutSum] = await Promise.all([
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: "RESERVED" },
+          },
+          _sum: { quantity: true },
+        }),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
+
+      const total = asset.quantity ?? 0;
+      const reserved = reservedSum._sum?.quantity ?? 0;
+      const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+      // Sum each kit's slice — the asset's pool earmarked for kit use.
+      const inKits = (asset.assetKits ?? []).reduce(
+        (sum: number, ak) => sum + (ak.quantity ?? 0),
+        0
+      );
+      // Operator-only custody (see field comment above).
+      const operatorCustody = (asset.custody ?? []).reduce(
+        (sum: number, c) =>
+          c.kitCustodyId == null ? sum + (c.quantity ?? 0) : sum,
+        0
+      );
+
+      quantityData = {
+        total,
+        inCustody: operatorCustody,
+        inKits,
+        reserved,
+        checkedOut,
+        // Strict-available pool: kits + operator + reserved + checked-out
+        // are all separate consumers; what's left is truly free.
+        available: total - inKits - operatorCustody - reserved - checkedOut,
+        // Adjust-cap: reservations don't subtract here (units are still
+        // physically present), but kits do because dropping below
+        // `inKits` would violate the sum-within-total DB trigger.
+        custodyAvailable: total - inKits - operatorCustody - checkedOut,
+      };
+    }
+
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members for the custody
+     * dialog. Self-service users are scoped to only their own record.
+     */
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
+
+    const bookingAsset =
+      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
     const currentBooking: any = null;
 
-    if (booking && booking.from) {
-      asset.bookings = [currentBooking];
+    if (bookingAsset && bookingAsset.booking.from) {
+      asset.bookingAssets = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
@@ -233,6 +352,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       timeZone,
       qrObj,
       reminders,
+      quantityData,
+      teamMembers,
+      totalTeamMembers,
       categories,
       totalCategories,
       locations,
@@ -446,11 +568,13 @@ export default function AssetOverview() {
     lastScan,
     currentOrganization,
     userId,
+    quantityData,
     allCustomFieldDefs,
   } = useLoaderData<typeof loader>();
+
   const booking =
-    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
-      ? asset?.bookings[0]
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
+      ? asset?.bookingAssets[0]?.booking
       : undefined;
 
   /**
@@ -478,12 +602,21 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles } = useUserRoleHelper();
+  const { roles, isSelfService } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  const canViewAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: currentOrganization,
   });
   const canEditAsset = canUpdateAvailability;
 
@@ -692,6 +825,30 @@ export default function AssetOverview() {
                 )}
               />
 
+              {asset?.assetModel ? (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Asset Model
+                  </span>
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                    {userHasPermission({
+                      roles,
+                      entity: PermissionEntity.assetModel,
+                      action: PermissionAction.update,
+                    }) ? (
+                      <Button
+                        to={`/settings/asset-models/${asset.assetModel.id}/edit`}
+                        variant="link-gray"
+                        className="text-gray-600 underline"
+                      >
+                        {asset.assetModel.name}
+                      </Button>
+                    ) : (
+                      <span>{asset.assetModel.name}</span>
+                    )}
+                  </div>
+                </li>
+              ) : null}
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
                 const barcodeCount =
@@ -970,47 +1127,117 @@ export default function AssetOverview() {
 
           <AssetReminderCards className="my-2" />
 
-          {asset?.kit?.name ? (
-            <Card className="my-3 py-3 md:border">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
-                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-                    <Icon icon="kit" />
+          {(() => {
+            /**
+             * Phase 4a-Polish-2: a QUANTITY_TRACKED asset can belong to
+             * multiple kits at distinct slices. Render one row per
+             * membership with the per-kit quantity badge on qty-tracked
+             * assets; INDIVIDUAL assets keep the single-name layout
+             * since they're DB-locked to one kit and have no meaningful
+             * "quantity per kit" to surface.
+             */
+            type KitMembership = {
+              quantity: number;
+              kit: { id: string; name: string } | null;
+            };
+            const memberships = ((asset.assetKits ?? []) as KitMembership[])
+              .filter((ak) => ak.kit?.id && ak.kit.name)
+              .map((ak) => ({
+                kitId: ak.kit!.id,
+                kitName: ak.kit!.name,
+                quantity: ak.quantity ?? 0,
+              }));
+            if (memberships.length === 0) return null;
+            const isQty = isQuantityTracked(asset);
+            const unit = asset.unitOfMeasure || "units";
+            return (
+              <Card className="my-3 py-3 md:border">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                      <Icon icon="kit" />
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <h3 className="mb-1 text-sm font-semibold">
+                      {memberships.length > 1
+                        ? "Included in kits"
+                        : "Included in kit"}
+                    </h3>
+                    <ul className="space-y-1">
+                      {memberships.map((m) => (
+                        <li
+                          key={m.kitId}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <Button
+                            to={`/kits/${m.kitId}`}
+                            role="link"
+                            variant="link"
+                            className="min-w-0 justify-start truncate text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                            target="_blank"
+                          >
+                            <span className="truncate">{m.kitName}</span>
+                          </Button>
+                          {isQty ? (
+                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                              {m.quantity} {unit}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
+              </Card>
+            );
+          })()}
 
-                <div>
-                  <h3 className="mb-1 text-sm font-semibold">
-                    Included in kit
-                  </h3>
-                  <Button
-                    to={`/kits/${asset.kitId}`}
-                    role="link"
-                    variant="link"
-                    className={tw(
-                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
-                    )}
-                    target="_blank"
-                  >
-                    <div className="max-w-[250px] truncate">
-                      {asset.kit.name}
-                    </div>
-                  </Button>
-                </div>
-              </div>
-            </Card>
+          {!isQuantityTracked(asset) ? (
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
+                  ?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+            />
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: asset?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-          />
+          {isQuantityTracked(asset) ? (
+            <QuantityOverviewCard
+              assetId={asset.id}
+              quantity={asset.quantity ?? null}
+              unitOfMeasure={asset.unitOfMeasure ?? null}
+              minQuantity={asset.minQuantity ?? null}
+              consumptionType={asset.consumptionType ?? null}
+              availableQuantity={quantityData?.available}
+              custodyAvailableQuantity={quantityData?.custodyAvailable}
+              inCustodyQuantity={quantityData?.inCustody}
+              inKitsQuantity={quantityData?.inKits}
+              reservedQuantity={quantityData?.reserved}
+              checkedOutQuantity={quantityData?.checkedOut}
+              canUpdate={canUpdateAvailability}
+            />
+          ) : null}
+
+          {isQuantityTracked(asset) ? (
+            <QuantityCustodyList
+              custody={asset.custody}
+              assetId={asset.id}
+              unitOfMeasure={asset.unitOfMeasure}
+              availableQuantity={quantityData?.custodyAvailable}
+              isSelfService={isSelfService}
+              currentUserId={userId}
+              canViewAllCustody={canViewAllCustody}
+              canCustody={canCustody}
+              inKit={getPrimaryKit<{ id: string; name: string }>(asset)}
+            />
+          ) : null}
 
           {asset && (
             <CodePreview

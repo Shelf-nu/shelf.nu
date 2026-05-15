@@ -92,10 +92,15 @@ describe("manage-kits route validation", () => {
     updatedAt: new Date(),
   } as any;
 
+  // Phase 3a renamed the implicit M2M to the explicit BookingAsset pivot;
+  // the action reads `booking.bookingAssets` now, so the mock shape follows.
   const mockBooking = {
     id: "booking123",
     status: BookingStatus.ONGOING,
-    assets: [{ id: "asset1" }, { id: "asset2" }],
+    bookingAssets: [
+      { asset: { id: "asset1" }, assetId: "asset1", quantity: 1, id: "ba1" },
+      { asset: { id: "asset2" }, assetId: "asset2", quantity: 1, id: "ba2" },
+    ],
     from: new Date(),
     to: new Date(),
     name: "Test Booking",
@@ -146,7 +151,10 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset3" }], // asset1 exists, asset3 is new
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset3" } }, // asset1 exists, asset3 is new
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -155,7 +163,10 @@ describe("manage-kits route validation", () => {
           id: "kit2",
           name: "Kit 2",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing assets
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset2" } }, // all existing assets
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -188,7 +199,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         {},
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
@@ -198,7 +210,10 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset1" }, { id: "asset2" }], // all existing
+          assetKits: [
+            { asset: { id: "asset1" } },
+            { asset: { id: "asset2" } }, // all existing
+          ],
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -240,7 +255,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -294,7 +309,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"])
+        new Set(["asset1", "asset2"]),
+        BookingStatus.ONGOING
       );
     });
 
@@ -304,7 +320,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -345,7 +361,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.AVAILABLE,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -387,7 +403,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -427,7 +443,7 @@ describe("manage-kits route validation", () => {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
-          assets: [{ id: "asset3" }], // new asset
+          assetKits: [{ asset: { id: "asset3" } }], // new asset
           organizationId: "org123",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -473,7 +489,8 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
         mockKits[0],
         mockPartialCheckinDetails,
-        new Set(["asset1", "asset2"]) // existing booking asset IDs
+        new Set(["asset1", "asset2"]), // existing booking asset IDs
+        BookingStatus.ONGOING
       );
     });
   });

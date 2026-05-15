@@ -397,6 +397,10 @@ export async function createUserNote(args: CreateUserNoteArgs) { ... }
 - Place shared helpers near the code that uses them, or in a shared utils file
   if used across multiple modules
 
+### TypeScript Strictness
+
+- **Never use `any` as a shortcut.** The `any` type should only be used when it genuinely makes sense (e.g., wrapping third-party APIs with unknown shapes). Using `any` because it's "easier" or "less work" to figure out the proper type is not acceptable. Always find or define the correct type — use `unknown` with type narrowing if the shape is truly dynamic.
+
 ### Key Business Features
 
 - **Asset Management**: CRUD operations, QR code generation, image processing

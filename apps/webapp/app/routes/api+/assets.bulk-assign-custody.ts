@@ -1,7 +1,6 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -48,11 +47,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    // Validate that the custodian belongs to the same organization
-    const teamMember = await getTeamMember({
+    /**
+     * Validate the custodian belongs to the same organization. We don't
+     * keep the result around any more — the SELF_SERVICE "assign-to-
+     * self" guard moved into `bulkCheckOutAssets` (which fetches the
+     * team member itself). The lookup here is still needed: it 404s
+     * the request if the requested custodianId is from another org or
+     * doesn't exist.
+     */
+    await getTeamMember({
       id: custodian.id,
       organizationId,
-      select: { id: true, userId: true },
+      select: { id: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -70,22 +76,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
-      throw new ShelfError({
-        cause: null,
-        title: "Action not allowed",
-        message: "Self user can only assign custody to themselves only.",
-        additionalData: { userId, assetIds, custodian },
-        label: "Assets",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
-
-    await bulkAssignCustody({
+    /**
+     * The SELF_SERVICE "assign-to-self" guard now lives inside
+     * `bulkCheckOutAssets` itself (centralised so web + mobile share
+     * one source of truth). We just pass `role` through.
+     */
+    const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
       assetIds,
       custodianId: custodian.id,
@@ -93,12 +89,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       settings,
+      role,
     });
+
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — assign custody individually.`
+        : "";
 
     sendNotification({
       title: `Assets are now in custody of ${custodian.name}`,
-      message:
-        "Remember, these assets will be unavailable until it is manually checked in.",
+      message: `Remember, these assets will be unavailable until custody is manually released.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

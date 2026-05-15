@@ -57,24 +57,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             name: true,
           },
         },
-        assets: {
+        // Phase 3a: walk the BookingAsset pivot to reach assets. The select
+        // shape below mirrors what main's mobile contract expected on the
+        // implicit M2M, but each row is now `{ asset: {...} }`.
+        bookingAssets: {
           select: {
-            id: true,
-            title: true,
-            status: true,
-            mainImage: true,
-            kitId: true,
-            category: {
-              select: { id: true, name: true, color: true },
-            },
-            kit: {
-              select: { id: true, name: true },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                mainImage: true,
+                category: {
+                  select: { id: true, name: true, color: true },
+                },
+                // Pull the asset's kit through the `AssetKit` pivot.
+                // `@@unique([assetId])` keeps the link 1:1, so the first
+                // pivot row (oldest by createdAt) is a lossless "primary
+                // kit" for mobile clients that expect a singular shape.
+                assetKits: {
+                  select: { kit: { select: { id: true, name: true } } },
+                  orderBy: { createdAt: "asc" },
+                  take: 1,
+                },
+              },
             },
           },
-          orderBy: [{ status: "desc" }, { createdAt: "asc" }],
+          orderBy: [
+            { asset: { status: "desc" } },
+            { asset: { createdAt: "asc" } },
+          ],
         },
         _count: {
-          select: { assets: true },
+          select: { bookingAssets: true },
         },
       },
     });
@@ -89,11 +104,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
     }
 
+    // Synthesise singular `kit` / `kitId` keys from the `AssetKit` pivot
+    // so the mobile JSON contract stays flat — clients consume a single
+    // kit per asset, not the pivot array. We also strip the raw
+    // `assetKits` field from the response.
+    const assets = booking.bookingAssets.map((ba) => {
+      const { assetKits, ...rest } = ba.asset;
+      const primaryKit = assetKits[0]?.kit ?? null;
+      return {
+        ...rest,
+        kit: primaryKit,
+        kitId: primaryKit?.id ?? null,
+      };
+    });
+
     // Compute booking capability flags
-    const checkedOutCount = booking.assets.filter(
+    const checkedOutCount = assets.filter(
       (a) => a.status === AssetStatus.CHECKED_OUT
     ).length;
-    const totalAssets = booking.assets.length;
+    const totalAssets = assets.length;
 
     const canCheckout = booking.status === "RESERVED" && totalAssets > 0;
     const canCheckin =
@@ -113,7 +142,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         creator: booking.creator,
         custodianUser: booking.custodianUser,
         custodianTeamMember: booking.custodianTeamMember,
-        assets: booking.assets,
+        assets,
         assetCount: totalAssets,
         checkedOutCount,
       },

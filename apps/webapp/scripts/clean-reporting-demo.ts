@@ -29,7 +29,6 @@
  */
 
 import { createDatabaseClient } from "@shelf/database";
-import type { Prisma } from "@shelf/database";
 import type { ExtendedPrismaClient } from "@shelf/database";
 
 import {
@@ -385,16 +384,10 @@ async function deleteAll(
     });
     counts.custodies = custodyResult.count;
 
-    // 8) Kit rows (name suffix). Detach assets first since `Asset.kitId`
-    // has `onDelete: SetNull` in the schema but we delete assets next
-    // anyway — still, explicit detach keeps step 9 faster.
-    await t.asset.updateMany({
-      where: {
-        organizationId: orgId,
-        kit: { name: { endsWith: NAME_SUFFIX } },
-      } as Prisma.AssetWhereInput,
-      data: { kitId: null },
-    });
+    // 8) Kit rows (name suffix). `AssetKit` pivot rows cascade-delete
+    // when the kit is deleted (FK is `ON DELETE CASCADE`), so no
+    // explicit detach pass is needed. Assets themselves stay; only the
+    // pivot link to the kit is cleared.
     const kitResult = await t.kit.deleteMany({
       where: { organizationId: orgId, name: { endsWith: NAME_SUFFIX } },
     });

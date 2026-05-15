@@ -60,13 +60,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         _count: { id: true },
       }),
 
-      // My custody count — assets currently in custody of this user
+      // My custody count — assets currently in custody of this user.
+      // Phase 2 widened `Asset.custody` from 1:1 to 1:many for
+      // QUANTITY_TRACKED multi-custodian support, so we filter via `some`.
       db.asset.count({
         where: {
           organizationId,
           custody: {
-            custodian: {
-              userId: user.id,
+            some: {
+              custodian: {
+                userId: user.id,
+              },
             },
           },
         },

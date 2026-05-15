@@ -6,7 +6,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { bulkAssignCustody } from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -19,7 +19,7 @@ import {
  * POST /api/mobile/custody/assign
  *
  * Assigns custody of a single asset to a team member.
- * Uses the same `bulkAssignCustody` service as the webapp to ensure
+ * Uses the same `bulkCheckOutAssets` service as the webapp to ensure
  * consistent behavior (status updates, notes, validation).
  *
  * Body: { assetId: string, custodianId: string }
@@ -78,7 +78,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    await bulkAssignCustody({
+    await bulkCheckOutAssets({
       userId: user.id,
       assetIds: [assetId],
       custodianId,

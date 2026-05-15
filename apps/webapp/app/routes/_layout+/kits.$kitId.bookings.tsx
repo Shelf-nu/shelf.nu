@@ -2,6 +2,7 @@ import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
+import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { getBookings } from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
@@ -63,7 +64,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
-    const [{ bookings, bookingCount }, teamMembersData, tagsData] =
+    const [{ bookings, bookingCount }, teamMembersData, tagsData, kit] =
       await Promise.all([
         getBookings({
           organizationId,
@@ -94,12 +95,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getTagsForBookingTagsFilter({
           organizationId,
         }),
+        // Tiny org-scoped lookup so the page header can render
+        // `${kit.name}'s bookings` instead of a generic literal
+        // (matches the sibling overview/assets routes).
+        db.kit.findFirst({
+          where: { id: kitId, organizationId },
+          select: { name: true },
+        }),
       ]);
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
     const header: HeaderData = {
-      title: "Kit Bookings",
+      title: kit ? `${kit.name}'s bookings` : "Kit Bookings",
     };
 
     const modelName = {

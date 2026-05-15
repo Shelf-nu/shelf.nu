@@ -2,8 +2,8 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
-import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
@@ -44,7 +44,9 @@ vi.mock("~/utils/roles.server", () => ({
 
 // why: testing custody assignment validation without executing actual bulk checkout operations
 vi.mock("~/modules/asset/service.server", () => ({
-  bulkAssignCustody: vi.fn().mockResolvedValue(undefined),
+  bulkCheckOutAssets: vi
+    .fn()
+    .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
 }));
 
 // why: testing team member organization validation without database lookups
@@ -140,7 +142,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: { id: true },
     });
   });
 
@@ -186,21 +188,26 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: { id: true },
     });
   });
 
-  it("prevents self-service users from assigning custody to other team members", async () => {
+  // why: the SELF_SERVICE "assign-to-self" guard now lives inside
+  // `bulkCheckOutAssets` (centralised so web + mobile callers share one
+  // source of truth — the mobile route was missing this check pre-fix,
+  // hex-security r3202162994). The route's responsibility shrinks to
+  // "pass `role` through". Behavioural enforcement is unit-tested at
+  // the service layer (see service.server.test.ts).
+  it("forwards role through to bulkCheckOutAssets so the service-level SELF_SERVICE guard can fire", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
       canUseBarcodes: false,
     } as any);
 
-    // Valid team member from same org, but different user
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
-      userId: "other-user-456", // Different from current user
+      userId: "other-user-456",
     });
 
     const formData = new FormData();
@@ -216,28 +223,30 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const request = new Request(
       "https://example.com/api/assets/bulk-assign-custody",
-      {
-        method: "POST",
-        body: formData,
-      }
+      { method: "POST", body: formData }
     );
 
-    const response = (await action(createActionArgs({ request }))) as any;
+    await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(403);
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: OrganizationRoles.SELF_SERVICE,
+        custodianId: "team-member-456",
+        userId: "user-123",
+      })
+    );
   });
 
-  it("allows self-service users to assign custody to themselves", async () => {
+  it("forwards ADMIN role transparently (service-level guard is no-op for non-SELF_SERVICE)", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
+      role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
     } as any);
 
-    // Valid team member from same org, same user
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
-      userId: "user-123", // Same as current user
+      userId: "user-123",
     });
 
     const formData = new FormData();
@@ -253,17 +262,16 @@ describe("api/assets/bulk-assign-custody", () => {
 
     const request = new Request(
       "https://example.com/api/assets/bulk-assign-custody",
-      {
-        method: "POST",
-        body: formData,
-      }
+      { method: "POST", body: formData }
     );
 
     const response = (await action(createActionArgs({ request }))) as any;
 
-    // Success case returns Response wrapping the payload
     expect(response instanceof Response).toBe(true);
     const responseData = await (response as unknown as Response).json();
     expect(responseData).toEqual({ error: null, success: true });
+    expect(bulkCheckOutAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ role: OrganizationRoles.ADMIN })
+    );
   });
 });

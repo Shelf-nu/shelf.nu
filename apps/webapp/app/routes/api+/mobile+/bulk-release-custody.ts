@@ -6,7 +6,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { bulkReleaseCustody } from "~/modules/asset/service.server";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -54,12 +54,18 @@ export async function action({ request }: ActionFunctionArgs) {
       role,
     });
 
-    await bulkReleaseCustody({
+    /**
+     * Pass `role` so the service-level SELF_SERVICE guard fires.
+     * Without it, a SELF_SERVICE user could release custody on any
+     * team member's asset (hex-security r3202161632).
+     */
+    await bulkCheckInAssets({
       userId: user.id,
       assetIds,
       organizationId,
       currentSearchParams: "",
       settings,
+      role,
     });
 
     return data({ success: true });

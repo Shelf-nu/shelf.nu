@@ -4,6 +4,7 @@ import type { Filter } from "~/components/assets/assets-index/advanced-filters/s
 import { ShelfError } from "~/utils/error";
 import {
   assetQueryFragment,
+  assetQueryJoins,
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
@@ -273,7 +274,7 @@ describe("generateWhereClause - special filter values", () => {
 
       // Should check both direct custody AND active bookings
       // Only counts booking custody when asset is CHECKED_OUT
-      expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) > 0");
       expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
       expect(sql).toContain("ONGOING");
@@ -292,7 +293,7 @@ describe("generateWhereClause - special filter values", () => {
 
       // Should exclude both direct custody AND active bookings
       // Only counts booking custody when asset is CHECKED_OUT
-      expect(sql).toContain("cu.id IS NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) = 0");
       expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
@@ -310,7 +311,7 @@ describe("generateWhereClause - special filter values", () => {
 
       // Should exclude both direct custody AND active bookings
       // Only counts booking custody when asset is CHECKED_OUT
-      expect(sql).toContain("cu.id IS NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) = 0");
       expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
@@ -328,7 +329,7 @@ describe("generateWhereClause - special filter values", () => {
 
       // Should check both direct custody AND active bookings
       // Only counts booking custody when asset is CHECKED_OUT
-      expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) > 0");
       expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
     });
@@ -345,7 +346,7 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // "in-custody" subsumes specific IDs - checks for any custody (direct or booking)
-      expect(sql).toContain("cu.id IS NOT NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) > 0");
       expect(sql).toContain("a.status = 'CHECKED_OUT' AND EXISTS");
       expect(sql).toContain("Booking");
       // Should NOT contain specific ID matching since in-custody covers all
@@ -364,8 +365,8 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should not add any custody-specific conditions (matches everything)
-      expect(sql).not.toContain("cu.id IS NULL");
-      expect(sql).not.toContain("cu.id IS NOT NULL");
+      expect(sql).not.toContain("jsonb_array_length(custody_agg.custody) = 0");
+      expect(sql).not.toContain("jsonb_array_length(custody_agg.custody) > 0");
     });
 
     it("handles containsAny with 'without-custody' + specific IDs (OR logic)", () => {
@@ -380,7 +381,7 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should include both conditions: no custody OR specific custodian
-      expect(sql).toContain("cu.id IS NULL");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) = 0");
       expect(sql).toContain("Custody");
     });
   });
@@ -487,7 +488,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NOT NULL');
+      expect(sql).toContain('EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
+      expect(sql).not.toContain("NOT EXISTS");
     });
 
     it("handles 'in-kit' with isNot operator (inverts to not in kit)", () => {
@@ -501,7 +504,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NULL');
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
     });
 
     it("handles 'without-kit' with is operator", () => {
@@ -515,7 +519,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NULL');
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
     });
 
     it("handles containsAny with only 'in-kit'", () => {
@@ -529,7 +534,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"kitId" IS NOT NULL');
+      expect(sql).toContain('EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."assetId" = a.id');
+      expect(sql).not.toContain("NOT EXISTS");
     });
 
     it("handles containsAny with both 'in-kit' and 'without-kit' (matches all)", () => {
@@ -544,8 +551,7 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should not add any kit-specific conditions
-      expect(sql).not.toContain('"kitId" IS NULL');
-      expect(sql).not.toContain('"kitId" IS NOT NULL');
+      expect(sql).not.toContain('"AssetKit"');
     });
 
     it("handles containsAny with 'without-kit' + specific IDs (OR logic)", () => {
@@ -559,9 +565,8 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      // Should include both: not in kit OR specific kit
-      expect(sql).toContain('"kitId" IS NULL');
-      expect(sql).toContain("Kit");
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM public."AssetKit" ak');
+      expect(sql).toContain('ak."kitId" = ANY');
     });
   });
 });
@@ -586,15 +591,100 @@ describe("assetQueryFragment", () => {
       );
     });
 
-    it("includes direct custody without CHECKED_OUT guard", () => {
+    it("projects direct custody from the lateral aggregation", () => {
       const fragment = assetQueryFragment();
       const sql = getFragmentSqlString(fragment);
 
-      // Direct custody (via Custody table) should not require CHECKED_OUT
-      expect(sql).toContain("WHEN cu.id IS NOT NULL THEN");
+      // Direct custody now flows through the per-asset lateral
+      // aggregation (custody_agg.custody) rather than a JOIN-based CASE
+      // — this prevents per-custody-row duplication for qty-tracked
+      // assets with multiple custodians (Issue A).
+      expect(sql).toContain("custody_agg.custody");
+      expect(sql).toContain("jsonb_array_length(custody_agg.custody) > 0");
+    });
+
+    it("does not gate the direct custody projection on CHECKED_OUT", () => {
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // Regression guard: the direct-custody branch must remain
+      // independent of asset status.
       expect(sql).not.toContain(
-        "WHEN cu.id IS NOT NULL AND a.status = 'CHECKED_OUT'"
+        "jsonb_array_length(custody_agg.custody) > 0 AND a.status = 'CHECKED_OUT'"
       );
+    });
+  });
+
+  describe("custody lateral aggregation (Issue A)", () => {
+    /**
+     * The lateral-subquery pattern (mirroring the barcodes lateral) is
+     * what makes a single asset return one row regardless of how many
+     * custody rows it has. Without this, the previous direct LEFT JOINs
+     * on Custody + TeamMember + User caused the asset to be returned N
+     * times for N custodians.
+     */
+    function getJoinsSqlString(sql: typeof assetQueryJoins) {
+      return sql.strings.join("?");
+    }
+
+    it("aggregates custody rows via a lateral subquery, not direct JOINs", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // The lateral aliased as `custody_agg` must exist
+      expect(sql).toContain("LEFT JOIN LATERAL");
+      expect(sql).toContain(") custody_agg ON TRUE");
+
+      // jsonb_agg over Custody is what produces the multi-row array
+      expect(sql).toContain("jsonb_agg(");
+      expect(sql).toContain('FROM public."Custody" cu');
+    });
+
+    it("does not LEFT JOIN Custody at the outer level", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // The outer-level direct join on Custody (`LEFT JOIN public."Custody"
+      // cu ON cu."assetId" = a.id`) was the root cause of duplication.
+      // It must now live exclusively inside the lateral subquery — the
+      // outer query may no longer reference cu without a `FROM` clause.
+      expect(sql).not.toMatch(
+        /LEFT JOIN public\."Custody" cu ON cu\."assetId" = a\.id/
+      );
+    });
+
+    it("keeps TeamMember/User joins scoped inside the custody lateral", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // The outer query exposes `bu` (booking User) and `btm`
+      // (booking TeamMember). It must NOT carry direct outer joins on
+      // `tm` / `u` that hang off `cu` — those belong in the lateral.
+      // Strip the lateral block then assert.
+      const outerOnly = sql.replace(
+        /LEFT JOIN LATERAL \([\s\S]*?\) custody_agg ON TRUE/,
+        ""
+      );
+      expect(outerOnly).not.toMatch(
+        /LEFT JOIN public\."TeamMember" tm ON cu\."teamMemberId" = tm\.id/
+      );
+      expect(outerOnly).not.toMatch(
+        /LEFT JOIN public\."User" u ON tm\."userId" = u\.id/
+      );
+    });
+
+    it("includes per-custody quantity in the aggregated jsonb objects", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // qty-tracked assets need the per-custody-row quantity exposed so
+      // the UI can render `name (quantity)` for each custodian.
+      expect(sql).toContain("'quantity', cu.quantity");
+    });
+
+    it("falls back to '[]'::jsonb when an asset has no custody rows", () => {
+      const sql = getJoinsSqlString(assetQueryJoins);
+
+      // COALESCE ensures custody_agg.custody is always an array, never
+      // null — keeps the CASE branch in assetQueryFragment simple.
+      expect(sql).toContain("COALESCE(");
+      expect(sql).toContain("'[]'::jsonb");
     });
   });
 

@@ -82,12 +82,21 @@ type Outcome =
   | "RESERVED_FUTURE"
   | "ARCHIVED";
 
-/** Final DB status the outcome resolves to. */
+/**
+ * Final DB status the outcome resolves to.
+ *
+ * `ONGOING_OVERDUE` ⇒ `"OVERDUE"` (not `"ONGOING"`). In production a
+ * scheduled job (`apps/webapp/app/utils/scheduler/booking.server.ts`)
+ * flips ONGOING bookings whose `to` date has passed, but the seed
+ * doesn't run that scheduler — without this mapping the Overdue Items
+ * report returns zero rows. Other reports that filter on `status IN
+ * ("ONGOING", "OVERDUE")` (overdue KPIs in compliance) also benefit.
+ */
 const FINAL_STATUS: Readonly<Record<Outcome, string>> = {
   COMPLETE: "COMPLETE",
   CANCELLED: "CANCELLED",
   ONGOING_CURRENT: "ONGOING",
-  ONGOING_OVERDUE: "ONGOING",
+  ONGOING_OVERDUE: "OVERDUE",
   RESERVED_FUTURE: "RESERVED",
   ARCHIVED: "ARCHIVED",
 };
@@ -245,7 +254,14 @@ async function createBooking(
       tags: state.markerTagId
         ? { connect: [{ id: state.markerTagId }] }
         : undefined,
-      assets: { connect: assetIds.map((id) => ({ id })) },
+      // Phase 3a renamed the implicit `Asset <-> Booking` M2M to the
+      // explicit `BookingAsset` pivot table. Each row is created with
+      // `quantity: 1` (the default for INDIVIDUAL assets). Qty-tracked
+      // bookings would override this; the seed only deals with
+      // INDIVIDUAL fixtures, so the default is fine.
+      bookingAssets: {
+        create: assetIds.map((id) => ({ asset: { connect: { id } } })),
+      },
     },
     select: { id: true },
   });
@@ -403,13 +419,46 @@ function buildTimeline(
   const daysAfter = (d: Date, days: number) =>
     new Date(d.getTime() + days * DAY);
 
+  /**
+   * Produce a realistic distribution of check-in times relative to a
+   * booking's due date so the Booking Compliance + Overdue Items reports
+   * see meaningful variance rather than 100% perfectly-on-time.
+   *
+   * Distribution targets (calibrated against the report's 15-min grace
+   * window in `apps/webapp/app/modules/reports/helpers.server.ts`):
+   *   ~65% on-time  → check-in within ±15 min of `to`
+   *   ~20% early    → 1–48 h before `to` (still on-time per grace)
+   *   ~15% late     → 30 min – 5 days after `to`  (counts as late)
+   *
+   * Pre-fix this helper returned `to` exactly for every COMPLETE /
+   * ARCHIVED booking, so every check-in landed at delta-zero and the
+   * compliance helper classified them all on-time. That made the
+   * report show a meaningless 100% across the board.
+   */
+  const checkInTimeRelativeTo = (to: Date): Date => {
+    const r = ctx.rng();
+    if (r < 0.65) {
+      // On-time: ±15 min jitter around `to`
+      const jitterMs = (ctx.rng() - 0.5) * 30 * 60 * 1000;
+      return new Date(to.getTime() + jitterMs);
+    }
+    if (r < 0.85) {
+      // Early: 1–48 hours before `to`
+      const earlyHours = randomIntInRange(1, 48, ctx.rng);
+      return hourAfter(to, -earlyHours);
+    }
+    // Late: 30 min – 5 days after `to`
+    const lateMinutes = randomIntInRange(30, 5 * 24 * 60, ctx.rng);
+    return new Date(to.getTime() + lateMinutes * 60 * 1000);
+  };
+
   switch (outcome) {
     case "COMPLETE": {
       const from = daysAfter(createdAt, randomIntInRange(1, 7, ctx.rng));
       const to = daysAfter(from, randomIntInRange(1, 5, ctx.rng));
       const reservedAt = hourAfter(createdAt, randomIntInRange(1, 24, ctx.rng));
       const ongoingAt = from;
-      const completedAt = to;
+      const completedAt = checkInTimeRelativeTo(to);
       return {
         from,
         to,
@@ -428,7 +477,7 @@ function buildTimeline(
       const to = daysAfter(from, randomIntInRange(1, 5, ctx.rng));
       const reservedAt = hourAfter(createdAt, randomIntInRange(1, 24, ctx.rng));
       const ongoingAt = from;
-      const completedAt = to;
+      const completedAt = checkInTimeRelativeTo(to);
       const archivedAt = daysAfter(
         completedAt,
         randomIntInRange(1, 30, ctx.rng)

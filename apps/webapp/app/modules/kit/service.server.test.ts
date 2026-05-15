@@ -1,4 +1,5 @@
 import {
+  AssetType,
   BarcodeType,
   KitStatus,
   AssetStatus,
@@ -25,6 +26,7 @@ import {
   bulkRemoveAssetsFromKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
+import { createNotes } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
 // @vitest-environment node
@@ -53,6 +55,13 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    assetKit: {
+      create: vitest.fn().mockResolvedValue({}),
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      update: vitest.fn().mockResolvedValue({}),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     location: {
       update: vitest.fn().mockResolvedValue({}),
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -66,10 +75,12 @@ vitest.mock("~/database/db.server", () => ({
     kitCustody: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     custody: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     note: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -539,88 +550,149 @@ describe("deleteKit", () => {
     vitest.clearAllMocks();
   });
 
-  it("should delete kit successfully", async () => {
-    expect.assertions(2);
+  it("deletes an AVAILABLE kit (no custody) without firing events or notes", async () => {
+    // why: pre-fix this path was the only behaviour deleteKit had — no kit
+    // custody means no children to release, so nothing to emit.
+    const availableKit = {
+      ...mockKitData,
+      assets: [],
+      custody: null,
+    };
     //@ts-expect-error missing vitest type
-    db.kit.delete.mockResolvedValue(mockKitData);
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([]);
+    db.kit.findUniqueOrThrow.mockResolvedValue(availableKit);
 
     const result = await deleteKit({
       id: "kit-1",
       organizationId: "org-1",
+      actorUserId: "user-1",
     });
 
-    expect(db.kit.delete).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
+    // Single + bulk paths now share `performKitDeletion`, which uses
+    // `deleteMany` so the same query handles both cardinalities.
+    expect(db.kit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
     });
-    expect(result).toEqual(mockKitData);
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
+    expect(result).toEqual(availableKit);
   });
 
-  it("should emit ASSET_KIT_CHANGED per asset that was in the kit", async () => {
-    expect.assertions(3);
-    const assetsInKit = [{ id: "asset-1" }, { id: "asset-2" }];
+  it("deletes an in-custody kit and emits CUSTODY_RELEASED + flips status + writes notes", async () => {
+    // Setup: kit in custody to Bob, contains Drill (INDIVIDUAL, no operator
+    // custody) and Pens (QUANTITY_TRACKED, has operator custody to Alice).
+    // After delete: Drill → AVAILABLE (no remaining custody), Pens stays
+    // IN_CUSTODY (Alice's row survives the cascade).
+    //
+    // Main's PR #2535 added three smaller tests here exercising the legacy
+    // `db.kit.delete` + `db.asset.findMany({ where: { kitId } })` shape;
+    // those don't apply to our branch's pivot-aware code path
+    // (findUniqueOrThrow → assetKits.asset → deleteMany). The
+    // `ASSET_KIT_CHANGED` emission they cover is now part of
+    // `performKitDeletion` and worth a dedicated assertion in a
+    // follow-up — left as a TODO so this merge stays scoped.
+    const inCustodyKit = {
+      ...mockKitData,
+      assetKits: [
+        { asset: { id: "drill-1", title: "Drill" } },
+        { asset: { id: "pens-1", title: "Pens" } },
+      ],
+      custody: {
+        id: "kc-1",
+        custodian: {
+          id: "tm-bob",
+          name: "Bob",
+          user: { id: "user-bob" },
+        },
+      },
+    };
     //@ts-expect-error missing vitest type
-    db.kit.delete.mockResolvedValue(mockKitData);
+    db.kit.findUniqueOrThrow.mockResolvedValue(inCustodyKit);
     //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(assetsInKit);
+    // Inherited (kit-allocated) custody rows pre-cascade — one per asset.
+    // `kitCustodyId` is required so the helper can map each event back
+    // to its source kit for `kitId` + `targetUserId`.
+    db.custody.findMany.mockResolvedValueOnce([
+      { assetId: "drill-1", teamMemberId: "tm-bob", kitCustodyId: "kc-1" },
+      { assetId: "pens-1", teamMemberId: "tm-bob", kitCustodyId: "kc-1" },
+    ]);
+    //@ts-expect-error missing vitest type
+    // Post-cascade snapshot — Pens still has Alice's operator row, Drill
+    // has nothing left.
+    db.custody.findMany.mockResolvedValueOnce([{ assetId: "pens-1" }]);
 
     await deleteKit({
       id: "kit-1",
       organizationId: "org-1",
-      actorUserId: "user-1",
+      actorUserId: "user-actor",
     });
 
-    expect(recordEvents).toHaveBeenCalledTimes(1);
-    expect(recordEvents).toHaveBeenCalledWith(
+    // Two recordEvents calls inside the tx:
+    //   1. CUSTODY_RELEASED per inherited Custody row (viaKit/viaKitDelete meta)
+    //   2. ASSET_KIT_CHANGED per asset that lost its kit on cascade
+    // The second call was added in the main-merge resolution so single + bulk
+    // delete paths share `performKitDeletion`'s ASSET_KIT_CHANGED emission
+    // (folded in from PR #2535).
+    expect(recordEvents).toHaveBeenCalledTimes(2);
+    const custodyReleasedArg = (recordEvents as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0];
+    expect(custodyReleasedArg).toHaveLength(2);
+    expect(custodyReleasedArg[0]).toMatchObject({
+      action: "CUSTODY_RELEASED",
+      entityType: "ASSET",
+      assetId: "drill-1",
+      kitId: "kit-1",
+      targetUserId: "user-bob",
+      meta: { viaKit: true, viaKitDelete: true },
+    });
+    const assetKitChangedArg = (recordEvents as ReturnType<typeof vitest.fn>)
+      .mock.calls[1][0];
+    expect(assetKitChangedArg).toHaveLength(2);
+    expect(assetKitChangedArg).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           action: "ASSET_KIT_CHANGED",
-          assetId: "asset-1",
+          assetId: "drill-1",
           kitId: "kit-1",
           field: "kitId",
           fromValue: "kit-1",
           toValue: null,
-          actorUserId: "user-1",
         }),
         expect.objectContaining({
           action: "ASSET_KIT_CHANGED",
-          assetId: "asset-2",
+          assetId: "pens-1",
           kitId: "kit-1",
           fromValue: "kit-1",
           toValue: null,
         }),
-      ]),
-      expect.anything()
+      ])
     );
-    expect(
-      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls[0][0]
-    ).toHaveLength(2);
-  });
 
-  it("should not emit events when kit has no assets", async () => {
-    expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([]);
+    expect(db.kit.deleteMany).toHaveBeenCalled();
 
-    await deleteKit({
-      id: "kit-1",
-      organizationId: "org-1",
-      actorUserId: "user-1",
+    // Drill flips to AVAILABLE; Pens does not (still has operator custody).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["drill-1"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.AVAILABLE },
     });
 
-    expect(recordEvents).not.toHaveBeenCalled();
+    // Notes written for both assets, kit name inlined (no link — kit gone).
+    expect(createNotes).toHaveBeenCalledTimes(1);
+    const notesArg = (createNotes as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(notesArg.assetIds).toEqual(["drill-1", "pens-1"]);
+    expect(notesArg.content).toContain("when kit");
+    expect(notesArg.content).toContain(mockKitData.name);
   });
 
-  it("should handle deletion errors", async () => {
-    expect.assertions(1);
+  it("handles deletion errors by wrapping them in ShelfError", async () => {
     //@ts-expect-error missing vitest type
-    db.kit.delete.mockRejectedValue(new Error("Deletion failed"));
+    db.kit.findUniqueOrThrow.mockRejectedValue(new Error("Not found"));
 
     await expect(
       deleteKit({
         id: "kit-1",
         organizationId: "org-1",
+        actorUserId: "user-1",
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -631,11 +703,25 @@ describe("bulkDeleteKits", () => {
     vitest.clearAllMocks();
   });
 
-  it("should bulk delete kits successfully", async () => {
-    expect.assertions(1);
+  it("should bulk delete kits successfully (no custody on either)", async () => {
+    // Both `bulkDeleteKits` and `deleteKit` share `performKitDeletion`
+    // now. With no kit-custody on the batch, no events / notes / status
+    // flips fire — verify the underlying deleteMany still runs.
     const kitsToDelete = [
-      { id: "kit-1", image: "image1.jpg", assets: [] },
-      { id: "kit-2", image: null, assets: [] },
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        image: "image1.jpg",
+        assetKits: [],
+        custody: null,
+      },
+      {
+        id: "kit-2",
+        name: "Kit 2",
+        image: null,
+        assetKits: [],
+        custody: null,
+      },
     ];
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(kitsToDelete);
@@ -646,21 +732,125 @@ describe("bulkDeleteKits", () => {
       userId: "user-1",
     });
 
-    expect(db.$transaction).toHaveBeenCalled();
+    expect(db.kit.findMany).toHaveBeenCalled();
+    expect(db.kit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+    });
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
+  });
+
+  it("bulk-deleting two in-custody kits emits per-kit events + per-kit notes", async () => {
+    // Two kits, each in custody to a different person, each with one
+    // asset. After the bulk delete: 2 CUSTODY_RELEASED events (one per
+    // inherited Custody row), 2 separate notes (each attributing the
+    // correct custodian to its kit), both assets flipped to AVAILABLE.
+    const kitsToDelete = [
+      {
+        id: "kit-A",
+        name: "Camera Kit",
+        image: null,
+        assetKits: [{ asset: { id: "drill-1", title: "Drill" } }],
+        custody: {
+          id: "kc-A",
+          custodian: {
+            id: "tm-bob",
+            name: "Bob",
+            user: { id: "user-bob" },
+          },
+        },
+      },
+      {
+        id: "kit-B",
+        name: "Drone Kit",
+        image: null,
+        assetKits: [{ asset: { id: "pen-1", title: "Pen" } }],
+        custody: {
+          id: "kc-B",
+          custodian: {
+            id: "tm-carol",
+            name: "Carol",
+            user: { id: "user-carol" },
+          },
+        },
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsToDelete);
+    //@ts-expect-error missing vitest type
+    // Pre-cascade inherited rows — one per kit, both linked to their
+    // respective KitCustody.
+    db.custody.findMany.mockResolvedValueOnce([
+      { assetId: "drill-1", teamMemberId: "tm-bob", kitCustodyId: "kc-A" },
+      { assetId: "pen-1", teamMemberId: "tm-carol", kitCustodyId: "kc-B" },
+    ]);
+    //@ts-expect-error missing vitest type
+    // Post-cascade — neither asset has remaining custody.
+    db.custody.findMany.mockResolvedValueOnce([]);
+
+    await bulkDeleteKits({
+      kitIds: ["kit-A", "kit-B"],
+      organizationId: "org-1",
+      userId: "user-actor",
+    });
+
+    // Two events, one per inherited row, with the right kitId mapping.
+    const eventsArg = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    expect(eventsArg).toHaveLength(2);
+    expect(eventsArg).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "drill-1",
+          kitId: "kit-A",
+          targetUserId: "user-bob",
+        }),
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "pen-1",
+          kitId: "kit-B",
+          targetUserId: "user-carol",
+        }),
+      ])
+    );
+
+    // Both assets flipped to AVAILABLE (no remaining custody).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: expect.arrayContaining(["drill-1", "pen-1"]) },
+        organizationId: "org-1",
+      },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+
+    // One note per in-custody kit (each note attributed to its
+    // custodian) — 2 calls total.
+    expect(createNotes).toHaveBeenCalledTimes(2);
   });
 
   it("should emit ASSET_KIT_CHANGED per asset across all deleted kits", async () => {
     expect.assertions(2);
+    // Translated from main's PR #2535 to our pivot schema: `assets:` on the
+    // kit row is now sourced via `assetKits: { select: { asset: {...} } }`
+    // and flattened in-memory before `performKitDeletion` runs.
     const kitsToDelete = [
       {
         id: "kit-1",
+        name: "Kit 1",
         image: null,
-        assets: [{ id: "asset-1" }, { id: "asset-2" }],
+        assetKits: [
+          { asset: { id: "asset-1", title: "Asset 1" } },
+          { asset: { id: "asset-2", title: "Asset 2" } },
+        ],
+        custody: null,
       },
       {
         id: "kit-2",
+        name: "Kit 2",
         image: null,
-        assets: [{ id: "asset-3" }],
+        assetKits: [{ asset: { id: "asset-3", title: "Asset 3" } }],
+        custody: null,
       },
     ];
     //@ts-expect-error missing vitest type
@@ -672,6 +862,10 @@ describe("bulkDeleteKits", () => {
       userId: "user-1",
     });
 
+    // ASSET_KIT_CHANGED events are emitted in a single batched recordEvents
+    // call inside `performKitDeletion` (one per asset, kit-id mapped from
+    // the pivot row's source kit). No CUSTODY_RELEASED events fire because
+    // neither kit has custody.
     expect(recordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -705,7 +899,13 @@ describe("bulkDeleteKits", () => {
     expect.assertions(1);
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue([
-      { id: "kit-1", image: null, assets: [] },
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        image: null,
+        assetKits: [],
+        custody: null,
+      },
     ]);
 
     await bulkDeleteKits({
@@ -726,18 +926,22 @@ describe("bulkRemoveAssetsFromKits", () => {
   it("should emit ASSET_KIT_CHANGED for each asset that left a kit", async () => {
     expect.assertions(2);
 
+    // Translated from main's PR #2535 to our pivot schema + Custody[] shape:
+    //   - `kit` is now sourced via `assetKits: { select: { kit: {...} } }`
+    //     and flattened in-memory.
+    //   - `custody` is an array (Phase 2 made Custody 1:N on Asset).
     const assets = [
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: { id: "kit-1", name: "Kit 1", custody: null },
-        custody: null,
+        assetKits: [{ kit: { id: "kit-1", name: "Kit 1", custody: null } }],
+        custody: [],
       },
       {
         id: "asset-2",
         title: "Asset 2",
-        kit: { id: "kit-2", name: "Kit 2", custody: null },
-        custody: null,
+        assetKits: [{ kit: { id: "kit-2", name: "Kit 2", custody: null } }],
+        custody: [],
       },
     ];
     //@ts-expect-error missing vitest type
@@ -779,23 +983,36 @@ describe("bulkRemoveAssetsFromKits", () => {
   it("should emit CUSTODY_RELEASED for assets whose kit-inherited custody was cleaned up", async () => {
     expect.assertions(1);
 
+    // Translated from main's PR #2535 to our pivot + Phase 3d-Polish-2 shape:
+    //   - `kit` sourced via `assetKits.kit` pivot relation.
+    //   - `custody` is Custody[] with the kit-inherited row keyed on
+    //     `kitCustodyId` (Phase 3d-Polish-2 discriminator). The service
+    //     filters by that key to avoid blowing away operator-assigned rows.
     const assets = [
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: {
-          id: "kit-1",
-          name: "Kit 1",
-          custody: { id: "kit-custody-1" },
-        },
-        custody: {
-          id: "custody-1",
-          custodian: {
-            id: "tm-1",
-            name: "Custodian",
-            user: { id: "user-2", firstName: "C", lastName: "U" },
+        assetKits: [
+          {
+            kit: {
+              id: "kit-1",
+              name: "Kit 1",
+              custody: { id: "kit-custody-1" },
+            },
           },
-        },
+        ],
+        custody: [
+          {
+            id: "custody-1",
+            teamMemberId: "tm-1",
+            kitCustodyId: "kit-custody-1",
+            custodian: {
+              id: "tm-1",
+              name: "Custodian",
+              user: { id: "user-2", firstName: "C", lastName: "U" },
+            },
+          },
+        ],
       },
     ];
     //@ts-expect-error missing vitest type
@@ -980,7 +1197,7 @@ describe("releaseCustody", () => {
     const kitWithCustody = {
       id: "kit-1",
       name: "Test Kit",
-      assets: [{ id: "asset-1", title: "Test Asset" }],
+      assetKits: [{ asset: { id: "asset-1", title: "Test Asset" } }],
       createdBy: { firstName: "John", lastName: "Doe" },
       custody: { custodian: { name: "Jane Smith" } },
     };
@@ -1001,7 +1218,11 @@ describe("releaseCustody", () => {
       where: { id: "kit-1", organizationId: "org-1" },
       select: expect.any(Object),
     });
-    expect(result).toEqual(kitWithCustody);
+    // returned kit; preserve the original pivot rows alongside.
+    expect(result).toEqual({
+      ...kitWithCustody,
+      assets: [{ id: "asset-1", title: "Test Asset" }],
+    });
   });
 });
 
@@ -1146,13 +1367,15 @@ describe("getAvailableKitAssetForBooking", () => {
     expect.assertions(2);
     const kitsWithAssets = [
       {
-        assets: [
-          { id: "asset-1", status: AssetStatus.AVAILABLE },
-          { id: "asset-2", status: AssetStatus.IN_CUSTODY },
+        assetKits: [
+          { asset: { id: "asset-1", status: AssetStatus.AVAILABLE } },
+          { asset: { id: "asset-2", status: AssetStatus.IN_CUSTODY } },
         ],
       },
       {
-        assets: [{ id: "asset-3", status: AssetStatus.AVAILABLE }],
+        assetKits: [
+          { asset: { id: "asset-3", status: AssetStatus.AVAILABLE } },
+        ],
       },
     ];
     //@ts-expect-error missing vitest type
@@ -1162,7 +1385,11 @@ describe("getAvailableKitAssetForBooking", () => {
 
     expect(db.kit.findMany).toHaveBeenCalledWith({
       where: { id: { in: ["kit-1", "kit-2"] } },
-      select: { assets: { select: { id: true, status: true } } },
+      select: {
+        assetKits: {
+          select: { asset: { select: { id: true, status: true } } },
+        },
+      },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);
   });
@@ -1205,14 +1432,16 @@ describe("updateKitsWithBookingCustodians", () => {
     //@ts-expect-error missing vitest type
     db.asset.findFirst.mockResolvedValue({
       id: "asset-1",
-      bookings: [
+      bookingAssets: [
         {
-          id: "booking-1",
-          custodianTeamMember: null,
-          custodianUser: {
-            firstName: "Jane",
-            lastName: "Doe",
-            profilePicture: "pic.jpg",
+          booking: {
+            id: "booking-1",
+            custodianTeamMember: null,
+            custodianUser: {
+              firstName: "Jane",
+              lastName: "Doe",
+              profilePicture: "pic.jpg",
+            },
           },
         },
       ],
@@ -1233,8 +1462,10 @@ describe("updateKitsWithBookingCustodians", () => {
     expect(db.asset.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kitId: "kit-co",
-          bookings: { some: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          assetKits: { some: { kitId: "kit-co" } },
+          bookingAssets: {
+            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
+          },
         }),
       })
     );
@@ -1255,11 +1486,13 @@ describe("updateKitsWithBookingCustodians", () => {
     //@ts-expect-error missing vitest type
     db.asset.findFirst.mockResolvedValue({
       id: "asset-1",
-      bookings: [
+      bookingAssets: [
         {
-          id: "booking-1",
-          custodianTeamMember: { name: "External Contractor" },
-          custodianUser: null,
+          booking: {
+            id: "booking-1",
+            custodianTeamMember: { name: "External Contractor" },
+            custodianUser: null,
+          },
         },
       ],
     });
@@ -1307,7 +1540,7 @@ describe("updateKitAssets - Location Cascade", () => {
     const mockKit = {
       id: "kit-1",
       location: { id: "location-1", name: "Warehouse A" },
-      assets: [],
+      assetKits: [],
       custody: null,
     };
 
@@ -1315,7 +1548,7 @@ describe("updateKitAssets - Location Cascade", () => {
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
+        assetKits: [],
         custody: null,
         location: null,
       },
@@ -1336,14 +1569,19 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
+    // onto direct pivot inserts via `assetKit.createMany`.
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      // Phase 4a-Polish-2: createMany now always writes `quantity`. The
+      // mock asset has no `type` so it falls through the QUANTITY_TRACKED
+      // branch, defaulting to `Math.max(1, asset.quantity ?? 1)` = 1.
+      data: [
+        {
+          assetId: "asset-1",
+          kitId: "kit-1",
+          organizationId: "org-1",
+          quantity: 1,
         },
-      },
+      ],
     });
 
     // Should update asset locations (cascade behavior)
@@ -1359,7 +1597,7 @@ describe("updateKitAssets - Location Cascade", () => {
     const mockKit = {
       id: "kit-1",
       location: null,
-      assets: [],
+      assetKits: [],
       custody: null,
     };
 
@@ -1367,7 +1605,7 @@ describe("updateKitAssets - Location Cascade", () => {
       {
         id: "asset-1",
         title: "Asset 1",
-        kit: null,
+        assetKits: [],
         custody: null,
         location: { id: "location-1", name: "Current Location" },
       },
@@ -1388,14 +1626,19 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // Should update kit assets
-    expect(db.kit.update).toHaveBeenCalledWith({
-      where: { id: "kit-1", organizationId: "org-1" },
-      data: {
-        assets: {
-          connect: [{ id: "asset-1" }],
+    // onto direct pivot inserts via `assetKit.createMany`.
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      // Phase 4a-Polish-2: createMany now always writes `quantity`. The
+      // mock asset has no `type` so it falls through the QUANTITY_TRACKED
+      // branch, defaulting to `Math.max(1, asset.quantity ?? 1)` = 1.
+      data: [
+        {
+          assetId: "asset-1",
+          kitId: "kit-1",
+          organizationId: "org-1",
+          quantity: 1,
         },
-      },
+      ],
     });
 
     // Should remove location from assets (set to null)
@@ -1403,5 +1646,1058 @@ describe("updateKitAssets - Location Cascade", () => {
       where: { id: { in: ["asset-1"] } },
       data: { locationId: null },
     });
+  });
+});
+
+/**
+ * Track T2 — Kit ↔ Qty-Tracked Custody Correctness Fixes.
+ *
+ * These describes lock in the contract that kit-allocated Custody rows are:
+ *  - tagged with `kitCustodyId` so they can be filtered separately from
+ *    operator-assigned per-unit custody on the same asset;
+ *  - threaded with `quantity` from the asset for QUANTITY_TRACKED assets
+ *    (defaulting to 1 for INDIVIDUAL); and
+ *  - released with the cascade-driven path (event-emit-before-delete) so
+ *    the audit trail still fires even though the explicit
+ *    `tx.custody.deleteMany` is gone.
+ */
+describe("updateKitAssets - kit-allocated custody threading", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("threads quantity + kitCustodyId per asset when inheriting kit custody", async () => {
+    expect.assertions(3);
+
+    /** Kit with active custody so newly added assets inherit it. */
+    const mockKit = {
+      id: "kit-1",
+      location: null,
+      assetKits: [],
+      custody: {
+        id: "kc-1",
+        custodian: {
+          id: "tm-1",
+          name: "Alice",
+          user: {
+            id: "user-9",
+            email: "alice@example.com",
+            firstName: "Alice",
+            lastName: "Example",
+            displayName: "Alice",
+            profilePicture: null,
+          },
+        },
+      },
+    };
+
+    /** One INDIVIDUAL + one QUANTITY_TRACKED asset, both new to the kit.
+     * Phase 4a-Polish-2: `buildKitCustodyInheritData` now reads
+     * `assetKits[].quantity` per kit. In production these rows are
+     * created earlier in `updateKitAssets`'s tx via `assetKit.createMany`
+     * — for the test fixture we pre-populate them at the kit's expected
+     * slice (the asset's full pool, mirroring the Phase-4a-pin + the
+     * backfill in the polish migration). */
+    const mockNewAssets = [
+      {
+        id: "asset-individual",
+        title: "Single",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        assetKits: [{ quantity: 1 }],
+        custody: [],
+        location: null,
+      },
+      {
+        id: "asset-qty",
+        title: "Batch of 50",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 50,
+        assetKits: [{ quantity: 50 }],
+        custody: [],
+        location: null,
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue(mockNewAssets);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["asset-individual", "asset-qty"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    // Inherited custody is created via createMany with the helper-built shape:
+    // INDIVIDUAL -> quantity 1, QUANTITY_TRACKED -> asset.quantity, both
+    // tagged with the kit's KitCustody.id.
+    expect(db.custody.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamMemberId: "tm-1",
+          assetId: "asset-individual",
+          kitCustodyId: "kc-1",
+          quantity: 1,
+        },
+        {
+          teamMemberId: "tm-1",
+          assetId: "asset-qty",
+          kitCustodyId: "kc-1",
+          quantity: 50,
+        },
+      ],
+    });
+
+    // Asset status flipped to IN_CUSTODY for the inherited assets.
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["asset-individual", "asset-qty"] },
+        organizationId: "org-1",
+      },
+      data: { status: AssetStatus.IN_CUSTODY },
+    });
+
+    // Activity events emitted with quantity + viaKit in meta.
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_ASSIGNED",
+          assetId: "asset-individual",
+          teamMemberId: "tm-1",
+          meta: expect.objectContaining({ viaKit: true, quantity: 1 }),
+        }),
+        expect.objectContaining({
+          action: "CUSTODY_ASSIGNED",
+          assetId: "asset-qty",
+          teamMemberId: "tm-1",
+          meta: expect.objectContaining({ viaKit: true, quantity: 50 }),
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+
+  it("filters asset-removal deleteMany by kitCustodyId so operator custody survives", async () => {
+    expect.assertions(2);
+
+    /** Kit has custody. We are removing one asset from the kit. */
+    const mockKit = {
+      id: "kit-1",
+      location: null,
+      // row carries the kitId (denormalised) so the production code can
+      // map `asset.assetKits[0]?.kitId`.
+      assetKits: [
+        {
+          kitId: "kit-1",
+          asset: {
+            id: "asset-1",
+            title: "Existing",
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [],
+          },
+        },
+      ],
+      custody: {
+        id: "kc-1",
+        custodian: {
+          id: "tm-1",
+          name: "Alice",
+          user: {
+            id: "user-9",
+            email: "alice@example.com",
+            firstName: "Alice",
+            lastName: "Example",
+            displayName: "Alice",
+            profilePicture: null,
+          },
+        },
+      },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
+    // No assets in the new list -> the existing asset is removed.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+    // Pretend the kit-allocated custody existed before the deleteMany.
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      // First findMany (capture rows about to be deleted)
+      .mockResolvedValueOnce([{ assetId: "asset-1", teamMemberId: "tm-1" }])
+      // Second findMany (still-custodied check after delete) -> empty
+      .mockResolvedValueOnce([]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: [], // removing asset-1
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    // The deleteMany on Custody is filtered by both assetId AND kitCustodyId
+    // so operator-assigned per-unit custody on the same asset stays.
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: { in: ["asset-1"] },
+        kitCustodyId: "kc-1",
+      },
+    });
+
+    // Event emitted before deletion.
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          meta: expect.objectContaining({ viaKit: true }),
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+});
+
+describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("threads quantity + kitCustodyId for mixed individual + qty assets", async () => {
+    expect.assertions(2);
+
+    // flattens `{...asset, kit: {id, name}}` from the parent kit; the mock
+    // therefore omits `kit` on each inner asset.
+    const availableKits = [
+      {
+        id: "kit-1",
+        name: "Mixed Kit",
+        status: KitStatus.AVAILABLE,
+        assetKits: [
+          {
+            asset: {
+              id: "asset-individual",
+              title: "Single",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
+          },
+          {
+            asset: {
+              id: "asset-qty",
+              title: "Batch of 50",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 50,
+            },
+          },
+        ],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(availableKits);
+    //@ts-expect-error missing vitest type
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "tm-1",
+      name: "Alice",
+      user: { id: "user-9", firstName: "Alice", lastName: "Example" },
+    });
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-new", kitId: "kit-1" },
+    ]);
+    // why: helper now does its own asset.findMany inside the tx and reads
+    // the kit's slice from `assetKits[].quantity` (Phase 4a-Polish-2).
+    // Pre-populate that with the asset's full pool to mirror the
+    // post-migration backfill state (kit owns the whole asset).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-individual",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        custody: [],
+        assetKits: [{ quantity: 1 }],
+      },
+      {
+        id: "asset-qty",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 50,
+        custody: [],
+        assetKits: [{ quantity: 50 }],
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkAssignKitCustody({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      custodianId: "tm-1",
+      custodianName: "Alice",
+      userId: "user-1",
+    });
+
+    expect(db.custody.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamMemberId: "tm-1",
+          assetId: "asset-individual",
+          kitCustodyId: "kc-new",
+          quantity: 1,
+        },
+        {
+          teamMemberId: "tm-1",
+          assetId: "asset-qty",
+          kitCustodyId: "kc-new",
+          quantity: 50,
+        },
+      ],
+    });
+
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_ASSIGNED",
+          assetId: "asset-individual",
+          meta: expect.objectContaining({ viaKit: true, quantity: 1 }),
+        }),
+        expect.objectContaining({
+          action: "CUSTODY_ASSIGNED",
+          assetId: "asset-qty",
+          meta: expect.objectContaining({ viaKit: true, quantity: 50 }),
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+
+  it("subtracts already-allocated custody from kit row's quantity (Option B)", async () => {
+    expect.assertions(1);
+
+    /** Pens has 80 units total; 4 already with operator Pleb. Kit assigned to
+     * Nikolay should claim only the remaining 76, not 80. INDIVIDUAL Drill
+     * always gets 1. */
+    const availableKits = [
+      {
+        id: "kit-1",
+        name: "Camera Kit",
+        status: KitStatus.AVAILABLE,
+        assetKits: [
+          {
+            asset: {
+              id: "drill",
+              title: "Drill",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
+          },
+          {
+            asset: {
+              id: "pens",
+              title: "Pens",
+              // Qty-tracked with 76 of 80 free — status stays AVAILABLE
+              // because there are units the kit can claim. Status flips to
+              // IN_CUSTODY only once the kit assignment writes its row.
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 80,
+            },
+          },
+        ],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(availableKits);
+    //@ts-expect-error missing vitest type
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "tm-nikolay",
+      name: "Nikolay",
+      user: { id: "user-niko", firstName: "Nikolay", lastName: "Bonev" },
+    });
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-new", kitId: "kit-1" },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "drill",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        custody: [],
+        assetKits: [{ quantity: 1 }],
+      },
+      {
+        id: "pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 80,
+        // 4 of 80 already operator-allocated. AssetKit.quantity = 80
+        // (kit owns the full pool post-migration backfill). Helper's
+        // strict cap caps the kit-Custody at `Asset.quantity − operator`
+        // = 76, even though the kit's pivot row says 80. This protects
+        // against over-allocation during the transition before the
+        // picker enforces strict non-overlap.
+        custody: [{ quantity: 4 }],
+        assetKits: [{ quantity: 80 }],
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkAssignKitCustody({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      custodianId: "tm-nikolay",
+      custodianName: "Nikolay",
+      userId: "user-niko",
+    });
+
+    expect(db.custody.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamMemberId: "tm-nikolay",
+          assetId: "drill",
+          kitCustodyId: "kc-new",
+          quantity: 1,
+        },
+        {
+          teamMemberId: "tm-nikolay",
+          assetId: "pens",
+          kitCustodyId: "kc-new",
+          quantity: 76,
+        },
+      ],
+    });
+  });
+
+  it("skips fully-allocated qty-tracked assets (remaining <= 0)", async () => {
+    expect.assertions(1);
+
+    const availableKits = [
+      {
+        id: "kit-1",
+        name: "Stationery Kit",
+        status: KitStatus.AVAILABLE,
+        assetKits: [
+          {
+            asset: {
+              id: "drill",
+              title: "Drill",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.INDIVIDUAL,
+              quantity: null,
+            },
+          },
+          {
+            asset: {
+              id: "pens",
+              title: "Pens (fully allocated)",
+              // Status would in reality be IN_CUSTODY once all units are
+              // operator-allocated, but this test exercises the helper-level
+              // "skip when remaining <= 0" branch — the bulkAssign guard
+              // runs before the helper does, so we keep AVAILABLE here to
+              // bypass it and verify the helper still skips Pens because
+              // custody adds to 80 of 80.
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+              quantity: 80,
+            },
+          },
+        ],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(availableKits);
+    //@ts-expect-error missing vitest type
+    db.teamMember.findUnique.mockResolvedValue({
+      id: "tm-1",
+      name: "Alice",
+      user: { id: "user-1", firstName: "Alice", lastName: "Example" },
+    });
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-new", kitId: "kit-1" },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "drill", type: AssetType.INDIVIDUAL, quantity: null, custody: [] },
+      {
+        id: "pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 80,
+        // All 80 already with two operators (50 + 30) → remaining 0 → skip.
+        custody: [{ quantity: 50 }, { quantity: 30 }],
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkAssignKitCustody({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      custodianId: "tm-1",
+      custodianName: "Alice",
+      userId: "user-1",
+    });
+
+    // Only Drill row gets created; Pens is skipped entirely.
+    expect(db.custody.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamMemberId: "tm-1",
+          assetId: "drill",
+          kitCustodyId: "kc-new",
+          quantity: 1,
+        },
+      ],
+    });
+  });
+});
+
+describe("bulkReleaseKitCustody - emit-before-cascade", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits CUSTODY_RELEASED events BEFORE kitCustody.deleteMany and skips explicit custody.deleteMany", async () => {
+    expect.assertions(3);
+
+    const kitsInCustody = [
+      {
+        id: "kit-1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-1",
+          custodian: {
+            id: "tm-1",
+            name: "Alice",
+            user: { id: "user-9" },
+          },
+        },
+        assets: [
+          {
+            id: "asset-1",
+            status: AssetStatus.IN_CUSTODY,
+            title: "Asset 1",
+            custody: [{ id: "custody-1" }],
+            kit: { id: "kit-1", name: "Kit 1" },
+          },
+        ],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
+    ]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      // First call: capture released rows
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          kitCustodyId: "kc-1",
+        },
+      ])
+      // Second call: still-custodied check after cascade (none)
+      .mockResolvedValueOnce([]);
+
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    const callOrder: string[] = [];
+    (recordEvents as ReturnType<typeof vitest.fn>).mockImplementation(() => {
+      callOrder.push("recordEvents");
+      return Promise.resolve();
+    });
+    (
+      db.kitCustody.deleteMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(() => {
+      callOrder.push("kitCustody.deleteMany");
+      return Promise.resolve({ count: 1 });
+    });
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkReleaseKitCustody({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // Event emission happens before the cascade fires.
+    expect(callOrder.indexOf("recordEvents")).toBeLessThan(
+      callOrder.indexOf("kitCustody.deleteMany")
+    );
+
+    // The explicit per-asset `custody.deleteMany({ where: { assetId: { in: ... } } })`
+    // is gone — cascade does the cleanup.
+    const allDeleteCalls = (
+      db.custody.deleteMany as unknown as {
+        mock: { calls: unknown[][] };
+      }
+    ).mock.calls;
+    const broadAssetIdDelete = allDeleteCalls.find((args) => {
+      const where = (args[0] as { where?: { assetId?: { in?: string[] } } })
+        ?.where;
+      return (
+        Boolean(where?.assetId?.in?.includes("asset-1")) &&
+        !(where as { kitCustodyId?: string }).kitCustodyId
+      );
+    });
+    expect(broadAssetIdDelete).toBeUndefined();
+
+    // Released event was emitted with viaKit + correct asset.
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          meta: expect.objectContaining({ viaKit: true }),
+        }),
+      ]),
+      expect.anything()
+    );
+  });
+});
+
+describe("releaseCustody (single kit) - emit-before-cascade", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("emits CUSTODY_RELEASED events for kit-allocated rows before the cascade and skips the broad custody.deleteMany", async () => {
+    expect.assertions(2);
+
+    const kitWithCustody = {
+      id: "kit-1",
+      name: "Test Kit",
+      assets: [{ id: "asset-1", title: "Test Asset" }],
+      createdBy: { firstName: "John", lastName: "Doe" },
+      custody: {
+        id: "kc-1",
+        custodian: {
+          id: "tm-1",
+          name: "Jane Smith",
+          user: { id: "user-9" },
+        },
+      },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(kitWithCustody);
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue(kitWithCustody);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      // First call: rows about to be cascade-deleted
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          kitCustodyId: "kc-1",
+        },
+      ])
+      // Second call: still-custodied check (none)
+      .mockResolvedValueOnce([]);
+
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await releaseCustody({
+      kitId: "kit-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+
+    // Event emitted with the right assetId + viaKit.
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "CUSTODY_RELEASED",
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          meta: expect.objectContaining({ viaKit: true }),
+        }),
+      ]),
+      expect.anything()
+    );
+
+    // No broad `tx.custody.deleteMany({ where: { assetId: { in: [...] } } })` —
+    // cascade handles the cleanup now.
+    const allDeleteCalls = (
+      db.custody.deleteMany as unknown as {
+        mock: { calls: unknown[][] };
+      }
+    ).mock.calls;
+    expect(allDeleteCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * Phase 4a-Polish-2 — picker contract.
+ *
+ * These describes lock in the contract between the kit manage-assets
+ * picker action and `updateKitAssets`:
+ *  - The action passes `assetQuantities` through to the service.
+ *  - The service writes per-asset quantity into `AssetKit.quantity` on
+ *    create AND on update of an existing pivot row.
+ *  - The service rejects oversubscribed submissions with a clean 400
+ *    rather than letting the DEFERRED constraint trigger surface as a
+ *    generic 500. Strict-available math mirrors the loader formula:
+ *      space = Asset.quantity − other kits − operator-only Custody −
+ *              ongoing BookingAsset; max = max(current, space).
+ */
+describe("updateKitAssets - per-row qty submission", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("writes the submitted quantity into AssetKit on new add for qty-tracked", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["pens"],
+      assetQuantities: { pens: 60 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "pens",
+          kitId: "kit-1",
+          organizationId: "org-1",
+          quantity: 60,
+        },
+      ],
+    });
+  });
+
+  it("updates AssetKit.quantity for an existing-in-kit qty-tracked row", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [
+        {
+          kitId: "kit-1",
+          asset: {
+            id: "pens",
+            title: "Pens",
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [],
+          },
+        },
+      ],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [{ kitId: "kit-1", quantity: 60 }],
+        custody: [],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["pens"],
+      assetQuantities: { pens: 80 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    // Pivot row already exists — no createMany call for this asset.
+    expect(db.assetKit.createMany).not.toHaveBeenCalled();
+    // The per-row update lands with the new value.
+    expect(db.assetKit.update).toHaveBeenCalledWith({
+      where: { assetId_kitId: { assetId: "pens", kitId: "kit-1" } },
+      data: { quantity: 80 },
+    });
+  });
+
+  it("ignores assetQuantities for INDIVIDUAL — always writes quantity = 1", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "drill",
+        title: "Drill",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["drill"],
+      // A tampered client may submit a qty for an INDIVIDUAL row — the
+      // service should coerce to 1 regardless.
+      assetQuantities: { drill: 5 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          assetId: "drill",
+          kitId: "kit-1",
+          organizationId: "org-1",
+          quantity: 1,
+        },
+      ],
+    });
+  });
+});
+
+describe("updateKitAssets - server-side strict-available validation", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("rejects with 400 when submitted qty exceeds the strict-available pool", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        // Other kit holds 40, operator Pleb holds 20, ongoing booking 10.
+        // Strict-available space = 100 - 40 - 20 - 10 = 30.
+        assetKits: [{ kitId: "other-kit", quantity: 40 }],
+        custody: [{ quantity: 20, kitCustodyId: null }],
+        bookingAssets: [{ quantity: 10 }],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["pens"],
+        // Way over the 30-unit ceiling.
+        assetQuantities: { pens: 80 },
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toMatchObject({
+      title: "Quantity exceeds available pool",
+      status: 400,
+    });
+
+    // No pivot writes happened — validation throws before the tx.
+    expect(db.assetKit.createMany).not.toHaveBeenCalled();
+  });
+
+  it("accepts a submission at the strict-available ceiling", async () => {
+    expect.assertions(1);
+
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [{ kitId: "other-kit", quantity: 40 }],
+        custody: [{ quantity: 20, kitCustodyId: null }],
+        bookingAssets: [{ quantity: 10 }],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["pens"],
+      // Exactly the ceiling.
+      assetQuantities: { pens: 30 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.assetKit.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({ assetId: "pens", quantity: 30 }),
+      ]),
+    });
+  });
+
+  it("excludes kit-allocated Custody rows from operator-only count", async () => {
+    expect.assertions(1);
+
+    // Pens 100, this kit holds 60 (with materialised Custody=60), other
+    // kit holds 30 (with materialised Custody=30), operator Pleb 10.
+    //   sum custody = 60 + 30 + 10 = 100
+    //   operator-only custody = 10 (Pleb)
+    //   other-kit AssetKit = 30
+    //   space (this kit) = 100 - 30 - 10 - 0 = 60
+    //   max = max(60, 60) = 60 → growing to 60 should be accepted.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-this",
+      location: null,
+      assetKits: [
+        {
+          kitId: "kit-this",
+          asset: {
+            id: "pens",
+            title: "Pens",
+            assetKits: [{ kitId: "kit-this" }, { kitId: "kit-other" }],
+            bookingAssets: [],
+          },
+        },
+      ],
+      custody: {
+        id: "kc-this",
+        custodian: {
+          id: "tm-1",
+          name: "Alice",
+          user: null,
+        },
+      },
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [
+          { kitId: "kit-this", quantity: 60 },
+          { kitId: "kit-other", quantity: 30 },
+        ],
+        custody: [
+          { quantity: 60, kitCustodyId: "kc-this" },
+          { quantity: 30, kitCustodyId: "kc-other" },
+          { quantity: 10, kitCustodyId: null },
+        ],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    // Submitting 60 (no change). If the filter were wrong and counted
+    // all 100 custody units as operator-only, max would be 0 and this
+    // would throw. With the correct filter, max = 60 and this passes.
+    await expect(
+      updateKitAssets({
+        kitId: "kit-this",
+        assetIds: ["pens"],
+        assetQuantities: { pens: 60 },
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).resolves.not.toThrow();
   });
 });

@@ -28,6 +28,8 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
+import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "../asset-image";
@@ -97,6 +99,7 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
+      <Th>Quantity</Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -171,6 +174,7 @@ export const AssetsList = ({
                           availableToBook={
                             resource.extendedProps?.availableToBook
                           }
+                          asset={resource.extendedProps}
                         />
                         <CategoryBadge
                           category={resource.extendedProps?.category}
@@ -216,7 +220,13 @@ export const ListAssetContent = ({
   bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
-  const { category, tags, custody, location, kit } = item;
+  const { category, tags, custody: custodyArray, location } = item;
+  const kit = item.assetKits?.[0]?.kit ?? null;
+  const {
+    primary: primaryCustody,
+    others: otherCustodians,
+    total: totalCustodians,
+  } = formatCustodyList(custodyArray);
   return (
     <>
       {/* Item */}
@@ -272,6 +282,7 @@ export const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  asset={item}
                 />
               </div>
             </div>
@@ -292,10 +303,46 @@ export const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={!isUserPage}>
         <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
-          ) : (
+          {!primaryCustody || totalCustodians === 0 ? (
             <EmptyTableValue />
+          ) : (
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="inline-flex min-w-0 items-center">
+                <TeamMemberBadge teamMember={primaryCustody.custodian} />
+                {primaryCustody.quantity && primaryCustody.quantity > 1 ? (
+                  <span className="ml-1 shrink-0 text-gray-500">
+                    ({primaryCustody.quantity})
+                  </span>
+                ) : null}
+              </span>
+              {otherCustodians.length > 0 ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        +{otherCustodians.length} more
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <ul className="flex flex-col gap-1 text-sm">
+                        {[primaryCustody, ...otherCustodians].map(
+                          (entry, index) => {
+                            const name = entry.custodian?.name ?? "Unknown";
+                            const qty = entry.quantity;
+                            return (
+                              <li key={`${name}-${index}`}>
+                                {name}
+                                {qty && qty > 1 ? ` (${qty})` : null}
+                              </li>
+                            );
+                          }
+                        )}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </span>
           )}
         </Td>
       </When>
@@ -311,6 +358,18 @@ export const ListAssetContent = ({
               childCount: location._count?.children ?? 0,
             }}
           />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      {/* Quantity */}
+      <Td>
+        {isQuantityTracked(item) && item.quantity != null ? (
+          <span>
+            {item.quantity}
+            {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
+          </span>
         ) : (
           <EmptyTableValue />
         )}

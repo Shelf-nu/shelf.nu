@@ -42,10 +42,12 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   ColumnLabelKey,
   BarcodeField,
 } from "~/modules/asset-index-settings/helpers";
+import { formatCustodyList } from "~/modules/custody/utils";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
@@ -172,13 +174,20 @@ export function AdvancedIndexColumn({
               ) : null}
 
               <div className="min-w-0 flex-1 truncate">
-                <Link
-                  to={item.id}
-                  className="truncate font-medium underline hover:text-gray-600"
-                  title={item.title}
-                >
-                  {item.title}
-                </Link>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    to={item.id}
+                    className="truncate font-medium underline hover:text-gray-600"
+                    title={item.title}
+                  >
+                    {item.title}
+                  </Link>
+                  {isQuantityTracked(item) ? (
+                    <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                      QTY
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
           }
@@ -212,7 +221,14 @@ export function AdvancedIndexColumn({
       );
 
     case "status":
-      return <StatusColumn id={item.id} status={item.status} />;
+      return (
+        <StatusColumn
+          id={item.id}
+          status={item.status}
+          availableToBook={item.availableToBook}
+          asset={item}
+        />
+      );
 
     case "description":
       return <DescriptionColumn value={item.description ?? ""} />;
@@ -275,7 +291,9 @@ export function AdvancedIndexColumn({
           value={
             item?.kit?.name ? (
               <Link
-                to={`/kits/${item.kitId}`}
+                // the advanced index row (assembled from the AssetKit pivot
+                // by the raw SQL loader).
+                to={`/kits/${item.kit.id}`}
                 className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
                 title={item.kit.name}
               >
@@ -315,6 +333,39 @@ export function AdvancedIndexColumn({
     case "barcode_ExternalQR":
     case "barcode_EAN13":
       return <BarcodeColumn column={column} item={item} />;
+
+    case "type":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) ? (
+            <span className="inline-flex shrink-0 items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+              QTY
+            </span>
+          ) : (
+            "Individual"
+          )}
+        </Td>
+      );
+
+    case "assetModel":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {item.assetModelName ? item.assetModelName : <EmptyTableValue />}
+        </Td>
+      );
+
+    case "quantity":
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.quantity != null ? (
+            `${item.quantity}${
+              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
+            }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
 
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
@@ -364,10 +415,25 @@ function TextColumn({
   );
 }
 
-function StatusColumn({ id, status }: { id: string; status: AssetStatus }) {
+function StatusColumn({
+  id,
+  status,
+  availableToBook,
+  asset,
+}: {
+  id: string;
+  status: AssetStatus;
+  availableToBook?: boolean;
+  asset?: AdvancedIndexAsset;
+}) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <AssetStatusBadge id={id} status={status} availableToBook={true} />
+      <AssetStatusBadge
+        id={id}
+        status={status}
+        availableToBook={availableToBook ?? true}
+        asset={asset}
+      />
     </Td>
   );
 }
@@ -443,12 +509,25 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   );
 }
 
-function CustodyColumn({
+/**
+ * Renders the custody column for the advanced asset index.
+ *
+ * Single custodian: renders just the badge (with `(qty)` suffix when
+ * the custody row tracks more than one unit, hiding the suffix on
+ * INDIVIDUAL assets to keep the row clean).
+ *
+ * Multiple custodians: renders the primary custodian's badge plus a
+ * `+N more` chip; hovering the chip reveals a tooltip listing every
+ * custodian on its own line so the full custody breakdown stays one
+ * hover away without inflating row height.
+ */
+export function CustodyColumn({
   custody,
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
   const { roles } = useUserRoleHelper();
+  const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
     <When
@@ -459,13 +538,79 @@ function CustodyColumn({
       })}
     >
       <Td>
-        {custody?.custodian ? (
-          <TeamMemberBadge teamMember={custody?.custodian} />
-        ) : (
+        {!primary || total === 0 ? (
           <EmptyTableValue />
+        ) : (
+          <CustodyColumnContent primary={primary} others={others} />
         )}
       </Td>
     </When>
+  );
+}
+
+/** Quantity suffix is intentionally omitted for `quantity <= 1` so
+ * INDIVIDUAL assets and qty-tracked rows that hold a single unit stay
+ * visually identical to today's rendering. */
+function CustodyQuantitySuffix({ quantity }: { quantity?: number }) {
+  if (!quantity || quantity <= 1) return null;
+  return <span className="ml-1 text-gray-500">({quantity})</span>;
+}
+
+/** Renders the badge + optional `+N more` chip. Split out so the empty
+ * state can short-circuit before the tooltip provider mounts. */
+function CustodyColumnContent({
+  primary,
+  others,
+}: {
+  primary: NonNullable<AdvancedIndexAsset["custody"]>[number];
+  others: NonNullable<AdvancedIndexAsset["custody"]>[number][];
+}) {
+  const hasOthers = others.length > 0;
+
+  const primaryBadge = (
+    <span className="inline-flex min-w-0 items-center">
+      <TeamMemberBadge teamMember={primary.custodian} />
+      <CustodyQuantitySuffix quantity={primary.quantity} />
+    </span>
+  );
+
+  if (!hasOthers) {
+    return primaryBadge;
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {primaryBadge}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+              data-testid="custody-more-chip"
+            >
+              +{others.length} more
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            className="max-w-xs"
+            data-testid="custody-more-tooltip"
+          >
+            <ul className="flex flex-col gap-1 text-sm">
+              {[primary, ...others].map((entry, index) => {
+                const name = entry.custodian?.name ?? entry.name ?? "Unknown";
+                const qty = entry.quantity;
+                return (
+                  <li key={`${name}-${index}`}>
+                    {name}
+                    {qty && qty > 1 ? ` (${qty})` : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
   );
 }
 

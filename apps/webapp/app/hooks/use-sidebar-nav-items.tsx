@@ -131,7 +131,6 @@ export function useSidebarNavItems() {
       Icon: BoxesIcon,
       hidden: isBaseOrSelfService,
     },
-
     {
       type: "child",
       title: "Tags",
@@ -229,6 +228,10 @@ export function useSidebarNavItems() {
         {
           title: "Custom fields",
           to: "/settings/custom-fields",
+        },
+        {
+          title: "Asset models",
+          to: "/settings/asset-models",
         },
       ],
     },

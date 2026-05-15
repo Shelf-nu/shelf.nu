@@ -2,7 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
-import { bulkReleaseCustody } from "~/modules/asset/service.server";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -43,6 +43,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
     );
 
+    /**
+     * Phase 2 widened Custody from 1:1 to 1:many to support multi-custodian
+     * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
+     * on rows assigned to their own user — guard before delegating to the
+     * bulk service so we fail fast and don't leak counts via partial work.
+     */
     if (role === OrganizationRoles.SELF_SERVICE) {
       const custodies = await db.custody.findMany({
         where: {
@@ -66,17 +72,23 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     }
 
-    await bulkReleaseCustody({
+    const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId,
       assetIds,
       organizationId,
       currentSearchParams,
       settings,
+      role,
     });
+
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — release custody individually.`
+        : "";
 
     sendNotification({
       title: "Assets are no longer in custody",
-      message: "These assets are available again.",
+      message: `These assets are available again.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

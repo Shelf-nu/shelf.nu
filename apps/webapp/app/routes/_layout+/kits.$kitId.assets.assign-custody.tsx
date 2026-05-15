@@ -26,7 +26,10 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
-import { getKit } from "~/modules/kit/service.server";
+import {
+  buildKitCustodyInheritData,
+  getKit,
+} from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -81,17 +84,32 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       extraInclude: {
-        assets: {
+        assetKits: {
           select: {
-            status: true,
-            bookings: {
-              where: {
-                status: {
-                  in: [BookingStatus.RESERVED],
+            asset: {
+              select: {
+                status: true,
+                // `type` is required so the qty-aware unavailability guard
+                // below can skip QUANTITY_TRACKED rows whose row-level
+                // status is IN_CUSTODY only because *some* units are
+                // operator-allocated (Option B handles that on assign).
+                type: true,
+                bookingAssets: {
+                  where: {
+                    booking: {
+                      status: {
+                        in: [BookingStatus.RESERVED],
+                      },
+                      from: { gt: new Date() },
+                    },
+                  },
+                  include: {
+                    booking: {
+                      select: { id: true },
+                    },
+                  },
                 },
-                from: { gt: new Date() },
               },
-              select: { id: true },
             },
           },
         },
@@ -105,11 +123,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * If any asset is not available in a kit,
-     * then a kit cannot be assigned a custody
+     * If any INDIVIDUAL asset is not available in a kit, a kit cannot be
+     * assigned custody. QUANTITY_TRACKED assets are exempt: their row-level
+     * status may be IN_CUSTODY because some units are operator-allocated,
+     * but `buildKitCustodyInheritData` (Option B) computes the remaining
+     * pool per asset on assign — partially-allocated assets get the leftover
+     * quantity, fully-allocated assets are silently skipped. Same precedent
+     * as the manage-assets picker filter in `asset/service.server.ts`.
      */
-    const someUnavailableAsset = kit.assets.some(
-      (asset) => asset.status !== "AVAILABLE"
+    const someUnavailableAsset = kit.assetKits.some(
+      (ak) =>
+        ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
     );
     if (someUnavailableAsset) {
       sendNotification({
@@ -246,43 +270,70 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custody: { create: { custodian: { connect: { id: custodianId } } } },
         },
         include: {
-          assets: true,
+          // Pull the freshly-created KitCustody row so we can stamp its
+          // id onto every asset-side Custody row as `kitCustodyId`. That
+          // discriminator distinguishes kit-allocated custody from
+          // operator-assigned custody on the same asset.
+          custody: { select: { id: true } },
+          assetKits: { select: { asset: { select: { id: true } } } },
         },
       });
 
-      // Update custody for all assets
-      await Promise.all(
-        updatedKit.assets.map((asset) =>
-          tx.asset.update({
-            where: { id: asset.id, organizationId },
-            data: {
-              status: AssetStatus.IN_CUSTODY,
-              custody: {
-                create: { custodian: { connect: { id: custodianId } } },
-              },
-            },
-          })
-        )
-      );
+      if (!updatedKit.custody) {
+        throw new ShelfError({
+          cause: null,
+          message: "Failed to create kit custody record.",
+          additionalData: { userId, kitId, custodianId },
+          label: "Kit",
+        });
+      }
 
-      // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx
-      await recordEvents(
-        updatedKit.assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_ASSIGNED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          kitId: updatedKit.id,
-          teamMemberId: custodianId,
-          targetUserId: custodianTeamMember.user?.id ?? undefined,
-          meta: { viaKit: true },
-        })),
-        tx
-      );
+      const kitCustodyId = updatedKit.custody.id;
 
-      return updatedKit;
+      // Build child Custody rows via the shared helper so the
+      // remaining-pool rule (qty-tracked rows claim `asset.quantity − already
+      // allocated`, fully-allocated assets are skipped) is applied
+      // consistently with `updateKitAssets` and `bulkAssignKitCustody`.
+      const inheritData = await buildKitCustodyInheritData({
+        tx,
+        kitId: updatedKit.id,
+        kitCustodyId,
+        teamMemberId: custodianId,
+        assetIds: updatedKit.assetKits.map((ak) => ak.asset.id),
+      });
+
+      if (inheritData.length > 0) {
+        await tx.custody.createMany({ data: inheritData });
+
+        const inheritedAssetIds = inheritData.map((row) => row.assetId);
+        await tx.asset.updateMany({
+          where: { id: { in: inheritedAssetIds }, organizationId },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        // Activity events — one CUSTODY_ASSIGNED per asset that received a
+        // kit-allocated row. Fully-allocated qty-tracked assets are skipped.
+        await recordEvents(
+          inheritData.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_ASSIGNED",
+            entityType: "ASSET",
+            entityId: row.assetId,
+            assetId: row.assetId,
+            kitId: updatedKit.id,
+            teamMemberId: custodianId,
+            targetUserId: custodianTeamMember.user?.id ?? undefined,
+            meta: { viaKit: true, quantity: row.quantity },
+          })),
+          tx
+        );
+      }
+
+      return {
+        ...updatedKit,
+        inheritedAssetIds: inheritData.map((r) => r.assetId),
+      };
     });
 
     // Create notes for all assets using markdoc wrappers (not critical for atomicity)
@@ -298,12 +349,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
 
-    await createNotes({
-      content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
-      type: NoteType.UPDATE,
-      userId,
-      assetIds: kit.assets.map((asset) => asset.id),
-    });
+    // Only notes for assets that actually received a kit-allocated Custody
+    // row. Fully operator-allocated qty-tracked assets are skipped.
+    if (kit.inheritedAssetIds.length > 0) {
+      await createNotes({
+        content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
+        type: NoteType.UPDATE,
+        userId,
+        assetIds: kit.inheritedAssetIds,
+      });
+    }
 
     sendNotification({
       title: `‘${kit.name}’ is now in custody of ${custodianName}`,
@@ -332,7 +387,9 @@ export default function GiveKitCustody() {
 
   const { isSelfService } = useUserRoleHelper();
 
-  const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
+  const hasBookings = kit.assetKits.some(
+    (ak) => ak.asset.bookingAssets.length > 0
+  );
   const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
@@ -395,7 +452,7 @@ export default function GiveKitCustody() {
             <>
               Kit is part of an{" "}
               <Link
-                to={`/bookings/${kit.assets[0].bookings[0].id}`}
+                to={`/bookings/${kit.assetKits[0]?.asset.bookingAssets[0]?.booking.id}`}
                 className="underline"
                 target="_blank"
               >

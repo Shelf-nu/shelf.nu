@@ -20,6 +20,7 @@ import {
   updateAsset,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
+import { getAssetModels } from "~/modules/asset-model/service.server";
 
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
@@ -72,10 +73,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: {
         tags: true,
         customFields: true,
-        kit: {
+        assetKits: {
           select: {
-            id: true,
-            name: true,
+            kit: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
         barcodes: {
@@ -90,8 +95,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const { categories, totalCategories, tags, locations, totalLocations } =
-      await getAllEntriesForCreateAndEdit({
+    const [
+      { categories, totalCategories, tags, locations, totalLocations },
+      { assetModels, totalAssetModels },
+    ] = await Promise.all([
+      getAllEntriesForCreateAndEdit({
         request,
         organizationId,
         defaults: {
@@ -99,7 +107,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           location: asset.locationId,
         },
         tagUseFor: TagUseFor.ASSET,
-      });
+      }),
+      getAssetModels({ organizationId, page: 1, perPage: 100 }),
+    ]);
 
     const searchParams = getCurrentSearchParams(request);
 
@@ -122,6 +132,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalTags: tags.length,
       locations,
       totalLocations,
+      assetModels,
+      totalAssetModels,
       currency: currentOrganization?.currency,
       customFields,
       referer: getRefererPath(request),
@@ -200,11 +212,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       title,
       description,
       category,
+      assetModelId,
       newLocationId,
       currentLocationId,
       valuation,
       addAnother,
       redirectTo,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     } = parsedData;
 
     /** This checks if tags are passed and build the  */
@@ -220,6 +237,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       title,
       description,
       categoryId: category ? category : "uncategorized",
+      assetModelId: assetModelId || null,
       tags,
       newLocationId,
       currentLocationId,
@@ -229,6 +247,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       valuation,
       organizationId,
       request,
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     });
 
     sendNotification({
@@ -285,9 +307,15 @@ export default function AssetEditPage() {
           }
           title={asset.title}
           categoryId={asset.categoryId}
+          assetModelId={asset.assetModelId}
           locationId={asset.locationId}
           description={asset.description}
           valuation={asset.valuation}
+          type={asset.type}
+          quantity={asset.quantity}
+          minQuantity={asset.minQuantity}
+          consumptionType={asset.consumptionType}
+          unitOfMeasure={asset.unitOfMeasure}
           tags={tags}
           barcodes={asset.barcodes}
           referer={referer}
