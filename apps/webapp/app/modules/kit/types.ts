@@ -88,12 +88,18 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   type: true,
   quantity: true,
   unitOfMeasure: true,
+  // why: Phase 4a-Polish-2 makes `AssetKit.quantity` the source of truth
+  // for "how many units this kit holds". The kit-page row reads the
+  // matching pivot row (filter by this route's kitId client-side) and
+  // renders `N / total units in kit`. Before Polish-2 the count was
+  // derived from `asset.quantity − operator custody`, which is now wrong
+  // once the kit can hold a strict subset of the pool.
+  assetKits: {
+    select: { kitId: true, quantity: true },
+  },
   custody: {
     select: {
       quantity: true,
-      // why: kit-page row needs to filter to kit-allocated rows only when
-      // the parent kit is in custody, so it can show "kit holds N of M
-      // units" instead of the asset's total stock.
       kitCustodyId: true,
     },
   },

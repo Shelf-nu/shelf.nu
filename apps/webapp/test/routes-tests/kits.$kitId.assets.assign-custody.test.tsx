@@ -404,19 +404,23 @@ describe("kits/$kitId/assets/assign-custody", () => {
       ],
     } as any);
 
-    // The helper reads existing custody via tx.asset.findMany.
+    // The helper reads existing custody + the kit's AssetKit slice via
+    // tx.asset.findMany. Phase 4a-Polish-2: `assetKits` is the primary
+    // source for kit-allocated quantity, so the fixture must include it.
     dbMocks.asset.findMany.mockResolvedValue([
       {
         id: "asset-individual",
         type: "INDIVIDUAL",
         quantity: null,
         custody: [],
+        assetKits: [{ quantity: 1 }],
       },
       {
         id: "asset-qty",
         type: "QUANTITY_TRACKED",
         quantity: 50,
         custody: [],
+        assetKits: [{ quantity: 50 }],
       },
     ]);
 
@@ -486,13 +490,23 @@ describe("kits/$kitId/assets/assign-custody", () => {
       assetKits: [{ asset: { id: "drill" } }, { asset: { id: "pens" } }],
     } as any);
 
+    // AssetKit.quantity = 80 (kit owns full pool, the typical backfill
+    // state). Pre-existing operator custody of 4 caps the kit-allocated
+    // Custody row at 80 − 4 = 76 via the safety ceiling in the helper.
     dbMocks.asset.findMany.mockResolvedValue([
-      { id: "drill", type: "INDIVIDUAL", quantity: null, custody: [] },
+      {
+        id: "drill",
+        type: "INDIVIDUAL",
+        quantity: null,
+        custody: [],
+        assetKits: [{ quantity: 1 }],
+      },
       {
         id: "pens",
         type: "QUANTITY_TRACKED",
         quantity: 80,
         custody: [{ quantity: 4 }],
+        assetKits: [{ quantity: 80 }],
       },
     ]);
 

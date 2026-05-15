@@ -296,6 +296,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // consistently with `updateKitAssets` and `bulkAssignKitCustody`.
       const inheritData = await buildKitCustodyInheritData({
         tx,
+        kitId: updatedKit.id,
         kitCustodyId,
         teamMemberId: custodianId,
         assetIds: updatedKit.assetKits.map((ak) => ak.asset.id),

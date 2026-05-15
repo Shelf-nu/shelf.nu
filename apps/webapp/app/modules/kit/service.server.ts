@@ -122,6 +122,10 @@ type KitCustodyInheritTxClient = {
         type: true;
         quantity: true;
         custody: { select: { quantity: true } };
+        assetKits: {
+          where: { kitId: string };
+          select: { quantity: true };
+        };
       };
     }) => Promise<
       Array<{
@@ -129,6 +133,7 @@ type KitCustodyInheritTxClient = {
         type: AssetType;
         quantity: number | null;
         custody: Array<{ quantity: number }>;
+        assetKits: Array<{ quantity: number }>;
       }>
     >;
   };
@@ -136,11 +141,15 @@ type KitCustodyInheritTxClient = {
 
 export async function buildKitCustodyInheritData({
   tx,
+  kitId,
   kitCustodyId,
   teamMemberId,
   assetIds,
 }: {
   tx: KitCustodyInheritTxClient;
+  /** The Kit whose custody is being assigned. Used to find each asset's
+   * per-kit AssetKit.quantity (Phase 4a-Polish-2). */
+  kitId: string;
   kitCustodyId: string;
   teamMemberId: string;
   assetIds: string[];
@@ -153,7 +162,17 @@ export async function buildKitCustodyInheritData({
       id: true,
       type: true,
       quantity: true,
+      // Pre-existing Custody rows (operator-allocated + any kit-allocated
+      // from previously-assigned kits) — needed for the strict cap below.
       custody: { select: { quantity: true } },
+      // The kit's allocated slice. Phase 4a-Polish-2 makes this the
+      // primary source of truth; defensive `?.[0]` handles the case where
+      // the row is missing (shouldn't happen — caller passes assetIds
+      // that belong to this kit — but we'd rather skip than crash).
+      assetKits: {
+        where: { kitId },
+        select: { quantity: true },
+      },
     },
   });
 
@@ -168,20 +187,35 @@ export async function buildKitCustodyInheritData({
       });
       continue;
     }
-    // why: subtract every existing Custody row's quantity (operator AND
-    // pre-existing kit-allocated) so we never over-allocate the asset's
-    // tracked pool. Pleb already holds 4 of 80 → kit row claims 76, not 80.
-    const allocated = asset.custody.reduce(
+
+    // Phase 4a-Polish-2: read the kit's allocated slice from `AssetKit`.
+    // Cap by `Asset.quantity − sum(pre-existing Custody)` to stay safe
+    // during the transitional period before the picker enforces strict
+    // non-overlap. Once the picker is the only way to mutate
+    // `AssetKit.quantity`, the cap is a no-op (`AssetKit.quantity` will
+    // already be ≤ that ceiling), but it keeps Option B correct today
+    // when `AssetKit.quantity` is still `Asset.quantity` from the
+    // backfill while operator custody may exist separately.
+    //
+    // Defensive `?.` on `assetKits` itself — older test fixtures don't
+    // include the relation in their mock asset shape; the production
+    // code path always pulls it via the select above.
+    const kitSlice = asset.assetKits?.[0]?.quantity ?? 0;
+    if (kitSlice <= 0) continue;
+
+    const preExistingCustody = asset.custody.reduce(
       (sum, row) => sum + (row.quantity ?? 0),
       0
     );
-    const remaining = (asset.quantity ?? 0) - allocated;
-    if (remaining <= 0) continue;
+    const availableCeiling = (asset.quantity ?? 0) - preExistingCustody;
+    const quantity = Math.max(0, Math.min(kitSlice, availableCeiling));
+    if (quantity <= 0) continue;
+
     rows.push({
       teamMemberId,
       assetId: asset.id,
       kitCustodyId,
-      quantity: remaining,
+      quantity,
     });
   }
   return rows;
@@ -1752,6 +1786,7 @@ export async function bulkAssignKitCustody({
           if (!kitCustodyId) return [];
           return buildKitCustodyInheritData({
             tx,
+            kitId: kit.id,
             kitCustodyId,
             teamMemberId: custodianId,
             assetIds: (kit.assetKits ?? []).map((ak) => ak.asset.id),
@@ -2848,6 +2883,7 @@ export async function updateKitAssets({
   organizationId,
   userId,
   assetIds,
+  assetQuantities = {},
   request,
   addOnly = false,
 }: {
@@ -2855,6 +2891,13 @@ export async function updateKitAssets({
   organizationId: Organization["id"];
   userId: User["id"];
   assetIds: Asset["id"][];
+  /**
+   * Phase 4a-Polish-2: per-asset quantity for QUANTITY_TRACKED rows in the
+   * picker. Missing entries default to the asset's full pool (today's
+   * "kit owns the whole asset" semantics). INDIVIDUAL assets always
+   * write quantity = 1 regardless of this map.
+   */
+  assetQuantities?: Record<Asset["id"], number>;
   request: Request;
   addOnly?: boolean; // If true, only add assets, don't remove existing ones
 }) {
@@ -2991,10 +3034,26 @@ export async function updateKitAssets({
           title: true,
           type: true,
           quantity: true,
-          // Pull the (≤1, today) row so we can check whether the asset
-          // already lives in this kit.
-          assetKits: { select: { kitId: true } },
+          // Pull all of the asset's AssetKit rows. Pre-polish there was at
+          // most one (the @@unique held); post-polish a QUANTITY_TRACKED
+          // asset can be in multiple kits. We need:
+          //   - kitId (cross-kit detection)
+          //   - quantity (this kit's slice for qty-change diff)
+          assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
+          // Ongoing/overdue booking allocations subtract from the strict-
+          // available pool checked below — pull them here so the
+          // validation pass doesn't need a second round-trip.
+          bookingAssets: {
+            where: {
+              booking: {
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
+              },
+            },
+            select: { quantity: true },
+          },
           location: { select: { id: true, name: true } },
         },
       })
@@ -3013,6 +3072,140 @@ export async function updateKitAssets({
       (asset) =>
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
+
+    /**
+     * Phase 4a-Polish-2: detect existing-in-kit assets whose submitted
+     * quantity differs from the current `AssetKit.quantity`. These trigger
+     * an `assetKit.update` + (if the kit is in custody) a cascade to the
+     * kit-allocated `Custody` row, with a paired `CUSTODY_ASSIGNED`
+     * (increase) or `CUSTODY_RELEASED` (decrease) event.
+     *
+     * Today the picker doesn't yet expose a qty input, so the
+     * `assetQuantities` map is typically empty and this bucket stays
+     * empty too — keeps the new code path dormant until T5 wires the UI.
+     */
+    type QtyChangedAsset = {
+      id: string;
+      title: string;
+      previousQuantity: number;
+      newQuantity: number;
+    };
+    const qtyChangedAssets: QtyChangedAsset[] = allAssetsForKit.flatMap(
+      (asset) => {
+        // Only consider assets that are already in this kit AND have a
+        // submitted quantity that differs from the current pivot value.
+        const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
+        if (!currentPivot) return [];
+
+        const submitted = assetQuantities[asset.id];
+        if (submitted == null) return [];
+
+        // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
+        // but defensively coerce.
+        const newQty =
+          asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
+        if (newQty === currentPivot.quantity) return [];
+
+        // Submitting qty=0 for an existing-in-kit asset is treated as a
+        // no-op here. The picker contract is: to remove an asset from the
+        // kit, omit its id from `assetIds` — that routes through
+        // `removedAssets` (which deletes the pivot row + cascades to
+        // kit-allocated Custody).
+        if (newQty <= 0) return [];
+
+        return [
+          {
+            id: asset.id,
+            title: asset.title,
+            previousQuantity: currentPivot.quantity,
+            newQuantity: newQty,
+          },
+        ];
+      }
+    );
+
+    /**
+     * Phase 4a-Polish-2 server-side strict-available validation. The
+     * picker enforces this client-side and the DEFERRED constraint
+     * trigger catches over-allocation at COMMIT, but a tampered request
+     * would otherwise surface as a generic 500. Re-check the
+     * strict-available pool here for any qty-tracked submission and
+     * return a clean 400.
+     *
+     * Strict-available formula (matches the picker loader):
+     *   spaceWithoutMe = Asset.quantity
+     *                  − sum(other kits' AssetKit.quantity)
+     *                  − sum(operator-only Custody.quantity)
+     *                  − sum(ongoing/overdue BookingAsset.quantity)
+     *   max            = max(currentInThisKit, spaceWithoutMe)
+     *
+     * `operator-only` filters by `kitCustodyId IS NULL` — kit-allocated
+     * Custody rows mirror the source kit's AssetKit slice and would
+     * otherwise double-count against the multi-kit + in-custody case.
+     *
+     * `max(current, spaceWithoutMe)` lets the user keep their existing
+     * slice in the overcommitted edge case (operator / booking growth
+     * pushed the pool below the kit's current allocation).
+     */
+    const oversubscribed: Array<{
+      assetId: string;
+      title: string;
+      submitted: number;
+      max: number;
+    }> = [];
+    for (const asset of allAssetsForKit) {
+      if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
+      const submitted = assetQuantities[asset.id];
+      if (submitted == null) continue;
+
+      const totalQty = asset.quantity ?? 0;
+      const currentInThisKit =
+        asset.assetKits.find((ak) => ak.kitId === kit.id)?.quantity ?? 0;
+      const otherKitsQty = asset.assetKits
+        .filter((ak) => ak.kitId !== kit.id)
+        .reduce((sum, ak) => sum + (ak.quantity ?? 0), 0);
+      const operatorOnlyCustody = (asset.custody ?? [])
+        .filter((c) => c.kitCustodyId == null)
+        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
+      const ongoingBookings = (asset.bookingAssets ?? []).reduce(
+        (sum, ba) => sum + (ba.quantity ?? 0),
+        0
+      );
+
+      const spaceWithoutMe = Math.max(
+        0,
+        totalQty - otherKitsQty - operatorOnlyCustody - ongoingBookings
+      );
+      const max = Math.max(currentInThisKit, spaceWithoutMe);
+
+      if (submitted > max) {
+        oversubscribed.push({
+          assetId: asset.id,
+          title: asset.title,
+          submitted,
+          max,
+        });
+      }
+    }
+    if (oversubscribed.length > 0) {
+      const detail = oversubscribed
+        .map((o) => `${o.title} (requested ${o.submitted}, max ${o.max})`)
+        .join("; ");
+      throw new ShelfError({
+        cause: null,
+        title: "Quantity exceeds available pool",
+        message: `Submitted quantity exceeds the strict-available pool for: ${detail}.`,
+        additionalData: {
+          kitId,
+          userId,
+          organizationId,
+          oversubscribed,
+        },
+        label: "Kit",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     /**
      * An INDIVIDUAL asset already in custody cannot be added to a kit.
@@ -3047,7 +3240,7 @@ export async function updateKitAssets({
 
     // The old kit.update({ data: { assets: { connect, disconnect } } })
     // block becomes direct pivot writes inside a single $transaction so
-    // remove + add are atomic.
+    // remove + add + qty-edit are atomic.
     await db.$transaction(async (tx) => {
       // Disconnect: drop the pivot rows for removed assets (only when not
       // in addOnly mode).
@@ -3060,13 +3253,23 @@ export async function updateKitAssets({
         });
       }
 
-      // Cross-kit move: assets being added that already live in another
-      // kit need their existing pivot row dropped first; @@unique([assetId])
-      // forbids two rows for the same asset, so the createMany below would
-      // otherwise hit P2002. Pre-pivot this worked because Asset.kitId was
-      // an update-in-place FK.
+      // Cross-kit move (INDIVIDUAL only): an INDIVIDUAL asset can only
+      // belong to one kit at a time. If the user selects an INDIVIDUAL
+      // asset that already lives in another kit, drop that pivot row
+      // first so the createMany below succeeds (the
+      // `enforce_individual_asset_single_kit` trigger would otherwise
+      // reject the insert with check_violation).
+      //
+      // QUANTITY_TRACKED assets can co-exist in multiple kits as of
+      // Phase 4a-Polish-2 — their pivot rows in OTHER kits stay intact,
+      // and the picker will have set this kit's quantity in
+      // `assetQuantities[id]`.
       const movedFromOtherKitIds = newlyAddedAssets
-        .filter((asset) => (asset.assetKits?.length ?? 0) > 0)
+        .filter(
+          (asset) =>
+            asset.type === AssetType.INDIVIDUAL &&
+            (asset.assetKits?.length ?? 0) > 0
+        )
         .map((asset) => asset.id);
       if (movedFromOtherKitIds.length > 0) {
         await tx.assetKit.deleteMany({
@@ -3074,15 +3277,42 @@ export async function updateKitAssets({
         });
       }
 
-      // Connect: create one pivot row per newly added asset.
+      // Connect: create one pivot row per newly added asset. Quantity
+      // comes from the submitted `assetQuantities` map for QTY_TRACKED;
+      // INDIVIDUAL is always 1. Missing map entries (today's behaviour
+      // before the picker UI ships in T5) default QTY_TRACKED to the
+      // asset's full pool — matches the Phase 4a-Polish-2 backfill so
+      // there's no observable change until the picker is wired up.
       if (newlyAddedAssets.length > 0) {
         await tx.assetKit.createMany({
-          data: newlyAddedAssets.map(({ id }) => ({
-            assetId: id,
-            kitId: kit.id,
-            organizationId,
-          })),
+          data: newlyAddedAssets.map((asset) => {
+            const submitted = assetQuantities[asset.id];
+            const quantity =
+              asset.type === AssetType.QUANTITY_TRACKED
+                ? Math.max(1, submitted ?? asset.quantity ?? 1)
+                : 1;
+            return {
+              assetId: asset.id,
+              kitId: kit.id,
+              organizationId,
+              quantity,
+            };
+          }),
         });
+      }
+
+      // Update: existing-in-kit assets whose submitted quantity differs
+      // from the current pivot value. Each row needs its own update
+      // because Prisma's updateMany doesn't support per-row data.
+      if (qtyChangedAssets.length > 0) {
+        for (const change of qtyChangedAssets) {
+          await tx.assetKit.update({
+            where: {
+              assetId_kitId: { assetId: change.id, kitId: kit.id },
+            },
+            data: { quantity: change.newQuantity },
+          });
+        }
       }
     });
 
@@ -3315,6 +3545,7 @@ export async function updateKitAssets({
       const inheritedAssetIds = await db.$transaction(async (tx) => {
         const inheritData = await buildKitCustodyInheritData({
           tx,
+          kitId: kit.id,
           kitCustodyId,
           teamMemberId,
           assetIds: assetsToInheritStatus.map((a) => a.id),
@@ -3361,6 +3592,86 @@ export async function updateKitAssets({
           assetIds: inheritedAssetIds,
         });
       }
+    }
+
+    /**
+     * Phase 4a-Polish-2: in-custody kit qty-edit cascade.
+     *
+     * When the user changes a QUANTITY_TRACKED asset's quantity inside a
+     * kit that's currently in custody, the kit-allocated `Custody.quantity`
+     * needs to track the new `AssetKit.quantity`. Otherwise the custodian's
+     * apparent allocation drifts out of sync with the kit's composition.
+     *
+     * For each qty-changed asset:
+     * - Look up the kit-allocated Custody row (`kitCustodyId =
+     *   kit.custody.id`).
+     * - Update its quantity to match.
+     * - Emit `CUSTODY_ASSIGNED` (increase) or `CUSTODY_RELEASED` (decrease)
+     *   with `meta: { viaKit: true, quantity: <delta> }` so reports see
+     *   the size of the change.
+     *
+     * If no kit-allocated Custody row exists (e.g. asset was fully
+     * operator-allocated when the kit got custody, so `buildKitCustodyInheritData`
+     * skipped it), we don't create one here — the qty-change alone
+     * doesn't grant new custody. Picker UX should explain this case to
+     * the user when it arises.
+     */
+    if (
+      kit.custody &&
+      kit.custody.id &&
+      kit.custody.custodian.id &&
+      qtyChangedAssets.length > 0
+    ) {
+      const kitCustodyId = kit.custody.id;
+      const targetUserId = kit.custody.custodian.user?.id ?? undefined;
+      const teamMemberId = kit.custody.custodian.id;
+
+      await db.$transaction(async (tx) => {
+        // Pre-fetch existing kit-allocated rows so we know which assets
+        // actually have something to cascade (and what the previous
+        // quantity was, in case it's drifted from `currentPivot.quantity`).
+        const existingRows = await tx.custody.findMany({
+          where: {
+            assetId: { in: qtyChangedAssets.map((c) => c.id) },
+            kitCustodyId,
+          },
+          select: { id: true, assetId: true, quantity: true },
+        });
+        const existingByAssetId = new Map(
+          existingRows.map((r) => [r.assetId, r])
+        );
+
+        const events: Parameters<typeof recordEvents>[0] = [];
+        for (const change of qtyChangedAssets) {
+          const existing = existingByAssetId.get(change.id);
+          if (!existing) continue;
+
+          const delta = change.newQuantity - existing.quantity;
+          if (delta === 0) continue;
+
+          await tx.custody.update({
+            where: { id: existing.id },
+            data: { quantity: change.newQuantity },
+          });
+
+          events.push({
+            organizationId,
+            actorUserId: userId,
+            action: delta > 0 ? "CUSTODY_ASSIGNED" : "CUSTODY_RELEASED",
+            entityType: "ASSET" as const,
+            entityId: change.id,
+            assetId: change.id,
+            kitId: kit.id,
+            teamMemberId,
+            targetUserId,
+            meta: { viaKit: true, quantity: Math.abs(delta) },
+          });
+        }
+
+        if (events.length > 0) {
+          await recordEvents(events, tx);
+        }
+      });
     }
 
     /**

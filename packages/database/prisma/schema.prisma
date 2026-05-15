@@ -1556,9 +1556,12 @@ model AssetKit {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  // Enforces "at most one kit per asset". Drop when multi-kit
-  // allocation lands and replace with the type-aware trigger.
-  @@unique([assetId])
+  // Phase 4a-Polish-2: the global "one kit per asset" constraint is
+  // replaced with a DB trigger `enforce_individual_asset_single_kit`
+  // that only caps INDIVIDUAL assets at 1 row, leaving QUANTITY_TRACKED
+  // assets free to belong to multiple kits. The composite below still
+  // prevents the same asset from being listed twice in the same kit.
+  // See migration `20260514..._drop_asset_kit_unique_add_triggers`.
   @@unique([assetId, kitId])
   @@index([kitId])
   @@index([organizationId])

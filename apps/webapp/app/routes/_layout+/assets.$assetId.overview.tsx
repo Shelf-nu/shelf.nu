@@ -55,7 +55,6 @@ import {
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
-import { computeAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -191,31 +190,42 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     let quantityData: {
       total: number;
+      /**
+       * Operator-only custody — sum of `Custody.quantity` where
+       * `kitCustodyId IS NULL`. Kit-allocated custody rows mirror
+       * `AssetKit.quantity` and are already counted via `inKits`;
+       * including them here would double-count post-Polish-2.
+       */
       inCustody: number;
+      /**
+       * Phase 4a-Polish-2: sum of `AssetKit.quantity` across every kit
+       * this asset participates in. Surfaced on the sidebar so users
+       * can see how many units are earmarked for kit use, and used in
+       * the `available` / `custodyAvailable` formulas so kit-earmarked
+       * units don't masquerade as free stock.
+       */
+      inKits: number;
       reserved: number;
       checkedOut: number;
       /**
        * Booking-aware availability: how many units can be reserved for a
        * *future* booking. Subtracts everything that's already spoken for —
-       * in-custody + reserved in other bookings + checked-out.
+       * kits + operator custody + reserved in other bookings + checked-out.
        */
       available: number;
       /**
        * Physical availability: how many units are *actually* on the shelf
-       * right now — not held by a custodian AND not currently checked out
-       * on an active booking. Used to cap custody assignment and
-       * total-quantity adjustments. Reservations (future bookings) do
-       * NOT subtract from this because the units are still physically
-       * present until that booking is checked out. `CHECKED_OUT` via a
-       * booking DOES subtract, because those units are semantically held
-       * by the booking custodian until they're checked back in.
+       * right now — not in a kit, not held by a custodian, and not
+       * currently checked out on an active booking. Used to cap custody
+       * assignment and total-quantity adjustments. Reservations (future
+       * bookings) do NOT subtract from this because the units are still
+       * physically present until that booking is checked out.
        */
       custodyAvailable: number;
     } | null = null;
 
     if (isQuantityTracked(asset)) {
-      const [custodyData, reservedSum, checkedOutSum] = await Promise.all([
-        computeAvailableQuantity(asset.id),
+      const [reservedSum, checkedOutSum] = await Promise.all([
         db.bookingAsset.aggregate({
           where: {
             assetId: asset.id,
@@ -232,18 +242,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         }),
       ]);
 
+      const total = asset.quantity ?? 0;
       const reserved = reservedSum._sum?.quantity ?? 0;
       const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+      // Sum each kit's slice — the asset's pool earmarked for kit use.
+      const inKits = (asset.assetKits ?? []).reduce(
+        (sum: number, ak) => sum + (ak.quantity ?? 0),
+        0
+      );
+      // Operator-only custody (see field comment above).
+      const operatorCustody = (asset.custody ?? []).reduce(
+        (sum: number, c) =>
+          c.kitCustodyId == null ? sum + (c.quantity ?? 0) : sum,
+        0
+      );
 
       quantityData = {
-        total: custodyData.total,
-        inCustody: custodyData.inCustody,
+        total,
+        inCustody: operatorCustody,
+        inKits,
         reserved,
         checkedOut,
-        available:
-          custodyData.total - custodyData.inCustody - reserved - checkedOut,
-        custodyAvailable:
-          custodyData.total - custodyData.inCustody - checkedOut,
+        // Strict-available pool: kits + operator + reserved + checked-out
+        // are all separate consumers; what's left is truly free.
+        available: total - inKits - operatorCustody - reserved - checkedOut,
+        // Adjust-cap: reservations don't subtract here (units are still
+        // physically present), but kits do because dropping below
+        // `inKits` would violate the sum-within-total DB trigger.
+        custodyAvailable: total - inKits - operatorCustody - checkedOut,
       };
     }
 
@@ -1102,37 +1128,66 @@ export default function AssetOverview() {
           <AssetReminderCards className="my-2" />
 
           {(() => {
-            const includedInKit = getPrimaryKit<{
-              id: string;
-              name: string;
-            }>(asset);
-            if (!includedInKit?.name) return null;
+            /**
+             * Phase 4a-Polish-2: a QUANTITY_TRACKED asset can belong to
+             * multiple kits at distinct slices. Render one row per
+             * membership with the per-kit quantity badge on qty-tracked
+             * assets; INDIVIDUAL assets keep the single-name layout
+             * since they're DB-locked to one kit and have no meaningful
+             * "quantity per kit" to surface.
+             */
+            type KitMembership = {
+              quantity: number;
+              kit: { id: string; name: string } | null;
+            };
+            const memberships = ((asset.assetKits ?? []) as KitMembership[])
+              .filter((ak) => ak.kit?.id && ak.kit.name)
+              .map((ak) => ({
+                kitId: ak.kit!.id,
+                kitName: ak.kit!.name,
+                quantity: ak.quantity ?? 0,
+              }));
+            if (memberships.length === 0) return null;
+            const isQty = isQuantityTracked(asset);
+            const unit = asset.unitOfMeasure || "units";
             return (
               <Card className="my-3 py-3 md:border">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
                     <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
                       <Icon icon="kit" />
                     </div>
                   </div>
 
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h3 className="mb-1 text-sm font-semibold">
-                      Included in kit
+                      {memberships.length > 1
+                        ? "Included in kits"
+                        : "Included in kit"}
                     </h3>
-                    <Button
-                      to={`/kits/${includedInKit.id}`}
-                      role="link"
-                      variant="link"
-                      className={tw(
-                        "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
-                      )}
-                      target="_blank"
-                    >
-                      <div className="max-w-[250px] truncate">
-                        {includedInKit.name}
-                      </div>
-                    </Button>
+                    <ul className="space-y-1">
+                      {memberships.map((m) => (
+                        <li
+                          key={m.kitId}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <Button
+                            to={`/kits/${m.kitId}`}
+                            role="link"
+                            variant="link"
+                            className="min-w-0 justify-start truncate text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                            target="_blank"
+                          >
+                            <span className="truncate">{m.kitName}</span>
+                          </Button>
+                          {isQty ? (
+                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                              {m.quantity} {unit}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
               </Card>
@@ -1163,6 +1218,7 @@ export default function AssetOverview() {
               availableQuantity={quantityData?.available}
               custodyAvailableQuantity={quantityData?.custodyAvailable}
               inCustodyQuantity={quantityData?.inCustody}
+              inKitsQuantity={quantityData?.inKits}
               reservedQuantity={quantityData?.reserved}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

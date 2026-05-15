@@ -1,6 +1,6 @@
 import {
   data,
-  useRouteLoaderData,
+  useParams,
   type LoaderFunctionArgs,
   type MetaFunction,
 } from "react-router";
@@ -170,12 +170,10 @@ export default function KitAssets() {
 function ListContent({ item }: { item: ListItemForKitPage }) {
   const { location, category, tags } = item;
 
-  // Read the parent kits.$kitId loader's kit data so we know whether the kit
-  // is in custody and which KitCustody row to filter custody rows by.
-  const parentData = useRouteLoaderData("routes/_layout+/kits.$kitId") as
-    | { kit?: { custody?: { id: string } | null } }
-    | undefined;
-  const kitCustodyId = parentData?.kit?.custody?.id ?? null;
+  // `kitId` from the URL — used below to pick this asset's pivot row out
+  // of `item.assetKits` (the asset can be in multiple kits since
+  // Phase 4a-Polish-2; we only care about THIS kit's slice here).
+  const { kitId } = useParams<{ kitId: string }>();
 
   const { roles } = useUserRoleHelper();
   return (
@@ -207,49 +205,29 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                 >
                   {item.title}
                 </Button>
-                {isQuantityTracked(item) && item.quantity != null
+                {isQuantityTracked(item)
                   ? (() => {
                       /**
-                       * Always render `· N / M units in kit` for qty-tracked
-                       * rows so users can see how the asset's stock is
-                       * split — whether the kit is in custody or not.
+                       * Render `· N units in kit` for qty-tracked rows.
                        *
-                       * - Kit IS in custody: N is the kit-allocated count
-                       *   (sum of Custody rows tagged with this
-                       *   KitCustody.id). N can be < total once Option B
-                       *   subtracted operator-allocated units at assign
-                       *   time.
-                       * - Kit IS NOT in custody: N is the units that
-                       *   *would* flow into the kit if it were assigned
-                       *   right now. An asset belongs to at most one kit,
-                       *   so when this kit has no KitCustody row, every
-                       *   Custody row on the asset is operator-allocated;
-                       *   N = asset.quantity − sum(operator custody).
-                       *
-                       * In the "no operator custody" case both branches
-                       * naturally produce `M / M units in kit`, which is
-                       * accurate (all units are part of the kit).
+                       * Phase 4a-Polish-2: `AssetKit.quantity` is the
+                       * source of truth — the picker writes it, the
+                       * kit-custody inherit helper reads it, reports read
+                       * it. We surface the kit-specific count only; the
+                       * asset's total is irrelevant on the kit page (and
+                       * a user comparing N/M would be confused if the
+                       * same qty-tracked asset is split across multiple
+                       * kits). The `find()` is defensive — the asset was
+                       * fetched via `assetKits: { some: { kitId } }`, so
+                       * a missing row shouldn't happen.
                        */
                       const unit = item.unitOfMeasure || "units";
-                      const inKit = kitCustodyId
-                        ? item.custody.reduce(
-                            (sum, c) =>
-                              c.kitCustodyId === kitCustodyId
-                                ? sum + (c.quantity ?? 0)
-                                : sum,
-                            0
-                          )
-                        : Math.max(
-                            0,
-                            item.quantity -
-                              item.custody.reduce(
-                                (sum, c) => sum + (c.quantity ?? 0),
-                                0
-                              )
-                          );
+                      const inKit =
+                        item.assetKits.find((ak) => ak.kitId === kitId)
+                          ?.quantity ?? 0;
                       return (
                         <span className="ml-2 text-xs text-gray-500">
-                          · {inKit} / {item.quantity} {unit} in kit
+                          · {inKit} {unit} in kit
                         </span>
                       );
                     })()

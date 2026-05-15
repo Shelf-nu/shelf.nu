@@ -92,8 +92,15 @@ export const getAssetOverviewFields = (
       },
     },
     assetModel: { select: { id: true, name: true } },
+    // Phase 4a-Polish-2: a QUANTITY_TRACKED asset can sit in multiple kits at
+    // distinct slices. Pull `quantity` so the asset-overview sidebar can list
+    // each kit with its allocation and so the loader can derive a true
+    // "available" pool (units NOT in any kit, custody, or active booking).
     assetKits: {
-      select: { kit: { select: { id: true, name: true, status: true } } },
+      select: {
+        quantity: true,
+        kit: { select: { id: true, name: true, status: true } },
+      },
     },
     bookingAssets: {
       where: {

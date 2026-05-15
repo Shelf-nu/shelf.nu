@@ -853,6 +853,98 @@ link is removed). End-state observably equivalent.
 - Option B math collapsing to `AssetKit.quantity` reads (currently
   still computes `Asset.quantity − sum(operator custody)`).
 
+> All four deferred items above shipped in **Phase 4a-Polish-2**
+> (below).
+
+#### Phase 4a-Polish-2 — Multi-kit allocation enabler + qty picker (COMPLETE — UNCOMMITTED, awaiting commit approval)
+
+**Status as of 2026-05-15:** code complete, `pnpm webapp:validate`
+green (**2177 / 2177**), `pnpm webapp:doctor --diff main` 95/100
+(the one new finding is `no-giant-component` on the picker route —
+same family as the booking picker, accepted). §0 schema/trigger
+checks verified via supabase-local MCP on the dev DB. §1 + §2 of
+the manual plan browser-tested. **Not yet committed** — a single
+bundled commit is staged-ready; the user reviews on another device
+before approving. Commit message + explicit file list were drafted
+in-session (one `feat(kits):` conventional commit, no push).
+
+Plan file: `~/.claude/plans/twinkly-mixing-pelican.md`. Manual test
+plan: `TESTING-PHASE-4A-POLISH-2.md` (15 sections; §0 done, §1–§2
+done, §3+ pending the user's continued walkthrough).
+
+**Baked-in product decisions (from the user, do not re-litigate):**
+
+1. INDIVIDUAL assets stay single-kit (DB trigger enforces);
+   QUANTITY_TRACKED can be in multiple kits at distinct slices.
+2. Picker MAX = strict-available pool — explicitly **excludes**
+   counts already in other kits, operator custody, or ongoing
+   bookings. Non-overlapping-axes model (simpler than the PRD's
+   "orthogonal axes" framing — this is the model that actually
+   shipped for Kit; revisit whether Location should match in 4b).
+3. In-custody kit qty edits are allowed, with an info-box dialog
+   warning, and cascade to the kit-allocated `Custody.quantity`.
+
+**What landed:**
+
+- Schema + migration `20260514100000_drop_asset_kit_unique_add_triggers`:
+  drop `@@unique([assetId])` (as a standalone `DROP INDEX` — Prisma
+  created it as an index, not a table constraint, so
+  `DROP CONSTRAINT` was a no-op); add
+  `enforce_individual_asset_single_kit` BEFORE trigger;
+  add `enforce_asset_kit_sum_within_total` CONSTRAINT trigger
+  `DEFERRABLE INITIALLY DEFERRED`; backfill QUANTITY_TRACKED pivot
+  rows to `quantity = Asset.quantity`.
+- `kit/service.server.ts`: `buildKitCustodyInheritData` now reads
+  `AssetKit.quantity` (Option B collapsed) with a safety ceiling
+  against pre-existing operator custody; `updateKitAssets` accepts
+  per-row `assetQuantities`, has the in-custody qty-edit cascade
+  (paired `CUSTODY_ASSIGNED`/`CUSTODY_RELEASED`, `meta.viaKit` +
+  delta), and a server-side strict-available re-check that returns
+  a clean 400 (not a 500 from the DEFERRED constraint).
+- `kit/picker-meta.server.ts` (**NEW module**): `getKitPickerMeta()`
+  - `PickerAssetMeta` — the one canonical strict-available formula,
+    shared conceptually with the service re-check. Formula:
+    `max(currentInThisKit, asset.quantity − other kits − operator-only
+custody − ongoing bookings)`. Operator-only custody filters
+    `kitCustodyId IS NULL` so multi-kit + in-custody assets don't
+    double-count.
+- Picker UI `kits.$kitId.assets.manage-assets.tsx`: per-row qty
+  input on qty-tracked rows, "Also in Kit X (N)" subtitle, "N
+  available" hint when pool < total, "was N" delta badge, in-custody
+  warning box. Loader uses the helper; named
+  `KitParamsSchema` / `AssetQuantitiesSchema` /
+  `ManageAssetsActionSchema` replace the inline Zod.
+- Asset overview `assets.$assetId.overview.tsx`: "Included in kit" →
+  "Included in kits" (lists every membership + per-kit slice);
+  Quantity Overview gains an "In kits" row (>0 only); `available`
+  and `custodyAvailable` now subtract kit slices + operator-only
+  custody; "In custody" is now operator-only. `computeAvailableQuantity`
+  no longer called from this loader (math inlined off the already-
+  fetched relations); the function is unchanged for its other
+  caller `computeBookingAvailableQuantity`.
+- Kit detail `kits.$kitId.assets.tsx`: reads `inKit` from
+  `AssetKit.quantity` directly; copy is now "N units in kit" (was
+  the misleading "N / M units in kit").
+- `asset/fields.ts`: `assetKits` select gains `quantity`.
+- `kit/types.ts`: `KIT_SELECT_FIELDS_FOR_LIST_ITEMS` gains
+  `assetKits { kitId, quantity }`.
+- Tests: 6 new contract tests in `kit/service.server.test.ts`
+  (new-add qty, qty-edit, INDIVIDUAL-ignores-qty, 400-on-over,
+  accept-at-ceiling, operator-only-custody filter); updated
+  `kits.$kitId.assets.assign-custody.test.tsx` fixtures to supply
+  the `assetKits` relation now read by the refactored helper.
+
+**Known gap surfaced but NOT yet fixed (user flagged 2026-05-15):**
+`QuantityCustodyList` / `QuantityCustodyDialog` still take a single
+`inKit={getPrimaryKit(...)}`. For a multi-kit qty-tracked asset the
+custody-breakdown card only knows about the first kit. The sidebar
+"Included in kits" + "Quantity Overview" cards are fixed; the
+custody dialog's kit-awareness is the remaining multi-kit hole.
+Decide at pickup whether to thread the full membership list or keep
+it single-kit (operator-custody assignment is independent of kit
+allocation under the non-overlapping-axes model, so it may be fine
+to leave — but the "held via kit" badge logic should be re-checked).
+
 #### Phase 4b — Location pivot (second)
 
 **Scope:** structurally identical to 4a but for Location. Larger
@@ -902,10 +994,15 @@ slip into Phase 5 if scope grows:
 
 Surfaced 2026-05-13 during §7 testing. When a kit is added to a
 booking, qty-tracked assets inside the kit get `BookingAsset.quantity
-= 1` instead of the kit's actual allocation. Today `AssetKit.quantity`
-is pinned at 1 (Phase 4a structural-only) so the booking layer has no
-source of truth for "how many units the kit owns." Two options at
-follow-up time:
+= 1` instead of the kit's actual allocation.
+
+> **UNBLOCKED by Phase 4a-Polish-2 (2026-05-15).** `AssetKit.quantity`
+> is now the meaningful source of truth, so **option (1) below is the
+> path** — the "pinned at 1" blocker is gone. Still uncommitted /
+> not yet built; pick this up as the next Phase 4d follow-up once
+> the Polish-2 commit lands.
+
+Two options were considered at follow-up time:
 
 1. **Tied to multi-kit allocation post-4a polish:** once
    `AssetKit.quantity` becomes meaningful, set
@@ -978,6 +1075,7 @@ scope in `docs/proposals/quantitative-assets.md` → Phase 4e.
 9. `20260430100759_add_kit_custody_id_to_custody` — Phase 3d-Polish-2: discriminator FK + one-shot backfill UPDATE for kit-allocated rows
 10. `20260504132547_enable_rls_for_booking_model_request` — RLS policy for `BookingModelRequest` (auto-generated alongside session work)
 11. `20260511120000_add_asset_kit_pivot` — Phase 4a: introduce `AssetKit` pivot, backfill from `Asset.kitId`, drop the column, ENABLE RLS
+12. `20260514100000_drop_asset_kit_unique_add_triggers` — Phase 4a-Polish-2: `DROP INDEX "AssetKit_assetId_key"`, add `enforce_individual_asset_single_kit` (BEFORE) + `enforce_asset_kit_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, backfill QUANTITY_TRACKED pivot rows to `quantity = Asset.quantity`. **Applied to dev DB; UNCOMMITTED (see Phase 4a-Polish-2 status).**
 
 ---
 
@@ -1060,6 +1158,7 @@ release}-custody.ts`, `mobile+/custody.assign.ts`, and their three
 - `app/modules/consumption-log/low-stock.server.ts`
 - `app/modules/custody/utils.ts`
 - `app/modules/booking-model-request/service.server.ts` (+ `.test.ts`) — Phase 3d
+- `app/modules/kit/picker-meta.server.ts` — Phase 4a-Polish-2: `getKitPickerMeta()` + `PickerAssetMeta`, the canonical strict-available formula for the kit picker
 
 ### New components:
 
@@ -1121,15 +1220,23 @@ typecheck + tests all clean. New tests added: 4 in
 in `kits.$kitId.assets.assign-custody.test.tsx` (Option B route),
 plus updated `query.server.test.ts` assertions.
 
-**Current baseline (Phase 3d-Polish-3 + main merge, all shipped):**
-`pnpm webapp:validate` green — **164 / 2103** tests passing across
-all suites. Lint + typecheck + tests all clean. The +173 vs
+**Phase 3d-Polish-3 + main merge baseline:** `pnpm webapp:validate`
+green — **164 / 2103** tests passing across all suites. The +173 vs
 Phase 3d-Polish-2 baseline breaks down as: ~150 mobile-companion-
 related route + utility tests inherited from main's PR #2412, plus
 new Phase 3d-Polish-3 coverage (15 IDOR-guard regression tests on
 booking phase-3 endpoints, 5 SELF_SERVICE-bulk-custody guard tests
 on the centralised service, 5 `performKitDeletion` helper tests, 4
 mobile route role-forwarding regression tests).
+
+**Current baseline (Phase 4a-Polish-2, UNCOMMITTED):**
+`pnpm webapp:validate` green — **2177 / 2177** tests across 166
+files. The +6 vs the Phase 4a-shipped 2171 are the new
+`kit/service.server.test.ts` picker contract tests. Lint +
+typecheck clean. `pnpm webapp:doctor --diff main` 95/100 (one
+accepted `no-giant-component` finding on the picker route). All of
+this is in the working tree only — see the Phase 4a-Polish-2 status
+block for the staged-but-unapproved commit.
 
 `TESTING-KIT-CUSTODY-CORRECTNESS.md` manual walkthrough complete —
 all sections ticked off or marked as covered-by-unit-test (6b: kit

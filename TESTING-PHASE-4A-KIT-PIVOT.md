@@ -172,11 +172,11 @@ flips to IN_CUSTODY as soon as \_any* units are operator-allocated;
 Option B math (`buildKitCustodyInheritData`) handles the remaining
 pool on assign. The guards now skip qty-tracked entirely.
 
-- [ ] Pick a qty-tracked asset (e.g. Pens qty 100) and assign **5
+- [x] Pick a qty-tracked asset (e.g. Pens qty 100) and assign **5
       units** to a team member from the asset detail page. `Pens.status`
       should now be `IN_CUSTODY` even though 95 units are still free.
-- [ ] Navigate to a kit's `/kits/<kitId>/assets/manage-assets`.
-- [ ] The Pens row in the picker should:
+- [x] Navigate to a kit's `/kits/<kitId>/assets/manage-assets`.
+- [x] The Pens row in the picker should:
   - Be clickable (no `cursor-not-allowed`).
   - Not be disabled / greyed-out.
   - Not render the orange "In custody" badge.
@@ -186,10 +186,10 @@ pool on assign. The guards now skip qty-tracked entirely.
     even when row-level `Asset.status` is `IN_CUSTODY` from partial
     allocation. Without this the row would render _no_ badge at all
     (regression caught in initial 4a-Polish testing).
-- [ ] Select Pens and Save. `AssetKit` row created with `quantity = 1`
+- [x] Select Pens and Save. `AssetKit` row created with `quantity = 1`
       (Phase 4a invariant — qty stays 1 until the post-4b polish
       ships multi-kit allocation).
-- [ ] Verify on DB:
+- [x] Verify on DB:
   ```sql
   SELECT ak.id, ak.quantity, c."teamMemberId", c.quantity AS custody_qty,
          c."kitCustodyId"
@@ -320,7 +320,7 @@ Supabase JWT obtained from `http://127.0.0.1:54321` and the org-scoped
 ## §11 Final gate
 
 - [x] `pnpm webapp:validate` green.
-- [ ] `pnpm webapp:doctor` — no new react-doctor findings.
+- [x] `pnpm webapp:doctor` — no new react-doctor findings.
 - [x] Browser console clean across all the flows above.
 - [x] Server console (`pnpm webapp:dev` terminal) clean — no Prisma "field does not exist" warnings.
       </content>
