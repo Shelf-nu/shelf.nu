@@ -2076,5 +2076,46 @@ describe("audit service", () => {
       });
       expect(mockDb.auditScan.create).not.toHaveBeenCalled();
     });
+
+    it("validates the asset before the duplicate-scan short-circuit", async () => {
+      // A stale AuditScan row exists for a now-cross-org asset (legacy data
+      // from the previously unguarded path). The org guard must win over the
+      // duplicate-scan early return so the retry cannot report success.
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Cross-org camera",
+        organizationId: "org-2",
+      });
+      mockDb.auditScan.findFirst.mockResolvedValue({
+        id: "stale-scan-1",
+        auditAssetId: "stale-audit-asset-1",
+      });
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    });
+
+    it("converts a TOCTOU asset-FK violation into a non-captured 404", async () => {
+      // Guard passes (asset valid at check time)...
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Valid camera",
+        organizationId: "org-1",
+      });
+      // ...but the asset is deleted before the insert, so the create inside
+      // the transaction throws a Prisma P2003 on AuditScan_assetId_fkey.
+      mockDb.auditScan.create.mockRejectedValue({
+        code: "P2003",
+        meta: { modelName: "AuditScan", constraint: "AuditScan_assetId_fkey" },
+        name: "PrismaClientKnownRequestError",
+      });
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    });
   });
 });
