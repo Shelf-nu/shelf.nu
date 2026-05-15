@@ -1,6 +1,7 @@
 import { AuditStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -18,15 +19,35 @@ import { makeShelfError } from "~/utils/error";
  *   - page (optional): page number (default 1)
  *   - perPage (optional): items per page (default 20, max 50)
  *   - search (optional): search string
+ *   - assignedToMe (optional): "true" → restrict to audits the caller is
+ *     assigned to. Admins/owners normally see every org audit; this lets
+ *     them opt into "just my work" via the companion's filter chip.
+ *     For BASE/SELF_SERVICE users the filter is already implicit in the
+ *     service layer; passing the flag is a no-op for them.
+ *
+ * Mobile-only sort: results are always ordered by `dueDate asc nulls last,
+ * createdAt desc` so the companion list surfaces overdue + soon-due work
+ * first. The webapp uses its own column-sort UI and does not hit this
+ * endpoint.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
+    // why: BASE/SELF_SERVICE users must NEVER see audits they're not
+    // assigned to — passing these two params makes
+    // `getAuditsForOrganization` apply its role-based assignee filter
+    // server-side. Without them, the service skips the auto-filter and
+    // a client sending `assignedToMe=false` (or just omitting the flag)
+    // sees the whole org. Mirrors how `audits.complete.ts` does it.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
     const searchParam = url.searchParams.get("search");
+    const assignedToMe = url.searchParams.get("assignedToMe") === "true";
     const page = Math.max(
       1,
       parseInt(url.searchParams.get("page") || "1", 10) || 1
@@ -58,10 +79,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { audits: rawAudits, totalAudits: rawTotal } =
       await getAuditsForOrganization({
         organizationId,
+        userId: user.id,
+        isSelfServiceOrBase,
         page: isSingleStatus || isAllOrNone ? page : 1,
         perPage: isSingleStatus || isAllOrNone ? perPage : 200,
         search: searchParam || null,
         status: isSingleStatus ? statusFilters[0] : null,
+        assignedToUserId: assignedToMe ? user.id : null,
+        prioritizeDeadlines: true,
       });
 
     // Post-filter for multi-status queries (e.g. "PENDING,ACTIVE")
@@ -90,6 +115,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
           lastName: a.createdBy?.lastName ?? null,
         },
         assigneeCount: a._count?.assignments ?? 0,
+        // why: surface "this one's mine" per row so the companion can
+        // render a marker without a second roundtrip per audit. Computed
+        // server-side because the asset list endpoint already loads
+        // `assignments` for the count above — no extra query cost.
+        isAssignedToMe:
+          a.assignments?.some((assn) => assn.userId === user.id) ?? false,
       })),
       page,
       perPage,
