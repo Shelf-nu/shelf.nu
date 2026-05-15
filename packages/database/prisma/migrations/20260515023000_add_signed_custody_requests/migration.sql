@@ -56,10 +56,10 @@ CREATE INDEX "SignedCustodyRequest_status_idx" ON "SignedCustodyRequest"("status
 ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "Asset"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "Asset"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_teamMemberId_fkey" FOREIGN KEY ("teamMemberId") REFERENCES "TeamMember"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_teamMemberId_fkey" FOREIGN KEY ("teamMemberId") REFERENCES "TeamMember"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

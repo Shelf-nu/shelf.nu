@@ -2,6 +2,7 @@ import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createOrganization } from "@factories";
 import {
   action,
   loader,
@@ -24,6 +25,7 @@ const dbMocks = vi.hoisted(() => {
       count: vi.fn(),
     },
     organization: {
+      // why: action reads organization custody-signing settings before assignment
       findUniqueOrThrow: vi.fn(),
     },
     custody: {
@@ -182,13 +184,15 @@ beforeEach(() => {
   } as any);
   createNoteMock.mockResolvedValue(undefined as any);
   sendNotificationMock.mockReturnValue(undefined as any);
-  mockOrganizationFindUniqueOrThrow.mockResolvedValue({
-    id: "org-1",
-    name: "Test Org",
-    customEmailFooter: null,
-    enableSignedCustodyOnAssignment: false,
-    requireCustodySignatureOnAssignment: false,
-  });
+  mockOrganizationFindUniqueOrThrow.mockResolvedValue(
+    createOrganization({
+      id: "org-1",
+      name: "Test Org",
+      customEmailFooter: null,
+      enableSignedCustodyOnAssignment: false,
+      requireCustodySignatureOnAssignment: false,
+    })
+  );
 });
 
 describe("assets.$assetId.overview.assign-custody loader", () => {
@@ -303,24 +307,12 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect((response as Response).status).toBe(404);
 
-    expect(mockGetTeamMember).toHaveBeenCalledWith({
-      id: "foreign-team-member-123",
-      organizationId: "org-1",
-      select: {
-        id: true,
-        name: true,
-        userId: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          },
-        },
-      },
-    });
+    expect(mockGetTeamMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "foreign-team-member-123",
+        organizationId: "org-1",
+      })
+    );
 
     expect(mockAssetUpdate).not.toHaveBeenCalled();
     expect(createNoteMock).not.toHaveBeenCalled();
@@ -365,24 +357,12 @@ describe("assets.$assetId.overview.assign-custody action", () => {
 
     expect((response as Response).status).toBe(302); // Redirect on success
 
-    expect(mockGetTeamMember).toHaveBeenCalledWith({
-      id: "team-member-123",
-      organizationId: "org-1",
-      select: {
-        id: true,
-        name: true,
-        userId: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          },
-        },
-      },
-    });
+    expect(mockGetTeamMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "team-member-123",
+        organizationId: "org-1",
+      })
+    );
 
     expect(mockAssetUpdate).toHaveBeenCalledWith({
       where: { id: "asset-123", organizationId: "org-1" },

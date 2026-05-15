@@ -712,10 +712,10 @@ model SignedCustodyRequest {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  asset   Asset  @relation(fields: [assetId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  asset   Asset  @relation(fields: [assetId], references: [id], onUpdate: Cascade, onDelete: NoAction)
   assetId String
 
-  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onUpdate: Cascade, onDelete: NoAction)
   teamMemberId String
 
   requestedBy   User?   @relation("SignedCustodyRequestedBy", fields: [requestedById], references: [id], onUpdate: Cascade, onDelete: SetNull)

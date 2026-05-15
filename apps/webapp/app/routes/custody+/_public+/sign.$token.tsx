@@ -1,3 +1,8 @@
+/**
+ * Public custody agreement signing route for pending signed custody requests.
+ *
+ * @file
+ */
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import { SignedCustodyRequestStatus } from "@prisma/client";
@@ -48,6 +53,11 @@ const SignCustodySchema = z.object({
   ),
 });
 
+/**
+ * Builds page metadata for the signed custody agreement route.
+ *
+ * @returns Route meta descriptors.
+ */
 export const meta = () => [
   { title: appendToMetaTitle("Sign custody agreement") },
 ];
@@ -95,6 +105,13 @@ function getTrustedSignerIp(request: Request) {
   return request.headers.get("fly-client-ip");
 }
 
+/**
+ * Loads a signed custody request for the authenticated assignee.
+ *
+ * @param args - Remix loader arguments including route params, request, and auth context.
+ * @returns The signature request payload or a redirect to sign in.
+ * @throws ShelfError when the token is unknown or belongs to a different Shelf user.
+ */
 export async function loader({ context, params, request }: LoaderFunctionArgs) {
   const { token } = getParams(params, ParamsSchema, {
     additionalData: { token: params.token },
@@ -128,6 +145,13 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Completes a pending signed custody request and selects the request organization.
+ *
+ * @param args - Remix action arguments including form data and auth context.
+ * @returns A redirect to the accepted asset, or validation/error data.
+ * @throws ShelfError when request validation or completion fails.
+ */
 export async function action({ context, params, request }: ActionFunctionArgs) {
   const { token } = getParams(params, ParamsSchema, {
     additionalData: { token: params.token },
@@ -180,8 +204,18 @@ export async function action({ context, params, request }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Renders the route error UI.
+ *
+ * @returns The shared error content component.
+ */
 export const ErrorBoundary = () => <ErrorContent />;
 
+/**
+ * Renders the custody agreement review and signature form.
+ *
+ * @returns The signed custody agreement page.
+ */
 export default function SignCustodyAgreement() {
   const { signatureRequest } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -189,8 +223,8 @@ export default function SignCustodyAgreement() {
   const validationErrors = getValidationErrors<typeof SignCustodySchema>(
     actionData?.error
   );
-  const alreadySigned =
-    signatureRequest.status === SignedCustodyRequestStatus.SIGNED;
+  const isPending =
+    signatureRequest.status === SignedCustodyRequestStatus.PENDING;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-12">
@@ -213,11 +247,7 @@ export default function SignCustodyAgreement() {
           <p className="whitespace-pre-line">{signatureRequest.documentBody}</p>
         </section>
 
-        {alreadySigned ? (
-          <p className="text-sm text-gray-700">
-            This agreement has already been signed.
-          </p>
-        ) : (
+        {isPending ? (
           <Form method="post" className="flex flex-col gap-4">
             <label className="flex flex-col gap-2 text-sm font-medium text-gray-700">
               Type your name
@@ -251,6 +281,12 @@ export default function SignCustodyAgreement() {
               Accept custody
             </Button>
           </Form>
+        ) : (
+          <p className="text-sm text-gray-700">
+            {signatureRequest.status === SignedCustodyRequestStatus.SIGNED
+              ? "This agreement has already been signed."
+              : "This agreement is no longer pending."}
+          </p>
         )}
       </div>
     </main>
@@ -276,9 +312,11 @@ function SignaturePad({ disabled }: { disabled: boolean }) {
   const getPoint = (event: PointerEvent<HTMLCanvasElement>) => {
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
     };
   };
 
