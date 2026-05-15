@@ -18,6 +18,7 @@ const dbMocks = vi.hoisted(() => {
   return {
     asset: {
       findUnique: vi.fn(),
+      findFirstOrThrow: vi.fn(),
       update: vi.fn(),
     },
     teamMember: {
@@ -39,11 +40,18 @@ const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
 
+const signedCustodyMocks = vi.hoisted(() => ({
+  createSignedCustodyRequests: vi.fn(),
+  sendSignedCustodyRequestEmails: vi.fn(),
+  shouldRequestSignedCustody: vi.fn(),
+}));
+
 // why: testing route handler without executing actual database operations
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
       findUnique: dbMocks.asset.findUnique,
+      findFirstOrThrow: dbMocks.asset.findFirstOrThrow,
       update: dbMocks.asset.update,
     },
     teamMember: {
@@ -60,7 +68,10 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         custody: { deleteMany: dbMocks.custody.deleteMany },
-        asset: { update: dbMocks.asset.update },
+        asset: {
+          findFirstOrThrow: dbMocks.asset.findFirstOrThrow,
+          update: dbMocks.asset.update,
+        },
       })
     ),
   },
@@ -84,6 +95,14 @@ vi.mock("~/modules/user/service.server", () => ({
 // why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
+}));
+
+// why: testing signed-custody branching without sending emails or writing request rows
+vi.mock("~/modules/custody/signed-custody.server", () => ({
+  createSignedCustodyRequests: signedCustodyMocks.createSignedCustodyRequests,
+  sendSignedCustodyRequestEmails:
+    signedCustodyMocks.sendSignedCustodyRequestEmails,
+  shouldRequestSignedCustody: signedCustodyMocks.shouldRequestSignedCustody,
 }));
 
 // why: testing custody assignment without creating actual notes
@@ -119,6 +138,7 @@ vi.mock("react-router", async () => {
 });
 
 const mockAssetFindUnique = dbMocks.asset.findUnique;
+const mockAssetFindFirstOrThrow = dbMocks.asset.findFirstOrThrow;
 const mockAssetUpdate = dbMocks.asset.update;
 const mockTeamMemberFindMany = dbMocks.teamMember.findMany;
 const mockTeamMemberCount = dbMocks.teamMember.count;
@@ -167,6 +187,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   mockAssetFindUnique.mockReset();
+  mockAssetFindFirstOrThrow.mockReset();
   mockAssetUpdate.mockReset();
   mockTeamMemberFindMany.mockReset();
   mockTeamMemberCount.mockReset();
@@ -184,6 +205,16 @@ beforeEach(() => {
   } as any);
   createNoteMock.mockResolvedValue(undefined as any);
   sendNotificationMock.mockReturnValue(undefined as any);
+  signedCustodyMocks.createSignedCustodyRequests.mockResolvedValue([
+    {
+      token: "signed-request-token",
+      asset: { title: "Test Asset" },
+    },
+  ]);
+  signedCustodyMocks.sendSignedCustodyRequestEmails.mockResolvedValue(
+    undefined
+  );
+  signedCustodyMocks.shouldRequestSignedCustody.mockReturnValue(false);
   mockOrganizationFindUniqueOrThrow.mockResolvedValue(
     createOrganization({
       id: "org-1",
@@ -378,6 +409,89 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     });
 
     expect(createNoteMock).toHaveBeenCalled();
+  });
+
+  it("creates a pending signed custody request instead of assigning custody immediately when a signature is required", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      name: "Valid Team Member",
+      userId: "user-456",
+      user: {
+        id: "user-456",
+        email: "custodian@example.com",
+        firstName: "Valid",
+        lastName: "Member",
+        displayName: "Valid Member",
+      },
+    });
+
+    mockAssetFindFirstOrThrow.mockResolvedValue({
+      id: "asset-123",
+      title: "Test Asset",
+      status: AssetStatus.AVAILABLE,
+    });
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    formData.set("requireSignedCustody", "on");
+
+    const request = new Request(
+      "https://example.com/assets/asset-123/overview/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect((response as Response).status).toBe(302);
+    expect(mockAssetFindFirstOrThrow).toHaveBeenCalledWith({
+      where: { id: "asset-123", organizationId: "org-1" },
+      select: { id: true, title: true, status: true },
+    });
+    expect(signedCustodyMocks.createSignedCustodyRequests).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assets: [
+          {
+            id: "asset-123",
+            title: "Test Asset",
+            status: AssetStatus.AVAILABLE,
+          },
+        ],
+        organizationId: "org-1",
+        teamMember: expect.objectContaining({
+          id: "team-member-123",
+          name: "Valid Team Member",
+          user: expect.objectContaining({
+            email: "custodian@example.com",
+          }),
+        }),
+      })
+    );
+    expect(
+      signedCustodyMocks.sendSignedCustodyRequestEmails
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientEmail: "custodian@example.com",
+        organizationName: "Test Org",
+      })
+    );
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(dbMocks.custody.deleteMany).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+    expect(sendNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Custody will be assigned after the custodian signs the agreement.",
+      })
+    );
   });
 
   it("prevents self-service users from assigning custody to other team members", async () => {
