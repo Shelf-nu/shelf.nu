@@ -360,6 +360,8 @@ export type AuditScanData = {
   scannedAt: string;
   auditAssetId: string | null;
   assetLocationName: string | null;
+  auditNotesCount: number;
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {
