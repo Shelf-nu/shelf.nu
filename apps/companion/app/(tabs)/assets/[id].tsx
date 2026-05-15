@@ -438,12 +438,6 @@ export default function AssetDetailScreen() {
                 <Text style={styles.qrIdText} selectable numberOfLines={1}>
                   {asset.qrCodes[0].id}
                 </Text>
-                {asset.qrCodes.length > 1 && (
-                  <Text style={styles.qrExtraText}>
-                    +{asset.qrCodes.length - 1} more QR code
-                    {asset.qrCodes.length > 2 ? "s" : ""} linked
-                  </Text>
-                )}
               </View>
             </View>
           )}
