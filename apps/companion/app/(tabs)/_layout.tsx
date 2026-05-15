@@ -37,7 +37,6 @@ export default function TabLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarTestID: "tab-home",
           tabBarAccessibilityLabel: "Home",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" size={size} color={color} />
@@ -49,7 +48,6 @@ export default function TabLayout() {
         options={{
           title: "Assets",
           headerShown: false,
-          tabBarTestID: "tab-assets",
           tabBarAccessibilityLabel: "Assets",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube-outline" size={size} color={color} />
@@ -60,7 +58,6 @@ export default function TabLayout() {
         name="scanner"
         options={{
           title: "Scan",
-          tabBarTestID: "tab-scan",
           tabBarAccessibilityLabel: "Scan",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
@@ -77,7 +74,6 @@ export default function TabLayout() {
         options={{
           title: "Bookings",
           headerShown: false,
-          tabBarTestID: "tab-bookings",
           tabBarAccessibilityLabel: "Bookings",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
@@ -102,7 +98,6 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Settings",
-          tabBarTestID: "tab-settings",
           tabBarAccessibilityLabel: "Settings",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings-outline" size={size} color={color} />

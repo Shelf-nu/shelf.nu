@@ -34,7 +34,6 @@ export const QuickActions = memo(function QuickActions({
   onEditPress,
   onDeletePress,
   isActionLoading,
-  _showOverflowMenu,
   setShowOverflowMenu,
 }: QuickActionsProps) {
   const { colors } = useTheme();

@@ -13,6 +13,7 @@
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean --platform ios",
     "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
     "test:e2e": "cd .maestro/scripts && bash run-all.sh",
     "test:e2e:suite": "cd .maestro/scripts && bash run-suite.sh",
     "android": "expo run:android",

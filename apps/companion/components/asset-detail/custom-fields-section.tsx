@@ -37,7 +37,6 @@ function formatCustomFieldValue(cf: CustomField): string {
 
 export const CustomFieldsSection = memo(function CustomFieldsSection({
   customFields,
-  _currency,
 }: CustomFieldsSectionProps) {
   const styles = useStyles();
 
