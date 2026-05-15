@@ -1,3 +1,8 @@
+/**
+ * Test suite for POST /api/mobile/audits/complete.
+ * Covers audit-session completion, assignee validation, permission
+ * checks, and the paid Audits add-on enforcement (403 when disabled).
+ */
 import { action } from "~/routes/api+/mobile+/audits.complete";
 import { createActionArgs } from "@mocks/remix";
 

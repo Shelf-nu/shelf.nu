@@ -1,3 +1,9 @@
+/**
+ * Test suite for POST /api/mobile/audits/note.
+ * Covers condition-note creation scoped to an auditAsset, the cross-tenant
+ * guard, the paid Audits add-on enforcement (403), permission checks, and
+ * invalid-body handling.
+ */
 import { action } from "~/routes/api+/mobile+/audits.note";
 import { createActionArgs } from "@mocks/remix";
 

@@ -1,3 +1,8 @@
+/**
+ * Test suite for POST /api/mobile/audits/record-scan.
+ * Covers scan recording, permission checks, and the paid Audits add-on
+ * enforcement (403 when disabled).
+ */
 import { action } from "~/routes/api+/mobile+/audits.record-scan";
 import { createActionArgs } from "@mocks/remix";
 

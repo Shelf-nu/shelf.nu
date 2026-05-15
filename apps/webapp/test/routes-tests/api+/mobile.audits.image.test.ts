@@ -1,3 +1,9 @@
+/**
+ * Test suite for POST /api/mobile/audits/image.
+ * Covers condition-photo upload + matching note (default vs content),
+ * Markdoc-injection stripping, the cross-tenant guard, the paid Audits
+ * add-on enforcement (403), permission checks, and missing-param handling.
+ */
 import { action } from "~/routes/api+/mobile+/audits.image";
 import { createActionArgs } from "@mocks/remix";
 
