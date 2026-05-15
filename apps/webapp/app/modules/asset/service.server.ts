@@ -43,6 +43,11 @@ import {
   getCategory,
 } from "~/modules/category/service.server";
 import {
+  createSignedCustodyRequests,
+  sendSignedCustodyRequestEmails,
+  shouldRequestSignedCustody,
+} from "~/modules/custody/signed-custody.server";
+import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
   upsertCustomField,
@@ -3670,6 +3675,7 @@ export async function bulkAssignCustody({
   organizationId,
   currentSearchParams,
   settings,
+  requireSignedCustody = false,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -3678,6 +3684,7 @@ export async function bulkAssignCustody({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  requireSignedCustody?: boolean;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -3691,37 +3698,50 @@ export async function bulkAssignCustody({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user, custodianTeamMember] = await Promise.all([
-      db.asset.findMany({
-        where: {
-          id: { in: resolvedIds },
-          organizationId,
-        },
-        select: { id: true, title: true, status: true },
-      }),
-      getUserByID(userId, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      }),
-      db.teamMember.findUnique({
-        where: { id: custodianId },
-        select: {
-          name: true,
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
+    const [assets, user, custodianTeamMember, organization] = await Promise.all(
+      [
+        db.asset.findMany({
+          where: {
+            id: { in: resolvedIds },
+            organizationId,
+          },
+          select: { id: true, title: true, status: true },
+        }),
+        getUserByID(userId, {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          } satisfies Prisma.UserSelect,
+        }),
+        db.teamMember.findUnique({
+          where: { id: custodianId },
+          select: {
+            name: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                displayName: true,
+              },
             },
           },
-        },
-      }),
-    ]);
+        }),
+        db.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: {
+            id: true,
+            name: true,
+            customEmailFooter: true,
+            enableSignedCustodyOnAssignment: true,
+            requireCustodySignatureOnAssignment: true,
+          },
+        }),
+      ]
+    );
 
     const assetsNotAvailable = assets.some(
       (asset) => asset.status !== "AVAILABLE"
@@ -3735,6 +3755,44 @@ export async function bulkAssignCustody({
         label: "Assets",
         shouldBeCaptured: false,
       });
+    }
+
+    if (
+      custodianTeamMember &&
+      (requireSignedCustody ||
+        shouldRequestSignedCustody({
+          organization,
+          custodianUserEmail: custodianTeamMember.user?.email,
+        })) &&
+      !!custodianTeamMember.user?.email
+    ) {
+      const signedRequests = await db.$transaction(async (tx) =>
+        createSignedCustodyRequests({
+          tx,
+          assets,
+          organizationId,
+          requestedBy: user,
+          teamMember: {
+            id: custodianId,
+            name: custodianTeamMember.name,
+            user: custodianTeamMember.user,
+          },
+        })
+      );
+
+      await sendSignedCustodyRequestEmails({
+        requests: signedRequests,
+        recipientEmail: custodianTeamMember.user!.email,
+        recipientName:
+          resolveUserDisplayName(custodianTeamMember.user) || custodianName,
+        organizationName: organization.name,
+        customEmailFooter: organization.customEmailFooter,
+      });
+
+      return {
+        assigned: 0,
+        pendingSignatureRequests: signedRequests.length,
+      };
     }
 
     /**
@@ -3801,7 +3859,10 @@ export async function bulkAssignCustody({
       );
     });
 
-    return true;
+    return {
+      assigned: assets.length,
+      pendingSignatureRequests: 0,
+    };
   } catch (cause) {
     const message =
       cause instanceof ShelfError

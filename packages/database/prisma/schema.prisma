@@ -93,6 +93,7 @@ model User {
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
   auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
+  signedCustodyRequestsRequested SignedCustodyRequest[] @relation("SignedCustodyRequestedBy")
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
@@ -209,6 +210,7 @@ model Asset {
   kitId          String?
 
   custody      Custody?
+  signedCustodyRequests SignedCustodyRequest[]
   notes        Note[]
   qrCodes      Qr[]
   barcodes     Barcode[]
@@ -645,6 +647,7 @@ model TeamMember {
   organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId  String
   custodies       Custody[]
+  signedCustodyRequests SignedCustodyRequest[]
   receivedInvites Invite[]
   user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   userId          String?
@@ -686,6 +689,48 @@ model Custody {
   @@index([teamMemberId])
 }
 
+enum SignedCustodyRequestStatus {
+  PENDING
+  SIGNED
+  CANCELLED
+}
+
+model SignedCustodyRequest {
+  id     String                     @id @default(cuid())
+  token  String                     @unique
+  status SignedCustodyRequestStatus @default(PENDING)
+
+  documentTitle String @default("Custody agreement")
+  documentBody  String @default("Please review and sign to accept custody of this asset.") @db.Text
+
+  signerName      String?
+  signatureDataUrl String? @db.Text
+  signerIp        String?
+  signerUserAgent String? @db.Text
+  signedAt        DateTime? @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  assetId String
+
+  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  teamMemberId String
+
+  requestedBy   User   @relation("SignedCustodyRequestedBy", fields: [requestedById], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  requestedById String
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([assetId])
+  @@index([teamMemberId])
+  @@index([requestedById])
+  @@index([status])
+}
+
 model Organization {
   id   String           @id @default(cuid())
   name String           @default("Personal")
@@ -715,6 +760,9 @@ model Organization {
   selfServiceCanSeeBookings Boolean @default(false) // If true, the self service users can see bookings that are not theirs
   baseUserCanSeeCustody     Boolean @default(false) // If true, the base users can see the custody of assets inside the organization
   baseUserCanSeeBookings    Boolean @default(false) // If true, the base users can see the bookings that are not theirs
+
+  enableSignedCustodyOnAssignment     Boolean @default(false)
+  requireCustodySignatureOnAssignment Boolean @default(false)
 
   // Barcode add-on (per-organization, managed via Stripe subscription)
   barcodesEnabled   Boolean   @default(false) // If true, this organization can use barcode functionality
@@ -754,6 +802,7 @@ model Organization {
   roleChangeLogs      RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
   activityEvents      ActivityEvent[]
+  signedCustodyRequests SignedCustodyRequest[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)

@@ -13,6 +13,10 @@ import { Button } from "../shared/button";
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
+  requireSignedCustody: z
+    .literal("on")
+    .optional()
+    .transform((value) => value === "on"),
 });
 
 export default function BulkAssignCustodyDialog() {
@@ -77,6 +81,19 @@ export default function BulkAssignCustodyDialog() {
               <p className="text-sm text-error-500">
                 {zo.errors.custodian()?.message}
               </p>
+            ) : null}
+            {!isSelfService ? (
+              <label className="mt-4 flex items-start gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name={zo.fields.requireSignedCustody()}
+                  className="mt-1"
+                  disabled={disabled}
+                />
+                <span>
+                  Require this custodian to sign before custody is assigned
+                </span>
+              </label>
             ) : null}
             {fetcherError ? (
               <p className="text-sm text-error-500">{fetcherError}</p>

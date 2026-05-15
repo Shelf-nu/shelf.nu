@@ -21,6 +21,11 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import {
+  createSignedCustodyRequests,
+  sendSignedCustodyRequestEmails,
+  shouldRequestSignedCustody,
+} from "~/modules/custody/signed-custody.server";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -45,9 +50,16 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveTeamMemberName } from "~/utils/user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [{ title: appendToMetaTitle("Assign custody") }];
+
+const AssignCustodyWithSignatureSchema = AssignCustodySchema.extend({
+  requireSignedCustody: z
+    .literal("on")
+    .optional()
+    .transform((value) => value === "on"),
+});
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -154,9 +166,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    const { custodian } = parseData(
+    const { custodian, requireSignedCustody } = parseData(
       await request.formData(),
-      AssignCustodySchema,
+      AssignCustodyWithSignatureSchema,
       {
         additionalData: { userId, assetId },
         message: "Please select a team member",
@@ -190,6 +202,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         user: {
           select: {
             id: true,
+            email: true,
             firstName: true,
             lastName: true,
             displayName: true,
@@ -218,6 +231,88 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         additionalData: { userId, assetId, custodianId },
         label: "Assets",
       });
+    }
+
+    const organization = await db.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        name: true,
+        customEmailFooter: true,
+        enableSignedCustodyOnAssignment: true,
+        requireCustodySignatureOnAssignment: true,
+      },
+    });
+
+    if (
+      (requireSignedCustody ||
+        shouldRequestSignedCustody({
+          organization,
+          custodianUserEmail: custodianTeamMember.user?.email,
+        })) &&
+      !!custodianTeamMember.user?.email
+    ) {
+      const signedRequests = await db
+        .$transaction(async (tx) => {
+          const asset = await tx.asset.findFirstOrThrow({
+            where: { id: assetId, organizationId },
+            select: { id: true, title: true, status: true },
+          });
+
+          if (asset.status !== AssetStatus.AVAILABLE) {
+            throw new ShelfError({
+              cause: null,
+              title: "Asset is unavailable",
+              message:
+                "This asset is no longer available for custody assignment.",
+              additionalData: { userId, assetId, custodianId },
+              label: "Assets",
+              status: 409,
+              shouldBeCaptured: false,
+            });
+          }
+
+          return createSignedCustodyRequests({
+            tx,
+            assets: [asset],
+            organizationId,
+            requestedBy: user,
+            teamMember: {
+              id: custodianId,
+              name: custodianDisplayName,
+              user: custodianTeamMember.user,
+            },
+          });
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while creating the custody signature request.",
+            additionalData: { userId, assetId, custodianId },
+            label: "Assets",
+          });
+        });
+
+      await sendSignedCustodyRequestEmails({
+        requests: signedRequests,
+        recipientEmail: custodianTeamMember.user!.email,
+        recipientName:
+          resolveUserDisplayName(custodianTeamMember.user) ||
+          custodianDisplayName,
+        organizationName: organization.name,
+        customEmailFooter: organization.customEmailFooter,
+      });
+
+      sendNotification({
+        title: `Signature request sent to ${custodianDisplayName}`,
+        message:
+          "Custody will be assigned after the custodian signs the agreement.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return redirect(`/assets/${assetId}`);
     }
 
     /** Assign custody to an asset inside a transaction so that the
@@ -335,7 +430,7 @@ export default function Custody() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const zo = useZorm("BulkAssignCustody", AssignCustodySchema);
+  const zo = useZorm("BulkAssignCustody", AssignCustodyWithSignatureSchema);
   const { isSelfService } = useUserRoleHelper();
   const error = zo.errors.custodian()?.message || actionData?.error?.message;
 
@@ -391,6 +486,20 @@ export default function Custody() {
           </div>
           {error ? (
             <div className="-mt-8 mb-8 text-sm text-error-500">{error}</div>
+          ) : null}
+
+          {!isSelfService ? (
+            <label className="-mt-4 mb-8 flex items-start gap-3 text-left text-sm text-gray-700">
+              <input
+                type="checkbox"
+                name={zo.fields.requireSignedCustody()}
+                className="mt-1"
+                disabled={disabled}
+              />
+              <span>
+                Require this custodian to sign before custody is assigned
+              </span>
+            </label>
           ) : null}
 
           {firstReservedBookingId ? (

@@ -43,10 +43,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams } = parseData(
-      formData,
-      BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
-    );
+    const { assetIds, custodian, currentSearchParams, requireSignedCustody } =
+      parseData(
+        formData,
+        BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
+      );
 
     // Validate that the custodian belongs to the same organization
     const teamMember = await getTeamMember({
@@ -85,7 +86,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await bulkAssignCustody({
+    const result = (await bulkAssignCustody({
       userId,
       assetIds,
       custodianId: custodian.id,
@@ -93,12 +94,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       currentSearchParams,
       settings,
-    });
+      requireSignedCustody,
+    })) ?? { assigned: assetIds.length, pendingSignatureRequests: 0 };
 
     sendNotification({
-      title: `Assets are now in custody of ${custodian.name}`,
-      message:
-        "Remember, these assets will be unavailable until it is manually checked in.",
+      title: result.pendingSignatureRequests
+        ? `Signature request sent to ${custodian.name}`
+        : `Assets are now in custody of ${custodian.name}`,
+      message: result.pendingSignatureRequests
+        ? "Custody will be assigned after the custodian signs the agreement."
+        : "Remember, these assets will be unavailable until it is manually checked in.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
