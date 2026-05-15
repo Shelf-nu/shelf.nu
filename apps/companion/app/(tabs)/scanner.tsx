@@ -473,6 +473,12 @@ function ScannerContent() {
           });
 
           setTimeout(() => {
+            // why: pushing the asset detail cross-tab from the Scanner tab
+            // leaves the Assets stack with no list beneath it, stranding the
+            // user (no back target). Root the Assets tab at its list first,
+            // then push the detail, so "back" returns to the Assets list —
+            // mirroring the working list→detail path.
+            router.push("/(tabs)/assets");
             router.push(`/(tabs)/assets/${asset.id}`);
             setScanResult(null);
             finalizeScan();

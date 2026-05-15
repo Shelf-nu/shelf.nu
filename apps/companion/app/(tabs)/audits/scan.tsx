@@ -500,6 +500,8 @@ function AuditScannerContent() {
           name: asset.name,
           thumbnailImage: asset.thumbnailImage || asset.mainImage,
           mainImage: asset.mainImage,
+          locationName: asset.locationName,
+          categoryName: asset.categoryName,
         });
       }
     }
