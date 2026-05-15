@@ -16,6 +16,7 @@ import {
   cancelAuditSession,
   deleteAuditSession,
   bulkDeleteAudits,
+  duplicateAuditSession,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -1370,6 +1371,245 @@ describe("audit service", () => {
           status: 500,
           message: expect.stringMatching(/Failed to bulk delete audits/),
         });
+      });
+    });
+  });
+
+  describe("duplicateAuditSession", () => {
+    const baseInput = {
+      auditSessionId: "audit-original",
+      organizationId: "org-1",
+      userId: "user-duplicator",
+    };
+
+    const originalAudit = {
+      id: "audit-original",
+      name: "Hull PC Bank Audit",
+      description: "Quarterly check",
+      organizationId: "org-1",
+      createdById: "user-1",
+      status: AuditStatus.COMPLETED,
+      scopeMeta: { contextType: "tag", contextName: "Canary PCs" },
+      targetId: null,
+      // Prisma's `where: { expected: true }` filter is applied at query time;
+      // the mock returns only the expected rows the service is meant to see.
+      assets: [
+        { assetId: "asset-1" },
+        { assetId: "asset-2" },
+        { assetId: "asset-3" },
+      ],
+    };
+
+    beforeEach(() => {
+      // Match the clearAllMocks pattern every other nested suite uses, so
+      // mock state can't leak in either direction. clearAllMocks resets
+      // call history; mockResolvedValue assignments below re-establish what
+      // each test relies on.
+      vi.clearAllMocks();
+
+      // Original audit lookup — overridden per test for not-found cases.
+      mockDb.auditSession.findFirst.mockResolvedValue(originalAudit);
+
+      // Default: all assets still exist.
+      mockDb.asset.findMany.mockResolvedValue([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+        { id: "asset-3", title: "PC #3" },
+      ]);
+
+      // createAuditSession internals (called by duplicateAuditSession).
+      mockDb.auditSession.create.mockResolvedValue({
+        id: "audit-copy",
+        name: `${originalAudit.name} (Copy)`,
+        description: originalAudit.description,
+        organizationId: "org-1",
+        createdById: baseInput.userId,
+        expectedAssetCount: 3,
+        foundAssetCount: 0,
+        missingAssetCount: 3,
+        unexpectedAssetCount: 0,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        status: AuditStatus.PENDING,
+        scopeMeta: originalAudit.scopeMeta,
+        targetId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockDb.auditSession.findUnique.mockResolvedValue({
+        id: "audit-copy",
+        name: `${originalAudit.name} (Copy)`,
+        description: originalAudit.description,
+        organizationId: "org-1",
+        createdById: baseInput.userId,
+        expectedAssetCount: 3,
+        foundAssetCount: 0,
+        missingAssetCount: 3,
+        unexpectedAssetCount: 0,
+        status: AuditStatus.PENDING,
+        scopeMeta: originalAudit.scopeMeta,
+        targetId: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        assignments: [],
+      });
+      mockDb.auditAsset.createMany.mockResolvedValue({ count: 3 });
+      mockDb.auditAsset.findMany.mockResolvedValue([
+        { id: "aa-1", assetId: "asset-1" },
+        { id: "aa-2", assetId: "asset-2" },
+        { id: "aa-3", assetId: "asset-3" },
+      ]);
+    });
+
+    it("creates a (Copy) audit and reports zero dropped assets when all assets still exist", async () => {
+      const result = await duplicateAuditSession(baseInput);
+
+      // The include must filter to expected:true so unexpected scan rows
+      // don't get promoted into the duplicate's scope.
+      expect(mockDb.auditSession.findFirst).toHaveBeenCalledWith({
+        where: { id: "audit-original", organizationId: "org-1" },
+        include: {
+          assets: { where: { expected: true }, select: { assetId: true } },
+        },
+      });
+
+      // The validateExistingAssetIds query — drives dropped-asset counting.
+      expect(mockDb.asset.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ["asset-1", "asset-2", "asset-3"] },
+          organizationId: "org-1",
+        },
+        select: { id: true },
+      });
+
+      // createAuditSession received the (Copy) name and scopeMeta as-is.
+      expect(mockDb.auditSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: "Hull PC Bank Audit (Copy)",
+          description: "Quarterly check",
+          organizationId: "org-1",
+          createdById: baseInput.userId,
+          scopeMeta: originalAudit.scopeMeta,
+        }),
+      });
+
+      // Due date and assignments must NOT carry over (PRD).
+      const createCall = mockDb.auditSession.create.mock.calls[0][0];
+      expect(createCall.data.dueDate).toBeUndefined();
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        newSession: expect.objectContaining({ id: "audit-copy" }),
+        droppedAssetCount: 0,
+        originalAssetCount: 3,
+      });
+    });
+
+    it("succeeds with a non-zero droppedAssetCount when some assets no longer exist", async () => {
+      // Only 2 of 3 assets still exist in the org.
+      mockDb.asset.findMany.mockResolvedValueOnce([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+      ]);
+      // createAuditSession's own asset existence check — must match the
+      // filtered list it's called with.
+      mockDb.asset.findMany.mockResolvedValueOnce([
+        { id: "asset-1", title: "PC #1" },
+        { id: "asset-2", title: "PC #2" },
+      ]);
+
+      const result = await duplicateAuditSession(baseInput);
+
+      expect(result.droppedAssetCount).toBe(1);
+      expect(result.originalAssetCount).toBe(3);
+      expect(result.newSession).toMatchObject({ id: "audit-copy" });
+    });
+
+    it("throws a 400 ShelfError when no original assets remain", async () => {
+      mockDb.asset.findMany.mockResolvedValueOnce([]);
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringMatching(/None of the original assets/),
+      });
+
+      // Must not have attempted to create anything.
+      expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    });
+
+    it("throws a 404 ShelfError when the source audit is not found", async () => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce(null);
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 404,
+        message: expect.stringMatching(/Audit not found/),
+      });
+
+      expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    });
+
+    it("preserves scopeMeta as-is even when it is null", async () => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce({
+        ...originalAudit,
+        scopeMeta: null,
+      });
+
+      await duplicateAuditSession(baseInput);
+
+      expect(mockDb.auditSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ scopeMeta: undefined }),
+      });
+    });
+
+    it("wraps unknown causes in a 500 ShelfError", async () => {
+      mockDb.auditSession.findFirst.mockRejectedValueOnce(
+        new Error("DB exploded")
+      );
+
+      await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+        status: 500,
+        message: expect.stringMatching(/Something went wrong/),
+      });
+    });
+
+    it.each([
+      ["PENDING", AuditStatus.PENDING],
+      ["ACTIVE", AuditStatus.ACTIVE],
+    ])(
+      "rejects duplication of a %s audit with a 400 (server-side guard)",
+      async (_label, status) => {
+        mockDb.auditSession.findFirst.mockResolvedValueOnce({
+          ...originalAudit,
+          status,
+        });
+
+        await expect(duplicateAuditSession(baseInput)).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /completed, cancelled, or archived audits can be duplicated/
+          ),
+        });
+
+        expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      ["COMPLETED", AuditStatus.COMPLETED],
+      ["CANCELLED", AuditStatus.CANCELLED],
+      ["ARCHIVED", AuditStatus.ARCHIVED],
+    ])("allows duplication of a %s audit", async (_label, status) => {
+      mockDb.auditSession.findFirst.mockResolvedValueOnce({
+        ...originalAudit,
+        status,
+      });
+
+      await expect(duplicateAuditSession(baseInput)).resolves.toMatchObject({
+        newSession: expect.objectContaining({ id: "audit-copy" }),
       });
     });
   });

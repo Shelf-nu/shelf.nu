@@ -10,7 +10,7 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { BookingStatus } from "@prisma/client";
+import type { BookingStatus, Currency } from "@prisma/client";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -557,6 +557,16 @@ export interface ReportPdfMetaBase {
   organizationUpdatedAt: Date;
   generatedAt: string;
   totalCount: number;
+  /**
+   * ISO 4217 currency code of the workspace whose data the PDF is rendering.
+   * Used by the PDF renderer to format monetary values via `formatCurrency`.
+   */
+  currency: Currency;
+  /**
+   * BCP 47 locale tag (e.g. `"en-GB"`, `"fr-FR"`) resolved from the request's
+   * client hints. Drives currency + number formatting in the PDF.
+   */
+  locale: string;
 }
 
 /** Data structure for compliance report PDF generation */

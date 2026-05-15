@@ -1146,15 +1146,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
-          zone: hints.timeZone,
-        }).toJSDate();
-
+        // `endDate` is already a zoned `Date` produced by the schema's
+        // `coerceLocalDate(timeZone)`, so no further parsing is needed here.
         await extendBooking({
           id,
           organizationId,
           hints,
-          newEndDate,
+          newEndDate: endDate,
           userId,
           role,
         });

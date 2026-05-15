@@ -55,8 +55,6 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Shelf needs camera access to scan QR codes and barcodes on your assets.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Shelf needs photo access to attach images to your assets.</string>
 	<key>NSUserActivityTypes</key>

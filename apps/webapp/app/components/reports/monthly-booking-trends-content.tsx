@@ -33,6 +33,54 @@ import type {
 } from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 
+/**
+ * Column definitions for the Monthly Booking Trends table, declared at
+ * module scope so cell function identities stay stable across renders. See
+ * `.claude/rules/react-render-stability.md` for the underlying rule.
+ */
+const MONTHLY_BOOKING_TRENDS_COLUMNS: ColumnDef<MonthlyBookingTrendRow>[] = [
+  {
+    accessorKey: "month",
+    header: "Month",
+    cell: ({ row }) => (
+      <span className="font-medium">{row.original.month}</span>
+    ),
+  },
+  {
+    accessorKey: "bookingsCreated",
+    header: "Bookings Created",
+    cell: ({ row }) => <NumberCell value={row.original.bookingsCreated} />,
+  },
+  {
+    accessorKey: "bookingsCompleted",
+    header: "Bookings Completed",
+    cell: ({ row }) => <NumberCell value={row.original.bookingsCompleted} />,
+  },
+  {
+    accessorKey: "momChange",
+    header: "vs Last Month",
+    cell: ({ row }) => {
+      const change = row.original.momChange;
+      if (change === null) return <span className="text-gray-400">—</span>;
+      return (
+        <span
+          className={tw(
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+            change > 0
+              ? "bg-green-100 text-green-700"
+              : change < 0
+              ? "bg-red-100 text-red-700"
+              : "bg-gray-100 text-gray-700"
+          )}
+        >
+          {change > 0 ? "+" : ""}
+          {change}%
+        </span>
+      );
+    },
+  },
+];
+
 /** Props for {@link MonthlyBookingTrendsContent}. */
 type Props = {
   /** Monthly trend rows for the table body (one entry per month). */
@@ -62,49 +110,7 @@ export function MonthlyBookingTrendsContent({
   totalRows,
   chartSeries,
 }: Props) {
-  // Column definitions for trends table
-  const columns: ColumnDef<MonthlyBookingTrendRow>[] = [
-    {
-      accessorKey: "month",
-      header: "Month",
-      cell: ({ row }) => (
-        <span className="font-medium">{row.original.month}</span>
-      ),
-    },
-    {
-      accessorKey: "bookingsCreated",
-      header: "Bookings Created",
-      cell: ({ row }) => <NumberCell value={row.original.bookingsCreated} />,
-    },
-    {
-      accessorKey: "bookingsCompleted",
-      header: "Bookings Completed",
-      cell: ({ row }) => <NumberCell value={row.original.bookingsCompleted} />,
-    },
-    {
-      accessorKey: "momChange",
-      header: "vs Last Month",
-      cell: ({ row }) => {
-        const change = row.original.momChange;
-        if (change === null) return <span className="text-gray-400">—</span>;
-        return (
-          <span
-            className={tw(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-              change > 0
-                ? "bg-green-100 text-green-700"
-                : change < 0
-                ? "bg-red-100 text-red-700"
-                : "bg-gray-100 text-gray-700"
-            )}
-          >
-            {change > 0 ? "+" : ""}
-            {change}%
-          </span>
-        );
-      },
-    },
-  ];
+  const columns = MONTHLY_BOOKING_TRENDS_COLUMNS;
 
   // Extract KPI values
   const totalBookings =

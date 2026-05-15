@@ -23,6 +23,60 @@ import { ComplianceHero } from "./compliance-hero";
 import { ReportEmptyState } from "./report-empty-state";
 import { ReportTable, StatusCell, DateCell, NumberCell } from "./report-table";
 
+/**
+ * Column definitions for the Booking Compliance table, declared at module
+ * scope so cell function identities stay stable across renders. See
+ * `.claude/rules/react-render-stability.md` for the underlying rule.
+ */
+const BOOKING_COMPLIANCE_COLUMNS: ColumnDef<BookingComplianceRow>[] = [
+  {
+    accessorKey: "bookingName",
+    header: "Booking",
+    cell: ({ row }) => (
+      <span className="font-medium">{row.original.bookingName}</span>
+    ),
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ row }) => {
+      const status = row.original.status;
+      const variant = getStatusVariant(status);
+      return <StatusCell status={formatStatus(status)} variant={variant} />;
+    },
+  },
+  {
+    accessorKey: "custodian",
+    header: "Booked by",
+    cell: ({ row }) =>
+      row.original.custodian || <span className="text-gray-400">—</span>,
+  },
+  {
+    accessorKey: "assetCount",
+    header: "Assets",
+    cell: ({ row }) => <NumberCell value={row.original.assetCount} />,
+  },
+  {
+    accessorKey: "scheduledEnd",
+    header: "Due Date",
+    cell: ({ row }) => <DateCell date={row.original.scheduledEnd} />,
+  },
+  {
+    accessorKey: "latenessMs",
+    header: "Return Status",
+    cell: ({ row }) => {
+      const { isOnTime, latenessMs } = row.original;
+      if (isOnTime) {
+        return <StatusCell status="On time" variant="success" />;
+      }
+      const lateness = formatLateness(latenessMs);
+      return (
+        <span className="text-sm font-medium text-orange-600">{lateness}</span>
+      );
+    },
+  },
+];
+
 /** Props for {@link BookingComplianceContent}. */
 type Props = {
   /** Booking detail rows for the current page (already sorted/paginated by the server). */
@@ -104,58 +158,7 @@ export function BookingComplianceContent({
     setSearchParams(params, { replace: true });
   };
 
-  // Column definitions for the booking compliance table
-  const columns: ColumnDef<BookingComplianceRow>[] = [
-    {
-      accessorKey: "bookingName",
-      header: "Booking",
-      cell: ({ row }) => (
-        <span className="font-medium">{row.original.bookingName}</span>
-      ),
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        const status = row.original.status;
-        const variant = getStatusVariant(status);
-        return <StatusCell status={formatStatus(status)} variant={variant} />;
-      },
-    },
-    {
-      accessorKey: "custodian",
-      header: "Booked by",
-      cell: ({ row }) =>
-        row.original.custodian || <span className="text-gray-400">—</span>,
-    },
-    {
-      accessorKey: "assetCount",
-      header: "Assets",
-      cell: ({ row }) => <NumberCell value={row.original.assetCount} />,
-    },
-    {
-      accessorKey: "scheduledEnd",
-      header: "Due Date",
-      cell: ({ row }) => <DateCell date={row.original.scheduledEnd} />,
-    },
-    {
-      accessorKey: "latenessMs",
-      header: "Return Status",
-      cell: ({ row }) => {
-        const { isOnTime, latenessMs } = row.original;
-        if (isOnTime) {
-          return <StatusCell status="On time" variant="success" />;
-        }
-        // Format lateness as human-readable
-        const lateness = formatLateness(latenessMs);
-        return (
-          <span className="text-sm font-medium text-orange-600">
-            {lateness}
-          </span>
-        );
-      },
-    },
-  ];
+  const columns = BOOKING_COMPLIANCE_COLUMNS;
 
   return (
     <div className="flex flex-col gap-4">
