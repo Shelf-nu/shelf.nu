@@ -1144,9 +1144,27 @@ export async function recordAuditScan(
       }),
       db.asset.findUnique({
         where: { id: assetId },
-        select: { id: true, title: true },
+        select: { id: true, title: true, organizationId: true },
       }),
     ]);
+
+    // Guard the AuditScan.assetId foreign key. Without this, a deleted asset,
+    // a cross-org asset, or a bogus id reaches `tx.auditScan.create` and
+    // surfaces as a raw Prisma P2003 (`AuditScan_assetId_fkey`) wrapped in a
+    // captured "Failed to record audit scan". Returning a clean, non-captured
+    // 404 keeps Sentry quiet and gives real users a meaningful message when
+    // they scan something that is not a valid asset in this workspace.
+    if (!scannedAsset || scannedAsset.organizationId !== organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "The scanned asset could not be found in this workspace. It may have been deleted or belong to a different organization.",
+        additionalData: { auditSessionId, assetId, organizationId },
+        status: 404,
+        shouldBeCaptured: false,
+        label,
+      });
+    }
 
     // Record the scan in a transaction
     const result = await db.$transaction(
@@ -1301,6 +1319,13 @@ export async function recordAuditScan(
 
     return result;
   } catch (cause) {
+    // Preserve already-typed ShelfErrors (e.g. the asset/session 404s above)
+    // so their status and `shouldBeCaptured: false` survive instead of being
+    // re-wrapped into a captured generic 500. Matches the pattern used by
+    // other handlers in this file.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Failed to record audit scan",
