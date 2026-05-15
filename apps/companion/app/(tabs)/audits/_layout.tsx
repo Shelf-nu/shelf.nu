@@ -2,6 +2,12 @@ import { Stack } from "expo-router";
 import { useTheme } from "@/lib/theme-context";
 import { fontSize } from "@/lib/constants";
 
+/**
+ * Anchor this stack at its list screen so cross-tab / deep-link navigation
+ * into an audit always leaves a back path to the audits list.
+ */
+export const unstable_settings = { initialRouteName: "index" };
+
 export default function AuditsLayout() {
   const { colors } = useTheme();
 

@@ -18,6 +18,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -473,7 +474,9 @@ function ScannerContent() {
           });
 
           setTimeout(() => {
-            router.push(`/(tabs)/assets/${asset.id}`);
+            // Cross-surface nav must go through pushIntoTab so the Assets
+            // tab is rooted at its list and "back" works (see navigation.ts).
+            pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${asset.id}`);
             setScanResult(null);
             finalizeScan();
           }, 950);
@@ -1333,7 +1336,7 @@ const useStyles = createStyles((colors) => ({
     alignItems: "center" as const,
     alignSelf: "center" as const,
     backgroundColor: "rgba(0,0,0,0.6)",
-    borderRadius: borderRadius.full,
+    borderRadius: borderRadius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     gap: 4,

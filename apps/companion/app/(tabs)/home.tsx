@@ -20,6 +20,8 @@ import {
   type DashboardAudit,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { pushIntoTab } from "@/lib/navigation";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -205,21 +207,31 @@ function HomeContent() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickActionsGrid}>
-          <QuickAction
-            icon="clipboard-outline"
-            label="Audits"
-            onPress={() => router.push("/(tabs)/audits")}
-          />
+          {currentOrg?.auditsEnabled && (
+            <QuickAction
+              icon="clipboard-outline"
+              label="Audits"
+              onPress={() => router.push("/(tabs)/audits")}
+            />
+          )}
           <QuickAction
             icon="scan-outline"
             label="Scan Code"
             onPress={() => router.push("/(tabs)/scanner")}
           />
-          <QuickAction
-            icon="add-circle-outline"
-            label="New Asset"
-            onPress={() => router.push("/(tabs)/assets/new")}
-          />
+          {userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "create",
+          }) && (
+            <QuickAction
+              icon="add-circle-outline"
+              label="New Asset"
+              onPress={() =>
+                pushIntoTab("/(tabs)/assets", "/(tabs)/assets/new")
+              }
+            />
+          )}
           <QuickAction
             icon="calendar-outline"
             label="Bookings"
@@ -279,14 +291,19 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
       )}
 
       {/* ── Active Audits ─────────────────────────── */}
-      {activeAudits && activeAudits.length > 0 && (
+      {/* Gated on the Audits add-on, same as the quick action above —
+          the dashboard endpoint may still return activeAudits, but a
+          non-add-on workspace must not see tappable audit cards that 403. */}
+      {currentOrg?.auditsEnabled && activeAudits && activeAudits.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>
@@ -309,7 +326,9 @@ function HomeContent() {
             <AuditCard
               key={audit.id}
               audit={audit}
-              onPress={() => router.push(`/(tabs)/audits/${audit.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/audits", `/(tabs)/audits/${audit.id}`)
+              }
             />
           ))}
         </View>
@@ -325,7 +344,9 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
@@ -341,7 +362,9 @@ function HomeContent() {
             <BookingCard
               key={b.id}
               booking={b}
-              onPress={() => router.push(`/(tabs)/bookings/${b.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${b.id}`)
+              }
             />
           ))}
         </View>
@@ -369,7 +392,9 @@ function HomeContent() {
             <AssetRow
               key={asset.id}
               asset={asset}
-              onPress={() => router.push(`/(tabs)/assets/${asset.id}`)}
+              onPress={() =>
+                pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${asset.id}`)
+              }
             />
           ))}
         </View>

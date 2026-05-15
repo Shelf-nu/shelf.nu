@@ -5,6 +5,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
 } from "~/modules/api/mobile-auth.server";
 import {
   completeAuditSession,
@@ -37,6 +38,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await enforceUserRateLimit(user.id, "bulk");
 
     const organizationId = await requireOrganizationAccess(request, user.id);
+    await requireMobileAuditsEnabled(organizationId);
 
     await requireMobilePermission({
       userId: user.id,

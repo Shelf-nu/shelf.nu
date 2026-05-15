@@ -1,3 +1,8 @@
+/**
+ * Test suite for POST /api/mobile/audits/complete.
+ * Covers audit-session completion, assignee validation, permission
+ * checks, and the paid Audits add-on enforcement (403 when disabled).
+ */
 import { action } from "~/routes/api+/mobile+/audits.complete";
 import { createActionArgs } from "@mocks/remix";
 
@@ -29,6 +34,7 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  requireMobileAuditsEnabled: vi.fn(),
   requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
@@ -54,6 +60,7 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
   requireMobilePermission,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
@@ -94,6 +101,7 @@ describe("POST /api/mobile/audits/complete", () => {
     });
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
     (requireAuditAssignee as any).mockResolvedValue(undefined);
@@ -165,6 +173,24 @@ describe("POST /api/mobile/audits/complete", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
 
+    expect(completeAuditSession).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 when the Audits add-on is disabled", async () => {
+    const auditsError = new Error("Audits add-on required");
+    (auditsError as any).status = 403;
+    (requireMobileAuditsEnabled as any).mockRejectedValue(auditsError);
+    (makeShelfError as any).mockReturnValue({
+      message: "Audits add-on required",
+      status: 403,
+    });
+
+    const request = createCompleteRequest({ sessionId: "session-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("Audits add-on required");
     expect(completeAuditSession).not.toHaveBeenCalled();
   });
 });

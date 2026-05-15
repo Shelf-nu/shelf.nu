@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
 } from "~/modules/api/mobile-auth.server";
 import {
   getAuditSessionDetails,
@@ -24,6 +25,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    await requireMobileAuditsEnabled(organizationId);
 
     const { auditId } = getParams(
       params,
@@ -85,6 +87,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         scannedAt:
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
+        assetLocationName: s.assetLocationName,
+        auditNotesCount: s.auditNotesCount,
+        auditImagesCount: s.auditImagesCount,
       })),
       canScan: session.status === "PENDING" || session.status === "ACTIVE",
       canComplete: session.status === "ACTIVE",

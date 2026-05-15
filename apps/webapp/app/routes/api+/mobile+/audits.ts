@@ -4,6 +4,7 @@ import {
   getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
 } from "~/modules/api/mobile-auth.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -34,6 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    await requireMobileAuditsEnabled(organizationId);
 
     // why: BASE/SELF_SERVICE users must NEVER see audits they're not
     // assigned to — passing these two params makes

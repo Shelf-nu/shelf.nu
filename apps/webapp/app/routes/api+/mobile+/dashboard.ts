@@ -25,6 +25,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
+    // Server-enforce the paid Audits add-on (same principle as the mobile
+    // audit routes' requireMobileAuditsEnabled): without this the dashboard
+    // serves activeAudits to non-add-on workspaces — a paywall bypass /
+    // data leak even with the client cards hidden.
+    const org = await db.organization.findUnique({
+      where: { id: organizationId },
+      select: { auditsEnabled: true },
+    });
+    const auditsEnabled = org?.auditsEnabled ?? false;
+
     // Run all queries in parallel for speed
     const [
       totalAssets,
@@ -145,11 +155,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // Active audits (PENDING or ACTIVE)
+      // Active audits (PENDING or ACTIVE) — gated on the Audits add-on.
+      // Empty `id: { in: [] }` yields no rows for non-add-on workspaces,
+      // so the dashboard never serializes audit data without the add-on.
       db.auditSession.findMany({
         where: {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
+          ...(auditsEnabled ? {} : { id: { in: [] } }),
         },
         select: {
           id: true,

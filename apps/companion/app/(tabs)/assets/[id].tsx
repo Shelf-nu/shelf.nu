@@ -17,6 +17,7 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type Location as LocationType } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -54,6 +55,25 @@ export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentOrg } = useOrg();
+  // Role-aware UI. Server enforces these on every API call
+  // (requireMobilePermission); this hides actions the user cannot perform
+  // so BASE/SELF_SERVICE don't tap buttons that 403. Mirrors scanner.tsx.
+  const roles = currentOrg?.roles;
+  const canUpdateAsset = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "update",
+  });
+  const canDeleteAsset = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "delete",
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "custody",
+  });
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
 
@@ -263,6 +283,7 @@ export default function AssetDetailScreen() {
             onImagePress={() => setShowImageZoom(true)}
             onUploadPress={handleImagePress}
             isUploading={isUploadingImage}
+            canUpload={canUpdateAsset}
           />
 
           {/* ── Title + Status ─────────────────────────── */}
@@ -298,6 +319,9 @@ export default function AssetDetailScreen() {
             isActionLoading={isActionLoading}
             showOverflowMenu={showOverflowMenu}
             setShowOverflowMenu={setShowOverflowMenu}
+            canUpdate={canUpdateAsset}
+            canDelete={canDeleteAsset}
+            canCustody={canCustody}
           />
 
           {/* ── Details Card ───────────────────────────── */}
@@ -414,12 +438,6 @@ export default function AssetDetailScreen() {
                 <Text style={styles.qrIdText} selectable numberOfLines={1}>
                   {asset.qrCodes[0].id}
                 </Text>
-                {asset.qrCodes.length > 1 && (
-                  <Text style={styles.qrExtraText}>
-                    +{asset.qrCodes.length - 1} more QR code
-                    {asset.qrCodes.length > 2 ? "s" : ""} linked
-                  </Text>
-                )}
               </View>
             </View>
           )}
@@ -437,11 +455,11 @@ export default function AssetDetailScreen() {
             onChangeNoteText={setNoteText}
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
-            // why: surface the no-org-context state to the user. Without
-            // this, `handlePostNote` silently early-returns on missing
-            // orgId and the tap feels broken. The disabled state + hint
-            // label is the visible feedback.
-            canPostNote={!!currentOrg?.id}
+            // why: composer shows only when the workspace is resolved AND
+            // the role can update the asset (server requires asset:update
+            // to add a note). BASE/SELF_SERVICE get a read-only activity
+            // feed instead of a box that 403s on Post.
+            canPostNote={!!currentOrg?.id && canUpdateAsset}
           />
         </ScrollView>
       </KeyboardAvoidingView>

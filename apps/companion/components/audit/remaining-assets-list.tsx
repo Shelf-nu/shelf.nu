@@ -14,7 +14,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 
-const REMAINING_ITEM_HEIGHT = 52;
+const REMAINING_ITEM_HEIGHT = 64;
 const keyExtractor = (item: RemainingAsset) => item.id;
 
 export type RemainingAsset = {
@@ -22,6 +22,8 @@ export type RemainingAsset = {
   name: string;
   thumbnailImage: string | null;
   mainImage: string | null;
+  locationName: string | null;
+  categoryName: string | null;
 };
 
 type RemainingAssetsListProps = {
@@ -70,9 +72,39 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
               <Ionicons name="cube-outline" size={16} color={colors.gray300} />
             </View>
           )}
-          <Text style={styles.remainingItemName} numberOfLines={1}>
-            {item.name}
-          </Text>
+          <View style={styles.remainingItemInfo}>
+            <Text style={styles.remainingItemName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {(item.locationName || item.categoryName) && (
+              <View style={styles.remainingMetaRow}>
+                {item.locationName ? (
+                  <View style={styles.remainingMetaPart}>
+                    <Ionicons
+                      name="location-outline"
+                      size={12}
+                      color={colors.mutedLight}
+                    />
+                    <Text style={styles.remainingMeta} numberOfLines={1}>
+                      {item.locationName}
+                    </Text>
+                  </View>
+                ) : null}
+                {item.categoryName ? (
+                  <View style={styles.remainingMetaPart}>
+                    <Ionicons
+                      name="pricetag-outline"
+                      size={12}
+                      color={colors.mutedLight}
+                    />
+                    <Text style={styles.remainingMeta} numberOfLines={1}>
+                      {item.categoryName}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </View>
         </View>
       );
     },
@@ -200,11 +232,30 @@ const useStyles = createStyles((colors) => ({
     justifyContent: "center",
     alignItems: "center",
   },
-  remainingItemName: {
+  remainingItemInfo: {
     flex: 1,
+    gap: 2,
+  },
+  remainingItemName: {
     fontSize: fontSize.sm,
     fontWeight: "500" as const,
     color: colors.foreground,
+  },
+  remainingMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  remainingMetaPart: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexShrink: 1,
+  },
+  remainingMeta: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    flexShrink: 1,
   },
   remainingImageZoomBadge: {
     position: "absolute",

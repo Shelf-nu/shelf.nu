@@ -4,6 +4,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
 } from "~/modules/api/mobile-auth.server";
 import { recordAuditScan } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -32,6 +33,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    await requireMobileAuditsEnabled(organizationId);
 
     await requireMobilePermission({
       userId: user.id,

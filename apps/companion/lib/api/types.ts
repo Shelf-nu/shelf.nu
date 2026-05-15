@@ -6,6 +6,13 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  /**
+   * Whether this workspace has the paid Audits add-on enabled
+   * (Stripe-gated; `Organization.auditsEnabled` server-side, surfaced via
+   * `/api/mobile/me`). When false the companion hides Audits entry points
+   * and every mobile audit endpoint returns 403.
+   */
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
@@ -358,6 +365,12 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  /** Asset's location name at scan time, or null if it has no location set. */
+  assetLocationName: string | null;
+  /** Number of COMMENT notes recorded against this scanned asset. */
+  auditNotesCount: number;
+  /** Number of condition photos uploaded for this scanned asset. */
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {
