@@ -29,6 +29,7 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  requireMobileAuditsEnabled: vi.fn(),
   requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
@@ -54,6 +55,7 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  requireMobileAuditsEnabled,
   requireMobilePermission,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
@@ -94,6 +96,7 @@ describe("POST /api/mobile/audits/complete", () => {
     });
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
     (requireAuditAssignee as any).mockResolvedValue(undefined);
