@@ -45,6 +45,19 @@ See `apps/companion/README.md` for full setup guide (LAN IPs, HTTP mode, device 
 - `pnpm --filter @shelf/webapp validate` - Complete pre-commit validation
 - `pnpm webapp:doctor` - Run [react-doctor](https://www.react.doctor/) against the webapp (React health diagnostics: hook misuse, perf, a11y, architecture). Advisory only — not wired into `validate` or CI gates.
 
+### Security Review Agent (pre-commit)
+
+A Claude-powered security reviewer runs automatically on `git commit` against security-sensitive diffs (routes, `*.server.ts`, prisma, Supabase wiring, server middleware, new dependencies). It catches the regressions hit most often — cross-org IDORs, missing `requirePermission` gates, open redirects, missing Zod validation, audit-trail gaps — before code reaches review.
+
+- Interactive subagent: `.claude/agents/shelf-security-reviewer.md` (full toolset — for manual `claude --agent shelf-security-reviewer ...` use with permission prompts).
+- Headless subagent: `.claude/agents/shelf-security-reviewer-headless.md` (`Skill`-only — what the pre-commit hook invokes; safe under `bypassPermissions` because there's no Bash/network channel to exfiltrate through).
+- Pre-commit wrapper: `scripts/security-review-staged.sh`
+- Wired into `lefthook.yml` at priority 5 (after typecheck)
+
+Advisory by default — findings print, the commit proceeds. Opt in to blocking with `SHELF_SEC_REVIEW_BLOCK=1`; skip with `SHELF_SEC_REVIEW=0`. Manual use: `claude --agent shelf-security-reviewer "review PR #N"`.
+
+📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
+
 ### Database
 
 All database commands run via the `@shelf/database` package (`packages/database/`). This package owns the Prisma schema, migrations, and client generation. The webapp does **not** manage database concerns directly — it consumes `@shelf/database` as a workspace dependency.
