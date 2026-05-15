@@ -1175,6 +1175,15 @@ export async function recordAuditScan(
     // AuditScan row pointing at a cross-org/deleted asset (legacy rows from
     // the previously unguarded path, or imported bad data) must not let a
     // retry report success and bypass this check.
+    //
+    // why: the residual "asset moved to another org between this read and
+    // `tx.auditScan.create`" race is not reachable here — `Asset.organizationId`
+    // is set at creation and never mutated anywhere in the codebase (org
+    // ownership transfer reassigns an org's owner, not an asset's org). The
+    // only reachable mid-window race is deletion, handled by the P2003
+    // fallback below. An in-transaction SELECT ... FOR UPDATE / composite-FK
+    // migration would add lock contention to this hot scan path to guard an
+    // unreachable state, so it is intentionally out of scope.
     if (!scannedAsset || scannedAsset.organizationId !== organizationId) {
       throw new ShelfError({
         cause: null,
