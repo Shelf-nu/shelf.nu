@@ -47,45 +47,55 @@ export const NotesSection = memo(function NotesSection({
         Activity{notes?.length ? ` (${notes.length})` : ""}
       </Text>
 
-      {/* Add note input */}
-      <View style={styles.noteInputContainer}>
-        <TextInput
-          style={styles.noteInput}
-          value={noteText}
-          onChangeText={onChangeNoteText}
-          placeholder={canPostNote ? "Add a note..." : "Loading workspace…"}
-          placeholderTextColor={colors.placeholderText}
-          editable={canPostNote}
-          multiline
-          maxLength={5000}
-          accessibilityLabel="Add a note"
-          accessibilityHint={
-            canPostNote ? undefined : "Workspace context is still loading."
-          }
-        />
-        <TouchableOpacity
-          style={[
-            styles.notePostBtn,
-            postDisabled && styles.notePostBtnDisabled,
-          ]}
-          onPress={onPostNote}
-          disabled={postDisabled}
-          accessibilityLabel="Post note"
-          accessibilityHint={
-            canPostNote
-              ? undefined
-              : "Disabled until the workspace context loads."
-          }
-          accessibilityRole="button"
-          accessibilityState={{ disabled: postDisabled }}
-        >
-          {isPostingNote ? (
-            <ActivityIndicator size="small" color={colors.primaryForeground} />
-          ) : (
-            <Ionicons name="send" size={16} color={colors.primaryForeground} />
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Add note input — hidden for roles without asset:update (server
+          requires it); read-only activity feed still renders below. */}
+      {canPostNote && (
+        <View style={styles.noteInputContainer}>
+          <TextInput
+            style={styles.noteInput}
+            value={noteText}
+            onChangeText={onChangeNoteText}
+            placeholder={canPostNote ? "Add a note..." : "Loading workspace…"}
+            placeholderTextColor={colors.placeholderText}
+            editable={canPostNote}
+            multiline
+            maxLength={5000}
+            accessibilityLabel="Add a note"
+            accessibilityHint={
+              canPostNote ? undefined : "Workspace context is still loading."
+            }
+          />
+          <TouchableOpacity
+            style={[
+              styles.notePostBtn,
+              postDisabled && styles.notePostBtnDisabled,
+            ]}
+            onPress={onPostNote}
+            disabled={postDisabled}
+            accessibilityLabel="Post note"
+            accessibilityHint={
+              canPostNote
+                ? undefined
+                : "Disabled until the workspace context loads."
+            }
+            accessibilityRole="button"
+            accessibilityState={{ disabled: postDisabled }}
+          >
+            {isPostingNote ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <Ionicons
+                name="send"
+                size={16}
+                color={colors.primaryForeground}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Notes list */}
       {notes && notes.length > 0 ? (

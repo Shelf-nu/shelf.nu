@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -216,11 +217,19 @@ function HomeContent() {
             label="Scan Code"
             onPress={() => router.push("/(tabs)/scanner")}
           />
-          <QuickAction
-            icon="add-circle-outline"
-            label="New Asset"
-            onPress={() => pushIntoTab("/(tabs)/assets", "/(tabs)/assets/new")}
-          />
+          {userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "create",
+          }) && (
+            <QuickAction
+              icon="add-circle-outline"
+              label="New Asset"
+              onPress={() =>
+                pushIntoTab("/(tabs)/assets", "/(tabs)/assets/new")
+              }
+            />
+          )}
           <QuickAction
             icon="calendar-outline"
             label="Bookings"

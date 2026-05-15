@@ -17,6 +17,7 @@ import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { userHasPermission } from "@/lib/permissions";
 import {
   fontSize,
   spacing,
@@ -64,6 +65,13 @@ function AssetsListContent() {
     error: orgError,
     refresh: refreshOrg,
   } = useOrg();
+  // Server enforces asset:create; hide create affordances for roles
+  // (BASE/SELF_SERVICE) that would only get a 403.
+  const canCreate = userHasPermission({
+    roles: currentOrg?.roles,
+    entity: "asset",
+    action: "create",
+  });
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const [assets, setAssets] = useState<AssetListItem[]>([]);
@@ -432,7 +440,7 @@ function AssetsListContent() {
                   ? "Try selecting a different status filter"
                   : "Create your first asset to start tracking"}
               </Text>
-              {!debouncedSearch && activeFilter === 0 && (
+              {!debouncedSearch && activeFilter === 0 && canCreate && (
                 <TouchableOpacity
                   style={styles.emptyAction}
                   onPress={() => router.push("/(tabs)/assets/new")}
@@ -483,18 +491,20 @@ function AssetsListContent() {
       </View>
 
       {/* FAB — Quick Asset Create */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          router.push("/(tabs)/assets/new");
-        }}
-        activeOpacity={0.85}
-        accessibilityLabel="Create new asset"
-        accessibilityRole="button"
-      >
-        <Ionicons name="add" size={28} color={colors.primaryForeground} />
-      </TouchableOpacity>
+      {canCreate && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push("/(tabs)/assets/new");
+          }}
+          activeOpacity={0.85}
+          accessibilityLabel="Create new asset"
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={28} color={colors.primaryForeground} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
