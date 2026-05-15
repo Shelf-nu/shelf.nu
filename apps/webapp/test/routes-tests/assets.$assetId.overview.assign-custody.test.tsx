@@ -2,7 +2,12 @@ import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createOrganization } from "@factories";
+import {
+  createAsset,
+  createOrganization,
+  createTeamMember,
+  createUser,
+} from "@factories";
 import {
   action,
   loader,
@@ -418,24 +423,39 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
+    mockOrganizationFindUniqueOrThrow.mockResolvedValue(
+      createOrganization({
+        id: "org-1",
+        name: "Test Org",
+        customEmailFooter: null,
+        enableSignedCustodyOnAssignment: true,
+        requireCustodySignatureOnAssignment: true,
+      })
+    );
+
     mockGetTeamMember.mockResolvedValue({
-      id: "team-member-123",
-      name: "Valid Team Member",
-      userId: "user-456",
-      user: {
+      ...createTeamMember({
+        id: "team-member-123",
+        name: "Valid Team Member",
+        userId: "user-456",
+        organizationId: "org-1",
+      }),
+      user: createUser({
         id: "user-456",
         email: "custodian@example.com",
         firstName: "Valid",
         lastName: "Member",
-        displayName: "Valid Member",
-      },
+      }),
     });
 
-    mockAssetFindFirstOrThrow.mockResolvedValue({
-      id: "asset-123",
-      title: "Test Asset",
-      status: AssetStatus.AVAILABLE,
-    });
+    mockAssetFindFirstOrThrow.mockResolvedValue(
+      createAsset({
+        id: "asset-123",
+        title: "Test Asset",
+        organizationId: "org-1",
+        status: AssetStatus.AVAILABLE,
+      })
+    );
 
     const formData = new FormData();
     formData.set(
@@ -459,11 +479,11 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     expect(signedCustodyMocks.createSignedCustodyRequests).toHaveBeenCalledWith(
       expect.objectContaining({
         assets: [
-          {
+          expect.objectContaining({
             id: "asset-123",
             title: "Test Asset",
             status: AssetStatus.AVAILABLE,
-          },
+          }),
         ],
         organizationId: "org-1",
         teamMember: expect.objectContaining({
