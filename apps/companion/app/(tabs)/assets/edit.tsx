@@ -37,8 +37,16 @@ import { PickerField } from "@/components/asset-edit/picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 
-/** The shape the server expects for a single custom-field update entry. */
-type CustomFieldPayloadValue = { raw: string | number | boolean } | null;
+/**
+ * Server-accepted wire type for a single custom-field update entry's
+ * `value` field. The webapp's mobile asset.update Zod schema is:
+ *   `z.union([z.string(), z.number(), z.boolean(), z.null()])`
+ * so this is a raw primitive, NOT `{ raw: ... }`. The previous wrapped
+ * shape (which shipped before this hotfix) was rejected by Zod parse
+ * for every type, surfacing as the generic "Sorry, something went
+ * wrong" 500 in the companion UI.
+ */
+type CustomFieldPayloadValue = string | number | boolean | null;
 
 /**
  * Build the JSON value payload for a single custom field update.
@@ -47,11 +55,16 @@ type CustomFieldPayloadValue = { raw: string | number | boolean } | null;
  * NUMBER / AMOUNT, a non-numeric string parses to `null` (treated as a
  * clear) so the user can't ship a malformed number to the server.
  *
+ * Matches the mobile create endpoint's wire format (raw primitives):
+ * the server's shared `buildMobileCustomFieldPayload` helper coerces
+ * `"true"`/`"false"` strings on BOOLEAN fields, so we emit real
+ * booleans here to keep the contract explicit.
+ *
  * @param type  The field's declared type from the canonical
- *              `MobileCustomFieldType` union — narrowed so the switch is
- *              exhaustively checkable.
+ *              `MobileCustomFieldType` union — narrowed so the switch
+ *              is exhaustively checkable.
  * @param value The string value from the form input.
- * @returns     `{ raw: ... }` on success, or `null` to clear the field.
+ * @returns     A `string`, `number`, `boolean`, or `null` (clear).
  */
 function buildCustomFieldPayloadValue(
   type: MobileCustomFieldType,
@@ -61,18 +74,18 @@ function buildCustomFieldPayloadValue(
 
   switch (type) {
     case "BOOLEAN":
-      return { raw: value === "true" };
+      return value === "true";
     case "DATE":
-      return { raw: value };
+      return value;
     case "AMOUNT":
     case "NUMBER": {
       const num = parseFloat(value);
-      return isNaN(num) ? null : { raw: num };
+      return isNaN(num) ? null : num;
     }
     case "TEXT":
     case "MULTILINE_TEXT":
     case "OPTION":
-      return { raw: value };
+      return value;
   }
 }
 
