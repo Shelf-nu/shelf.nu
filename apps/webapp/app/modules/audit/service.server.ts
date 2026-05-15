@@ -126,6 +126,14 @@ export type AuditExpectedAsset = {
   mainImage?: string | null;
   thumbnailImage?: string | null;
   locationName?: string | null;
+  /** Asset category name (only loaded on the mobile audit detail path). */
+  categoryName?: string | null;
+  /**
+   * Display name of the team member holding the asset (custody.custodian).
+   * Prefers User.displayName → first+last → TeamMember.name. Null if the
+   * asset isn't currently in custody, or on paths that don't load it.
+   */
+  custodianName?: string | null;
 };
 
 export type CreateAuditSessionResult = {
@@ -649,6 +657,32 @@ export async function getAuditSessionDetails({
                     name: true,
                   },
                 },
+                // why: surface category + active custodian on the
+                // audit detail row so the field worker can find the
+                // asset without leaving the audit context. The mobile
+                // endpoint plumbs these straight through to
+                // AuditExpectedAsset.
+                category: {
+                  select: {
+                    name: true,
+                  },
+                },
+                custody: {
+                  select: {
+                    custodian: {
+                      select: {
+                        name: true,
+                        user: {
+                          select: {
+                            firstName: true,
+                            lastName: true,
+                            displayName: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
             _count: {
@@ -705,16 +739,31 @@ export async function getAuditSessionDetails({
 
     const expectedAssets: AuditExpectedAsset[] = session.assets
       .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => ({
-        id: auditAsset.assetId,
-        name: auditAsset.asset?.title ?? "",
-        auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
-        auditNotesCount: auditAsset._count?.notes ?? 0,
-        auditImagesCount: auditAsset._count?.images ?? 0,
-        mainImage: auditAsset.asset?.mainImage ?? null,
-        thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-        locationName: auditAsset.asset?.location?.name ?? null,
-      }));
+      .map((auditAsset) => {
+        // why: prefer the User's display fields when the custodian is a
+        // real user; fall back to the TeamMember's name for non-user
+        // "external" custodians (contractors etc.). Routes through the
+        // shared `resolveUserDisplayName` helper so the precedence
+        // (displayName → first+last) stays in one place.
+        const custodian = auditAsset.asset?.custody?.custodian;
+        const custodianName =
+          (custodian?.user && resolveUserDisplayName(custodian.user)) ||
+          custodian?.name ||
+          null;
+
+        return {
+          id: auditAsset.assetId,
+          name: auditAsset.asset?.title ?? "",
+          auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
+          auditNotesCount: auditAsset._count?.notes ?? 0,
+          auditImagesCount: auditAsset._count?.images ?? 0,
+          mainImage: auditAsset.asset?.mainImage ?? null,
+          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          locationName: auditAsset.asset?.location?.name ?? null,
+          categoryName: auditAsset.asset?.category?.name ?? null,
+          custodianName,
+        };
+      });
 
     return {
       session,
@@ -1669,6 +1718,23 @@ export async function getAuditsForOrganization(params: {
   orderBy?: string;
   /** Sort direction */
   orderDirection?: SortingDirection;
+  /**
+   * When set, restricts the result to audits this user is assigned to.
+   * Used by the mobile companion's "Assigned to me" filter — admins/owners
+   * normally see every audit, so this gives them an opt-in way to scope
+   * the list to their own work without losing visibility into the rest
+   * (toggle off → see everything). Layered on top of the role-based
+   * auto-filter for BASE/SELF_SERVICE: if either condition demands the
+   * filter, it applies.
+   */
+  assignedToUserId?: string | null;
+  /**
+   * When true, sort by `(dueDate asc nulls last, createdAt desc)` so the
+   * companion's audit list surfaces overdue and upcoming-due items
+   * first. Overrides `orderBy` / `orderDirection`. Mobile-only — the
+   * webapp uses its own column-sort UI.
+   */
+  prioritizeDeadlines?: boolean;
 }) {
   const {
     organizationId,
@@ -1680,7 +1746,24 @@ export async function getAuditsForOrganization(params: {
     status,
     orderBy = "createdAt",
     orderDirection = "desc",
+    assignedToUserId,
+    prioritizeDeadlines = false,
   } = params;
+
+  // why: BASE/SELF_SERVICE roles MUST be scoped to their own assignments.
+  // If a caller signals "scope to role" but forgets to pass userId, the
+  // predicate would silently collapse to null and leak the whole org list.
+  // Fail loud — and OUTSIDE the try/catch below so the precise error reaches
+  // the caller (the catch wraps everything in a generic "fetch failed").
+  if (isSelfServiceOrBase && !userId) {
+    throw new ShelfError({
+      cause: null,
+      message: "Missing user context for assignment-scoped audit query.",
+      additionalData: { organizationId, isSelfServiceOrBase },
+      label,
+      status: 400,
+    });
+  }
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -1688,11 +1771,19 @@ export async function getAuditsForOrganization(params: {
 
     const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-    // Filter by assignee for BASE/SELF_SERVICE users
-    if (isSelfServiceOrBase && userId) {
+    // Filter by assignee for BASE/SELF_SERVICE users, OR when the caller
+    // explicitly asks for "assigned to me". Both paths use the same
+    // `assignments.some.userId` predicate so an admin/owner who opts into
+    // the filter via `assignedToUserId` gets the same scoping the role
+    // check would apply automatically for low-permission users. The
+    // BASE/SELF_SERVICE branch can rely on `userId` being non-null
+    // thanks to the guard above.
+    const assigneeFilterUserId =
+      (isSelfServiceOrBase ? userId : null) ?? assignedToUserId ?? null;
+    if (assigneeFilterUserId) {
       where.assignments = {
         some: {
-          userId,
+          userId: assigneeFilterUserId,
         },
       };
     }
@@ -1712,12 +1803,25 @@ export async function getAuditsForOrganization(params: {
       where.status = { notIn: [AuditStatus.ARCHIVED] };
     }
 
+    // why: the companion's `prioritizeDeadlines` toggle surfaces work
+    // the user has to act on next — overdue first (asc dueDate puts
+    // earliest dates first, and any negative-offset overdue date is
+    // earliest), then upcoming dues, then audits without a deadline
+    // (Prisma's `nulls: "last"` keeps no-deadline rows from polluting
+    // the top of the list). The secondary `createdAt desc` is a stable
+    // tiebreaker so two same-day-due audits don't shuffle between
+    // requests.
+    const resolvedOrderBy: Prisma.AuditSessionOrderByWithRelationInput[] =
+      prioritizeDeadlines
+        ? [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }]
+        : [{ [orderBy]: orderDirection }];
+
     const [audits, totalAudits] = await Promise.all([
       db.auditSession.findMany({
         skip,
         take,
         where,
-        orderBy: { [orderBy]: orderDirection },
+        orderBy: resolvedOrderBy,
         include: AUDIT_LIST_INCLUDE,
       }),
       db.auditSession.count({ where }),
