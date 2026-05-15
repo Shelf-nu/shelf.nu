@@ -25,7 +25,7 @@ import {
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type MobileCustomFieldType } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -38,55 +38,26 @@ import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
 
 /**
- * Server-accepted wire type for a single custom-field update entry's
- * `value` field. The webapp's mobile asset.update Zod schema is:
- *   `z.union([z.string(), z.number(), z.boolean(), z.null()])`
- * so this is a raw primitive, NOT `{ raw: ... }`. The previous wrapped
- * shape (which shipped before this hotfix) was rejected by Zod parse
- * for every type, surfacing as the generic "Sorry, something went
- * wrong" 500 in the companion UI.
- */
-type CustomFieldPayloadValue = string | number | boolean | null;
-
-/**
  * Build the JSON value payload for a single custom field update.
  *
- * Returns `null` for empty values so the server clears the field. For
- * NUMBER / AMOUNT, a non-numeric string parses to `null` (treated as a
- * clear) so the user can't ship a malformed number to the server.
+ * Mirrors the CREATE flow's `buildCustomFieldsPayload` in `new.tsx`:
+ * send the form's raw string for every field type, let the SERVER do
+ * the coercion. The webapp's `buildMobileCustomFieldPayload` is the
+ * single source of truth for BOOLEAN string → boolean normalization,
+ * and the downstream `buildCustomFieldValue` handles number / date
+ * parsing. Replicating coercion client-side here would duplicate that
+ * logic and drift over time (which is what the previous `{ raw: ... }`
+ * wrapper was trying to do — and got it wrong, the wrapped shape was
+ * rejected by Zod).
  *
- * Matches the mobile create endpoint's wire format (raw primitives):
- * the server's shared `buildMobileCustomFieldPayload` helper coerces
- * `"true"`/`"false"` strings on BOOLEAN fields, so we emit real
- * booleans here to keep the contract explicit.
- *
- * @param type  The field's declared type from the canonical
- *              `MobileCustomFieldType` union — narrowed so the switch
- *              is exhaustively checkable.
  * @param value The string value from the form input.
- * @returns     A `string`, `number`, `boolean`, or `null` (clear).
+ * @returns     The raw string when present, or `null` to clear the
+ *              field on the server side (matches the partial-update
+ *              contract: null = explicit clear, absence = "not
+ *              touched").
  */
-function buildCustomFieldPayloadValue(
-  type: MobileCustomFieldType,
-  value: string
-): CustomFieldPayloadValue {
-  if (!value.trim()) return null; // null to clear the field
-
-  switch (type) {
-    case "BOOLEAN":
-      return value === "true";
-    case "DATE":
-      return value;
-    case "AMOUNT":
-    case "NUMBER": {
-      const num = parseFloat(value);
-      return isNaN(num) ? null : num;
-    }
-    case "TEXT":
-    case "MULTILINE_TEXT":
-    case "OPTION":
-      return value;
-  }
+function buildCustomFieldPayloadValue(value: string): string | null {
+  return value.trim() ? value : null;
 }
 
 /**
@@ -205,7 +176,7 @@ export default function EditAssetScreen() {
       .filter((cf) => cf.value !== cf.originalValue)
       .map((cf) => ({
         id: cf.id,
-        value: buildCustomFieldPayloadValue(cf.type, cf.value),
+        value: buildCustomFieldPayloadValue(cf.value),
       }));
     if (changedCustomFields.length > 0) {
       payload.customFields = changedCustomFields;

@@ -69,6 +69,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         auditAssetId: a.auditAssetId,
         mainImage: a.mainImage ?? null,
         thumbnailImage: a.thumbnailImage ?? null,
+        // why: surface where the asset should be, what category it
+        // belongs to, and who currently has it so the field worker can
+        // resolve the audit row without leaving the audit context. All
+        // nullable: location/category may be unset, custody is sparse.
+        locationName: a.locationName ?? null,
+        categoryName: a.categoryName ?? null,
+        custodianName: a.custodianName ?? null,
       })),
       existingScans: scans.map((s) => ({
         code: s.code,

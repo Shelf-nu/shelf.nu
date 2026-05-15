@@ -222,6 +222,48 @@ export const createAdvancedAssetFilterCookie = (orgId: string) =>
   });
 
 /**
+ * Normalize a filter param string for the Advanced-mode Assets index.
+ *
+ * Column filters not in operator form (e.g. `?location=<uuid>` emitted by
+ * report drill-downs or external deep links) are promoted to `is:<value>`
+ * so downstream filter parsing applies them rather than dropping them
+ * silently — which previously broke drill-down for Advanced-mode workspaces.
+ * Non-column params (page, search, etc.) pass through unchanged.
+ *
+ * Values that contain a `:` but fail operator validation are treated as
+ * **malformed operator attempts** and dropped, preserving the previous
+ * reject-unknown-operator semantics. Otherwise downstream code would split
+ * something like `?status=foo:AVAILABLE` into operator=`is`, value=`foo`
+ * and try to cast `foo` to the AssetStatus enum at query time.
+ *
+ * Used by both the URL path (CASE 1) and the cookie path (CASE 2) of
+ * {@link getAdvancedFiltersFromRequest}.
+ */
+function normalizeAdvancedFilterParams(
+  filters: string,
+  columnNames: string[]
+): URLSearchParams {
+  const normalized = new URLSearchParams();
+  new URLSearchParams(filters).forEach((value, key) => {
+    if (!columnNames.includes(key)) {
+      normalized.append(key, value);
+      return;
+    }
+    if (advancedFilterFormatSchema.safeParse(value).success) {
+      normalized.append(key, value);
+      return;
+    }
+    // Only promote unambiguous bare values. A `:` indicates the caller meant
+    // operator form; if it didn't validate above, the operator is unknown and
+    // we keep the old "drop malformed" behavior rather than coercing it.
+    if (value && !value.includes(":")) {
+      normalized.append(key, `is:${value}`);
+    }
+  });
+  return normalized;
+}
+
+/**
  * Gets and validates advanced filters from request parameters
  * Ensures URL parameters match the expected advanced filter format
  * @param request - The incoming request
@@ -243,27 +285,12 @@ export async function getAdvancedFiltersFromRequest(
   const cookieHeader = request.headers.get("Cookie");
   const advancedAssetFilterCookie =
     createAdvancedAssetFilterCookie(organizationId);
+  const columnNames = (settings.columns as Column[]).map((col) => col.name);
 
   // CASE 1: URL has filters
   // Validate them, save to cookie, and return (with redirect if validation changed params)
   if (filters) {
-    const validatedParams = new URLSearchParams();
-    const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-    // Validate each filter parameter
-    new URLSearchParams(filters).forEach((value, key) => {
-      // Non-column params (like page, search) pass through without validation
-      if (!columnNames.includes(key as any)) {
-        validatedParams.append(key, value);
-        return;
-      }
-
-      // Column filters must match advanced filter format (e.g., "is:AVAILABLE")
-      if (advancedFilterFormatSchema.safeParse(value).success) {
-        validatedParams.append(key, value);
-      }
-    });
-
+    const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
     const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
@@ -284,23 +311,10 @@ export async function getAdvancedFiltersFromRequest(
     filters = (await advancedAssetFilterCookie.parse(cookieHeader)) || "";
 
     if (filters) {
-      const validatedParams = new URLSearchParams();
-      const columnNames = (settings.columns as Column[]).map((col) => col.name);
-
-      // Validate each filter from cookie
-      new URLSearchParams(filters).forEach((value, key) => {
-        // Non-column params pass through
-        if (!columnNames.includes(key as any)) {
-          validatedParams.append(key, value);
-          return;
-        }
-
-        // Column filters must match advanced filter format
-        if (advancedFilterFormatSchema.safeParse(value).success) {
-          validatedParams.append(key, value);
-        }
-      });
-
+      const validatedParams = normalizeAdvancedFilterParams(
+        filters,
+        columnNames
+      );
       const validatedParamsString = validatedParams.toString();
       const cleanedFilters = cleanParamsForCookie(validatedParamsString);
 
