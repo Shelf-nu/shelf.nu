@@ -2,11 +2,13 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobileAuditsEnabled,
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -90,6 +92,19 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
+
+    // Scope to assignment: BASE/SELF_SERVICE hold audit:update, but the
+    // mobile list/detail paths restrict them to assigned audits. Mirror
+    // audits.complete.ts so a low-privileged user who learns an
+    // auditAssetId can't write evidence to an audit they can't access.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+    await requireAuditAssignee({
+      auditSessionId,
+      organizationId,
+      userId: user.id,
+      isSelfServiceOrBase,
+    });
 
     const note = await db.auditNote.create({
       data: {

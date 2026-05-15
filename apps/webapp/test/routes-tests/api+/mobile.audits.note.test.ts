@@ -35,6 +35,12 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   requireMobileAuditsEnabled: vi.fn(),
   requireMobilePermission: vi.fn(),
+  getMobileUserContext: vi.fn(),
+}));
+
+// why: external service — assignee scoping is enforced here
+vi.mock("~/modules/audit/service.server", () => ({
+  requireAuditAssignee: vi.fn(),
 }));
 
 // why: external database — don't hit the real DB
@@ -66,7 +72,9 @@ import {
   requireOrganizationAccess,
   requireMobileAuditsEnabled,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { db } from "~/database/db.server";
 
 const mockUser = {
@@ -107,6 +115,8 @@ describe("POST /api/mobile/audits/note", () => {
     (db.auditAsset.findFirst as any).mockResolvedValue({
       id: "audit-asset-1",
     });
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (requireAuditAssignee as any).mockResolvedValue(undefined);
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
@@ -182,6 +192,28 @@ describe("POST /api/mobile/audits/note", () => {
     );
 
     expect((result as unknown as Response).status).toBe(404);
+    expect(db.auditNote.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the caller is not an assignee of the audit", async () => {
+    (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
+    const assigneeErr = new Error("Not an assignee");
+    (assigneeErr as any).status = 403;
+    (requireAuditAssignee as any).mockRejectedValue(assigneeErr);
+
+    const result = await action(
+      createActionArgs({ request: createNoteRequest(validBody) })
+    );
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(requireAuditAssignee).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auditSessionId: "session-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        isSelfServiceOrBase: true,
+      })
+    );
     expect(db.auditNote.create).not.toHaveBeenCalled();
   });
 

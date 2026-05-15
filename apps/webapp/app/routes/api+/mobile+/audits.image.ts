@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobileAuditsEnabled,
   requireMobilePermission,
@@ -8,6 +9,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -97,6 +99,19 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
+
+    // Scope to assignment: BASE/SELF_SERVICE hold audit:update, but the
+    // mobile list/detail paths restrict them to assigned audits. Mirror
+    // audits.complete.ts so a low-privileged user who learns an
+    // auditAssetId can't upload evidence to an audit they can't access.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+    await requireAuditAssignee({
+      auditSessionId,
+      organizationId,
+      userId: user.id,
+      isSelfServiceOrBase,
+    });
 
     // Read the optional note text from the multipart body, NOT the query
     // string: a note can be up to 5000 chars, which risks URL-length

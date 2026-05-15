@@ -35,6 +35,12 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   requireMobileAuditsEnabled: vi.fn(),
   requireMobilePermission: vi.fn(),
+  getMobileUserContext: vi.fn(),
+}));
+
+// why: external service — assignee scoping is enforced here
+vi.mock("~/modules/audit/service.server", () => ({
+  requireAuditAssignee: vi.fn(),
 }));
 
 // why: external database — don't hit the real DB. $transaction runs the
@@ -78,7 +84,9 @@ import {
   requireOrganizationAccess,
   requireMobileAuditsEnabled,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { db } from "~/database/db.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
@@ -120,6 +128,8 @@ describe("POST /api/mobile/audits/image", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
     (db.auditAsset.findFirst as any).mockResolvedValue({ id: "audit-asset-1" });
+    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (requireAuditAssignee as any).mockResolvedValue(undefined);
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
   });
 
@@ -243,6 +253,33 @@ describe("POST /api/mobile/audits/image", () => {
     );
 
     expect((result as unknown as Response).status).toBe(404);
+    expect(uploadAuditImage).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the caller is not an assignee of the audit", async () => {
+    (getMobileUserContext as any).mockResolvedValue({ role: "BASE" });
+    const assigneeErr = new Error("Not an assignee");
+    (assigneeErr as any).status = 403;
+    (requireAuditAssignee as any).mockRejectedValue(assigneeErr);
+
+    const result = await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(requireAuditAssignee).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auditSessionId: "session-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        isSelfServiceOrBase: true,
+      })
+    );
     expect(uploadAuditImage).not.toHaveBeenCalled();
   });
 
