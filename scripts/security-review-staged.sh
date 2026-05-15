@@ -177,15 +177,65 @@ is_allowed() {
   return 1
 }
 
-# package.json should only trigger review when a NEW dependency line was
-# added, not on a version bump or removal. LC_ALL=C ensures byte-order
-# sort independent of the user's locale (otherwise `comm -23` may produce
-# inconsistent results on systems with non-default LC_COLLATE).
+# Emit the sorted, unique set of dependency names declared in a package.json
+# fed on stdin, restricted to the four dependency blocks. Anything outside
+# `dependencies` / `devDependencies` / `peerDependencies` /
+# `optionalDependencies` (scripts, engines, resolutions, pnpm overrides, …)
+# is ignored. Prints nothing when no JSON parser is available — the caller
+# then falls back to a coarser line heuristic.
+dep_keys_from_json() {
+  case "$JSON_PARSER" in
+    jq)
+      jq -r '
+        [ (.dependencies // {}), (.devDependencies // {}),
+          (.peerDependencies // {}), (.optionalDependencies // {}) ]
+        | add // {} | keys[]' 2>/dev/null | LC_ALL=C sort -u
+      ;;
+    python3)
+      python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+keys = set()
+for block in ('dependencies', 'devDependencies',
+              'peerDependencies', 'optionalDependencies'):
+    section = doc.get(block)
+    if isinstance(section, dict):
+        keys.update(section.keys())
+for k in sorted(keys):
+    print(k)
+" 2>/dev/null | LC_ALL=C sort -u
+      ;;
+  esac
+}
+
+# package.json should only trigger review when a NEW dependency is added,
+# not on a version bump, a removal, or an unrelated key (a new npm script,
+# `engines`, `resolutions`, …). When a JSON parser is available we diff the
+# dependency-block key sets of the staged blob against HEAD — structurally,
+# so non-dependency keys can never trigger. Without a parser we fall back to
+# the old line heuristic, which over-triggers on any added `"key":` but
+# never misses a real new dependency (fails safe). LC_ALL=C keeps the
+# `comm`/`sort` byte-order independent of the user's locale.
 package_json_added_dep() {
   local f="$1"
-  local diff_out
+
+  if [[ -n "$JSON_PARSER" ]]; then
+    local staged head_keys net_new
+    # `:0:` is the staged (index) blob; HEAD copy may not exist for a
+    # brand-new package.json — treat a missing/empty HEAD as no prior deps.
+    staged=$(git show ":0:$f" 2>/dev/null | dep_keys_from_json)
+    head_keys=$(git show "HEAD:$f" 2>/dev/null | dep_keys_from_json)
+    [[ -z "$staged" ]] && return 1
+    net_new=$(LC_ALL=C comm -23 <(echo "$staged") <(echo "$head_keys"))
+    [[ -n "$net_new" ]]
+    return
+  fi
+
+  local diff_out added removed net_new
   diff_out=$(git diff --cached --no-color -- "$f" 2>/dev/null) || return 1
-  local added removed
   added=$(echo "$diff_out" | grep -E '^\+[[:space:]]+"[^"]+":' \
     | sed -E 's/^\+[[:space:]]+"([^"]+)":.*$/\1/' \
     | LC_ALL=C sort -u)
@@ -193,7 +243,6 @@ package_json_added_dep() {
     | sed -E 's/^-[[:space:]]+"([^"]+)":.*$/\1/' \
     | LC_ALL=C sort -u)
   [[ -z "$added" ]] && return 1
-  local net_new
   net_new=$(LC_ALL=C comm -23 <(echo "$added") <(echo "$removed"))
   [[ -n "$net_new" ]]
 }
@@ -264,6 +313,13 @@ fi
 if command -v getconf >/dev/null 2>&1; then
   ARG_MAX_BYTES=$(getconf ARG_MAX 2>/dev/null || echo 131072)
 else
+  ARG_MAX_BYTES=131072
+fi
+# `getconf ARG_MAX` can exit 0 while printing nothing (or a non-numeric
+# value) on some platforms, leaving ARG_MAX_BYTES empty. Validate it is a
+# positive integer before the arithmetic below so the size guard can't be
+# silently neutralised.
+if ! [[ "$ARG_MAX_BYTES" =~ ^[1-9][0-9]*$ ]]; then
   ARG_MAX_BYTES=131072
 fi
 DIFF_MAX_AUTO=$((ARG_MAX_BYTES - 32768))
@@ -367,16 +423,21 @@ fi
 # Any failure falls back to printing the raw result (safe — the agent has
 # no Bash/Web tools, so there's nothing to exfiltrate).
 SECURITY_RELEVANT=""
+RISK_LEVEL=""
+VERDICT=""
 REPORT=""
 
 if [[ -n "$JSON_PARSER" ]]; then
   ASSISTANT_MSG=$(printf '%s' "$RAW" | json_get .result)
   if [[ -n "$ASSISTANT_MSG" ]] && printf '%s' "$ASSISTANT_MSG" | json_valid; then
     SECURITY_RELEVANT=$(printf '%s' "$ASSISTANT_MSG" | json_get .security_relevant)
+    RISK_LEVEL=$(printf '%s' "$ASSISTANT_MSG" | json_get .risk_level)
+    VERDICT=$(printf '%s' "$ASSISTANT_MSG" | json_get .verdict)
     REPORT=$(printf '%s' "$ASSISTANT_MSG" | json_get .report)
   else
     # Agent's response wasn't well-formed JSON. Show whatever it returned
     # but treat as security-relevant so the developer sees something.
+    # RISK_LEVEL / VERDICT stay empty → blocking mode stays advisory below.
     SECURITY_RELEVANT="true"
     REPORT="${ASSISTANT_MSG:-$RAW}"
     echo "[shelf-security-reviewer] warning: agent did not return the expected JSON envelope."
@@ -400,13 +461,35 @@ echo "$REPORT"
 echo ""
 
 # ---- 10. Optional blocking mode ---------------------------------------------
+# The block decision is driven by the STRUCTURED envelope fields
+# (`risk_level`, `verdict`) — never by substring-matching the markdown
+# report. The report template itself enumerates every severity (e.g.
+# "**Risk level:** Critical | High | Medium | Low | None" and a
+# "### 🔴 Critical / P0" heading emitted even when that bucket is empty),
+# so the old `grep "Critical"` matched on every report and blocked every
+# commit. When the structured fields are absent (malformed envelope or no
+# JSON parser) we stay advisory — consistent with the script's
+# fail-open-on-infra stance — and say so explicitly.
 if [[ "${SHELF_SEC_REVIEW_BLOCK:-0}" == "1" ]]; then
-  if echo "$REPORT" | grep -qE "Critical|🟠 High|Verdict.*Block|Verdict.*Request changes"; then
+  should_block=0
+  case "$RISK_LEVEL" in
+    Critical | High) should_block=1 ;;
+  esac
+  case "$VERDICT" in
+    Block | "Request changes") should_block=1 ;;
+  esac
+
+  if [[ "$should_block" == "1" ]]; then
     echo ""
-    echo "❌ [shelf-security-reviewer] blocking commit — findings above."
+    echo "❌ [shelf-security-reviewer] blocking commit — risk: ${RISK_LEVEL:-?}, verdict: ${VERDICT:-?} (findings above)."
     echo "   Emergency bypass:  git commit --no-verify"
     echo "   Disable blocking:  unset SHELF_SEC_REVIEW_BLOCK"
     exit 1
+  fi
+
+  if [[ -z "$RISK_LEVEL" && -z "$VERDICT" ]]; then
+    echo "[shelf-security-reviewer] BLOCK mode is on but the agent returned no"
+    echo "  structured risk_level/verdict — staying advisory (commit allowed)."
   fi
 fi
 

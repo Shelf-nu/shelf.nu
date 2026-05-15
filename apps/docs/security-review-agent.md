@@ -179,13 +179,13 @@ so you know where additional manual review is needed.
 
 All flags are local to the `git commit` invocation that sets them.
 
-| Variable                   | Default | Purpose                                                                                                            |
-| -------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------ |
-| `SHELF_SEC_REVIEW`         |     `1` | Set to `0` to skip the hook entirely (WIP / fixup commits, urgent hotfixes).                                       |
-| `SHELF_SEC_REVIEW_BLOCK`   |     `0` | Set to `1` to fail the commit when the reviewer reports Critical or High findings.                                 |
-| `SHELF_SEC_REVIEW_FORCE`   |     `0` | Set to `1` to run regardless of the relevance filter — useful for manual sanity checks on otherwise-skipped files. |
-| `SHELF_SEC_REVIEW_TIMEOUT` |   `120` | Timeout in seconds. Bump for very large diffs.                                                                     |
-| `SHELF_SEC_REVIEW_VERBOSE` |     `0` | Set to `1` to print the trace of which staged files passed/failed the filter. Useful for tuning.                   |
+| Variable                   | Default | Purpose                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------- | ------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SHELF_SEC_REVIEW`         |     `1` | Set to `0` to skip the hook entirely (WIP / fixup commits, urgent hotfixes).                                                                                                                                                                                                                                                            |
+| `SHELF_SEC_REVIEW_BLOCK`   |     `0` | Set to `1` to fail the commit when the agent's structured `risk_level` is `Critical`/`High` or `verdict` is `Block`/`Request changes`. Decision uses the JSON envelope fields, not the report text. If the agent returns no structured fields (malformed envelope, no `jq`/`python3`), blocking stays advisory and the commit proceeds. |
+| `SHELF_SEC_REVIEW_FORCE`   |     `0` | Set to `1` to run regardless of the relevance filter — useful for manual sanity checks on otherwise-skipped files.                                                                                                                                                                                                                      |
+| `SHELF_SEC_REVIEW_TIMEOUT` |   `120` | Timeout in seconds. Bump for very large diffs.                                                                                                                                                                                                                                                                                          |
+| `SHELF_SEC_REVIEW_VERBOSE` |     `0` | Set to `1` to print the trace of which staged files passed/failed the filter. Useful for tuning.                                                                                                                                                                                                                                        |
 
 Examples:
 
@@ -282,12 +282,17 @@ The architecture closes that channel:
    that detected injection attempts should be **reported as Critical
    findings** rather than followed.
 3. **Structured output, not a free-text sentinel.** The agent returns a
-   JSON envelope `{security_relevant: bool, report: string}` parsed
-   server-side with `jq`. Replacing the old `NO_SECURITY_RELEVANT_CHANGES`
-   string sentinel raises the bar for an injection that wants to
-   silently suppress the review — it now has to produce a precisely
-   well-formed JSON object with `security_relevant: false`, which is
-   substantially harder than emitting a free-text marker.
+   JSON envelope
+   `{security_relevant: bool, risk_level: string, verdict: string, report: string}`
+   parsed server-side with `jq`. Replacing the old
+   `NO_SECURITY_RELEVANT_CHANGES` string sentinel raises the bar for an
+   injection that wants to silently suppress the review — it now has to
+   produce a precisely well-formed JSON object with
+   `security_relevant: false`, which is substantially harder than emitting
+   a free-text marker. The `risk_level` / `verdict` fields — not the
+   markdown report — drive the `SHELF_SEC_REVIEW_BLOCK` decision, so the
+   block heuristic can't be tripped by the report template merely _naming_
+   the severities it enumerates.
 4. **Defense in depth via the wrapper.** The script enforces a timeout
    so a stalled agent can't hang the commit, captures non-zero exit
    codes without blocking, and falls back to printing raw output if the
