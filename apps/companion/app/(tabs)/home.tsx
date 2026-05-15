@@ -207,11 +207,13 @@ function HomeContent() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickActionsGrid}>
-          <QuickAction
-            icon="clipboard-outline"
-            label="Audits"
-            onPress={() => router.push("/(tabs)/audits")}
-          />
+          {currentOrg?.auditsEnabled && (
+            <QuickAction
+              icon="clipboard-outline"
+              label="Audits"
+              onPress={() => router.push("/(tabs)/audits")}
+            />
+          )}
           <QuickAction
             icon="scan-outline"
             label="Scan Code"

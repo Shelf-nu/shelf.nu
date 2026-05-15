@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
+import { validateAuditEnabled } from "~/utils/permissions/audit.validator.server";
 import {
   type PermissionAction,
   type PermissionEntity,
@@ -96,6 +97,7 @@ export async function getUserOrganizations(userId: string) {
           type: true,
           imageId: true,
           barcodesEnabled: true,
+          auditsEnabled: true,
         },
       },
     },
@@ -105,6 +107,23 @@ export async function getUserOrganizations(userId: string) {
     ...uo.organization,
     roles: uo.roles,
   }));
+}
+
+/**
+ * Ensures the organization has the paid Audits add-on enabled. Every mobile
+ * audit route MUST call this after requireOrganizationAccess. The webapp
+ * gates audits behind this add-on (audit.validator.server.ts); without this
+ * the mobile API would be a paywall bypass. Throws a 403 ShelfError, handled
+ * by each route's try/catch exactly like requireMobilePermission.
+ */
+export async function requireMobileAuditsEnabled(
+  organizationId: string
+): Promise<void> {
+  const org = await db.organization.findUnique({
+    where: { id: organizationId },
+    select: { auditsEnabled: true },
+  });
+  validateAuditEnabled(org, { organizationId });
 }
 
 /**

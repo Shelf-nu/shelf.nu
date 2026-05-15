@@ -6,6 +6,7 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
