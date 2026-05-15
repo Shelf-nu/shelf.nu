@@ -274,11 +274,11 @@ function AuditDetailContent() {
           status: "UNEXPECTED",
           isExpected: false,
           scannedAt: scan.scannedAt,
-          // why: unexpected scans are assets that shouldn't be here. The
-          // mobile scan payload doesn't carry location/category/custody
-          // (the scan record only ID-references the asset), so null is
-          // honest — the UI omits the meta rows for unexpected entries.
-          locationName: null,
+          // why: the scan payload carries the asset's location
+          // (getAuditScans selects asset.location.name). Category and
+          // custody are not fetched for scan records, so they stay null —
+          // honest, and the UI omits only those two meta rows.
+          locationName: scan.assetLocationName,
           categoryName: null,
           custodianName: null,
         });

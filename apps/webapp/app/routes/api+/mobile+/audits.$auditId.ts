@@ -85,6 +85,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         scannedAt:
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
+        assetLocationName: s.assetLocationName,
       })),
       canScan: session.status === "PENDING" || session.status === "ACTIVE",
       canComplete: session.status === "ACTIVE",

@@ -358,6 +358,7 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  assetLocationName: string | null;
 };
 
 export type AuditDetailResponse = {
