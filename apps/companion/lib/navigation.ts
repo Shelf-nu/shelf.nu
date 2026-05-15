@@ -33,6 +33,8 @@ export type TabRoot =
  *
  * @param tabRoot - the target tab's index route
  * @param nestedHref - optional nested route to push on top (e.g. a detail)
+ * @returns void — performs navigation as a synchronous side-effect
+ * @throws Propagates any navigation error thrown by expo-router's `router`
  */
 export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
   // `withAnchor` tells expo-router to include the target stack's anchor

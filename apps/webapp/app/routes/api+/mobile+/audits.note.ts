@@ -70,6 +70,20 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // Security: the auditAssetId must belong to THIS session (the session
+    // is already org-scoped above). Without this a client could attach a
+    // note to an AuditAsset from another audit/org — cross-tenant write.
+    const auditAsset = await db.auditAsset.findFirst({
+      where: { id: auditAssetId, auditSessionId },
+      select: { id: true },
+    });
+    if (!auditAsset) {
+      return data(
+        { error: { message: "Audit asset not found in this session" } },
+        { status: 404 }
+      );
+    }
+
     const note = await db.auditNote.create({
       data: {
         content: content.trim(),

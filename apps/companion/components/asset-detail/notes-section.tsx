@@ -55,15 +55,11 @@ export const NotesSection = memo(function NotesSection({
             style={styles.noteInput}
             value={noteText}
             onChangeText={onChangeNoteText}
-            placeholder={canPostNote ? "Add a note..." : "Loading workspace…"}
+            placeholder="Add a note..."
             placeholderTextColor={colors.placeholderText}
-            editable={canPostNote}
             multiline
             maxLength={5000}
             accessibilityLabel="Add a note"
-            accessibilityHint={
-              canPostNote ? undefined : "Workspace context is still loading."
-            }
           />
           <TouchableOpacity
             style={[
@@ -73,11 +69,6 @@ export const NotesSection = memo(function NotesSection({
             onPress={onPostNote}
             disabled={postDisabled}
             accessibilityLabel="Post note"
-            accessibilityHint={
-              canPostNote
-                ? undefined
-                : "Disabled until the workspace context loads."
-            }
             accessibilityRole="button"
             accessibilityState={{ disabled: postDisabled }}
           >

@@ -37,6 +37,7 @@ const txAuditNoteCreate = vi.hoisted(() => vi.fn());
 vi.mock("~/database/db.server", () => ({
   db: {
     auditSession: { findFirst: vi.fn() },
+    auditAsset: { findFirst: vi.fn() },
     $transaction: vi.fn(async (fn: any) =>
       fn({ auditNote: { create: txAuditNoteCreate } })
     ),
@@ -109,6 +110,7 @@ describe("POST /api/mobile/audits/image", () => {
     (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
+    (db.auditAsset.findFirst as any).mockResolvedValue({ id: "audit-asset-1" });
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
   });
 
@@ -197,6 +199,23 @@ describe("POST /api/mobile/audits/image", () => {
     );
 
     expect((result as unknown as Response).status).toBe(400);
+    expect(uploadAuditImage).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when auditAssetId is not in the session (cross-tenant guard)", async () => {
+    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
+    (db.auditAsset.findFirst as any).mockResolvedValue(null); // belongs elsewhere
+
+    const result = await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(404);
     expect(uploadAuditImage).not.toHaveBeenCalled();
   });
 

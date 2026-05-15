@@ -35,6 +35,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 vi.mock("~/database/db.server", () => ({
   db: {
     auditSession: { findFirst: vi.fn() },
+    auditAsset: { findFirst: vi.fn() },
     auditNote: { create: vi.fn() },
   },
 }));
@@ -96,6 +97,10 @@ describe("POST /api/mobile/audits/note", () => {
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
+    (db.auditAsset.findFirst as any).mockResolvedValue({
+      id: "audit-asset-1",
+    });
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
@@ -153,6 +158,18 @@ describe("POST /api/mobile/audits/note", () => {
 
   it("returns 404 when the audit session is not in the caller's org", async () => {
     (db.auditSession.findFirst as any).mockResolvedValue(null);
+
+    const result = await action(
+      createActionArgs({ request: createNoteRequest(validBody) })
+    );
+
+    expect((result as unknown as Response).status).toBe(404);
+    expect(db.auditNote.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when auditAssetId is not in the session (cross-tenant guard)", async () => {
+    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
+    (db.auditAsset.findFirst as any).mockResolvedValue(null); // belongs elsewhere
 
     const result = await action(
       createActionArgs({ request: createNoteRequest(validBody) })
