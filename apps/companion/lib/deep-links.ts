@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { api } from "./api";
+import { pushIntoTab } from "./navigation";
 
 /**
  * Supported deep link patterns:
@@ -63,7 +64,7 @@ async function resolveQrAndNavigate(
   try {
     const { data, error } = await api.qr(qrId);
     if (!error && data?.qr?.asset?.id) {
-      router.push(`/(tabs)/assets/${data.qr.asset.id}`);
+      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
       return;
     }
   } catch {
@@ -89,10 +90,10 @@ export function useDeepLinkHandler() {
     function navigateToLink(link: ParsedLink) {
       switch (link.type) {
         case "asset":
-          router.push(`/(tabs)/assets/${link.id}`);
+          pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${link.id}`);
           break;
         case "booking":
-          router.push(`/(tabs)/bookings/${link.id}`);
+          pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${link.id}`);
           break;
         case "qr":
           // Resolve the QR code to an asset and navigate directly

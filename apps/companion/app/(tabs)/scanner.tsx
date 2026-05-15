@@ -18,6 +18,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -473,13 +474,9 @@ function ScannerContent() {
           });
 
           setTimeout(() => {
-            // why: pushing the asset detail cross-tab from the Scanner tab
-            // leaves the Assets stack with no list beneath it, stranding the
-            // user (no back target). Root the Assets tab at its list first,
-            // then push the detail, so "back" returns to the Assets list —
-            // mirroring the working list→detail path.
-            router.push("/(tabs)/assets");
-            router.push(`/(tabs)/assets/${asset.id}`);
+            // Cross-surface nav must go through pushIntoTab so the Assets
+            // tab is rooted at its list and "back" works (see navigation.ts).
+            pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${asset.id}`);
             setScanResult(null);
             finalizeScan();
           }, 950);

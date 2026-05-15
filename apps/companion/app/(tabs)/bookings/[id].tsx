@@ -12,6 +12,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { pushIntoTab } from "@/lib/navigation";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingDetail, type BookingAsset } from "@/lib/api";
@@ -238,7 +239,7 @@ export default function BookingDetailScreen() {
             if (selectable) {
               toggleAssetSelection(item.id);
             } else if (!isSelectMode) {
-              router.push(`/(tabs)/assets/${item.id}`);
+              pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`);
             }
           }}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
