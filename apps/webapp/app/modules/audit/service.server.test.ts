@@ -10,6 +10,7 @@ import {
   addAssetsToAudit,
   removeAssetFromAudit,
   removeAssetsFromAudit,
+  getAuditsForOrganization,
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
@@ -78,6 +79,10 @@ vi.mock("~/database/db.server", () => {
       updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
+      // why: getAuditsForOrganization runs findMany + count in parallel
+      // for pagination; without this mock the Promise.all rejects with
+      // "count is not a function" and the test crashes before assertions.
+      count: vi.fn(),
     },
     auditNote: {
       create: vi.fn(),
@@ -1897,6 +1902,111 @@ describe("audit service", () => {
       expect(sendAuditCancelledEmails).toHaveBeenCalledWith(
         expect.objectContaining({ cancelledByName: "the audit creator" })
       );
+    });
+  });
+
+  describe("getAuditsForOrganization", () => {
+    // why: the shared `mockDb` above declares `auditSession.count` as a
+    // `vi.fn()` returning `unknown` — that's enough for vi.mocked to
+    // surface it as a typed mock here without resorting to `as any`,
+    // which silenced the very type signal these tests should provide.
+    const mockDb = vi.mocked(db, true);
+
+    beforeEach(() => {
+      mockDb.auditSession.findMany.mockResolvedValue([]);
+      mockDb.auditSession.count.mockResolvedValue(0);
+    });
+
+    it("scopes to the caller's assignments when assignedToUserId is set (admin opt-in)", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "admin-user",
+        isSelfServiceOrBase: false,
+        assignedToUserId: "admin-user",
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      expect(findManyArgs.where).toMatchObject({
+        organizationId: "org-1",
+        assignments: { some: { userId: "admin-user" } },
+      });
+    });
+
+    it("does NOT scope to assignments for admin/owner when assignedToUserId is null", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "admin-user",
+        isSelfServiceOrBase: false,
+        assignedToUserId: null,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      // why: the toggle is OFF — admin/owner sees all audits, not just theirs.
+      expect(findManyArgs.where).toBeDefined();
+      expect(findManyArgs.where!.assignments).toBeUndefined();
+    });
+
+    it("auto-scopes for BASE/SELF_SERVICE even when assignedToUserId is unset", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        userId: "base-user",
+        isSelfServiceOrBase: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      expect(findManyArgs.where).toBeDefined();
+      expect(findManyArgs.where!.assignments).toEqual({
+        some: { userId: "base-user" },
+      });
+    });
+
+    it("throws when isSelfServiceOrBase is true but userId is missing", async () => {
+      // why: silently falling back to assignedToUserId (or null) when a
+      // caller signals role-scoping but forgets the userId would leak
+      // the whole org list to a BASE/SELF_SERVICE user. The guard fails
+      // loud so the bug surfaces in dev/tests, not in customers' hands.
+      await expect(
+        getAuditsForOrganization({
+          organizationId: "org-1",
+          isSelfServiceOrBase: true,
+          // userId intentionally omitted
+        })
+      ).rejects.toThrow(/Missing user context/);
+      expect(mockDb.auditSession.findMany).not.toHaveBeenCalled();
+    });
+
+    it("applies (dueDate asc nulls last, createdAt desc) when prioritizeDeadlines is true", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        prioritizeDeadlines: true,
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      expect(findManyArgs.orderBy).toEqual([
+        { dueDate: { sort: "asc", nulls: "last" } },
+        { createdAt: "desc" },
+      ]);
+    });
+
+    it("falls back to the legacy single-field orderBy when prioritizeDeadlines is false", async () => {
+      await getAuditsForOrganization({
+        organizationId: "org-1",
+        orderBy: "createdAt",
+        orderDirection: "desc",
+      });
+
+      const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
+      expect(findManyArgs).toBeDefined();
+      if (!findManyArgs) return;
+      expect(findManyArgs.orderBy).toEqual([{ createdAt: "desc" }]);
     });
   });
 });
