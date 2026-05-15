@@ -1638,16 +1638,29 @@ interface CustodySnapshotArgs {
 export async function custodySnapshotReport(
   args: CustodySnapshotArgs
 ): Promise<ReportPayload<CustodySnapshotRow>> {
-  const { organizationId, teamMemberId, page = 1, pageSize = 50 } = args;
+  const {
+    organizationId,
+    teamMemberId,
+    locationId,
+    page = 1,
+    pageSize = 50,
+  } = args;
 
   const startTime = performance.now();
 
   try {
-    // Build where clause for custody records
+    // Build where clause for custody records. Location filtering operates on
+    // the underlying asset; the `"without-location"` sentinel mirrors the
+    // Simple-mode Assets index convention for "no location set".
+    const assetWhere: Prisma.AssetWhereInput = { organizationId };
+    if (locationId === "without-location") {
+      assetWhere.locationId = null;
+    } else if (locationId) {
+      assetWhere.locationId = locationId;
+    }
+
     const where: Prisma.CustodyWhereInput = {
-      asset: {
-        organizationId,
-      },
+      asset: assetWhere,
     };
 
     if (teamMemberId) {
