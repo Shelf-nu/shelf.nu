@@ -300,7 +300,10 @@ function HomeContent() {
       )}
 
       {/* ── Active Audits ─────────────────────────── */}
-      {activeAudits && activeAudits.length > 0 && (
+      {/* Gated on the Audits add-on, same as the quick action above —
+          the dashboard endpoint may still return activeAudits, but a
+          non-add-on workspace must not see tappable audit cards that 403. */}
+      {currentOrg?.auditsEnabled && activeAudits && activeAudits.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>
