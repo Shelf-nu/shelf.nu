@@ -103,7 +103,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         : `Assets are now in custody of ${custodian.name}`,
       message: result.pendingSignatureRequests
         ? "Custody will be assigned after the custodian signs the agreement."
-        : "Remember, these assets will be unavailable until it is manually checked in.",
+        : "Remember, these assets will be unavailable until they are manually released.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

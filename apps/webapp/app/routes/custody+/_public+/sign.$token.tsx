@@ -8,18 +8,19 @@ import {
   redirect,
   useActionData,
   useLoaderData,
-  useNavigation,
 } from "react-router";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useDisabled } from "~/hooks/use-disabled";
 import { completeSignedCustodyRequest } from "~/modules/custody/signed-custody.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import {
   assertIsPost,
   error,
@@ -29,10 +30,22 @@ import {
 } from "~/utils/http.server";
 
 const ParamsSchema = z.object({ token: z.string().min(1) });
+const MAX_SIGNATURE_DATA_URL_LENGTH = 250_000;
 
 const SignCustodySchema = z.object({
   signerName: z.string().trim().min(1, "Please type your name"),
-  signatureDataUrl: z.string().optional(),
+  signatureDataUrl: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z
+      .string()
+      .max(MAX_SIGNATURE_DATA_URL_LENGTH, "Signature image is too large")
+      .regex(
+        /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/,
+        "Signature image must be a PNG data URL"
+      )
+      .optional()
+  ),
 });
 
 export const meta = () => [
@@ -76,6 +89,10 @@ async function getSignatureRequest(token: string) {
   }
 
   return request;
+}
+
+function getTrustedSignerIp(request: Request) {
+  return request.headers.get("fly-client-ip");
 }
 
 export async function loader({ context, params, request }: LoaderFunctionArgs) {
@@ -139,7 +156,7 @@ export async function action({ context, params, request }: ActionFunctionArgs) {
       signerUserId: authSession.userId,
       signerName,
       signatureDataUrl,
-      signerIp: request.headers.get("x-forwarded-for"),
+      signerIp: getTrustedSignerIp(request),
       signerUserAgent: request.headers.get("user-agent"),
     });
 
@@ -168,8 +185,10 @@ export const ErrorBoundary = () => <ErrorContent />;
 export default function SignCustodyAgreement() {
   const { signatureRequest } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const navigation = useNavigation();
-  const disabled = navigation.state !== "idle";
+  const disabled = useDisabled();
+  const validationErrors = getValidationErrors<typeof SignCustodySchema>(
+    actionData?.error
+  );
   const alreadySigned =
     signatureRequest.status === SignedCustodyRequestStatus.SIGNED;
 
@@ -208,9 +227,19 @@ export default function SignCustodyAgreement() {
                 placeholder={signatureRequest.teamMember.name}
                 disabled={disabled}
               />
+              {validationErrors?.signerName?.message ? (
+                <span className="text-sm font-normal text-error-600">
+                  {validationErrors.signerName.message}
+                </span>
+              ) : null}
             </label>
 
             <SignaturePad disabled={disabled} />
+            {validationErrors?.signatureDataUrl?.message ? (
+              <p className="text-sm text-error-600">
+                {validationErrors.signatureDataUrl.message}
+              </p>
+            ) : null}
 
             {actionData?.error?.message ? (
               <p className="text-sm text-error-600">

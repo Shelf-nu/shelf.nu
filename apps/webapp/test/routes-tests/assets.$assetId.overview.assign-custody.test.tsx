@@ -23,6 +23,9 @@ const dbMocks = vi.hoisted(() => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    organization: {
+      findUniqueOrThrow: vi.fn(),
+    },
     custody: {
       // why: action now clears stale custody before assignment
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -44,6 +47,9 @@ vi.mock("~/database/db.server", () => ({
     teamMember: {
       findMany: dbMocks.teamMember.findMany,
       count: dbMocks.teamMember.count,
+    },
+    organization: {
+      findUniqueOrThrow: dbMocks.organization.findUniqueOrThrow,
     },
     custody: {
       deleteMany: dbMocks.custody.deleteMany,
@@ -114,6 +120,8 @@ const mockAssetFindUnique = dbMocks.asset.findUnique;
 const mockAssetUpdate = dbMocks.asset.update;
 const mockTeamMemberFindMany = dbMocks.teamMember.findMany;
 const mockTeamMemberCount = dbMocks.teamMember.count;
+const mockOrganizationFindUniqueOrThrow =
+  dbMocks.organization.findUniqueOrThrow;
 const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
 
 const requirePermissionMock = vi.mocked(requirePermission);
@@ -160,6 +168,7 @@ beforeEach(() => {
   mockAssetUpdate.mockReset();
   mockTeamMemberFindMany.mockReset();
   mockTeamMemberCount.mockReset();
+  mockOrganizationFindUniqueOrThrow.mockReset();
   mockGetTeamMember.mockReset();
 
   // Reset service mocks
@@ -173,6 +182,13 @@ beforeEach(() => {
   } as any);
   createNoteMock.mockResolvedValue(undefined as any);
   sendNotificationMock.mockReturnValue(undefined as any);
+  mockOrganizationFindUniqueOrThrow.mockResolvedValue({
+    id: "org-1",
+    name: "Test Org",
+    customEmailFooter: null,
+    enableSignedCustodyOnAssignment: false,
+    requireCustodySignatureOnAssignment: false,
+  });
 });
 
 describe("assets.$assetId.overview.assign-custody loader", () => {
@@ -297,6 +313,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
         user: {
           select: {
             id: true,
+            email: true,
             firstName: true,
             lastName: true,
             displayName: true,
@@ -358,6 +375,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
         user: {
           select: {
             id: true,
+            email: true,
             firstName: true,
             lastName: true,
             displayName: true,

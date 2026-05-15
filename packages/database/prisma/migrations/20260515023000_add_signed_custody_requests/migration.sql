@@ -21,7 +21,7 @@ CREATE TABLE "SignedCustodyRequest" (
     "organizationId" TEXT NOT NULL,
     "assetId" TEXT NOT NULL,
     "teamMemberId" TEXT NOT NULL,
-    "requestedById" TEXT NOT NULL,
+    "requestedById" TEXT,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL,
 
@@ -36,6 +36,12 @@ CREATE INDEX "SignedCustodyRequest_organizationId_idx" ON "SignedCustodyRequest"
 
 -- CreateIndex
 CREATE INDEX "SignedCustodyRequest_assetId_idx" ON "SignedCustodyRequest"("assetId");
+
+-- CreateIndex
+CREATE INDEX "SignedCustodyRequest_assetId_status_idx" ON "SignedCustodyRequest"("assetId", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SignedCustodyRequest_one_pending_per_asset_idx" ON "SignedCustodyRequest"("assetId") WHERE "status" = 'PENDING';
 
 -- CreateIndex
 CREATE INDEX "SignedCustodyRequest_teamMemberId_idx" ON "SignedCustodyRequest"("teamMemberId");
@@ -56,4 +62,4 @@ ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_assetId_
 ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_teamMemberId_fkey" FOREIGN KEY ("teamMemberId") REFERENCES "TeamMember"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "SignedCustodyRequest" ADD CONSTRAINT "SignedCustodyRequest_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

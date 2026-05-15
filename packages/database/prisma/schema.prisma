@@ -34,20 +34,20 @@ model Image {
 }
 
 model User {
-  id                    String  @id @default(cuid())
-  email                 String  @unique
-  username              String  @unique @default(cuid())
-  firstName             String?
-  lastName              String?
-  displayName           String?
-  profilePicture        String?
-  usedFreeTrial         Boolean @default(false)
-  onboarded             Boolean @default(false)
-  customerId            String? @unique // Stripe customer id
-  sso                   Boolean @default(false)
-  createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
-  skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
-  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
+  id                     String  @id @default(cuid())
+  email                  String  @unique
+  username               String  @unique @default(cuid())
+  firstName              String?
+  lastName               String?
+  displayName            String?
+  profilePicture         String?
+  usedFreeTrial          Boolean @default(false)
+  onboarded              Boolean @default(false)
+  customerId             String? @unique // Stripe customer id
+  sso                    Boolean @default(false)
+  createdWithInvite      Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  skipSubscriptionCheck  Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice       Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
 
   // Last selected organization for cross-device workspace persistence
@@ -62,37 +62,37 @@ model User {
   deletedAt DateTime?
 
   // Relationships
-  assets             Asset[]
-  categories         Category[]
-  notes              Note[]
-  bookingNotes      BookingNote[]      @relation("BookingNoteUser")
-  auditNotes        AuditNote[]        @relation("AuditNoteUser")
-  locationNotes     LocationNote[]     @relation("LocationNoteUser")
-  qrCodes            Qr[]
-  scans              Scan[]
-  tags               Tag[]
-  roles              Role[]
-  locations          Location[]
-  images             Image[]
-  organizations      Organization[]
-  customFields       CustomField[]
-  sentInvites        Invite[]           @relation("inviter")
-  receivedInvites    Invite[]           @relation("invitee")
-  teamMembers        TeamMember[]
-  userOrganizations  UserOrganization[]
-  bookings           Booking[]          @relation("creator")
-  custodies          Booking[]          @relation("custodian")
-  createdKits        Kit[]
-  tierId             TierId             @default(free)
-  tier               Tier               @relation(fields: [tierId], references: [id])
-  assetReminders     AssetReminder[]
-  contact            UserContact?
-  businessIntel      UserBusinessIntel?
-  auditsCreated      AuditSession[]
-  auditAssignments   AuditAssignment[]
-  auditAssetsScanned AuditAsset[]
-  auditScans         AuditScan[]
-  auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
+  assets                         Asset[]
+  categories                     Category[]
+  notes                          Note[]
+  bookingNotes                   BookingNote[]          @relation("BookingNoteUser")
+  auditNotes                     AuditNote[]            @relation("AuditNoteUser")
+  locationNotes                  LocationNote[]         @relation("LocationNoteUser")
+  qrCodes                        Qr[]
+  scans                          Scan[]
+  tags                           Tag[]
+  roles                          Role[]
+  locations                      Location[]
+  images                         Image[]
+  organizations                  Organization[]
+  customFields                   CustomField[]
+  sentInvites                    Invite[]               @relation("inviter")
+  receivedInvites                Invite[]               @relation("invitee")
+  teamMembers                    TeamMember[]
+  userOrganizations              UserOrganization[]
+  bookings                       Booking[]              @relation("creator")
+  custodies                      Booking[]              @relation("custodian")
+  createdKits                    Kit[]
+  tierId                         TierId                 @default(free)
+  tier                           Tier                   @relation(fields: [tierId], references: [id])
+  assetReminders                 AssetReminder[]
+  contact                        UserContact?
+  businessIntel                  UserBusinessIntel?
+  auditsCreated                  AuditSession[]
+  auditAssignments               AuditAssignment[]
+  auditAssetsScanned             AuditAsset[]
+  auditScans                     AuditScan[]
+  auditImagesUploaded            AuditImage[]           @relation("AuditImageUploader")
   signedCustodyRequestsRequested SignedCustodyRequest[] @relation("SignedCustodyRequestedBy")
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
@@ -209,18 +209,18 @@ model Asset {
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
 
-  custody      Custody?
+  custody               Custody?
   signedCustodyRequests SignedCustodyRequest[]
-  notes        Note[]
-  qrCodes      Qr[]
-  barcodes     Barcode[]
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
-  bookings     Booking[]
-  reminders    AssetReminder[]
-  auditEntries AuditAsset[]
-  auditScans   AuditScan[]
+  notes                 Note[]
+  qrCodes               Qr[]
+  barcodes              Barcode[]
+  reports               ReportFound[]
+  tags                  Tag[]
+  customFields          AssetCustomFieldValue[]
+  bookings              Booking[]
+  reminders             AssetReminder[]
+  auditEntries          AuditAsset[]
+  auditScans            AuditScan[]
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -644,19 +644,19 @@ model TeamMember {
   id   String @id @default(cuid())
   name String
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
-  organizationId  String
-  custodies       Custody[]
+  organization          Organization           @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId        String
+  custodies             Custody[]
   signedCustodyRequests SignedCustodyRequest[]
-  receivedInvites Invite[]
-  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
-  userId          String?
-  kitCustodies    KitCustody[]
+  receivedInvites       Invite[]
+  user                  User?                  @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  userId                String?
+  kitCustodies          KitCustody[]
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
-  bookings       Booking[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  bookings        Booking[]
   assetReminders  AssetReminder[]
   teamMemberNotes TeamMemberNote[]
 
@@ -703,11 +703,11 @@ model SignedCustodyRequest {
   documentTitle String @default("Custody agreement")
   documentBody  String @default("Please review and sign to accept custody of this asset.") @db.Text
 
-  signerName      String?
-  signatureDataUrl String? @db.Text
-  signerIp        String?
-  signerUserAgent String? @db.Text
-  signedAt        DateTime? @db.Timestamptz(3)
+  signerName       String?
+  signatureDataUrl String?   @db.Text
+  signerIp         String?
+  signerUserAgent  String?   @db.Text
+  signedAt         DateTime? @db.Timestamptz(3)
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
@@ -718,14 +718,15 @@ model SignedCustodyRequest {
   teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   teamMemberId String
 
-  requestedBy   User   @relation("SignedCustodyRequestedBy", fields: [requestedById], references: [id], onUpdate: Cascade, onDelete: Cascade)
-  requestedById String
+  requestedBy   User?   @relation("SignedCustodyRequestedBy", fields: [requestedById], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  requestedById String?
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   @@index([organizationId])
   @@index([assetId])
+  @@index([assetId, status])
   @@index([teamMemberId])
   @@index([requestedById])
   @@index([status])
@@ -770,9 +771,9 @@ model Organization {
   usedBarcodeTrial  Boolean   @default(false) // Set once a 7-day free barcode trial is activated (prevents reuse)
 
   // Audit add-on (per-organization, managed via Stripe subscription)
-  auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
-  auditsEnabledAt  DateTime? // Track when audit feature was enabled
-  usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
+  auditsEnabled   Boolean   @default(false) // If true, this organization can use audit functionality
+  auditsEnabledAt DateTime? // Track when audit feature was enabled
+  usedAuditTrial  Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
 
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
@@ -795,13 +796,13 @@ model Organization {
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
 
-  auditSessions      AuditSession[]
-  auditImages        AuditImage[]
+  auditSessions AuditSession[]
+  auditImages   AuditImage[]
 
-  usersWithLastSelected User[] @relation("lastSelectedOrg")
-  roleChangeLogs      RoleChangeLog[]
-  teamMemberNotes     TeamMemberNote[]
-  activityEvents      ActivityEvent[]
+  usersWithLastSelected User[]                 @relation("lastSelectedOrg")
+  roleChangeLogs        RoleChangeLog[]
+  teamMemberNotes       TeamMemberNote[]
+  activityEvents        ActivityEvent[]
   signedCustodyRequests SignedCustodyRequest[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
@@ -1280,12 +1281,12 @@ model BookingSettings {
   autoArchiveBookings Boolean @default(false) // Whether to automatically archive completed bookings
   autoArchiveDays     Int     @default(2) // Number of days after completion before auto-archiving
 
-  requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
+  requireExplicitCheckinForAdmin       Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
 
   // Notification settings
-  notifyBookingCreator     Boolean @default(true) // Whether the booking creator receives email notifications
-  notifyAdminsOnNewBooking Boolean @default(true) // Whether all admins receive a notification when a booking is reserved
+  notifyBookingCreator     Boolean      @default(true) // Whether the booking creator receives email notifications
+  notifyAdminsOnNewBooking Boolean      @default(true) // Whether all admins receive a notification when a booking is reserved
   alwaysNotifyTeamMembers  TeamMember[] @relation("BookingSettingsAlwaysNotify") // Team members who always receive ALL booking email notifications
 
   // Relationships
@@ -1614,10 +1615,10 @@ model AuditSession {
   missingAssetCount    Int @default(0)
   unexpectedAssetCount Int @default(0)
 
-  startedAt   DateTime?
-  dueDate     DateTime?
-  completedAt DateTime?
-  cancelledAt DateTime?
+  startedAt                DateTime?
+  dueDate                  DateTime?
+  completedAt              DateTime?
+  cancelledAt              DateTime?
   activeSchedulerReference String?
 
   createdBy      User         @relation(fields: [createdById], references: [id])
@@ -1678,9 +1679,9 @@ model AuditAsset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  scans AuditScan[]
+  scans  AuditScan[]
   images AuditImage[]
-  notes AuditNote[]
+  notes  AuditNote[]
 
   @@unique([auditSessionId, assetId])
   @@index([status])
