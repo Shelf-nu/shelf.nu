@@ -56,6 +56,14 @@ type DisplayAsset = {
   status: AuditAssetStatus;
   isExpected: boolean;
   scannedAt: string | null;
+  /**
+   * Context the field worker needs DURING the audit. All nullable —
+   * server may omit when unknown (e.g. asset has no location set, asset
+   * isn't in custody, older mobile client without these fields).
+   */
+  locationName: string | null;
+  categoryName: string | null;
+  custodianName: string | null;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -249,6 +257,9 @@ function AuditDetailContent() {
         status: scan ? "FOUND" : "PENDING",
         isExpected: true,
         scannedAt: scan?.scannedAt || null,
+        locationName: asset.locationName ?? null,
+        categoryName: asset.categoryName ?? null,
+        custodianName: asset.custodianName ?? null,
       });
     }
 
@@ -263,6 +274,13 @@ function AuditDetailContent() {
           status: "UNEXPECTED",
           isExpected: false,
           scannedAt: scan.scannedAt,
+          // why: unexpected scans are assets that shouldn't be here. The
+          // mobile scan payload doesn't carry location/category/custody
+          // (the scan record only ID-references the asset), so null is
+          // honest — the UI omits the meta rows for unexpected entries.
+          locationName: null,
+          categoryName: null,
+          custodianName: null,
         });
       }
     }
@@ -298,17 +316,54 @@ function AuditDetailContent() {
           ? "Missing"
           : "Unexpected";
 
+      // why: surfacing location / category / custodian inline removes
+      // the field worker's reason to navigate away from the audit. Each
+      // row tells them WHERE to look + WHAT KIND + WHO HAS IT without
+      // a tap into the asset detail. Falls back gracefully when the
+      // server omits a field (older mobile API responses).
+      const metaParts: {
+        icon: React.ComponentProps<typeof Ionicons>["name"];
+        text: string;
+      }[] = [];
+      if (item.locationName) {
+        metaParts.push({ icon: "location-outline", text: item.locationName });
+      }
+      if (item.categoryName) {
+        metaParts.push({ icon: "pricetag-outline", text: item.categoryName });
+      }
+      if (item.custodianName) {
+        metaParts.push({
+          icon: "person-outline",
+          text: `with ${item.custodianName}`,
+        });
+      }
+
       return (
-        <TouchableOpacity
+        <View
           style={styles.assetCard}
-          activeOpacity={0.7}
-          onPress={() => {
-            Haptics.selectionAsync();
-            router.push(`/(tabs)/assets/${item.id}`);
-          }}
-          accessibilityLabel={`${item.name}, ${statusLabel}`}
-          accessibilityRole="button"
+          // why: React Native 0.81 treats a plain View as a container,
+          // so VoiceOver/TalkBack would announce each child Text node
+          // separately. `accessible` collapses the subtree into one
+          // element with the composed label below — same UX a tapable
+          // TouchableOpacity gives by default.
+          accessible
+          accessibilityLabel={[
+            item.name,
+            statusLabel,
+            ...metaParts.map((p) => p.text),
+          ].join(", ")}
+          accessibilityRole="summary"
         >
+          {/*
+            why: the previous `router.push('/(tabs)/assets/...)' from
+            inside the Audits tab polluted the Assets tab's stack — the
+            Assets tab kept showing the asset detail until the user
+            manually navigated back. Removed the cross-tab navigation
+            entirely; the field worker has everything they need on this
+            card (image, name, location, category, custodian, status).
+            Full asset detail remains reachable from the Assets tab,
+            which is the correct surface for browsing.
+          */}
           {item.mainImage ? (
             <Image
               source={{ uri: item.mainImage }}
@@ -325,6 +380,22 @@ function AuditDetailContent() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.name}
             </Text>
+            {metaParts.length > 0 && (
+              <View style={styles.assetMetaList}>
+                {metaParts.map((p) => (
+                  <View key={p.icon + p.text} style={styles.assetMetaRow}>
+                    <Ionicons
+                      name={p.icon}
+                      size={12}
+                      color={colors.mutedLight}
+                    />
+                    <Text style={styles.assetMeta} numberOfLines={1}>
+                      {p.text}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
             {item.scannedAt && (
               <Text style={styles.assetMeta} numberOfLines={1}>
                 Scanned {formatDateTime(item.scannedAt)}
@@ -338,10 +409,10 @@ function AuditDetailContent() {
               {statusLabel}
             </Text>
           </View>
-        </TouchableOpacity>
+        </View>
       );
     },
-    [colors, auditAssetStatusBadge, styles, router]
+    [colors, auditAssetStatusBadge, styles]
   );
 
   // ── Loading / Error states ────────────────────────────
@@ -1003,6 +1074,16 @@ const useStyles = createStyles((colors, shadows) => ({
   assetMeta: {
     fontSize: fontSize.xs,
     color: colors.muted,
+    flexShrink: 1,
+  },
+  assetMetaList: {
+    gap: 2,
+    marginTop: 2,
+  },
+  assetMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
 
   // Empty states
