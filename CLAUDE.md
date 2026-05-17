@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Claude Code skills
+
+This repo ships project-level Claude skills under `.claude/skills/` (real content lives at `.agents/skills/` with symlinks; both are committed intentionally). Pinned versions are tracked in `skills-lock.json` at the root.
+
+Currently vendored:
+
+- `security-review` — OWASP-style checklist for new code (auth, input, secrets, rate limits)
+- `two-factor-authentication-best-practices` — MFA / TOTP / backup codes (Better-Auth reference)
+- `auth0-mfa` — AAL/AMR claims, step-up patterns, error codes
+- `oauth-oidc-misconfiguration` — redirect, state, PKCE, token audience playbook
+- `supabase` — Supabase-specific auth traps, RLS, JWT freshness
+- `supabase-postgres-best-practices` — Postgres performance / correctness patterns
+
+**For contributors:** you don't need to install anything — these work on a fresh clone. They activate contextually (e.g., asking about MFA pulls in the 2FA skill; reviewing new code pulls in `security-review`).
+
+**Maintenance commands:**
+
+- `npx skills check` — see if upstream has newer versions
+- `npx skills update` — pull upstream improvements (voluntary; updates `skills-lock.json`)
+- `npx skills experimental_install` — restore from `skills-lock.json` (use on Windows if symlinks didn't resolve, or after deleting `.agents/`/`.claude/skills/` to refresh)
+
+See `.claude/skills/README.md` for the full layout and rationale.
+
 ## Essential Commands
 
 This is a **pnpm + Turborepo monorepo**. Use `pnpm` instead of `npm`.
