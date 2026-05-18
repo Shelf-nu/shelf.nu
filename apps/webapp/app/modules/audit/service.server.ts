@@ -1073,6 +1073,44 @@ export async function getAssetsForAuditSession({
 }
 
 /**
+ * Detects a Prisma P2003 foreign-key violation specifically on the
+ * `AuditScan.assetId` constraint.
+ *
+ * Used to recognise the TOCTOU race where the scanned asset is deleted or
+ * moved to another organization between the pre-transaction guard and
+ * `tx.auditScan.create`. Uses a structural check (rather than
+ * `instanceof Prisma.PrismaClientKnownRequestError`) to stay consistent with
+ * the value-free `@prisma/client` import style used elsewhere in this file,
+ * and narrows to the `assetId` FK so unrelated FK failures (e.g. a deleted
+ * scanning user hitting `scannedById`) are still reported as real errors.
+ *
+ * @param cause - The thrown value from the scan transaction.
+ * @returns `true` only for a P2003 on the AuditScan asset foreign key.
+ */
+function isAuditAssetFkViolation(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) {
+    return false;
+  }
+  const code = "code" in cause ? (cause as { code?: unknown }).code : undefined;
+  if (code !== "P2003") {
+    return false;
+  }
+  const meta = "meta" in cause ? (cause as { meta?: unknown }).meta : undefined;
+  const constraint =
+    typeof meta === "object" && meta !== null && "constraint" in meta
+      ? String((meta as { constraint?: unknown }).constraint)
+      : "";
+  const message =
+    "message" in cause ? String((cause as { message?: unknown }).message) : "";
+  // Prisma reports the constraint in `meta.constraint`; some adapters only
+  // include it in the message text, so check both.
+  return (
+    constraint.includes("AuditScan_assetId_fkey") ||
+    message.includes("AuditScan_assetId_fkey")
+  );
+}
+
+/**
  * Records a scan in the audit session and updates the audit asset status.
  * This allows audits to be persisted and resumed across sessions.
  *
@@ -1109,6 +1147,55 @@ export async function recordAuditScan(
       organizationId,
     });
 
+    // Pre-fetch user and asset data for note creation outside the transaction.
+    const [scannerUser, scannedAsset] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        },
+      }),
+      db.asset.findUnique({
+        where: { id: assetId },
+        select: { id: true, title: true, organizationId: true },
+      }),
+    ]);
+
+    // Guard the AuditScan.assetId foreign key. Without this, a deleted asset,
+    // a cross-org asset, or a bogus id reaches `tx.auditScan.create` and
+    // surfaces as a raw Prisma P2003 (`AuditScan_assetId_fkey`) wrapped in a
+    // captured "Failed to record audit scan". Returning a clean, non-captured
+    // 404 keeps Sentry quiet and gives real users a meaningful message when
+    // they scan something that is not a valid asset in this workspace.
+    //
+    // This runs BEFORE the duplicate-scan short-circuit on purpose: a stale
+    // AuditScan row pointing at a cross-org/deleted asset (legacy rows from
+    // the previously unguarded path, or imported bad data) must not let a
+    // retry report success and bypass this check.
+    //
+    // why: the residual "asset moved to another org between this read and
+    // `tx.auditScan.create`" race is not reachable here — `Asset.organizationId`
+    // is set at creation and never mutated anywhere in the codebase (org
+    // ownership transfer reassigns an org's owner, not an asset's org). The
+    // only reachable mid-window race is deletion, handled by the P2003
+    // fallback below. An in-transaction SELECT ... FOR UPDATE / composite-FK
+    // migration would add lock contention to this hot scan path to guard an
+    // unreachable state, so it is intentionally out of scope.
+    if (!scannedAsset || scannedAsset.organizationId !== organizationId) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "The scanned asset could not be found in this workspace. It may have been deleted or belong to a different organization.",
+        additionalData: { auditSessionId, assetId, organizationId },
+        status: 404,
+        shouldBeCaptured: false,
+        label,
+      });
+    }
+
     // Check if this asset was already scanned in this audit
     const existingScan = await db.auditScan.findFirst({
       where: {
@@ -1130,23 +1217,6 @@ export async function recordAuditScan(
         unexpectedAssetCount: session.unexpectedAssetCount,
       };
     }
-
-    // Pre-fetch user and asset data for note creation outside the transaction
-    const [scannerUser, scannedAsset] = await Promise.all([
-      db.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        },
-      }),
-      db.asset.findUnique({
-        where: { id: assetId },
-        select: { id: true, title: true },
-      }),
-    ]);
 
     // Record the scan in a transaction
     const result = await db.$transaction(
@@ -1301,6 +1371,29 @@ export async function recordAuditScan(
 
     return result;
   } catch (cause) {
+    // Preserve already-typed ShelfErrors (e.g. the asset/session 404s above)
+    // so their status and `shouldBeCaptured: false` survive instead of being
+    // re-wrapped into a captured generic 500. Matches the pattern used by
+    // other handlers in this file.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    // TOCTOU fallback: the pre-transaction guard validated the asset, but it
+    // can still be deleted or moved to another org between that check and
+    // `tx.auditScan.create`. That race surfaces as a Prisma P2003 foreign-key
+    // violation on `AuditScan_assetId_fkey`. Convert it to the same clean,
+    // non-captured 404 the guard returns instead of a captured generic 500.
+    if (isAuditAssetFkViolation(cause)) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "The scanned asset could not be found in this workspace. It may have been deleted or belong to a different organization.",
+        additionalData: { auditSessionId, assetId, organizationId },
+        status: 404,
+        shouldBeCaptured: false,
+        label,
+      });
+    }
     throw new ShelfError({
       cause,
       message: "Failed to record audit scan",

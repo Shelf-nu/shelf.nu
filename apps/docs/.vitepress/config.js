@@ -114,6 +114,10 @@ export default {
             text: "Booking conflict handling",
             link: "/booking-conflict-queries",
           },
+          {
+            text: "Security Review Agent",
+            link: "/security-review-agent",
+          },
         ],
       },
       {

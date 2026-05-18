@@ -4,7 +4,6 @@ import {
   getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
-  requireMobileAuditsEnabled,
 } from "~/modules/api/mobile-auth.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -35,7 +34,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    await requireMobileAuditsEnabled(organizationId);
 
     // why: BASE/SELF_SERVICE users must NEVER see audits they're not
     // assigned to — passing these two params makes
@@ -43,7 +41,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // server-side. Without them, the service skips the auto-filter and
     // a client sending `assignedToMe=false` (or just omitting the flag)
     // sees the whole org. Mirrors how `audits.complete.ts` does it.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
     const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
 
     const url = new URL(request.url);
