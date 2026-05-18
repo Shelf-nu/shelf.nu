@@ -7,7 +7,7 @@ import {
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
-import { canUseAudits } from "~/utils/subscription.server";
+import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -103,8 +103,16 @@ export async function getUserOrganizations(userId: string) {
     },
   });
 
+  // Serialize the *canonical* add-on capability (premium-aware), not the
+  // raw DB flags, so the companion's client-side gating
+  // (`currentOrg.auditsEnabled` / `.barcodesEnabled`) stays aligned with
+  // the server gating, which now uses canUseAudits/canUseBarcodes. Without
+  // this, non-premium/self-hosted deployments would allow the feature on
+  // the API but hide it in the app.
   return userOrgs.map((uo) => ({
     ...uo.organization,
+    barcodesEnabled: canUseBarcodes(uo.organization),
+    auditsEnabled: canUseAudits(uo.organization),
     roles: uo.roles,
   }));
 }

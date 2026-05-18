@@ -7,10 +7,11 @@ export type Organization = {
   roles: string[];
   barcodesEnabled: boolean;
   /**
-   * Whether this workspace has the paid Audits add-on enabled
-   * (Stripe-gated; `Organization.auditsEnabled` server-side, surfaced via
-   * `/api/mobile/me`). When false the companion hides Audits entry points
-   * and every mobile audit endpoint returns 403.
+   * Canonical "can use Audits" capability from `/api/mobile/me`
+   * (server-side `canUseAudits`: the paid add-on flag, OR always true when
+   * premium gating is disabled). Premium-aware so client gating matches
+   * the server. When false the companion hides Audits entry points and
+   * every mobile audit endpoint returns 403.
    */
   auditsEnabled: boolean;
 };
