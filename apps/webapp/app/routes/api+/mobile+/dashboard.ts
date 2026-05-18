@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -25,15 +26,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    // Server-enforce the paid Audits add-on (same principle as the mobile
-    // audit routes' requireMobileAuditsEnabled): without this the dashboard
-    // serves activeAudits to non-add-on workspaces — a paywall bypass /
-    // data leak even with the client cards hidden.
-    const org = await db.organization.findUnique({
-      where: { id: organizationId },
-      select: { auditsEnabled: true },
-    });
-    const auditsEnabled = org?.auditsEnabled ?? false;
+    // Server-enforce the paid Audits add-on via the canonical helper
+    // (canUseAudits, surfaced through getMobileUserContext) so the
+    // dashboard never serves activeAudits to non-add-on workspaces — a
+    // paywall bypass / data leak even with the client cards hidden.
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     // Run all queries in parallel for speed
     const [
@@ -162,7 +162,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
-          ...(auditsEnabled ? {} : { id: { in: [] } }),
+          ...(canUseAudits ? {} : { id: { in: [] } }),
         },
         select: {
           id: true,

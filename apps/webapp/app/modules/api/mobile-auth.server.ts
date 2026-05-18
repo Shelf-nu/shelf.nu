@@ -2,12 +2,12 @@ import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
-import { validateAuditEnabled } from "~/utils/permissions/audit.validator.server";
 import {
   type PermissionAction,
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import { canUseAudits } from "~/utils/subscription.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -110,23 +110,6 @@ export async function getUserOrganizations(userId: string) {
 }
 
 /**
- * Ensures the organization has the paid Audits add-on enabled. Every mobile
- * audit route MUST call this after requireOrganizationAccess. The webapp
- * gates audits behind this add-on (audit.validator.server.ts); without this
- * the mobile API would be a paywall bypass. Throws a 403 ShelfError, handled
- * by each route's try/catch exactly like requireMobilePermission.
- */
-export async function requireMobileAuditsEnabled(
-  organizationId: string
-): Promise<void> {
-  const org = await db.organization.findUnique({
-    where: { id: organizationId },
-    select: { auditsEnabled: true },
-  });
-  validateAuditEnabled(org, { organizationId });
-}
-
-/**
  * Resolves the organizationId from the request and verifies
  * the user has access to it. Returns the organizationId.
  *
@@ -194,7 +177,9 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the user's role and org barcode settings for a given organization.
+ * Fetches the user's role and org capability flags (barcodes, audits) for
+ * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
+ * subscription.server predicates so mobile matches webapp gating exactly.
  *
  * Used by mobile routes that call service layer functions requiring
  * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody).
@@ -202,12 +187,18 @@ export async function requireMobilePermission({
 export async function getMobileUserContext(
   userId: string,
   organizationId: string
-): Promise<{ role: OrganizationRoles; canUseBarcodes: boolean }> {
+): Promise<{
+  role: OrganizationRoles;
+  canUseBarcodes: boolean;
+  canUseAudits: boolean;
+}> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
     select: {
       roles: true,
-      organization: { select: { barcodesEnabled: true } },
+      organization: {
+        select: { barcodesEnabled: true, auditsEnabled: true },
+      },
     },
   });
 
@@ -226,6 +217,7 @@ export async function getMobileUserContext(
     // an empty array doesn't surface as `undefined` to downstream callers.
     role: userOrg.roles[0] ?? OrganizationRoles.BASE,
     canUseBarcodes: userOrg.organization.barcodesEnabled,
+    canUseAudits: canUseAudits(userOrg.organization),
   };
 }
 

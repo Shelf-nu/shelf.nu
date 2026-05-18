@@ -34,7 +34,7 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
-  requireMobileAuditsEnabled: vi.fn(),
+  getMobileUserContext: vi.fn(),
   requireMobilePermission: vi.fn(),
 }));
 
@@ -58,7 +58,7 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
-  requireMobileAuditsEnabled,
+  getMobileUserContext,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { recordAuditScan } from "~/modules/audit/service.server";
@@ -98,7 +98,11 @@ describe("POST /api/mobile/audits/record-scan", () => {
     });
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: true,
+      canUseBarcodes: true,
+    });
     (requireMobilePermission as any).mockResolvedValue(undefined);
   });
 
@@ -162,12 +166,10 @@ describe("POST /api/mobile/audits/record-scan", () => {
   });
 
   it("should return 403 when the Audits add-on is disabled", async () => {
-    const auditsError = new Error("Audits add-on required");
-    (auditsError as any).status = 403;
-    (requireMobileAuditsEnabled as any).mockRejectedValue(auditsError);
-    (makeShelfError as any).mockReturnValue({
-      message: "Audits add-on required",
-      status: 403,
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: false,
+      canUseBarcodes: true,
     });
 
     const request = createRecordScanRequest({
@@ -180,7 +182,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
 
     expect((result as unknown as Response).status).toBe(403);
     const body = await (result as unknown as Response).json();
-    expect(body.error.message).toContain("Audits add-on required");
+    expect(body.error.message).toContain("not enabled");
     expect(recordAuditScan).not.toHaveBeenCalled();
   });
 });

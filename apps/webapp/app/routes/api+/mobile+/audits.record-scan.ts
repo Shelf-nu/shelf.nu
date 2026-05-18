@@ -4,7 +4,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
-  requireMobileAuditsEnabled,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { recordAuditScan } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -33,7 +33,21 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    await requireMobileAuditsEnabled(organizationId);
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
 
     await requireMobilePermission({
       userId: user.id,
