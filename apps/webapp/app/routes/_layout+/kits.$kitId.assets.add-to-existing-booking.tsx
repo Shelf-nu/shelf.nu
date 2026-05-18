@@ -124,7 +124,9 @@ const processBooking = async (
       throw new ShelfError({
         cause: null,
         message: "No assets available.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
@@ -164,7 +166,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: `No kitIds found or booking not found.`,
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 

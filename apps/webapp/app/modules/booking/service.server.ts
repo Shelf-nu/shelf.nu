@@ -4846,9 +4846,11 @@ export async function getExistingBookingDetails(
   organizationId: string
 ) {
   try {
-    // why: findFirstOrThrow + organizationId (findUnique can't take a
-    // non-unique org filter) prevents cross-org booking disclosure.
-    const booking = await db.booking.findFirstOrThrow({
+    // why: findFirst + organizationId (findUnique can't take a non-unique org
+    // filter) prevents cross-org booking disclosure. We null-check explicitly
+    // instead of findFirstOrThrow so a cross-org/missing id returns a clean
+    // 404 "Booking not found." rather than leaking a raw Prisma error string.
+    const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
       select: {
         id: true,
@@ -4857,11 +4859,23 @@ export async function getExistingBookingDetails(
       },
     });
 
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking not found.",
+        status: 404,
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
     if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
       throw new ShelfError({
         cause: null,
         message: "Booking is not in Draft or Reserved status.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
@@ -4952,7 +4966,9 @@ export async function processBooking(
       throw new ShelfError({
         cause: null,
         message: "No assets available.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 

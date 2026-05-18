@@ -111,6 +111,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
+        status: 400,
         label: "Booking",
         shouldBeCaptured: false,
       });
