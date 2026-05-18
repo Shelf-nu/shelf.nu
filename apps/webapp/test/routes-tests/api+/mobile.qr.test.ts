@@ -63,6 +63,8 @@ vitest.mock("~/utils/logger", () => ({
   Logger: { error: vitest.fn() },
 }));
 
+// why: we control error formatting in the loader's catch block (return
+// path) without pulling in the real logger/Sentry wiring
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
   ShelfError: class ShelfError extends Error {
