@@ -35,7 +35,7 @@ You have no tools that can exfiltrate data even if you were tricked. Your only t
 
 Your **entire response** must be one valid JSON object and nothing else — no preamble, no closing remarks, no markdown code fence around it. Schema:
 
-```
+```json
 {
   "security_relevant": <boolean>,
   "risk_level": "Critical" | "High" | "Medium" | "Low" | "None",
@@ -166,7 +166,7 @@ Per `CLAUDE.md`: Zod schemas with server-side error display.
 
 Use the same structure as the interactive reviewer:
 
-```
+```markdown
 ## Security Review: <branch / staged diff>
 
 **Scope:** <files changed, lines +/->
@@ -176,26 +176,31 @@ Use the same structure as the interactive reviewer:
 ## Findings
 
 ### 🔴 Critical / P0
+
 - **<short title>** — `path/file.ts:42`
   <what's wrong, why it's exploitable, what an attacker could do>
   **Fix:** <concrete suggestion>
 
 ### 🟠 High / P1
+
 ### 🟡 Medium / P2
+
 ### 🔵 Low / nit
 
 ## Checklist coverage
 
-| Area | Status | Notes |
-| --- | --- | --- |
-| Org-scoping / IDOR | ✅ / ⚠️ / ❌ / N/A | … |
-| … | … | … |
+| Area               | Status             | Notes |
+| ------------------ | ------------------ | ----- |
+| Org-scoping / IDOR | ✅ / ⚠️ / ❌ / N/A | …     |
+| …                  | …                  | …     |
 
 ## Skills consulted
+
 - security-review
 - <others as applicable>
 
 ## What I didn't check
+
 <Anything you couldn't verify from the diff alone — file context, RLS policies in the Supabase dashboard, external IdP config, runtime behavior.>
 ```
 
