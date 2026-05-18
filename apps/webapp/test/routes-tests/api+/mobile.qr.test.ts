@@ -1,9 +1,25 @@
+/**
+ * Test suite for GET /api/mobile/qr/:qrId.
+ *
+ * Covers QR→asset resolution and the scan-provenance write (who + when via
+ * `createScan`) added so companion field scans appear in an asset's scan
+ * history. Asserts provenance is recorded on a successful, in-org resolve;
+ * NOT recorded on 404/403/401; the user-agent fallback; and that a
+ * provenance failure is non-fatal (asset still resolves, error logged once).
+ *
+ * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
+ */
 import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
 
-// why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
+/**
+ * Hoisted factory for the mocked React Router `data()` helper.
+ *
+ * why: mocking `data()` to return real `Response` objects so the loader's
+ * single-fetch return path can be asserted (status + JSON body).
+ */
 const createDataMock = vitest.hoisted(() => {
   return () =>
     vitest.fn((body: unknown, init?: ResponseInit) => {
@@ -107,6 +123,13 @@ const mockQr = {
   organizationId: "org-1",
 };
 
+/**
+ * Builds an authenticated GET request for the QR endpoint.
+ *
+ * @param userAgent - optional User-Agent header; omit to assert the
+ *   server-side `"mobile-companion"` fallback.
+ * @returns a `Request` with a bearer token (and the UA header when given).
+ */
 function createQrRequest(userAgent?: string) {
   const headers: Record<string, string> = {
     Authorization: "Bearer test-token",
@@ -117,6 +140,12 @@ function createQrRequest(userAgent?: string) {
   return new Request("http://localhost:3000/api/mobile/qr/qr-1", { headers });
 }
 
+/**
+ * Invokes the QR loader with the standard `qr-1` route param.
+ *
+ * @param request - the request from {@link createQrRequest}.
+ * @returns the loader result (a `Response` via the mocked `data()`).
+ */
 function run(request: Request) {
   return loader(createLoaderArgs({ request, params: { qrId: "qr-1" } }));
 }

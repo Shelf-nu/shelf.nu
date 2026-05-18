@@ -95,7 +95,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         new ShelfError({
           cause,
           message: "Failed to record mobile scan provenance",
-          additionalData: { qrId: qr.id, userId: user.id },
+          // why: qrId is enough to trace the failing scan; avoid putting a
+          // raw user identifier into the log pipeline.
+          additionalData: { qrId: qr.id },
           label: "Scan",
         })
       );
