@@ -14,12 +14,12 @@ report, and (by default) lets the commit proceed. It does not edit code.
 There are **two** agent variants — the same Shelf-specific checklist, but
 different capability boundaries for different invocation contexts.
 
-| File                                                 | Role                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.claude/agents/shelf-security-reviewer.md`          | **Interactive** variant. Tools: `Read, Bash, Skill, Agent, WebFetch, WebSearch`. Used when a human runs `claude --agent shelf-security-reviewer ...` for PR / branch / commit-range review. Bash is needed so the agent can run `gh pr diff`, `git diff`, `grep`, etc. Permission prompts confirm each tool call.                                                                               |
-| `.claude/agents/shelf-security-reviewer-headless.md` | **Headless** variant — what the pre-commit hook invokes. Tools: `Skill` only — no Bash, no WebFetch, no Agent. Receives the staged diff inline between `<shelf_diff>` tags rather than fetching it itself. Emits a strict JSON envelope. Designed for `bypassPermissions` use because there are no capabilities to bypass — a prompt-injection payload in the diff has no exfiltration channel. |
-| `scripts/security-review-staged.sh`                  | The pre-commit wrapper — filters staged files to security-sensitive paths, pre-computes the diff, invokes the headless agent, parses the JSON envelope, prints the report, optionally blocks the commit.                                                                                                                                                                                        |
-| `lefthook.yml` → `pre-commit` → `security-review`    | Wires the script into the existing pre-commit chain at priority 5 (after typecheck). Inherits `skip: [merge, rebase]` from the rest of the pipeline.                                                                                                                                                                                                                                            |
+| File                                                 | Role                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.claude/agents/shelf-security-reviewer.md`          | **Interactive** variant. Tools: `Read, Bash, Skill, Agent, WebFetch, WebSearch`. Used when a human runs `claude --agent shelf-security-reviewer ...` for PR / branch / commit-range review. Bash is needed so the agent can run `gh pr diff`, `git diff`, `grep`, etc. Permission prompts confirm each tool call.                                                                                                 |
+| `.claude/agents/shelf-security-reviewer-headless.md` | **Headless** variant — what the pre-commit hook invokes. Tools: `Skill` only — no Bash, no WebFetch, no Agent. Receives the staged diff inline between a unique per-invocation random marker rather than fetching it itself. Emits a strict JSON envelope. Designed for `bypassPermissions` use because there are no capabilities to bypass — a prompt-injection payload in the diff has no exfiltration channel. |
+| `scripts/security-review-staged.sh`                  | The pre-commit wrapper — filters staged files to security-sensitive paths, pre-computes the diff, invokes the headless agent, parses the JSON envelope, prints the report, optionally blocks the commit.                                                                                                                                                                                                          |
+| `lefthook.yml` → `pre-commit` → `security-review`    | Wires the script into the existing pre-commit chain at priority 5 (after typecheck). Inherits `skip: [merge, rebase]` from the rest of the pipeline.                                                                                                                                                                                                                                                              |
 
 The interactive agent is also usable on demand — see [Manual invocation](#manual-invocation).
 
@@ -276,11 +276,19 @@ The architecture closes that channel:
    it.
 2. **Diff passed as data, not fetched as action.** The wrapper script
    computes the diff in trusted shell (`git diff --cached --no-color`)
-   and injects it into the prompt between `<shelf_diff>` and
-   `</shelf_diff>` tags. The agent's system prompt explicitly states
-   that anything inside those tags is **data**, not instructions, and
-   that detected injection attempts should be **reported as Critical
-   findings** rather than followed.
+   and injects it into the prompt between a **unique, per-invocation
+   random marker** (`<shelf_diff_…>` … `</shelf_diff_…>`) rather than a
+   fixed tag. A staged file that embedded the literal closing tag would
+   otherwise prematurely close the data section and make the trailing
+   text read as instructions (review-evasion); because the marker is
+   unpredictable to whoever authored the diff, no embedded string can
+   match it, so the boundary cannot be escaped. This also covers the
+   self-referential case where this script (which contains the literal
+   token) is itself in the staged diff. The agent's system prompt
+   states that anything between the markers is **data**, not
+   instructions, that the marker is unguessable, and that any embedded
+   text claiming to be a boundary marker is itself an injection to be
+   **reported as a Critical finding** rather than followed.
 3. **Structured output, not a free-text sentinel.** The agent returns a
    JSON envelope
    `{security_relevant: bool, risk_level: string, verdict: string, report: string}`
