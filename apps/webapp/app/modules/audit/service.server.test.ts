@@ -18,6 +18,7 @@ import {
   deleteAuditSession,
   bulkDeleteAudits,
   duplicateAuditSession,
+  recordAuditScan,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -105,8 +106,14 @@ vi.mock("~/database/db.server", () => {
     auditImage: {
       findMany: vi.fn(),
     },
+    auditScan: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
     asset: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
   };
@@ -149,8 +156,14 @@ const mockDb = db as unknown as {
   auditImage: {
     findMany: ReturnType<typeof vi.fn>;
   };
+  auditScan: {
+    findFirst: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
   asset: {
     findMany: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
   };
   $transaction: ReturnType<typeof vi.fn>;
 };
@@ -2007,6 +2020,102 @@ describe("audit service", () => {
       expect(findManyArgs).toBeDefined();
       if (!findManyArgs) return;
       expect(findManyArgs.orderBy).toEqual([{ createdAt: "desc" }]);
+    });
+  });
+
+  describe("recordAuditScan asset guard", () => {
+    const scanInput = {
+      auditSessionId: "audit-1",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      isExpected: true,
+      userId: "user-1",
+      organizationId: "org-1",
+    };
+
+    beforeEach(() => {
+      // Valid, org-owned, non-archived session; no prior scan recorded.
+      mockDb.auditSession.findFirst.mockResolvedValue({
+        id: "audit-1",
+        organizationId: "org-1",
+        status: AuditStatus.ACTIVE,
+        foundAssetCount: 0,
+        unexpectedAssetCount: 0,
+        missingAssetCount: 0,
+      });
+      mockDb.auditScan.findFirst.mockResolvedValue(null);
+      mockDb.user.findUnique.mockResolvedValue({
+        id: "user-1",
+        firstName: "Scan",
+        lastName: "User",
+        displayName: "Scan User",
+      });
+    });
+
+    it("returns a non-captured 404 when the scanned asset does not exist", async () => {
+      mockDb.asset.findUnique.mockResolvedValue(null);
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
+      // The FK-violating create must never be reached.
+      expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+    });
+
+    it("returns a non-captured 404 when the asset belongs to another org", async () => {
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Cross-org camera",
+        organizationId: "org-2",
+      });
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
+      expect(mockDb.auditScan.create).not.toHaveBeenCalled();
+    });
+
+    it("validates the asset before the duplicate-scan short-circuit", async () => {
+      // A stale AuditScan row exists for a now-cross-org asset (legacy data
+      // from the previously unguarded path). The org guard must win over the
+      // duplicate-scan early return so the retry cannot report success.
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Cross-org camera",
+        organizationId: "org-2",
+      });
+      mockDb.auditScan.findFirst.mockResolvedValue({
+        id: "stale-scan-1",
+        auditAssetId: "stale-audit-asset-1",
+      });
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    });
+
+    it("converts a TOCTOU asset-FK violation into a non-captured 404", async () => {
+      // Guard passes (asset valid at check time)...
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Valid camera",
+        organizationId: "org-1",
+      });
+      // ...but the asset is deleted before the insert, so the create inside
+      // the transaction throws a Prisma P2003 on AuditScan_assetId_fkey.
+      mockDb.auditScan.create.mockRejectedValue({
+        code: "P2003",
+        meta: { modelName: "AuditScan", constraint: "AuditScan_assetId_fkey" },
+        name: "PrismaClientKnownRequestError",
+      });
+
+      await expect(recordAuditScan(scanInput)).rejects.toMatchObject({
+        status: 404,
+        shouldBeCaptured: false,
+      });
     });
   });
 });

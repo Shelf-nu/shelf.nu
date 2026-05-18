@@ -365,7 +365,7 @@ describe("POST /api/mobile/asset/update", () => {
       expect((result as unknown as Response).status).toBe(200);
     });
 
-    it("accepts a raw number for NUMBER / AMOUNT values", async () => {
+    it("accepts a raw STRING for NUMBER / AMOUNT values (companion sends strings; server coerces)", async () => {
       (getActiveCustomFields as any).mockResolvedValue([
         { id: "cf-qty", name: "Qty", type: "NUMBER", required: false },
       ]);
@@ -380,14 +380,14 @@ describe("POST /api/mobile/asset/update", () => {
 
       const request = createRequest({
         assetId: "asset-1",
-        customFields: [{ id: "cf-qty", value: 42 }],
+        customFields: [{ id: "cf-qty", value: "42" }],
       });
       const result = await action(createActionArgs({ request }));
 
       expect((result as unknown as Response).status).toBe(200);
     });
 
-    it("accepts a raw boolean for BOOLEAN values", async () => {
+    it("accepts a raw STRING for BOOLEAN values (server coerces 'true'/'false')", async () => {
       (getActiveCustomFields as any).mockResolvedValue([
         {
           id: "cf-warranty",
@@ -407,7 +407,7 @@ describe("POST /api/mobile/asset/update", () => {
 
       const request = createRequest({
         assetId: "asset-1",
-        customFields: [{ id: "cf-warranty", value: true }],
+        customFields: [{ id: "cf-warranty", value: "true" }],
       });
       const result = await action(createActionArgs({ request }));
 
