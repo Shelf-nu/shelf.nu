@@ -27,11 +27,15 @@ import { AuditImageUploadDialog } from "~/components/audit/audit-image-upload-di
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
-import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
+import {
+  createAuditAssetImagesAddedNote,
+  createAuditImageEvidenceNote,
+} from "~/modules/audit/helpers.server";
 import {
   uploadAuditImage,
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
+import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -193,9 +197,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const intent = formData.get("intent") as string;
 
     if (intent === "create-note") {
-      const content = formData.get("content") as string;
+      const rawContent = formData.get("content") as string;
 
-      if (!content?.trim()) {
+      // Audit note content is Markdoc-rendered in the feed (MarkdownViewer)
+      // and the PDF path assumes server-side sanitization. Strip `{%`/`%}`
+      // so a user-authored note cannot smuggle a Markdoc tag (e.g.
+      // `{% audit_images ids="..." /%}`) into the rendered feed/report —
+      // mirrors the image-evidence path and the mobile note route.
+      const content = stripMarkdocDelimiters(rawContent ?? "");
+
+      if (!content) {
         throw new ShelfError({
           cause: null,
           message: "Note content is required",
@@ -207,7 +218,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       const note = await db.auditNote.create({
         data: {
-          content: content.trim(),
+          content,
           auditSessionId: auditId,
           auditAssetId: auditAssetId,
           userId,
@@ -315,25 +326,47 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         uploadedImages.push(image);
       }
 
-      // Create a note in a transaction to track the image uploads
+      // Create a note in a transaction to track the image uploads.
       await db.$transaction(async (tx) => {
         const imageIds = uploadedImages.map((img) => img.id);
-        // Create note with custom content if provided, otherwise use default
-        if (noteContent?.trim()) {
-          // User provided a note - create a COMMENT note with images
+
+        if (intent === "upload-image") {
+          // Single-file path — delegate entirely to the shared, sanitized
+          // evidence-note writer (same helper used by the mobile route).
+          // Markdoc injection is closed inside `createAuditImageEvidenceNote`
+          // via `buildAuditImagesNoteContent` → `stripMarkdocDelimiters`.
+          await createAuditImageEvidenceNote({
+            tx,
+            auditSessionId: auditId,
+            auditAssetId: auditAssetId,
+            userId,
+            imageIds,
+            content: noteContent,
+          });
+          return;
+        }
+
+        // Multi-file path — preserve the existing note shape but sanitize the
+        // user-authored text segment before the trusted tag is appended so an
+        // injected `{%`/`%}` cannot open or close a Markdoc tag. Branch on the
+        // SANITIZED value: a payload that sanitizes to "" must fall back to
+        // the auto-generated UPDATE note, not create a COMMENT note that holds
+        // only the trusted tag (wrong type + user-deletable).
+        const sanitizedNoteContent = stripMarkdocDelimiters(noteContent ?? "");
+        if (sanitizedNoteContent) {
           await tx.auditNote.create({
             data: {
               auditSessionId: auditId,
               auditAssetId: auditAssetId,
               userId,
-              content: `${noteContent.trim()}\n\n{% audit_images count=${
+              content: `${sanitizedNoteContent}\n\n{% audit_images count=${
                 imageIds.length
               } ids="${imageIds.join(",")}" /%}`,
               type: "COMMENT",
             },
           });
         } else {
-          // No note provided - use default auto-generated note
+          // No note provided — use the default auto-generated UPDATE note.
           await createAuditAssetImagesAddedNote({
             auditSessionId: auditId,
             auditAssetId: auditAssetId,
@@ -430,13 +463,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const newImageIds = uploadedImages.map((img) => img.id);
         const allImageIds = [...existingImageIds, ...newImageIds];
 
-        // Remove existing audit_images tags and append new one with all images
-        let updatedContent = existingNote.content.replace(
+        // Remove existing audit_images tags, sanitize the surviving user-authored
+        // body so a previously-injected delimiter can't survive a re-tag, then
+        // append the fresh trusted tag.
+        const strippedTags = existingNote.content.replace(
           /{%\s*audit_images[^%]*%}/g,
           ""
         );
-        updatedContent = updatedContent.trim();
-        updatedContent += `\n\n{% audit_images count=${
+        // stripMarkdocDelimiters trims and removes `{%`/`%}` from user text only;
+        // the trusted tag is appended after, so it is never touched.
+        const sanitizedBody = stripMarkdocDelimiters(strippedTags);
+        const updatedContent = `${sanitizedBody}\n\n{% audit_images count=${
           allImageIds.length
         } ids="${allImageIds.join(",")}" /%}`;
 
