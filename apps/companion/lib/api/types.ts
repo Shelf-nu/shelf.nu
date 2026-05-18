@@ -6,6 +6,14 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  /**
+   * Canonical "can use Audits" capability from `/api/mobile/me`
+   * (server-side `canUseAudits`: the paid add-on flag, OR always true when
+   * premium gating is disabled). Premium-aware so client gating matches
+   * the server. When false the companion hides Audits entry points and
+   * every mobile audit endpoint returns 403.
+   */
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
@@ -358,6 +366,12 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  /** Asset's location name at scan time, or null if it has no location set. */
+  assetLocationName: string | null;
+  /** Number of COMMENT notes recorded against this scanned asset. */
+  auditNotesCount: number;
+  /** Number of condition photos uploaded for this scanned asset. */
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {

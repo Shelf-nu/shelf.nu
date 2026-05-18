@@ -45,7 +45,21 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
     const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
 
     const body = await request.json();

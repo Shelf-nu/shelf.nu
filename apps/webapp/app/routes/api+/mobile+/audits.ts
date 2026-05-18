@@ -41,7 +41,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // server-side. Without them, the service skips the auto-filter and
     // a client sending `assignedToMe=false` (or just omitting the flag)
     // sees the whole org. Mirrors how `audits.complete.ts` does it.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
     const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
 
     const url = new URL(request.url);

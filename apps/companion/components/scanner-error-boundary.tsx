@@ -34,7 +34,7 @@ export function ScannerErrorFallback({ onRetry }: { onRetry: () => void }) {
         style={{
           fontSize: 18,
           fontWeight: "600",
-          color: colors.text,
+          color: colors.foreground,
           marginTop: 16,
           textAlign: "center",
         }}
@@ -44,7 +44,7 @@ export function ScannerErrorFallback({ onRetry }: { onRetry: () => void }) {
       <Text
         style={{
           fontSize: 14,
-          color: colors.textSecondary,
+          color: colors.foregroundSecondary,
           marginTop: 8,
           textAlign: "center",
         }}
