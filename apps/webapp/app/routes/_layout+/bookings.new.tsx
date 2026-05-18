@@ -74,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
         label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -151,6 +152,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
         label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }

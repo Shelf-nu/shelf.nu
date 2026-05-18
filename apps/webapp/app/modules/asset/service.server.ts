@@ -4373,6 +4373,7 @@ export async function bulkUpdateAssetCategory({
         createAssetCategoryChangeNote({
           assetId: asset.id,
           userId,
+          organizationId,
           previousCategory: asset.category,
           newCategory,
           loadUserForNotes,

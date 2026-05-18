@@ -53,9 +53,12 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    // why: createKit/updateKit now run a cross-org ownership guard that calls
+    // db.location.findFirst before connecting a location.
     location: {
       update: vitest.fn().mockResolvedValue({}),
       findUnique: vitest.fn().mockResolvedValue(null),
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
@@ -78,11 +81,6 @@ vitest.mock("~/database/db.server", () => ({
     // db.category.findFirst before connecting a category. Mocked so the guard
     // can resolve the referenced category for valid test ids.
     category: {
-      findFirst: vitest.fn().mockResolvedValue(null),
-    },
-    // why: same cross-org ownership guard exists for locations via
-    // db.location.findFirst before connecting a location.
-    location: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
   },
