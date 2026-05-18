@@ -409,6 +409,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,
+        organizationId,
       });
     }
 

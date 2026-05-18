@@ -373,6 +373,7 @@ export async function createAuditSession(
     await createAssetNotesForAuditAddition({
       assetIds: assets.map((a) => a.id),
       userId: createdById,
+      organizationId,
       audit: {
         id: result.session.id,
         name: result.session.name,
@@ -2154,6 +2155,7 @@ export async function addAssetsToAudit({
         await createAssetNotesForAuditAddition({
           assetIds: result.newAssetIds,
           userId,
+          organizationId,
           audit: result.audit,
         });
       }
@@ -2273,6 +2275,7 @@ export async function removeAssetFromAudit({
       await createAssetNotesForAuditRemoval({
         assetIds: [result.assetId],
         userId,
+        organizationId,
         audit: result.audit,
       });
     });
@@ -2383,6 +2386,7 @@ export async function removeAssetsFromAudit({
         await createAssetNotesForAuditRemoval({
           assetIds: result.assetIds,
           userId,
+          organizationId,
           audit: result.audit,
         });
       }

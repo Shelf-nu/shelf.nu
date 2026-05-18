@@ -136,6 +136,10 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
       }),
       createNote({
         assetId: reminder.assetId,
+        // why: scope the note's asset to the reminder's org so the
+        // scheduled job cannot write a note onto a foreign-tenant asset
+        // (defense-in-depth cross-org IDOR guard)
+        organizationId: reminder.organizationId,
         userId: reminder.createdById,
         type: "UPDATE",
         content: `**System** has sent **${reminder.name.trim()}** reminder.`,

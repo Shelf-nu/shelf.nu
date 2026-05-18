@@ -99,7 +99,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
-      assetIds
+      assetIds,
+      organizationId
     );
 
     const bookingAssets = (
@@ -144,6 +145,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
+      organizationId,
     });
 
     sendNotification({

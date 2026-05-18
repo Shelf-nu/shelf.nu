@@ -116,6 +116,15 @@ vitest.mock("~/database/db.server", () => ({
     },
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: cross-org IDOR guard (assertTeamMemberBelongsToOrg) and the
+      // new-custodian lookup now query teamMember.findFirst scoped by
+      // organizationId. Echo a minimal row for the requested id so the
+      // guard passes; individual tests still override with richer shapes.
+      findFirst: vitest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) => ({
+          id: where.id,
+        })),
     },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -255,6 +264,19 @@ const mockCreateBookingParams = {
 describe("createBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+
+    // why: createBooking now runs cross-org IDOR guards inside its
+    // transaction. assertAssetsBelongToOrg / assertTagsBelongToOrg compare
+    // findMany().length against the requested id count, so the mock must
+    // echo back exactly the requested ids (deduped) for the guards to pass.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id }))
+    );
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id }))
+    );
   });
 
   it("should create a booking successfully", async () => {
@@ -395,7 +417,9 @@ describe("partialCheckinBooking", () => {
 
     // Verify assets status updated (no longer disconnecting from booking)
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: partial check-in now scopes the asset status update by
+      // organizationId (cross-org IDOR hardening).
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -416,6 +440,9 @@ describe("partialCheckinBooking", () => {
       type: "UPDATE",
       userId: "user-1",
       assetIds: ["asset-1", "asset-2"],
+      // why: createNotes now requires organizationId (it internally runs the
+      // cross-org asset guard); the booking service forwards the booking's org.
+      organizationId: "org-1",
     });
 
     expect(result).toEqual({
@@ -525,7 +552,9 @@ describe("partialCheckinBooking", () => {
 
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1"] } },
+      // why: partial check-in now scopes the kit status update by
+      // organizationId (cross-org IDOR hardening).
+      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
       data: { status: KitStatus.AVAILABLE },
     });
 
@@ -1013,8 +1042,11 @@ describe("updateBasicBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
 
+    // why: the new-custodian lookup is now org-scoped via findFirst (was
+    // findUnique) for cross-org IDOR hardening; mock findFirst with the
+    // richer custodian shape so the email gets the new custodian's details.
     //@ts-expect-error missing vitest type
-    db.teamMember.findUnique.mockResolvedValue({
+    db.teamMember.findFirst.mockResolvedValue({
       id: "team-member-2",
       name: "New TM",
       user: { id: "user-2", firstName: "New", lastName: "Custodian" },
@@ -1498,7 +1530,9 @@ describe("checkoutBooking", () => {
     const result = await checkoutBooking(mockCheckoutParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: checkout now scopes the asset status update by organizationId
+      // (cross-org IDOR hardening) so foreign-org assets can't be mutated.
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
@@ -1602,7 +1636,9 @@ describe("checkinBooking", () => {
     const result = await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: check-in now scopes the asset status update by organizationId
+      // (cross-org IDOR hardening) so foreign-org assets can't be mutated.
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -1653,7 +1689,8 @@ describe("checkinBooking", () => {
     await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1"] } },
+      // why: check-in now scopes the asset status update by organizationId.
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
   });
@@ -1758,6 +1795,8 @@ describe("checkinBooking", () => {
         id: {
           in: ["asset-2", "asset-3"],
         },
+        // why: check-in now scopes the asset status update by organizationId.
+        organizationId: "org-1",
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -1819,6 +1858,8 @@ describe("checkinBooking", () => {
         id: {
           in: ["kit-asset-1", "kit-asset-2", "kit-asset-3", "singular-asset"],
         },
+        // why: check-in now scopes the asset status update by organizationId.
+        organizationId: "org-1",
       },
       data: { status: AssetStatus.AVAILABLE },
     });

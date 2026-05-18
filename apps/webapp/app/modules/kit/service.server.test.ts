@@ -68,6 +68,17 @@ vitest.mock("~/database/db.server", () => ({
     note: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    // why: createKit/updateKit now run cross-org ownership guards that call
+    // db.category.findFirst before connecting a category. Mocked so the guard
+    // can resolve the referenced category for valid test ids.
+    category: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
+    // why: same cross-org ownership guard exists for locations via
+    // db.location.findFirst before connecting a location.
+    location: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -142,6 +153,19 @@ const mockCreateParams = {
 describe("createKit", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: the cross-org ownership guard in createKit queries
+    // db.category.findFirst({ where: { id, organizationId } }) and
+    // db.location.findFirst(...) before connecting. Echo back { id: where.id }
+    // so valid test ids resolve and the guard passes (returns null only when
+    // no id is supplied, preserving the not-found behavior).
+    //@ts-expect-error missing vitest type
+    db.category.findFirst.mockImplementation(({ where }) =>
+      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+    );
+    //@ts-expect-error missing vitest type
+    db.location.findFirst.mockImplementation(({ where }) =>
+      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+    );
   });
 
   it("should create a kit successfully with category", async () => {
@@ -334,6 +358,17 @@ describe("createKit", () => {
 describe("updateKit", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: updateKit runs the same cross-org ownership guard as createKit.
+    // Echo back { id: where.id } so valid test ids resolve and the guard
+    // passes (returns null when no id is supplied, e.g. uncategorized).
+    //@ts-expect-error missing vitest type
+    db.category.findFirst.mockImplementation(({ where }) =>
+      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+    );
+    //@ts-expect-error missing vitest type
+    db.location.findFirst.mockImplementation(({ where }) =>
+      where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null)
+    );
   });
 
   it("should update kit successfully with category", async () => {
@@ -925,10 +960,13 @@ describe("getAvailableKitAssetForBooking", () => {
     //@ts-expect-error missing vitest type
     db.kit.findMany.mockResolvedValue(kitsWithAssets);
 
-    const result = await getAvailableKitAssetForBooking(["kit-1", "kit-2"]);
+    const result = await getAvailableKitAssetForBooking(
+      ["kit-1", "kit-2"],
+      "org-1"
+    );
 
     expect(db.kit.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1", "kit-2"] } },
+      where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
       select: { assets: { select: { id: true, status: true } } },
     });
     expect(result).toEqual(["asset-1", "asset-2", "asset-3"]);

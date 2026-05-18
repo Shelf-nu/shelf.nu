@@ -123,6 +123,7 @@ describe("POST /api/mobile/asset/add-note", () => {
       type: "COMMENT",
       userId: "user-1",
       assetId: "asset-1",
+      organizationId: "org-1",
     });
   });
 

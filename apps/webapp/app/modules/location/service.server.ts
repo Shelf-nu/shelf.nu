@@ -1374,6 +1374,23 @@ export async function getLocationKits(
   }
 }
 
+/**
+ * Persists a system note on an asset describing a location add/change/remove.
+ *
+ * `organizationId` is required and forwarded to `createNote`, which asserts
+ * the target asset belongs to that org before writing — preventing a caller
+ * from attaching a note to another tenant's asset (cross-org IDOR).
+ *
+ * @param params.currentLocation - The asset's location before the change
+ * @param params.newLocation - The asset's location after the change
+ * @param params.firstName - Acting user's first name (for the note link)
+ * @param params.lastName - Acting user's last name (for the note link)
+ * @param params.assetId - The asset the note is written against
+ * @param params.userId - The acting user's ID
+ * @param params.isRemoving - Whether the location is being removed
+ * @param params.organizationId - Caller's validated organization ID
+ * @throws {ShelfError} If the asset is not in `organizationId` or the write fails
+ */
 export async function createLocationChangeNote({
   currentLocation,
   newLocation,
@@ -1382,6 +1399,7 @@ export async function createLocationChangeNote({
   assetId,
   userId,
   isRemoving,
+  organizationId,
 }: {
   currentLocation: Pick<Location, "id" | "name"> | null;
   newLocation: Pick<Location, "id" | "name"> | null;
@@ -1390,6 +1408,7 @@ export async function createLocationChangeNote({
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
+  organizationId: string;
 }) {
   try {
     const message = getLocationUpdateNoteContent({
@@ -1406,6 +1425,9 @@ export async function createLocationChangeNote({
       type: "UPDATE",
       userId,
       assetId,
+      // why: scope the note's asset to the caller's org so a crafted
+      // assetId cannot attach a note to another tenant's asset (IDOR)
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1424,6 +1446,7 @@ async function createBulkLocationChangeNotes({
   removedAssetIds,
   userId,
   location,
+  organizationId,
 }: {
   modifiedAssets: Prisma.AssetGetPayload<{
     select: {
@@ -1449,6 +1472,8 @@ async function createBulkLocationChangeNotes({
   removedAssetIds: Asset["id"][];
   userId: User["id"];
   location: Pick<Location, "id" | "name">;
+  /** Caller's validated org — forwarded to each per-asset note for the IDOR guard */
+  organizationId: string;
 }) {
   try {
     const user = await db.user
@@ -1492,6 +1517,9 @@ async function createBulkLocationChangeNotes({
           assetId: asset.id,
           userId,
           isRemoving,
+          // why: forward the caller's org so each per-asset note is
+          // validated against the asset's true org (cross-org IDOR guard)
+          organizationId,
         });
 
         if (isNew && newLocation) {
@@ -1797,6 +1825,9 @@ export async function updateLocationAssets({
       removedAssetIds,
       userId,
       location,
+      // why: assets were loaded scoped to organizationId — forward it so
+      // each per-asset note is validated against the asset's true org
+      organizationId,
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) {
@@ -2078,6 +2109,10 @@ export async function updateLocationKits({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org (cross-org IDOR guard)
+              organizationId,
             })
           )
         );
@@ -2179,6 +2214,10 @@ export async function updateLocationKits({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org (cross-org IDOR guard)
+              organizationId,
             })
           )
         );

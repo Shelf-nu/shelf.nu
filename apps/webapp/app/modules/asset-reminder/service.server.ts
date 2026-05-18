@@ -61,6 +61,9 @@ export async function createAssetReminder({
     await Promise.all([
       createNote({
         assetId,
+        // why: scope the note's asset to the reminder's org so a caller
+        // cannot attach a note to another tenant's asset (cross-org IDOR)
+        organizationId,
         userId: createdById,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({

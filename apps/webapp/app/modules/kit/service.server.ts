@@ -50,6 +50,10 @@ import {
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  assertCategoryBelongsToOrg,
+  assertLocationBelongsToOrg,
+} from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
@@ -139,6 +143,13 @@ export async function createKit({
             ],
           };
 
+    // why: categoryId comes from form input — prove it belongs to this
+    // kit's org before connecting, else an attacker links a foreign
+    // tenant's category (cross-org IDOR)
+    if (categoryId) {
+      await assertCategoryBelongsToOrg({ categoryId, organizationId });
+    }
+
     const data: Prisma.KitCreateInput = {
       name,
       description,
@@ -166,6 +177,9 @@ export async function createKit({
     }
 
     if (locationId) {
+      // why: locationId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertLocationBelongsToOrg({ locationId, organizationId });
       data.location = { connect: { id: locationId } };
     }
 
@@ -252,6 +266,9 @@ export async function updateKit({
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
+      // why: categoryId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertCategoryBelongsToOrg({ categoryId, organizationId });
       Object.assign(data, {
         category: {
           connect: {
@@ -262,6 +279,9 @@ export async function updateKit({
     }
 
     if (locationId) {
+      // why: locationId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertLocationBelongsToOrg({ locationId, organizationId });
       data.location = { connect: { id: locationId } };
     }
 
@@ -869,6 +889,9 @@ export async function releaseCustody({
       type: "UPDATE",
       userId,
       assetIds: kit.assets.map((asset) => asset.id),
+      // why: notes target this kit's assets — scope to the kit's org so
+      // they can only be written against same-tenant assets
+      organizationId,
     });
 
     return kit;
@@ -1638,12 +1661,27 @@ export async function relinkKitQrCode({
   };
 }
 
+/**
+ * Resolves the asset IDs contained in the given kits, for adding to a booking.
+ *
+ * `organizationId` is required and scopes the kit lookup so a caller cannot
+ * pull assets out of kits belonging to another tenant (cross-org IDOR). Kits
+ * not in the org simply yield no assets.
+ *
+ * @param kitIds - Kit IDs sourced from request input
+ * @param organizationId - Caller's validated organization ID
+ * @returns Asset IDs belonging to the in-org kits
+ * @throws {ShelfError} on DB failure
+ */
 export async function getAvailableKitAssetForBooking(
-  kitIds: Kit["id"][]
+  kitIds: Kit["id"][],
+  organizationId: string
 ): Promise<string[]> {
   try {
     const selectedKits = await db.kit.findMany({
-      where: { id: { in: kitIds } },
+      // why: organizationId scoping prevents cross-org IDOR — without it a
+      // caller in Org A could resolve assets from Org B's kits.
+      where: { id: { in: kitIds }, organizationId },
       select: { assets: { select: { id: true, status: true } } },
     });
 
@@ -1746,6 +1784,10 @@ export async function updateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to this kit (loaded scoped to
+              // organizationId) — pass the kit's org so the note is
+              // validated against the asset's true org
+              organizationId,
             })
           )
         );
@@ -1794,6 +1836,10 @@ export async function updateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to this kit (loaded scoped to
+              // organizationId) — pass the kit's org so the note is
+              // validated against the asset's true org
+              organizationId,
             })
           )
         );
@@ -1900,6 +1946,10 @@ export async function bulkUpdateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org
+              organizationId,
             })
           )
         );
@@ -1948,6 +1998,10 @@ export async function bulkUpdateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org
+              organizationId,
             })
           )
         );
@@ -2252,6 +2306,7 @@ export async function updateKitAssets({
 
     await createBulkKitChangeNotes({
       kit,
+      organizationId,
       newlyAddedAssets,
       removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
       userId,
@@ -2319,6 +2374,10 @@ export async function updateKitAssets({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset resolved scoped to organizationId for this
+              // kit — pass the org so the note is validated against the
+              // asset's true org
+              organizationId,
             })
           )
         );
@@ -2357,6 +2416,10 @@ export async function updateKitAssets({
                 type: "UPDATE",
                 userId,
                 assetId: asset.id,
+                // why: asset resolved scoped to organizationId for this
+                // kit — pass the org so the note is validated against
+                // the asset's true org
+                organizationId,
               })
             )
           );
@@ -2400,6 +2463,9 @@ export async function updateKitAssets({
         type: NoteType.UPDATE,
         userId,
         assetIds: assetsToInheritStatus.map((asset) => asset.id),
+        // why: assets resolved scoped to organizationId for this kit —
+        // pass the org so the notes are validated against same-tenant assets
+        organizationId,
       });
     }
 
@@ -2430,6 +2496,9 @@ export async function updateKitAssets({
         type: NoteType.UPDATE,
         userId,
         assetIds,
+        // why: assetIds derived from this kit's assets (loaded scoped to
+        // organizationId) — pass the org so notes target same-tenant assets
+        organizationId,
       });
     }
 
