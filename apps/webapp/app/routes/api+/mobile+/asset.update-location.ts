@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -80,15 +81,54 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Update the asset's location
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId },
-      data: { locationId },
-      select: {
-        id: true,
-        title: true,
-        location: { select: { id: true, name: true } },
-      },
+    // why: short-circuit when the requested location matches the asset's
+    // current location. Without this guard the route would write a no-op
+    // `tx.asset.update`, an `ASSET_LOCATION_CHANGED` event whose
+    // `fromValue === toValue`, and a misleading "updated the location
+    // from X to X" note. The bulk path (`bulkUpdateAssetLocation`) does
+    // exactly the same filter before recording events — see the
+    // singular/bulk parity rule in `.claude/rules/bulk-event-parity.md`.
+    if (asset.location?.id === location.id) {
+      return data({
+        asset: {
+          id: asset.id,
+          title: asset.title,
+          location: asset.location,
+        },
+      });
+    }
+
+    // Update the asset's location and atomically record the
+    // ASSET_LOCATION_CHANGED activity event so reports + activity-event
+    // aggregations include mobile-initiated location changes.
+    const updatedAsset = await db.$transaction(async (tx) => {
+      const updated = await tx.asset.update({
+        where: { id: assetId },
+        data: { locationId },
+        select: {
+          id: true,
+          title: true,
+          location: { select: { id: true, name: true } },
+        },
+      });
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: user.id,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          locationId: location.id,
+          field: "locationId",
+          fromValue: asset.location?.id ?? null,
+          toValue: location.id,
+        },
+        tx
+      );
+
+      return updated;
     });
 
     // Create activity note (matches webapp format)

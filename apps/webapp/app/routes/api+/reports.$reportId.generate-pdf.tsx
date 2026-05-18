@@ -27,7 +27,7 @@ import type {
   AssetInventoryPdfMeta,
   CustodySnapshotPdfMeta,
 } from "~/modules/reports/types";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -125,13 +125,15 @@ export const loader = async ({
       customTo ? new Date(customTo) : undefined
     );
 
-    // Get organization info
+    // Get organization info. `currency` is required so PDF monetary values
+    // render in the workspace's configured currency rather than a hardcoded "$".
     const organization = await db.organization.findUnique({
       where: { id: organizationId },
       select: {
         name: true,
         imageId: true,
         updatedAt: true,
+        currency: true,
       },
     });
 
@@ -143,6 +145,15 @@ export const loader = async ({
         status: 404,
       });
     }
+
+    // Locale drives number + currency formatting inside the PDF renderer.
+    const locale = getLocale(request);
+
+    // Common monetary fields threaded into every pdfMeta variant.
+    const monetaryMeta = {
+      currency: organization.currency,
+      locale,
+    };
 
     // Date formatter - use explicit options to avoid conflict with dateStyle
     // (the utility adds default year/month/day when timeStyle is missing,
@@ -170,6 +181,7 @@ export const loader = async ({
         );
 
         pdfMeta = {
+          ...monetaryMeta,
           reportId,
           reportTitle: reportDef.title,
           reportDescription: reportDef.description,
@@ -235,6 +247,7 @@ export const loader = async ({
         }
 
         pdfMeta = {
+          ...monetaryMeta,
           reportId: "asset-inventory",
           reportTitle: reportDef.title,
           reportDescription: reportDef.description,
@@ -276,6 +289,7 @@ export const loader = async ({
         }
 
         pdfMeta = {
+          ...monetaryMeta,
           reportId: "custody-snapshot",
           reportTitle: reportDef.title,
           reportDescription: reportDef.description,

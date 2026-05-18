@@ -1,3 +1,8 @@
+/**
+ * Test suite for POST /api/mobile/audits/complete.
+ * Covers audit-session completion, assignee validation, permission
+ * checks, and the paid Audits add-on enforcement (403 when disabled).
+ */
 import { action } from "~/routes/api+/mobile+/audits.complete";
 import { createActionArgs } from "@mocks/remix";
 
@@ -95,7 +100,11 @@ describe("POST /api/mobile/audits/complete", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: true,
+      canUseBarcodes: true,
+    });
     (requireAuditAssignee as any).mockResolvedValue(undefined);
     (completeAuditSession as any).mockResolvedValue(undefined);
   });
@@ -165,6 +174,22 @@ describe("POST /api/mobile/audits/complete", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
 
+    expect(completeAuditSession).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 when the Audits add-on is disabled", async () => {
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: false,
+      canUseBarcodes: true,
+    });
+
+    const request = createCompleteRequest({ sessionId: "session-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("not enabled");
     expect(completeAuditSession).not.toHaveBeenCalled();
   });
 });

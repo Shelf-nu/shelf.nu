@@ -25,10 +25,14 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
 import {
   AssetCell,
+  CurrencyCell,
   DateCell,
   ReportTable,
 } from "~/components/reports/report-table";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type { CustodySnapshotRow, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 
 /** Props for {@link CustodySnapshotContent}. */
 type Props = {
@@ -58,6 +62,9 @@ export function CustodySnapshotContent({
   totalRows,
   onRowClick,
 }: Props) {
+  const currentOrganization = useCurrentOrganization();
+  const { locale } = useHints();
+
   // Calculate max days for relative bar width
   const maxDays = Math.max(...rows.map((r) => r.daysInCustody), 1);
 
@@ -128,12 +135,9 @@ export function CustodySnapshotContent({
       {
         accessorKey: "valuation",
         header: "Value",
-        cell: ({ row }) =>
-          row.original.valuation ? (
-            `$${row.original.valuation.toLocaleString()}`
-          ) : (
-            <span className="text-gray-400">—</span>
-          ),
+        cell: ({ row }) => (
+          <CurrencyCell value={row.original.valuation} treatZeroAsEmpty />
+        ),
       },
     ],
     [maxDays]
@@ -178,7 +182,11 @@ export function CustodySnapshotContent({
               <span className="text-xs text-gray-500">Total Value</span>
               <span className="text-lg font-medium text-gray-900">
                 {totalCustodyValue > 0
-                  ? `$${totalCustodyValue.toLocaleString()}`
+                  ? formatCurrency({
+                      value: totalCustodyValue,
+                      currency: currentOrganization?.currency ?? "USD",
+                      locale,
+                    })
                   : "—"}
               </span>
             </div>

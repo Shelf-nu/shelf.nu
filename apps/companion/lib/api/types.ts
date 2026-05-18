@@ -6,6 +6,14 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  /**
+   * Canonical "can use Audits" capability from `/api/mobile/me`
+   * (server-side `canUseAudits`: the paid add-on flag, OR always true when
+   * premium gating is disabled). Premium-aware so client gating matches
+   * the server. When false the companion hides Audits entry points and
+   * every mobile audit endpoint returns 403.
+   */
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
@@ -309,6 +317,12 @@ export type AuditListItem = {
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null };
   assigneeCount: number;
+  /**
+   * True when the authenticated mobile user is among the audit's
+   * assignees. Server-computed on the list endpoint so the companion
+   * can render a "Yours" marker without an extra round-trip per row.
+   */
+  isAssignedToMe: boolean;
 };
 
 export type AuditsResponse = {
@@ -325,6 +339,24 @@ export type AuditExpectedAsset = {
   auditAssetId: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Where the asset is supposed to be physically. Surfaced on the
+   * audit detail row so the field worker can navigate to the right
+   * shelf / room without leaving the audit context. Null when the
+   * asset has no location set or the server didn't load it.
+   */
+  locationName: string | null;
+  /**
+   * Asset category name — helps when the image is generic and you
+   * need to disambiguate "which laptop" among many identical rows.
+   */
+  categoryName: string | null;
+  /**
+   * Display name of the team member currently holding the asset, if
+   * any. Helps explain why an expected asset can't be found at its
+   * location (someone has it on loan).
+   */
+  custodianName: string | null;
 };
 
 export type AuditScanData = {
@@ -334,6 +366,12 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  /** Asset's location name at scan time, or null if it has no location set. */
+  assetLocationName: string | null;
+  /** Number of COMMENT notes recorded against this scanned asset. */
+  auditNotesCount: number;
+  /** Number of condition photos uploaded for this scanned asset. */
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {
@@ -408,6 +446,16 @@ export type CreateAssetResponse = {
   };
 };
 
+/**
+ * Server-accepted scalar value for a custom field on create / update.
+ * The webapp coerces these into the appropriate stored representation:
+ * - string  → TEXT / MULTILINE_TEXT / DATE (ISO) / OPTION (option text)
+ * - number  → NUMBER / AMOUNT
+ * - boolean → BOOLEAN
+ * - null    → clear the value (UPDATE only)
+ */
+export type CustomFieldValue = string | number | boolean | null;
+
 export type UpdateAssetPayload = {
   assetId: string;
   title?: string;
@@ -416,7 +464,67 @@ export type UpdateAssetPayload = {
   newLocationId?: string;
   currentLocationId?: string;
   valuation?: number | null;
-  customFields?: { id: string; value: any }[];
+  /**
+   * Custom field updates. Each entry is the customField `id` (NOT the asset's
+   * custom-field-value row id) plus the new value. Omitted fields are left
+   * unchanged on the server.
+   */
+  customFields?: { id: string; value: CustomFieldValue }[];
+};
+
+/**
+ * Definition of an active custom field as returned by
+ * `GET /api/mobile/custom-fields`. The companion uses this shape to render
+ * the right input (via `CustomFieldInput`) and to enforce required-ness
+ * client-side before submitting the create / update payload.
+ *
+ * Field semantics:
+ * - `id`        — stable CustomField primary key; used as the dictionary
+ *                 key on the form's local id → value map.
+ * - `name`      — human-readable label shown above the input.
+ * - `type`      — one of `TEXT`, `MULTILINE_TEXT`, `BOOLEAN`, `DATE`,
+ *                 `NUMBER`, `AMOUNT`, `OPTION`. Drives input rendering.
+ * - `helpText`  — optional hint shown next to the label (and forwarded as
+ *                 an `accessibilityHint` to screen readers).
+ * - `required`  — when true, the create / update screens block submit
+ *                 until a non-empty value is provided. The server enforces
+ *                 the same contract; the client check is a UX improvement.
+ * - `options`   — only populated for `type === "OPTION"`. The allowed set
+ *                 of values the user may pick from. Empty array / null for
+ *                 every other type.
+ */
+/**
+ * Discriminated union of all supported custom-field types. Keeping this as
+ * a literal union (not `string`) catches typos at compile time — the most
+ * common confusion is webapp internals using lowercase identifiers
+ * (`"option"`, `"boolean"`) while the database and this API contract use
+ * uppercase. Add a new constant here when introducing a new field type.
+ */
+export type MobileCustomFieldType =
+  | "TEXT"
+  | "MULTILINE_TEXT"
+  | "BOOLEAN"
+  | "DATE"
+  | "NUMBER"
+  | "AMOUNT"
+  | "OPTION";
+
+export type MobileCustomFieldDefinition = {
+  id: string;
+  name: string;
+  type: MobileCustomFieldType;
+  helpText: string | null;
+  required: boolean;
+  options: string[] | null;
+};
+
+/**
+ * Response payload for `GET /api/mobile/custom-fields?orgId=...&categoryId=...`.
+ * Returns the full set of active custom-field definitions that apply to the
+ * selected category (or to "no category" when `categoryId` is omitted).
+ */
+export type CustomFieldsResponse = {
+  customFields: MobileCustomFieldDefinition[];
 };
 
 export type UpdateAssetResponse = {

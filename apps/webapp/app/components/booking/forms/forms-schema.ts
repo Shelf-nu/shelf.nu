@@ -1,6 +1,7 @@
 import type { BookingSettings } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
-import { format, addHours, differenceInHours } from "date-fns";
+import { addHours, differenceInHours } from "date-fns";
+import { DateTime } from "luxon";
 import { z } from "zod";
 import type { WorkingHoursData } from "~/modules/working-hours/types";
 import {
@@ -10,25 +11,72 @@ import {
 } from "~/modules/working-hours/utils";
 import type { getHints } from "~/utils/client-hints";
 
+/**
+ * Parses a `datetime-local` wire string (e.g. `"2026-05-01T16:10"`) in the
+ * user's timezone using Luxon. The HTML `datetime-local` input emits values
+ * without an offset, so `new Date(value)` interprets them in the server's
+ * local zone (UTC in production), which silently corrupts validation.
+ *
+ * Returns a Zod string schema whose `.transform()` yields a correct Date.
+ *
+ * @param timeZone - IANA zone (from `getHints(request).timeZone`). Falls back
+ *   to UTC if missing.
+ */
+function coerceLocalDate(timeZone?: string) {
+  const zone = timeZone ?? "UTC";
+  // Accept a `datetime-local` wire string (production), a full ISO string
+  // (existing call sites), or a Date object (existing unit tests). `fromISO`
+  // with a `zone` hint applies the zone only when the string has no offset.
+  return z
+    .union([z.string().min(1, "Date is required"), z.date()])
+    .transform((val, ctx) => {
+      if (val instanceof Date) return val;
+      const dt = DateTime.fromISO(val, { zone });
+      if (!dt.isValid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Invalid date format",
+        });
+        return z.NEVER;
+      }
+      return dt.toJSDate();
+    });
+}
+
 type ValidationResult = { isValid: true } | { isValid: false; message: string };
 
 /**
- * Validates if a datetime falls within working hours
+ * Validates if a datetime falls within working hours.
+ *
+ * `dateTime` is an absolute instant. To read weekday / time-of-day / calendar
+ * date the way the user intended, we must extract components in the user's
+ * timezone — otherwise NY 16:00 becomes UTC 20:00 on the server and a valid
+ * afternoon booking fails the 9–17 working-hours check.
+ *
+ * @param dateTime - The booking instant (typically produced by `coerceLocalDate`).
+ * @param workingHours - The org's working-hours config.
+ * @param timeZone - IANA zone for the booking user. Falls back to server-local
+ *   when omitted, preserving the legacy code path for callers that have no zone.
  */
 function validateWorkingHours(
   dateTime: Date,
-  workingHours: WorkingHoursData
+  workingHours: WorkingHoursData,
+  timeZone?: string
 ): ValidationResult {
   // If working hours are disabled, all times are valid
   if (!workingHours.enabled) {
     return { isValid: true };
   }
 
-  // Extract day and time directly - no timezone conversion needed
-  // dateTime is already correctly parsed from user input
-  const dayOfWeek = dateTime.getDay().toString(); // 0 = Sunday, 1 = Monday, etc.
-  const timeString = format(dateTime, "HH:mm");
-  const dateString = format(dateTime, "yyyy-MM-dd");
+  // Extract weekday/time/date in the user's zone when known. Luxon's `weekday`
+  // is 1=Mon..7=Sun; `% 7` maps it back to JS `getDay()` semantics (0=Sun..6=Sat)
+  // which match the `weeklySchedule` keys produced elsewhere in the codebase.
+  const local = timeZone
+    ? DateTime.fromJSDate(dateTime).setZone(timeZone)
+    : DateTime.fromJSDate(dateTime);
+  const dayOfWeek = (local.weekday % 7).toString();
+  const timeString = local.toFormat("HH:mm");
+  const dateString = local.toFormat("yyyy-MM-dd");
 
   // Check for date-specific overrides first. Overrides are stored as
   // UTC-midnight timestamps that represent an absolute calendar date, so we
@@ -103,18 +151,13 @@ function validateWorkingHours(
 function validateFutureDate(
   date: Date,
   bufferStartTime: number,
-  timeZone?: string
+  _timeZone?: string
 ): ValidationResult {
-  let now: Date;
-  if (timeZone) {
-    now = new Date(
-      new Date().toLocaleString("en-US", {
-        timeZone,
-      })
-    );
-  } else {
-    now = new Date();
-  }
+  // why: `date` is now an absolute instant produced by `coerceLocalDate` in
+  // the user's zone, so a plain `new Date()` is the correct comparand.
+  // The previous toLocaleString/Date round-trip computed `now` in the wrong
+  // zone and triggered false "in the past" errors near the wall-clock moment.
+  const now = new Date();
 
   // Only apply buffer if bufferStartTime is greater than 0
   const hasBuffer = bufferStartTime > 0;
@@ -223,8 +266,8 @@ export function BookingFormSchema({
           userId: z.string().optional().nullable(),
         })
       ),
-    startDate: z.coerce.date().optional(),
-    endDate: z.coerce.date().optional(),
+    startDate: coerceLocalDate(hints?.timeZone).optional(),
+    endDate: coerceLocalDate(hints?.timeZone).optional(),
     tags: tagsRequired
       ? z.string().min(1, "At least one tag is required")
       : z.string().optional(),
@@ -232,7 +275,7 @@ export function BookingFormSchema({
 
   // Create enhanced date schemas with working hours and buffer validation
   const createValidatedStartDateSchema = () =>
-    z.coerce.date().superRefine((data, ctx) => {
+    coerceLocalDate(hints?.timeZone).superRefine((data, ctx) => {
       // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
@@ -249,7 +292,11 @@ export function BookingFormSchema({
 
       // 2. Validate working hours if available
       if (workingHours && hints?.timeZone) {
-        const workingHoursValidation = validateWorkingHours(data, workingHours);
+        const workingHoursValidation = validateWorkingHours(
+          data,
+          workingHours,
+          hints.timeZone
+        );
         if (!workingHoursValidation.isValid) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -260,10 +307,14 @@ export function BookingFormSchema({
     });
 
   const createValidatedEndDateSchema = () =>
-    z.coerce.date().superRefine((data, ctx) => {
+    coerceLocalDate(hints?.timeZone).superRefine((data, ctx) => {
       // Only validate working hours for end date (no future date requirement)
       if (workingHours && hints?.timeZone) {
-        const validation = validateWorkingHours(data, workingHours);
+        const validation = validateWorkingHours(
+          data,
+          workingHours,
+          hints.timeZone
+        );
         if (!validation.isValid) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -395,19 +446,12 @@ export function ExtendBookingSchema({
 
   return z
     .object({
-      startDate: z.string(), // Hidden field with booking start date
-      endDate: z.string().superRefine((dateString, ctx) => {
-        // Convert string to Date for validation purposes
-        const dateTime = new Date(dateString);
-
-        if (isNaN(dateTime.getTime())) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Invalid date format",
-          });
-          return;
-        }
-
+      // Hidden field carrying the booking's existing start date. Parse with
+      // the user's zone so the cross-field max-length check below operates on
+      // an absolute instant rather than reinterpreting a bare datetime-local
+      // string in the server zone.
+      startDate: coerceLocalDate(timeZone),
+      endDate: coerceLocalDate(timeZone).superRefine((dateTime, ctx) => {
         // 1. Validate future date with buffer using existing function (skipped for ADMIN/OWNER)
         const futureValidation = validateFutureDate(
           dateTime,
@@ -426,7 +470,8 @@ export function ExtendBookingSchema({
         if (workingHours) {
           const workingHoursValidation = validateWorkingHours(
             dateTime,
-            workingHours
+            workingHours,
+            timeZone
           );
           if (!workingHoursValidation.isValid) {
             ctx.addIssue({
@@ -440,8 +485,7 @@ export function ExtendBookingSchema({
     .superRefine((data, ctx) => {
       // Cross-field validation for maximum booking length (skipped for ADMIN/OWNER)
       if (effectiveMaxBookingLength && data.startDate && data.endDate) {
-        const startDate = new Date(data.startDate);
-        const endDate = new Date(data.endDate);
+        const { startDate, endDate } = data;
 
         let durationInHours: number;
 

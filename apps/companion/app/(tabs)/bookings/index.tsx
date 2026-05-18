@@ -379,6 +379,8 @@ function BookingsListContent() {
               <Text style={styles.emptyTitle}>
                 {activeFilter === 0
                   ? "No active bookings"
+                  : activeFilter === 2
+                  ? "No bookings"
                   : `No ${STATUS_FILTERS[
                       activeFilter
                     ].label.toLowerCase()} bookings`}

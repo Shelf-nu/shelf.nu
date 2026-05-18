@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -24,6 +25,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    // Server-enforce the paid Audits add-on via the canonical helper
+    // (canUseAudits, surfaced through getMobileUserContext) so the
+    // dashboard never serves activeAudits to non-add-on workspaces — a
+    // paywall bypass / data leak even with the client cards hidden.
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     // Run all queries in parallel for speed
     const [
@@ -145,11 +155,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // Active audits (PENDING or ACTIVE)
+      // Active audits (PENDING or ACTIVE) — gated on the Audits add-on.
+      // Empty `id: { in: [] }` yields no rows for non-add-on workspaces,
+      // so the dashboard never serializes audit data without the add-on.
       db.auditSession.findMany({
         where: {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
+          ...(canUseAudits ? {} : { id: { in: [] } }),
         },
         select: {
           id: true,

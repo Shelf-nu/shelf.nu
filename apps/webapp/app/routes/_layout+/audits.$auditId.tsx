@@ -142,6 +142,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
+        // Admin/owner is the inverse of self-service/base in this codebase.
+        // Passing it through lets the service allow non-creator admin/owners
+        // to cancel — matches archive/delete permissions.
+        isAdminOrOwner: !isSelfServiceOrBase,
         hints,
       });
 

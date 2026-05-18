@@ -23,6 +23,7 @@ import type {
   AssetInventoryPdfMeta,
   CustodySnapshotPdfMeta,
 } from "~/modules/reports/types";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 export interface ReportPdfProps {
@@ -533,7 +534,11 @@ function AssetInventoryPreview({
           />
           <MetricBox
             label="Total Value"
-            value={`$${pdfMeta.totalValuation.toLocaleString()}`}
+            value={formatCurrency({
+              value: pdfMeta.totalValuation,
+              currency: pdfMeta.currency,
+              locale: pdfMeta.locale,
+            })}
           />
           <MetricBox
             label="Available"
@@ -588,7 +593,13 @@ function AssetInventoryPreview({
                   {row.custodian || "—"}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation ? `$${row.valuation.toLocaleString()}` : "—"}
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
+                        value: row.valuation,
+                        currency: pdfMeta.currency,
+                        locale: pdfMeta.locale,
+                      })}
                 </td>
               </tr>
             ))}
@@ -624,7 +635,11 @@ function CustodySnapshotPreview({
           <MetricBox label="Team Members" value={pdfMeta.totalCustodians} />
           <MetricBox
             label="Total Value"
-            value={`$${pdfMeta.totalValuation.toLocaleString()}`}
+            value={formatCurrency({
+              value: pdfMeta.totalValuation,
+              currency: pdfMeta.currency,
+              locale: pdfMeta.locale,
+            })}
           />
         </div>
       </section>
@@ -669,7 +684,13 @@ function CustodySnapshotPreview({
                   {row.daysInCustody}
                 </td>
                 <td className="border-b border-gray-100 p-2 text-right">
-                  {row.valuation ? `$${row.valuation.toLocaleString()}` : "—"}
+                  {row.valuation == null
+                    ? "—"
+                    : formatCurrency({
+                        value: row.valuation,
+                        currency: pdfMeta.currency,
+                        locale: pdfMeta.locale,
+                      })}
                 </td>
               </tr>
             ))}

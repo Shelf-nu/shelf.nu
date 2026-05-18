@@ -31,9 +31,22 @@ export const assetsApi = {
     return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`);
   },
 
-  /** Get full asset details */
-  asset: (assetId: string) =>
-    apiFetch<{ asset: AssetDetail }>(`/api/mobile/assets/${assetId}`),
+  /**
+   * Get full details for a single asset. The mobile asset-detail route
+   * requires `orgId` to scope the lookup to the caller's workspace —
+   * passing it as a query param is the standard pattern across the mobile
+   * API (matches `assets`, `barcode`, `teamMembers`, etc.).
+   *
+   * @param assetId - Identifier of the asset to fetch.
+   * @param orgId - Caller's current workspace id. Required by the server;
+   *   client callers should not invoke this when the value isn't available.
+   * @returns `{ asset }` on success or `{ error }` on failure (per
+   *   `apiFetch`'s envelope).
+   */
+  asset: (assetId: string, orgId: string) =>
+    apiFetch<{ asset: AssetDetail }>(
+      `/api/mobile/assets/${assetId}?orgId=${orgId}`
+    ),
 
   /** Resolve a QR code to an asset */
   qr: (qrId: string) => apiFetch<QrResponse>(`/api/mobile/qr/${qrId}`),
@@ -66,9 +79,25 @@ export const assetsApi = {
       : cachedApiFetch<LocationsResponse>(path);
   },
 
-  /** Add a comment note to an asset */
-  addNote: (assetId: string, content: string) =>
-    apiFetch<{ note: AssetNote }>("/api/mobile/asset/add-note", {
+  /**
+   * Post a user-authored comment note to an asset's activity log. The
+   * mobile add-note route requires `orgId` to scope the action to the
+   * caller's workspace — passing it as a query param matches the rest of
+   * the org-scoped mobile API surface (`asset`, `assets`, `barcode`,
+   * etc.).
+   *
+   * @param assetId - Identifier of the asset to attach the note to.
+   * @param content - Trimmed note body. Caller should validate non-empty
+   *   before invoking; the server will reject empty content but the
+   *   round-trip is wasteful.
+   * @param orgId - Caller's current workspace id. Required by the server;
+   *   client callers should not invoke this when the value isn't available
+   *   (the asset-detail screen disables the Post button until it is).
+   * @returns `{ note }` on success or `{ error }` on failure (per
+   *   `apiFetch`'s envelope).
+   */
+  addNote: (assetId: string, content: string, orgId: string) =>
+    apiFetch<{ note: AssetNote }>(`/api/mobile/asset/add-note?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ assetId, content }),
     }),
