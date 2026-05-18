@@ -5,14 +5,25 @@ import {
   requireMobileAuth,
   MOBILE_ASSET_SELECT,
 } from "~/modules/api/mobile-auth.server";
-import { makeShelfError } from "~/utils/error";
+import { createScan } from "~/modules/scan/service.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 
 /**
  * GET /api/mobile/qr/:qrId
  *
  * Resolves a QR code to its linked asset or kit.
  * Used by the mobile scanner after scanning a Shelf QR code.
+ *
+ * Also records scan provenance (who + when) via `createScan`, mirroring the
+ * public web QR resolver. The companion previously recorded nothing on
+ * resolve, so field scans were invisible to an asset's scan history /
+ * "last scanned by". GPS coordinates are intentionally NOT captured here —
+ * that is a deliberate, separate item (needs a location permission + privacy
+ * manifest; see the companion post-launch backlog).
+ *
+ * @see {@link file://./../../qr+/_public+/$qrId.tsx}
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -62,6 +73,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         { status: 403 }
+      );
+    }
+
+    // Record scan provenance (who + when), mirroring the public web QR
+    // resolver. Org membership is verified above, so this only ever logs
+    // in-org scans — intentionally stricter than web, which also records
+    // cross-org "contact owner" scans. Non-fatal: `createScan` throws a
+    // ShelfError on failure (e.g. a scan-note write hiccup), and a
+    // provenance failure must never turn a successful resolve into an
+    // error response for the scanner.
+    try {
+      await createScan({
+        userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+        userId: user.id,
+        qrId: qr.id,
+        deleted: false,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to record mobile scan provenance",
+          additionalData: { qrId: qr.id, userId: user.id },
+          label: "Scan",
+        })
       );
     }
 
