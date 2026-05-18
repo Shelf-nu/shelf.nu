@@ -4,11 +4,12 @@ import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
-  requireMobileAuditsEnabled,
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
+import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -19,31 +20,24 @@ import {
  * POST /api/mobile/audits/note
  *
  * Creates a condition note tied to a scanned asset within an audit — the
- * per-asset evidence the audit PDF report renders. Faithfully mirrors the
- * webapp `create-note` intent in
- * `routes/_layout+/audits.$auditId.scan.$auditAssetId.details.tsx` so the
- * note reaches reports identically.
+ * per-asset evidence the audit PDF report renders. Mirrors the webapp
+ * `create-note` intent in
+ * `routes/_layout+/audits.$auditId.scan.$auditAssetId.details.tsx`.
  *
  * Query params:
  *   - orgId (required): organization ID
  *
- * Body (JSON):
- *   - auditSessionId: string
- *   - auditAssetId: string — the AuditAsset the note is condition evidence for
- *   - content: string — the note body
+ * Body (JSON): `{ auditSessionId, auditAssetId, content }`
  *
  * @param args - Remix action args; `request` carries the bearer auth
  *   header, the `orgId` query param, and the JSON body
- * @returns A JSON `Response`: `{ note }` on success, otherwise
- *   `{ error: { message } }` with a 4xx status (400/403/404)
- * @throws Never — all failures are caught and returned as JSON error
- *   responses via `makeShelfError`
+ * @returns JSON `{ note }` on success, else `{ error: { message } }` 4xx
+ * @throws Never — failures are caught and returned via `makeShelfError`
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    await requireMobileAuditsEnabled(organizationId);
     await requireMobilePermission({
       userId: user.id,
       organizationId,
@@ -51,64 +45,77 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { auditSessionId, auditAssetId, content } = z
+    // Paid Audits add-on gate. #2551 replaced the standalone
+    // `requireMobileAuditsEnabled` helper with the `canUseAudits` flag on
+    // `getMobileUserContext` — mirror `audits.complete.ts` so the revenue
+    // gate stays consistent across every mobile audit route.
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
+
+    const parsed = z
       .object({
         auditSessionId: z.string().min(1),
         auditAssetId: z.string().min(1),
-        content: z.string().min(1, "Note content is required"),
+        content: z
+          .string()
+          .trim()
+          .min(1, "Note content is required")
+          .max(NOTE_MAX_CONTENT_LENGTH),
       })
-      .parse(await request.json());
+      .safeParse(await request.json());
 
-    if (!content.trim()) {
+    if (!parsed.success) {
+      return data(
+        {
+          error: {
+            message: parsed.error.issues[0]?.message ?? "Invalid request body",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const { auditSessionId, auditAssetId, content: rawContent } = parsed.data;
+
+    // Audit note content is rendered through Markdoc in the audit feed
+    // (`audit-asset-note-item.tsx` → MarkdownViewer) and the PDF path
+    // assumes notes are sanitized server-side. Strip `{%`/`%}` from this
+    // user-authored note so a client cannot persist a Markdoc tag (e.g.
+    // `{% audit_images ids="..." /%}`) that surfaces another asset's
+    // evidence — the same neutralization the image-evidence path applies.
+    const content = stripMarkdocDelimiters(rawContent);
+    if (!content) {
       return data(
         { error: { message: "Note content is required" } },
         { status: 400 }
       );
     }
 
-    // Defense-in-depth: confirm the session is in the caller's org (the
-    // webapp scopes this via the route's requirePermission on the param).
-    const session = await db.auditSession.findFirst({
-      where: { id: auditSessionId, organizationId },
-      select: { id: true },
-    });
-    if (!session) {
-      return data(
-        { error: { message: "Audit session not found" } },
-        { status: 404 }
-      );
-    }
-
-    // Security: the auditAssetId must belong to THIS session (the session
-    // is already org-scoped above). Without this a client could attach a
-    // note to an AuditAsset from another audit/org — cross-tenant write.
-    const auditAsset = await db.auditAsset.findFirst({
-      where: { id: auditAssetId, auditSessionId },
-      select: { id: true },
-    });
-    if (!auditAsset) {
-      return data(
-        { error: { message: "Audit asset not found in this session" } },
-        { status: 404 }
-      );
-    }
-
-    // Scope to assignment: BASE/SELF_SERVICE hold audit:update, but the
-    // mobile list/detail paths restrict them to assigned audits. Mirror
-    // audits.complete.ts so a low-privileged user who learns an
-    // auditAssetId can't write evidence to an audit they can't access.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-    await requireAuditAssignee({
+    // Org-scoped session + asset-in-session + assignee scoping (shared with
+    // the image route; unit-tested in mobile-evidence.server.test.ts).
+    await requireAuditAssetInSession({
       auditSessionId,
+      auditAssetId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase,
     });
 
     const note = await db.auditNote.create({
       data: {
-        content: content.trim(),
+        content,
         auditSessionId,
         auditAssetId,
         userId: user.id,

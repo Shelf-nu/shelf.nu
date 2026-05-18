@@ -3,13 +3,12 @@ import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
-  requireMobileAuditsEnabled,
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
+import { createAuditImageEvidenceNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
-import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -19,46 +18,55 @@ import {
 /**
  * POST /api/mobile/audits/image
  *
- * Uploads a single condition photo for a scanned asset within an audit and
- * records the matching note, so the image + note reach the audit PDF report
- * exactly like the webapp. Mirrors the `upload-image` intent in
- * `routes/_layout+/audits.$auditId.scan.$auditAssetId.details.tsx` (the
- * single-file variant — the companion uploads one photo per request, same
- * as the mobile asset image-upload route).
+ * Uploads one condition photo for a scanned asset within an audit and
+ * records the matching evidence note, so the image + note reach the audit
+ * PDF report exactly like the webapp single-file `upload-image` intent in
+ * `routes/_layout+/audits.$auditId.scan.$auditAssetId.details.tsx`.
  *
  * Query params:
- *   - orgId (required): organization ID
- *   - auditSessionId (required)
- *   - auditAssetId (required): the AuditAsset this photo is evidence for
+ *   - orgId (required), auditSessionId (required), auditAssetId (required)
  *
- * Body: multipart/form-data with:
- *   - `image` (required): the photo file
- *   - `content` (optional): note text to attach alongside the photo. Sent
- *     in the body (not the query) so a long note can't blow URL limits or
- *     leak into request logs.
+ * Body: multipart/form-data with `image` (required) and optional `content`
+ * (note text). `content` is read from the SAME bounded parse that streams
+ * the file (`uploadAuditImage` -> `parseFileFormData`, `maxFileSize`
+ * enforced; `@remix-run/form-data-parser` passes text fields through) —
+ * never via an unbounded `request.clone().formData()`.
  *
- * The upload pipeline (resize/thumbnail/storage) is shared with the webapp
- * via `uploadAuditImage`.
- *
- * @param args - Remix action args; `request` carries the bearer auth
- *   header, the query params, and the multipart body (`image` + optional
- *   `content`)
- * @returns A JSON `Response`: `{ image }` on success, otherwise
- *   `{ error: { message } }` with a 4xx status (400/403/404)
- * @throws Never — all failures are caught and returned as JSON error
- *   responses via `makeShelfError`
+ * @param args - Remix action args; `request` carries bearer auth, the
+ *   query params, and the multipart body
+ * @returns JSON `{ image }` on success, else `{ error: { message } }` 4xx
+ * @throws Never — failures are caught and returned via `makeShelfError`
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    await requireMobileAuditsEnabled(organizationId);
     await requireMobilePermission({
       userId: user.id,
       organizationId,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
+
+    // Paid Audits add-on gate. #2551 replaced the standalone
+    // `requireMobileAuditsEnabled` helper with the `canUseAudits` flag on
+    // `getMobileUserContext` — mirror `audits.complete.ts` so the revenue
+    // gate stays consistent across every mobile audit route.
+    const { canUseAudits } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    if (!canUseAudits) {
+      return data(
+        {
+          error: {
+            message:
+              "Audits are not enabled for this workspace. Contact your admin to enable this feature.",
+          },
+        },
+        { status: 403 }
+      );
+    }
 
     const url = new URL(request.url);
     const auditSessionId = url.searchParams.get("auditSessionId");
@@ -75,94 +83,46 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const session = await db.auditSession.findFirst({
-      where: { id: auditSessionId, organizationId },
-      select: { id: true },
-    });
-    if (!session) {
-      return data(
-        { error: { message: "Audit session not found" } },
-        { status: 404 }
-      );
-    }
-
-    // Security: the auditAssetId must belong to THIS session (the session
-    // is already org-scoped above). Without this a client could attach an
-    // image to an AuditAsset from another audit/org — cross-tenant write.
-    const auditAsset = await db.auditAsset.findFirst({
-      where: { id: auditAssetId, auditSessionId },
-      select: { id: true },
-    });
-    if (!auditAsset) {
-      return data(
-        { error: { message: "Audit asset not found in this session" } },
-        { status: 404 }
-      );
-    }
-
-    // Scope to assignment: BASE/SELF_SERVICE hold audit:update, but the
-    // mobile list/detail paths restrict them to assigned audits. Mirror
-    // audits.complete.ts so a low-privileged user who learns an
-    // auditAssetId can't upload evidence to an audit they can't access.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-    await requireAuditAssignee({
+    // Org-scoped session + asset-in-session + assignee scoping (shared with
+    // the note route; unit-tested in mobile-evidence.server.test.ts).
+    await requireAuditAssetInSession({
       auditSessionId,
+      auditAssetId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase,
     });
 
-    // Read the optional note text from the multipart body, NOT the query
-    // string: a note can be up to 5000 chars, which risks URL-length
-    // limits (414/413) and leaks potentially-sensitive text into access /
-    // CDN logs. Clone so uploadAuditImage can still parse the file stream
-    // from the original request (mirrors the webapp sibling).
-    const formData = await request.clone().formData();
-    const contentRaw = formData.get("content");
-    const content = typeof contentRaw === "string" ? contentRaw : null;
-
-    // Shared pipeline: parse multipart, resize, thumbnail, upload to
-    // storage, create the AuditImage row tied to auditAssetId.
-    const image = await uploadAuditImage({
+    // Single bounded parse: the file stream AND the optional `content`
+    // text field come from `parseFileFormData` (maxFileSize enforced;
+    // @remix-run/form-data-parser passes text fields through). No separate
+    // `request.clone().formData()` — that buffered the whole upload
+    // unbounded before any size check (closed DoS vector).
+    const { image, formData } = await uploadAuditImage({
       request,
       auditSessionId,
       organizationId,
       uploadedById: user.id,
       auditAssetId,
+      returnParsedFormData: true,
     });
 
-    // Mirror the webapp: record the upload as a note so it shows in the
-    // activity feed and the audit PDF report (pdf-helpers reads auditNote
-    // + auditImage by auditAssetId).
+    const contentRaw = formData.get("content");
+    // Forward raw content to the helper — sanitization (Markdoc injection
+    // stripping) is encapsulated in buildAuditImagesNoteContent inside
+    // createAuditImageEvidenceNote (unit-tested in note-content.server.test.ts).
+    const content = typeof contentRaw === "string" ? contentRaw : null;
+
+    // Shared, sanitized, transactional evidence-note writer (same helper
+    // the webapp scan route uses — Markdoc injection closed there too).
     await db.$transaction(async (tx) => {
-      if (content?.trim()) {
-        await tx.auditNote.create({
-          data: {
-            auditSessionId,
-            auditAssetId,
-            userId: user.id,
-            // Strip Markdoc delimiters from user content so it can't break
-            // or inject the trailing {% audit_images %} tag. (The webapp
-            // sibling has the same unsanitized concat — flagged for a
-            // shared-helper follow-up rather than diverging silently.)
-            content: `${content
-              .trim()
-              .replace(/\{%|%\}/g, "")}\n\n{% audit_images count=1 ids="${
-              image.id
-            }" /%}`,
-            type: "COMMENT",
-          },
-        });
-      } else {
-        await createAuditAssetImagesAddedNote({
-          auditSessionId,
-          auditAssetId,
-          userId: user.id,
-          imageIds: [image.id],
-          tx,
-        });
-      }
+      await createAuditImageEvidenceNote({
+        tx,
+        auditSessionId,
+        auditAssetId,
+        userId: user.id,
+        imageIds: [image.id],
+        content,
+      });
     });
 
     return data({ image });

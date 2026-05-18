@@ -28,26 +28,25 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: external auth — don't hit Supabase. Includes requireMobileAuditsEnabled
-// (the #18 paid-add-on guard) so we can assert it gates this route.
+// why: external auth — don't hit Supabase. getMobileUserContext carries the
+// paid-add-on flag (canUseAudits) so we can assert it gates this route
+// (#2551 replaced the old requireMobileAuditsEnabled helper).
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
-  requireMobileAuditsEnabled: vi.fn(),
-  requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
+  requireMobilePermission: vi.fn(),
 }));
 
-// why: external service — assignee scoping is enforced here
-vi.mock("~/modules/audit/service.server", () => ({
-  requireAuditAssignee: vi.fn(),
+// why: external guard — session/org/asset/assignee scoping is unit-tested
+// in mobile-evidence.server.test.ts; here we only assert it is invoked.
+vi.mock("~/modules/audit/mobile-evidence.server", () => ({
+  requireAuditAssetInSession: vi.fn(),
 }));
 
 // why: external database — don't hit the real DB
 vi.mock("~/database/db.server", () => ({
   db: {
-    auditSession: { findFirst: vi.fn() },
-    auditAsset: { findFirst: vi.fn() },
     auditNote: { create: vi.fn() },
   },
 }));
@@ -70,12 +69,12 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
-  requireMobileAuditsEnabled,
-  requireMobilePermission,
   getMobileUserContext,
+  requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
-import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { db } from "~/database/db.server";
+import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 
 const mockUser = {
   id: "user-1",
@@ -109,18 +108,16 @@ describe("POST /api/mobile/audits/note", () => {
       authUser: { id: "auth-user-1", email: mockUser.email },
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
-    (requireMobilePermission as any).mockResolvedValue(undefined);
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
-    (db.auditAsset.findFirst as any).mockResolvedValue({
-      id: "audit-asset-1",
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: true,
     });
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
-    (requireAuditAssignee as any).mockResolvedValue(undefined);
+    (requireMobilePermission as any).mockResolvedValue(undefined);
+    (requireAuditAssetInSession as any).mockResolvedValue(undefined);
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
     (db.auditNote.create as any).mockResolvedValue({
       id: "note-1",
       content: "Scratched on the left side",
@@ -147,9 +144,11 @@ describe("POST /api/mobile/audits/note", () => {
   });
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
-    const addonErr = new Error("Audit functionality is not enabled");
-    (addonErr as any).status = 403;
-    (requireMobileAuditsEnabled as any).mockRejectedValue(addonErr);
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: false,
+    });
 
     const result = await action(
       createActionArgs({ request: createNoteRequest(validBody) })
@@ -173,7 +172,9 @@ describe("POST /api/mobile/audits/note", () => {
   });
 
   it("returns 404 when the audit session is not in the caller's org", async () => {
-    (db.auditSession.findFirst as any).mockResolvedValue(null);
+    (requireAuditAssetInSession as any).mockRejectedValue(
+      Object.assign(new Error("Audit session not found"), { status: 404 })
+    );
 
     const result = await action(
       createActionArgs({ request: createNoteRequest(validBody) })
@@ -184,8 +185,11 @@ describe("POST /api/mobile/audits/note", () => {
   });
 
   it("returns 404 when auditAssetId is not in the session (cross-tenant guard)", async () => {
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
-    (db.auditAsset.findFirst as any).mockResolvedValue(null); // belongs elsewhere
+    (requireAuditAssetInSession as any).mockRejectedValue(
+      Object.assign(new Error("Audit asset not found in this session"), {
+        status: 404,
+      })
+    );
 
     const result = await action(
       createActionArgs({ request: createNoteRequest(validBody) })
@@ -196,30 +200,27 @@ describe("POST /api/mobile/audits/note", () => {
   });
 
   it("returns 403 when the caller is not an assignee of the audit", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ role: "SELF_SERVICE" });
-    const assigneeErr = new Error("Not an assignee");
-    (assigneeErr as any).status = 403;
-    (requireAuditAssignee as any).mockRejectedValue(assigneeErr);
+    (requireAuditAssetInSession as any).mockRejectedValue(
+      Object.assign(new Error("Not an assignee"), { status: 403 })
+    );
 
     const result = await action(
       createActionArgs({ request: createNoteRequest(validBody) })
     );
 
     expect((result as unknown as Response).status).toBe(403);
-    expect(requireAuditAssignee).toHaveBeenCalledWith(
+    expect(requireAuditAssetInSession).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: "session-1",
+        auditAssetId: "audit-asset-1",
         organizationId: "org-1",
         userId: "user-1",
-        isSelfServiceOrBase: true,
       })
     );
     expect(db.auditNote.create).not.toHaveBeenCalled();
   });
 
   it("rejects an empty/invalid body without creating a note", async () => {
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
-
     const result = await action(
       createActionArgs({
         request: createNoteRequest({
@@ -230,7 +231,62 @@ describe("POST /api/mobile/audits/note", () => {
       })
     );
 
-    expect((result as unknown as Response).status).toBeGreaterThanOrEqual(400);
+    expect((result as unknown as Response).status).toBe(400);
+    expect(db.auditNote.create).not.toHaveBeenCalled();
+  });
+
+  it("strips Markdoc delimiters from note content before persisting", async () => {
+    (db.auditNote.create as any).mockResolvedValue({
+      id: "note-1",
+      content: "x",
+      user: { id: "user-1" },
+    });
+
+    await action(
+      createActionArgs({
+        request: createNoteRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          content: 'crack {% audit_images ids="stolen" /%} here',
+        }),
+      })
+    );
+
+    const writtenContent = (db.auditNote.create as any).mock.calls[0][0].data
+      .content as string;
+    // delimiters gone → cannot reconstruct a Markdoc tag in the rendered feed
+    expect(writtenContent).not.toContain("{%");
+    expect(writtenContent).not.toContain("%}");
+    expect(writtenContent).toContain("crack");
+  });
+
+  it("returns 400 when content is only Markdoc delimiters (sanitizes to empty)", async () => {
+    const result = await action(
+      createActionArgs({
+        request: createNoteRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          content: "{% %}",
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(db.auditNote.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when content exceeds NOTE_MAX_CONTENT_LENGTH", async () => {
+    const result = await action(
+      createActionArgs({
+        request: createNoteRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          content: "a".repeat(NOTE_MAX_CONTENT_LENGTH + 1),
+        }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(400);
     expect(db.auditNote.create).not.toHaveBeenCalled();
   });
 });

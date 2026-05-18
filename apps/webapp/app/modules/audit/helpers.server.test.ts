@@ -9,6 +9,7 @@ import {
   createAssetsAddedToAuditNote,
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
+  createAuditImageEvidenceNote,
 } from "./helpers.server";
 
 // Mock the markdoc wrappers
@@ -1445,6 +1446,77 @@ describe("audit helpers", () => {
       });
 
       expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAuditImageEvidenceNote", () => {
+    function makeTx() {
+      return {
+        // why: external DB — exercise the note write without a real Prisma
+        // tx; returns a stable id so the COMMENT-branch assertions can read it.
+        auditNote: { create: vi.fn().mockResolvedValue({ id: "note-1" }) },
+        // why: createAuditAssetImagesAddedNote (delegated to in the no-content
+        // branch) reads user + auditAsset to compose its default note text.
+        user: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "user-1",
+            firstName: "Test",
+            lastName: "User",
+            displayName: null,
+          }),
+        },
+        auditAsset: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "audit-asset-1",
+            asset: { id: "asset-1", title: "Drill" },
+          }),
+        },
+      };
+    }
+
+    it("writes a sanitized COMMENT note with the trusted tag when content is given", async () => {
+      const tx = makeTx();
+      await createAuditImageEvidenceNote({
+        tx: tx as any,
+        auditSessionId: "session-1",
+        auditAssetId: "audit-asset-1",
+        userId: "user-1",
+        imageIds: ["img-1"],
+        content: 'evil {% audit_images ids="stolen" /%} note',
+      });
+
+      expect(tx.auditNote.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          userId: "user-1",
+          type: "COMMENT",
+          content: expect.stringContaining(
+            '{% audit_images count=1 ids="img-1" /%}'
+          ),
+        }),
+      });
+      const written = tx.auditNote.create.mock.calls[0][0].data
+        .content as string;
+      expect(written).not.toContain('{% audit_images ids="stolen"');
+    });
+
+    it("delegates to the default images-added note when content is empty", async () => {
+      const tx = makeTx();
+      await createAuditImageEvidenceNote({
+        tx: tx as any,
+        auditSessionId: "session-1",
+        auditAssetId: "audit-asset-1",
+        userId: "user-1",
+        imageIds: ["img-1"],
+        content: "   ",
+      });
+
+      const call = tx.auditNote.create.mock.calls[0][0];
+      expect(call.data.type).toBe("UPDATE");
+      expect(call.data.content).toContain(
+        '{% audit_images count=1 ids="img-1" /%}'
+      );
     });
   });
 });

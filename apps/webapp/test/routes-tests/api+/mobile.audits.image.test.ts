@@ -1,8 +1,14 @@
 /**
  * Test suite for POST /api/mobile/audits/image.
- * Covers condition-photo upload + matching note (default vs content),
- * Markdoc-injection stripping, the cross-tenant guard, the paid Audits
+ *
+ * Covers condition-photo upload + matching evidence note (default vs content),
+ * the shared-guard delegation, cross-tenant protection, the paid Audits
  * add-on enforcement (403), permission checks, and missing-param handling.
+ *
+ * After the Task-6 refactor the route delegates to:
+ *  - `requireAuditAssetInSession` (shared guard, replaces inlined db lookups)
+ *  - `uploadAuditImage({ returnParsedFormData: true })` (bounded parse)
+ *  - `createAuditImageEvidenceNote` (sanitized, transactional note writer)
  */
 import { action } from "~/routes/api+/mobile+/audits.image";
 import { createActionArgs } from "@mocks/remix";
@@ -28,31 +34,28 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: external auth — don't hit Supabase. Includes requireMobileAuditsEnabled
-// (the #18 paid-add-on guard) so we can assert it gates this route.
+// why: external auth — don't hit Supabase. getMobileUserContext carries the
+// paid-add-on flag (canUseAudits) so we can assert it gates this route
+// (#2551 replaced the old requireMobileAuditsEnabled helper).
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
-  requireMobileAuditsEnabled: vi.fn(),
-  requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
+  requireMobilePermission: vi.fn(),
 }));
 
-// why: external service — assignee scoping is enforced here
-vi.mock("~/modules/audit/service.server", () => ({
-  requireAuditAssignee: vi.fn(),
+// why: shared guard encapsulates org-scoped session + asset-in-session +
+// assignee scoping; unit-tested in mobile-evidence.server.test.ts.
+vi.mock("~/modules/audit/mobile-evidence.server", () => ({
+  requireAuditAssetInSession: vi.fn(),
 }));
 
 // why: external database — don't hit the real DB. $transaction runs the
-// callback with a tx whose auditNote.create we can assert on.
-const txAuditNoteCreate = vi.hoisted(() => vi.fn());
+// callback with an opaque tx; createAuditImageEvidenceNote is mocked so it
+// never touches the tx.
 vi.mock("~/database/db.server", () => ({
   db: {
-    auditSession: { findFirst: vi.fn() },
-    auditAsset: { findFirst: vi.fn() },
-    $transaction: vi.fn(async (fn: any) =>
-      fn({ auditNote: { create: txAuditNoteCreate } })
-    ),
+    $transaction: vi.fn(async (fn: any) => fn({})),
   },
 }));
 
@@ -60,8 +63,12 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/audit/image.service.server", () => ({
   uploadAuditImage: vi.fn(),
 }));
+
+// why: shared note writer is unit-tested in helpers.server.test.ts;
+// here we only verify the route forwards the right arguments.
 vi.mock("~/modules/audit/helpers.server", () => ({
   createAuditAssetImagesAddedNote: vi.fn(),
+  createAuditImageEvidenceNote: vi.fn(),
 }));
 
 // why: control error formatting in the catch block
@@ -82,14 +89,13 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
-  requireMobileAuditsEnabled,
-  requireMobilePermission,
   getMobileUserContext,
+  requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
-import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { db } from "~/database/db.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
-import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
+import { createAuditImageEvidenceNote } from "~/modules/audit/helpers.server";
 
 const mockUser = {
   id: "user-1",
@@ -106,7 +112,7 @@ function createImageRequest(opts: {
   const params = new URLSearchParams({ orgId: "org-1" });
   if (opts.auditSessionId) params.set("auditSessionId", opts.auditSessionId);
   if (opts.auditAssetId) params.set("auditAssetId", opts.auditAssetId);
-  // content travels in the multipart body now (not the query string)
+  // content travels in the multipart body (not the query string)
   const form = new FormData();
   if (opts.content !== undefined) form.set("content", opts.content);
   return new Request(`http://localhost/api/mobile/audits/image?${params}`, {
@@ -124,13 +130,18 @@ describe("POST /api/mobile/audits/image", () => {
       authUser: { id: "auth-user-1", email: mockUser.email },
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (requireMobileAuditsEnabled as any).mockResolvedValue(undefined);
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: true,
+    });
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
-    (db.auditAsset.findFirst as any).mockResolvedValue({ id: "audit-asset-1" });
-    (getMobileUserContext as any).mockResolvedValue({ role: "ADMIN" });
-    (requireAuditAssignee as any).mockResolvedValue(undefined);
-    (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
+    (requireAuditAssetInSession as any).mockResolvedValue(undefined);
+    // Default: uploadAuditImage returns the new bounded shape
+    (uploadAuditImage as any).mockResolvedValue({
+      image: { id: "img-1" },
+      formData: new FormData(),
+    });
   });
 
   it("uploads the photo and records a default images-added note", async () => {
@@ -146,27 +157,39 @@ describe("POST /api/mobile/audits/image", () => {
     expect(result instanceof Response).toBe(true);
     const body = await (result as unknown as Response).json();
     expect(body.image.id).toBe("img-1");
+
+    // Route must call uploadAuditImage with returnParsedFormData: true
     expect(uploadAuditImage).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: "session-1",
         organizationId: "org-1",
         uploadedById: "user-1",
         auditAssetId: "audit-asset-1",
+        returnParsedFormData: true,
       })
     );
-    // no content → auto-generated images-added note
-    expect(createAuditAssetImagesAddedNote).toHaveBeenCalledWith(
+
+    // No content in formData → content arg is null → delegate note to the shared helper
+    expect(createAuditImageEvidenceNote).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: "session-1",
         auditAssetId: "audit-asset-1",
         userId: "user-1",
         imageIds: ["img-1"],
+        content: null,
       })
     );
-    expect(txAuditNoteCreate).not.toHaveBeenCalled();
   });
 
-  it("with content, records a COMMENT note tagging the uploaded image", async () => {
+  it("with content, forwards it unchanged to createAuditImageEvidenceNote", async () => {
+    // Route must NOT sanitize; sanitization is the helper's responsibility.
+    const fd = new FormData();
+    fd.set("content", "Dent on top");
+    (uploadAuditImage as any).mockResolvedValue({
+      image: { id: "img-1" },
+      formData: fd,
+    });
+
     const result = await action(
       createActionArgs({
         request: createImageRequest({
@@ -178,44 +201,51 @@ describe("POST /api/mobile/audits/image", () => {
     );
 
     expect((result as unknown as Response).status).toBe(200);
-    expect(txAuditNoteCreate).toHaveBeenCalledWith(
+    expect(createAuditImageEvidenceNote).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          auditSessionId: "session-1",
-          auditAssetId: "audit-asset-1",
-          userId: "user-1",
-          type: "COMMENT",
-          content: expect.stringContaining(
-            '{% audit_images count=1 ids="img-1" /%}'
-          ),
-        }),
+        auditSessionId: "session-1",
+        auditAssetId: "audit-asset-1",
+        userId: "user-1",
+        imageIds: ["img-1"],
+        content: "Dent on top",
       })
     );
-    expect(createAuditAssetImagesAddedNote).not.toHaveBeenCalled();
   });
 
-  it("strips Markdoc delimiters from content so the audit_images tag can't be injected", async () => {
+  it("forwards raw (unsanitized) content to the helper (sanitization is the helper's job)", async () => {
+    // The route must pass content verbatim; stripping Markdoc delimiters is
+    // encapsulated in buildAuditImagesNoteContent (note-content.server) which
+    // createAuditImageEvidenceNote calls — unit-tested separately there.
+    const rawContent = 'evil {% audit_images ids="stolen-id" /%} text';
+    const fd = new FormData();
+    fd.set("content", rawContent);
+    (uploadAuditImage as any).mockResolvedValue({
+      image: { id: "img-1" },
+      formData: fd,
+    });
+
     await action(
       createActionArgs({
         request: createImageRequest({
           auditSessionId: "session-1",
           auditAssetId: "audit-asset-1",
-          content: 'evil {% audit_images ids="stolen-id" /%} text',
+          content: rawContent,
         }),
       })
     );
 
-    const noteContent = (txAuditNoteCreate as any).mock.calls[0][0].data
-      .content as string;
-    // injected tag delimiters removed; only the trusted trailing tag remains
-    expect(noteContent).not.toContain('{% audit_images ids="stolen-id"');
-    expect(noteContent).toContain('{% audit_images count=1 ids="img-1" /%}');
+    // The route forwards the raw string unchanged — no stripping here
+    expect(createAuditImageEvidenceNote).toHaveBeenCalledWith(
+      expect.objectContaining({ content: rawContent })
+    );
   });
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
-    const addonErr = new Error("Audit functionality is not enabled");
-    (addonErr as any).status = 403;
-    (requireMobileAuditsEnabled as any).mockRejectedValue(addonErr);
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: false,
+    });
 
     const result = await action(
       createActionArgs({
@@ -239,9 +269,11 @@ describe("POST /api/mobile/audits/image", () => {
     expect(uploadAuditImage).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when auditAssetId is not in the session (cross-tenant guard)", async () => {
-    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
-    (db.auditAsset.findFirst as any).mockResolvedValue(null); // belongs elsewhere
+  it("returns 404 when requireAuditAssetInSession rejects with 404 (cross-tenant guard)", async () => {
+    const notFoundErr = Object.assign(new Error("Audit session not found"), {
+      status: 404,
+    });
+    (requireAuditAssetInSession as any).mockRejectedValue(notFoundErr);
 
     const result = await action(
       createActionArgs({
@@ -253,14 +285,22 @@ describe("POST /api/mobile/audits/image", () => {
     );
 
     expect((result as unknown as Response).status).toBe(404);
+    expect(requireAuditAssetInSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auditSessionId: "session-1",
+        auditAssetId: "audit-asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    );
     expect(uploadAuditImage).not.toHaveBeenCalled();
   });
 
   it("returns 403 when the caller is not an assignee of the audit", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ role: "BASE" });
-    const assigneeErr = new Error("Not an assignee");
-    (assigneeErr as any).status = 403;
-    (requireAuditAssignee as any).mockRejectedValue(assigneeErr);
+    const assigneeErr = Object.assign(new Error("Not an assignee"), {
+      status: 403,
+    });
+    (requireAuditAssetInSession as any).mockRejectedValue(assigneeErr);
 
     const result = await action(
       createActionArgs({
@@ -272,12 +312,11 @@ describe("POST /api/mobile/audits/image", () => {
     );
 
     expect((result as unknown as Response).status).toBe(403);
-    expect(requireAuditAssignee).toHaveBeenCalledWith(
+    expect(requireAuditAssetInSession).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: "session-1",
         organizationId: "org-1",
         userId: "user-1",
-        isSelfServiceOrBase: true,
       })
     );
     expect(uploadAuditImage).not.toHaveBeenCalled();
@@ -299,5 +338,19 @@ describe("POST /api/mobile/audits/image", () => {
 
     expect((result as unknown as Response).status).toBe(403);
     expect(uploadAuditImage).not.toHaveBeenCalled();
+  });
+
+  it("wraps the $transaction call and delegates note to createAuditImageEvidenceNote inside it", async () => {
+    await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+        }),
+      })
+    );
+
+    expect(db.$transaction).toHaveBeenCalled();
+    expect(createAuditImageEvidenceNote).toHaveBeenCalled();
   });
 });

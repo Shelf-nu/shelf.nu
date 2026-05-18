@@ -2,6 +2,7 @@ import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { buildAuditImagesNoteContent } from "./note-content.server";
 
 /**
  * Creates an automatic note when an audit is created.
@@ -407,6 +408,62 @@ export async function createAuditAssetImagesAddedNote({
       type: "UPDATE",
       content,
     },
+  });
+}
+
+/**
+ * Records the evidence note that accompanies an image upload on a scanned
+ * asset, in the caller's transaction. Single source of truth shared by the
+ * webapp scan route and the mobile companion image route.
+ *
+ * - With user content: a `COMMENT` note whose body is the **sanitized**
+ *   user text followed by a single trusted `{% audit_images %}` tag
+ *   (Markdoc injection closed via {@link buildAuditImagesNoteContent}).
+ * - Without content: delegates to {@link createAuditAssetImagesAddedNote}
+ *   for the auto-generated `UPDATE` note.
+ *
+ * @param args.tx - Active Prisma transaction client
+ * @param args.auditSessionId - The audit session the note belongs to
+ * @param args.auditAssetId - The scanned AuditAsset this evidence is for
+ * @param args.userId - The author of the note / uploader
+ * @param args.imageIds - Ids of the AuditImage rows just uploaded
+ * @param args.content - Optional user note text (untrusted; sanitized)
+ * @returns Nothing; the note is written via `tx`
+ */
+export async function createAuditImageEvidenceNote({
+  tx,
+  auditSessionId,
+  auditAssetId,
+  userId,
+  imageIds,
+  content,
+}: {
+  tx: any; // Prisma transaction client (matches createAuditAssetImagesAddedNote)
+  auditSessionId: string;
+  auditAssetId: string;
+  userId: string;
+  imageIds: string[];
+  content?: string | null;
+}) {
+  if (content?.trim()) {
+    await tx.auditNote.create({
+      data: {
+        auditSessionId,
+        auditAssetId,
+        userId,
+        type: "COMMENT",
+        content: buildAuditImagesNoteContent({ content, imageIds }),
+      },
+    });
+    return;
+  }
+
+  await createAuditAssetImagesAddedNote({
+    auditSessionId,
+    auditAssetId,
+    userId,
+    imageIds,
+    tx,
   });
 }
 

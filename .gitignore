@@ -80,3 +80,6 @@ lefthook-local.yml
 *.cert.bak/
 
 node-compile-cache/
+
+# Expo build/cache artifacts (root-level; apps/companion/.gitignore covers its own)
+.expo/
