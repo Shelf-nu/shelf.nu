@@ -224,7 +224,7 @@ export async function getMobileUserContext(
     // the convention used in roles.server.ts and invite/service.server.ts so
     // an empty array doesn't surface as `undefined` to downstream callers.
     role: userOrg.roles[0] ?? OrganizationRoles.BASE,
-    canUseBarcodes: userOrg.organization.barcodesEnabled,
+    canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
   };
 }
