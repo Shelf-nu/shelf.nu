@@ -523,7 +523,14 @@ export default function AssetDetailScreen() {
           <TeamMemberPicker
             visible={showCustodyPicker}
             orgId={currentOrg.id}
-            onSelect={handleAssignCustody}
+            onSelect={(member) => {
+              // Mirror handleLocationSelect: dismiss the picker before the
+              // confirm/assign flow so the user sees the refetched asset
+              // detail and the new custody state — not a stuck member list
+              // with no visible feedback (read as "it didn't work").
+              setShowCustodyPicker(false);
+              handleAssignCustody(member);
+            }}
             onClose={() => setShowCustodyPicker(false)}
           />
           <LocationPicker
