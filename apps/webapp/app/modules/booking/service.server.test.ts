@@ -126,6 +126,13 @@ vitest.mock("~/database/db.server", () => ({
           id: where.id,
         })),
     },
+    // why: cross-org IDOR guard assertUserBelongsToOrg now queries
+    // userOrganization.findFirst({ userId, organizationId }) before connecting
+    // a custodian user. Echo a membership row so happy-path booking tests pass;
+    // tests that exercise the foreign-user rejection override with null.
+    userOrganization: {
+      findFirst: vitest.fn().mockResolvedValue({ id: "user-org-1" }),
+    },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },

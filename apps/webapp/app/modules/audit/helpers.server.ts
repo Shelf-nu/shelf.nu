@@ -61,7 +61,6 @@ export async function createAssetScanNote({
   isExpected,
   tx,
   prefetchedUser,
-  prefetchedAsset,
 }: {
   auditSessionId: string;
   assetId: string;
@@ -75,15 +74,16 @@ export async function createAssetScanNote({
     firstName: string | null;
     lastName: string | null;
   } | null;
-  prefetchedAsset?: { id: string; title: string } | null;
 }) {
-  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  // why: the asset is ALWAYS fetched org-scoped here (no prefetch shortcut) so
+  // a caller that prefetched an asset without org scoping cannot feed a
+  // foreign-org asset through this note path (cross-org IDOR). The user is not
+  // org-scoped data for this note, so prefetchedUser remains a safe shortcut.
   const [asset, scanner] = await Promise.all([
-    prefetchedAsset ??
-      tx.asset.findFirst({
-        where: { id: assetId, organizationId },
-        select: { id: true, title: true },
-      }),
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
+      select: { id: true, title: true },
+    }),
     prefetchedUser ??
       tx.user.findUnique({
         where: { id: userId },

@@ -1353,7 +1353,6 @@ export async function recordAuditScan(
           isExpected,
           tx,
           prefetchedUser: scannerUser,
-          prefetchedAsset: scannedAsset,
         });
 
         // Activity event — AUDIT_ASSET_SCANNED.

@@ -26,6 +26,7 @@ import type {
   Location,
   Tag,
   TeamMember,
+  User,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -66,6 +67,12 @@ export type OrgValidationTxClient = {
   location: {
     findFirst: (args: {
       where: { id: string; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
+  };
+  userOrganization: {
+    findFirst: (args: {
+      where: { userId: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
@@ -252,6 +259,44 @@ export async function assertLocationBelongsToOrg(
       status: 404,
       shouldBeCaptured: false,
       additionalData: { organizationId, locationId },
+    });
+  }
+}
+
+/**
+ * Asserts that a user is a member of `organizationId` (via UserOrganization).
+ *
+ * Used to validate request-supplied custodian *user* IDs before connecting
+ * them to a booking — `custodianTeamMemberId` being org-valid does not prove
+ * the paired `custodianUserId` is, so an attacker could otherwise bind an
+ * arbitrary (foreign) user as the custodian user and leak their name/email.
+ *
+ * @param params.userId - User ID sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 404 if the user is not a member of the organization
+ */
+export async function assertUserBelongsToOrg(
+  { userId, organizationId }: { userId: User["id"]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  const client = tx ?? db;
+
+  const found = await client.userOrganization.findFirst({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  if (!found) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid custodian",
+      message:
+        "The selected custodian user is not a member of this workspace. Please reload and try again.",
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+      additionalData: { organizationId, userId },
     });
   }
 }

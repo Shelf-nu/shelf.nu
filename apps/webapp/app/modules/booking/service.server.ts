@@ -64,6 +64,7 @@ import {
   assertAssetsBelongToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
+  assertUserBelongsToOrg,
 } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -526,6 +527,18 @@ export async function createBooking({
         tx
       );
 
+      // SECURITY (cross-org IDOR): custodianUserId is also request input and a
+      // valid team member does not prove the paired user belongs to the org.
+      if (booking.custodianUserId) {
+        await assertUserBelongsToOrg(
+          {
+            userId: booking.custodianUserId,
+            organizationId: booking.organizationId,
+          },
+          tx
+        );
+      }
+
       const created = await tx.booking.create({
         data: dataToCreate,
         include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -746,6 +759,12 @@ export async function updateBasicBooking({
          * This will override the value if there were any previous custodians`
          */
         if (custodianUserId) {
+          // SECURITY (cross-org IDOR): custodianUserId is request input; a
+          // valid team member does not prove the paired user is in this org.
+          await assertUserBelongsToOrg({
+            userId: custodianUserId,
+            organizationId,
+          });
           dataToUpdate.custodianUser = {
             connect: { id: custodianUserId },
           };
@@ -1153,6 +1172,12 @@ export async function reserveBooking({
        * This will override the value if there were any previous custodians`
        */
       if (custodianUserId) {
+        // SECURITY (cross-org IDOR): custodianUserId is request input; a valid
+        // team member does not prove the paired user is in this org.
+        await assertUserBelongsToOrg({
+          userId: custodianUserId,
+          organizationId,
+        });
         dataToUpdate.custodianUser = {
           connect: { id: custodianUserId },
         };

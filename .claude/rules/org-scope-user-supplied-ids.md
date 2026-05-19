@@ -33,7 +33,10 @@ const loc = await db.location.findFirst({ where: { id: newLocationId } });
 
 // ✅ Good — assert ownership first (inside the tx), then proceed
 await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
-await assertLocationBelongsToOrg({ locationId: newLocationId, organizationId });
+await assertLocationBelongsToOrg(
+  { locationId: newLocationId, organizationId },
+  tx
+);
 ```
 
 When you fix one occurrence, grep sibling create/update/bulk handlers of the

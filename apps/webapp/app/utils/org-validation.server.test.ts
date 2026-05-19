@@ -19,6 +19,7 @@ import {
   assertTeamMemberBelongsToOrg,
   assertCategoryBelongsToOrg,
   assertLocationBelongsToOrg,
+  assertUserBelongsToOrg,
 } from "./org-validation.server";
 
 // why: importing the module pulls in ~/database/db.server (Prisma client
@@ -35,6 +36,7 @@ function txWith(overrides: Record<string, any>) {
     teamMember: { findFirst: vitest.fn().mockResolvedValue(null) },
     category: { findFirst: vitest.fn().mockResolvedValue(null) },
     location: { findFirst: vitest.fn().mockResolvedValue(null) },
+    userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -190,6 +192,36 @@ describe("single-entity guards reject foreign/missing with 404", () => {
     });
     await expect(
       assertLocationBelongsToOrg({ locationId: "l-1", organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("assertUserBelongsToOrg", () => {
+  it("throws 404 when the user is not a member of the org (foreign custodian user)", async () => {
+    const tx = txWith({
+      userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
+    });
+    const err = await assertUserBelongsToOrg(
+      { userId: "u-foreign", organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(404);
+    expect(tx.userOrganization.findFirst).toHaveBeenCalledWith({
+      where: { userId: "u-foreign", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("resolves when the user is a member of the org", async () => {
+    const tx = txWith({
+      userOrganization: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "uo-1" }),
+      },
+    });
+    await expect(
+      assertUserBelongsToOrg({ userId: "u-1", organizationId: ORG }, tx)
     ).resolves.toBeUndefined();
   });
 });
