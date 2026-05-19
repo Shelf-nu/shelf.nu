@@ -1523,6 +1523,44 @@ describe("checkoutBooking", () => {
     to: futureToDate,
   };
 
+  it("aborts checkout and performs no writes when an attached asset is not in the caller's org", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          title: "Asset 1",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+        // legacy cross-org link — belongs to another workspace
+        {
+          id: "foreign-asset",
+          kitId: null,
+          title: "Foreign Asset",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // org guard: only the in-org asset resolves; "foreign-asset" is absent
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      "Some of the selected assets do not exist in your workspace"
+    );
+    // fail-safe: no status transition, no booking write
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("should checkout booking successfully with no conflicts", async () => {
     expect.assertions(2);
 
