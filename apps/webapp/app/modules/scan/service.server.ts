@@ -263,3 +263,59 @@ export async function createScanNote({
     });
   }
 }
+
+/**
+ * Max age of a scan whose geolocation may still be attached from the public,
+ * unauthenticated /qr/:qrId endpoint. The legitimate browser flow posts
+ * coordinates within seconds of the scan being created.
+ */
+const SCAN_GEO_UPDATE_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Attaches geolocation to a freshly-created scan from the **public,
+ * unauthenticated** `/qr/:qrId` route.
+ *
+ * SECURITY (CWE-639 / CWE-862): that route requires no authentication and
+ * `scanId` is fully attacker-controlled. Calling `updateScan` directly there
+ * let anyone overwrite the GPS of *any* scan record by id. We only permit
+ * updating a scan created within {@link SCAN_GEO_UPDATE_WINDOW_MS}, which
+ * matches the legitimate immediate client-side geolocation post and prevents
+ * tampering of arbitrary or historical scan records.
+ *
+ * @param params.scanId - Scan id from public form input (untrusted)
+ * @param params.latitude - Geolocation latitude
+ * @param params.longitude - Geolocation longitude
+ * @returns The updated scan
+ * @throws {ShelfError} 403 if the scan is missing or older than the window
+ */
+export async function updateScanGeolocation({
+  scanId,
+  latitude,
+  longitude,
+}: {
+  scanId: Scan["id"];
+  latitude?: Scan["latitude"];
+  longitude?: Scan["longitude"];
+}) {
+  const scan = await db.scan.findUnique({
+    where: { id: scanId },
+    select: { id: true, createdAt: true },
+  });
+
+  if (
+    !scan ||
+    Date.now() - scan.createdAt.getTime() > SCAN_GEO_UPDATE_WINDOW_MS
+  ) {
+    throw new ShelfError({
+      cause: null,
+      title: "Scan not found",
+      message: "This scan can no longer be updated.",
+      label,
+      status: 403,
+      shouldBeCaptured: false,
+      additionalData: { scanId },
+    });
+  }
+
+  return updateScan({ id: scanId, latitude, longitude });
+}

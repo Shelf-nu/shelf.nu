@@ -6,7 +6,11 @@ import { ErrorContent } from "~/components/errors";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
-import { createScan, updateScan } from "~/modules/scan/service.server";
+import {
+  createScan,
+  updateScan,
+  updateScanGeolocation,
+} from "~/modules/scan/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -153,10 +157,15 @@ export async function action({ request }: ActionFunctionArgs) {
       })
     );
 
-    /** This handles the automatic update when we have scanId formData */
+    /**
+     * This handles the automatic geolocation update when we have scanId
+     * formData. SECURITY: this route is public/unauthenticated and `scanId`
+     * is attacker-controlled — updateScanGeolocation only permits updating a
+     * recently-created scan, so arbitrary/old scan records cannot be tampered.
+     */
     if (scanId) {
-      await updateScan({
-        id: scanId,
+      await updateScanGeolocation({
+        scanId,
         latitude,
         longitude,
       });

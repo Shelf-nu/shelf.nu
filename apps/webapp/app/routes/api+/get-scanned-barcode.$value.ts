@@ -17,6 +17,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  sanitizeAssetExtraInclude,
+  sanitizeKitExtraInclude,
+} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -102,16 +106,22 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       auditSessionId?: string;
     };
 
+    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
+    // user-controlled JSON. Allowlist them before merging into the Prisma
+    // include so relation traversal / deep nesting cannot be injected.
+    const safeAssetExtraInclude = sanitizeAssetExtraInclude(assetExtraInclude);
+    const safeKitExtraInclude = sanitizeKitExtraInclude(kitExtraInclude);
+
     const include = {
       ...BARCODE_INCLUDE,
 
       // Include additional data based on search params. This will override the default includes
-      ...(assetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...assetExtraInclude } } }
+      ...(safeAssetExtraInclude
+        ? { asset: { include: { ...ASSET_INCLUDE, ...safeAssetExtraInclude } } }
         : undefined),
 
-      ...(kitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...kitExtraInclude } } }
+      ...(safeKitExtraInclude
+        ? { kit: { include: { ...KIT_INCLUDE, ...safeKitExtraInclude } } }
         : undefined),
     };
 
