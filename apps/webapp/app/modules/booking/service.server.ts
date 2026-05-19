@@ -1337,6 +1337,19 @@ export async function checkoutBooking({
         });
       });
 
+    // SECURITY (defense-in-depth): reject checkout if any attached asset is
+    // not in this org BEFORE any asset-derived logic runs. A legacy
+    // pre-remediation cross-org link would otherwise (a) leak the foreign
+    // asset's title through the conflict/custody error messages below, and
+    // (b) let the booking transition while the org-scoped updateMany skips it.
+    // Legitimately-created bookings (assets validated at create/add) pass.
+    if (bookingFound.assets.length > 0) {
+      await assertAssetsBelongToOrg({
+        assetIds: bookingFound.assets.map((a) => a.id),
+        organizationId,
+      });
+    }
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.assets) {
       const conflictedAssets = bookingFound.assets.filter((asset) =>

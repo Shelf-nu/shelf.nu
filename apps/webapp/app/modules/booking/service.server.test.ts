@@ -83,7 +83,16 @@ vitest.mock("~/database/db.server", () => ({
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
-      findMany: vitest.fn().mockResolvedValue([]),
+      // why: assertAssetsBelongToOrg (checkout/create cross-org guard) calls
+      // db.asset.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
+      // Echo the requested ids so the guard passes for happy-path tests; other
+      // call sites (no id.in) still get [], and tests override per-case.
+      findMany: vitest.fn().mockImplementation((args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       update: vitest.fn().mockResolvedValue({}),
     },
@@ -1491,6 +1500,19 @@ describe("reserveBooking", () => {
 describe("checkoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: checkoutBooking now runs assertAssetsBelongToOrg over the booking's
+    // assets (right after load, before any asset-derived logic). Echo the
+    // requested ids so the org guard passes and tests can exercise the
+    // conflict / custody / happy-path flows. (clearAllMocks keeps prior
+    // describe implementations, so set this explicitly per describe.)
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }
+    );
   });
 
   const mockCheckoutParams = {
@@ -1500,6 +1522,44 @@ describe("checkoutBooking", () => {
     from: futureFromDate,
     to: futureToDate,
   };
+
+  it("aborts checkout and performs no writes when an attached asset is not in the caller's org", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          title: "Asset 1",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+        // legacy cross-org link — belongs to another workspace
+        {
+          id: "foreign-asset",
+          kitId: null,
+          title: "Foreign Asset",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // org guard: only the in-org asset resolves; "foreign-asset" is absent
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      "Some of the selected assets do not exist in your workspace"
+    );
+    // fail-safe: no status transition, no booking write
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 
   it("should checkout booking successfully with no conflicts", async () => {
     expect.assertions(2);
