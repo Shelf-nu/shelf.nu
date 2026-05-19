@@ -1033,8 +1033,11 @@ rendering layer one PR per axis:
   kit-cascade notes from `performKitDeletion` /
   `bulkRemoveAssetsFromKits`) include unit count for qty-tracked.
 - **Kit-membership notes** (add/remove/cross-kit-move) include
-  `AssetKit.quantity` once multi-kit allocation ships in the post-4a
-  polish.
+  `AssetKit.quantity`. **UNBLOCKED 2026-05-19** — multi-kit allocation
+  shipped in Phase 4a-Polish-2 (`bebaf4ec6`); `AssetKit.quantity` is
+  now the meaningful source, so this bullet is ready to build. Sweep
+  `createBulkKitChangeNotes` + the cross-kit-move / removal note
+  writers in `kit/service.server.ts`.
 - **Location-change notes** include moved unit count from
   `AssetLocation.quantity` once 4b lands.
 - **Booking notes** (checkout, partial check-in, check-in) — sweep

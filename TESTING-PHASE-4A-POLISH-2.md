@@ -170,12 +170,12 @@ Run via supabase-local MCP or psql. Expected outcomes are documented inline.
 
 ## §5 Picker UI — INDIVIDUAL stays single-kit
 
-- [ ] Place Drill (INDIVIDUAL) in Kit A.
-- [ ] Open Kit B. Click **Manage assets**.
-- [ ] **Verify** Drill is selectable but with the usual "in other kit" treatment (it gets removed from Kit A on cross-kit move).
-- [ ] Select Drill. **No qty input** appears (INDIVIDUAL).
-- [ ] Confirm. Drill moves from Kit A to Kit B.
-- [ ] DB:
+- [x] Place Drill (INDIVIDUAL) in Kit A.
+- [x] Open Kit B. Click **Manage assets**.
+- [x] **Verify** Drill is selectable but with the usual "in other kit" treatment (it gets removed from Kit A on cross-kit move).
+- [x] Select Drill. **No qty input** appears (INDIVIDUAL).
+- [x] Confirm. Drill moves from Kit A to Kit B.
+- [x] DB:
   ```sql
   SELECT "kitId" FROM "AssetKit" WHERE "assetId" = '<drill>';
   ```
@@ -185,19 +185,19 @@ Run via supabase-local MCP or psql. Expected outcomes are documented inline.
 
 (Prerequisite: Kit A is in custody to Bob. AssetKit row for Pens in Kit A at 60. Bob's Custody row for Pens at 60 with `kitCustodyId` pointing to Kit A's KitCustody.)
 
-- [ ] Open Kit A's manage-assets. Pens shows qty input at 60.
-- [ ] Change qty to 80.
-- [ ] **Verify** "was 60" mini-badge appears.
-- [ ] Click **Confirm**. **Verify** the dialog now shows a yellow **"Quantity change notice"** box stating "You changed the quantity for 1 asset already in this kit. The custodian's allocation will be adjusted by the same amount when you confirm."
-- [ ] Confirm. Redirect.
-- [ ] DB:
+- [x] Open Kit A's manage-assets. Pens shows qty input at 60.
+- [x] Change qty to 80.
+- [x] **Verify** "was 60" mini-badge appears.
+- [x] Click **Confirm**. **Verify** the dialog now shows a yellow **"Quantity change notice"** box stating "You changed the quantity for 1 asset already in this kit. The custodian's allocation will be adjusted by the same amount when you confirm."
+- [x] Confirm. Redirect.
+- [x] DB:
   ```sql
   SELECT quantity FROM "AssetKit" WHERE "kitId" = '<kit_a>' AND "assetId" = '<pens>';
   SELECT quantity, "kitCustodyId" FROM "Custody"
     WHERE "assetId" = '<pens>' AND "kitCustodyId" = '<kit_a_custody_id>';
   ```
   Expected: `AssetKit.quantity = 80`, `Custody.quantity = 80`.
-- [ ] Activity events:
+- [x] Activity events:
   ```sql
   SELECT action, meta FROM "ActivityEvent"
     WHERE "assetId" = '<pens>' ORDER BY "createdAt" DESC LIMIT 5;
@@ -206,38 +206,38 @@ Run via supabase-local MCP or psql. Expected outcomes are documented inline.
 
 ## §7 Picker UI — in-custody kit qty decrease
 
-- [ ] Same setup. Pens AssetKit = 80, Bob's Custody = 80.
-- [ ] Open picker, change qty to 50. Confirm. (Info-box should appear.)
-- [ ] DB: `AssetKit.quantity = 50`, `Custody.quantity = 50`.
-- [ ] Activity event: one `CUSTODY_RELEASED` with `meta.viaKit = true` and `meta.quantity = 30`.
+- [x] Same setup. Pens AssetKit = 80, Bob's Custody = 80.
+- [x] Open picker, change qty to 50. Confirm. (Info-box should appear.)
+- [x] DB: `AssetKit.quantity = 50`, `Custody.quantity = 50`.
+- [x] Activity event: one `CUSTODY_RELEASED` with `meta.viaKit = true` and `meta.quantity = 30`.
 
 ## §8 Picker UI — in-custody kit deselect
 
-- [ ] Same setup. Pens AssetKit = 50, Bob's Custody = 50.
-- [ ] Deselect Pens. Confirm.
-- [ ] DB:
+- [x] Same setup. Pens AssetKit = 50, Bob's Custody = 50.
+- [x] Deselect Pens. Confirm.
+- [x] DB:
   ```sql
   SELECT * FROM "AssetKit" WHERE "kitId" = '<kit_a>' AND "assetId" = '<pens>';
   SELECT * FROM "Custody"
     WHERE "assetId" = '<pens>' AND "kitCustodyId" = '<kit_a_custody_id>';
   ```
   Expected: zero rows in both.
-- [ ] Activity: `CUSTODY_RELEASED` with `meta.viaKit = true`, full 50.
+- [x] Activity: `CUSTODY_RELEASED` with `meta.viaKit = true`, full 50.
 
 ## §9 Picker MAX cap — input bounds & strict-available math
 
-- [ ] Reset: Pens AssetKit-Kit-A = 60, operator Pleb has 20 units, ongoing booking has 5 units.
-- [ ] Open Kit B picker. Select Pens.
-- [ ] **Verify** MAX = 100 − 60 − 20 − 5 = 15.
-- [ ] Try to type **100** in the input. **Verify** the value caps to 15 on blur or change.
-- [ ] Confirm with qty = 15. Verify AssetKit Kit B = 15.
+- [x] Reset: Pens AssetKit-Kit-A = 60, operator Pleb has 20 units, ongoing booking has 5 units.
+- [x] Open Kit B picker. Select Pens.
+- [x] **Verify** MAX = 100 − 60 − 20 − 5 = 15.
+- [x] Try to type **100** in the input. **Verify** the value caps to 15 on blur or change.
+- [x] Confirm with qty = 15. Verify AssetKit Kit B = 15.
 
 ## §10 Server-side strict-available validation
 
-- [ ] Reset to a known state: Pens AssetKit-Kit-A = 60, operator 20, booking 5 → MAX for Kit B = 15.
-- [ ] In the network tab, intercept the form POST to `/kits/<kit-b>/assets/manage-assets` and modify the `assetQuantities` JSON to `{"<pens-id>": 99}` before sending.
-- [ ] **Verify** response: HTTP 400 with the error message **"Quantity exceeds available pool"** containing detail like `Pens (requested 99, max 15)`.
-- [ ] No AssetKit row created. DB unchanged.
+- [x] Reset to a known state: Pens AssetKit-Kit-A = 60, operator 20, booking 5 → MAX for Kit B = 15.
+- [x] In the network tab, intercept the form POST to `/kits/<kit-b>/assets/manage-assets` and modify the `assetQuantities` JSON to `{"<pens-id>": 99}` before sending.
+- [x] **Verify** response: HTTP 400 with the error message **"Quantity exceeds available pool"** containing detail like `Pens (requested 99, max 15)`.
+- [x] No AssetKit row created. DB unchanged.
 
 (Easier alternative: temporarily set the input `max` attribute to something larger via DevTools, then submit a too-large value.)
 
@@ -245,59 +245,59 @@ Run via supabase-local MCP or psql. Expected outcomes are documented inline.
 
 The picker + server-side validation should prevent reaching this. Test only to confirm the safety net works.
 
-- [ ] In SQL, simulate the picker bypass: a tx that inserts a pivot row exceeding the asset pool.
-- [ ] Expected: `ERROR: AssetKit total … exceeds Asset.quantity …` at COMMIT.
+- [x] In SQL, simulate the picker bypass: a tx that inserts a pivot row exceeding the asset pool.
+- [x] Expected: `ERROR: AssetKit total … exceeds Asset.quantity …` at COMMIT.
 
 ## §12 Overcommitted edge case
 
 Theoretical edge: kit holds X units, but independent operator/booking growth pushed the strict-available pool below X. Picker should still let the user keep or reduce.
 
-- [ ] Place Pens in Kit A at AssetKit.quantity = 80.
-- [ ] Manually create operator Custody for Pens at 30 (bypassing the picker via SQL or another flow). Now AssetKit (80) + operator (30) = 110 > Asset.quantity (100). Real-world creation paths shouldn't allow this, but if you've reached this state somehow:
-- [ ] Open Kit A picker. Pens shows qty = 80. MAX = max(80, 100 − 0 − 30 − 0) = max(80, 70) = 80.
-- [ ] User can reduce to any value ≤ 80, but not grow.
-- [ ] Submit qty = 70 → succeeds.
+- [x] Place Pens in Kit A at AssetKit.quantity = 80.
+- [x] Manually create operator Custody for Pens at 30 (bypassing the picker via SQL or another flow). Now AssetKit (80) + operator (30) = 110 > Asset.quantity (100). Real-world creation paths shouldn't allow this, but if you've reached this state somehow:
+- [x] Open Kit A picker. Pens shows qty = 80. MAX = max(80, 100 − 0 − 30 − 0) = max(80, 70) = 80.
+- [x] User can reduce to any value ≤ 80, but not grow.
+- [x] Submit qty = 70 → succeeds.
 
 ## §13 Cross-kit move INDIVIDUAL
 
-- [ ] Drill (INDIVIDUAL) in Kit A.
-- [ ] Open Kit B picker. Select Drill. **Verify** no qty input.
-- [ ] Submit. Drill moves to Kit B. (One AssetKit row, kitId = B.)
-- [ ] Try to add Drill to Kit C via SQL `INSERT` — DB trigger rejects with `check_violation`.
+- [x] Drill (INDIVIDUAL) in Kit A.
+- [x] Open Kit B picker. Select Drill. **Verify** no qty input.
+- [x] Submit. Drill moves to Kit B. (One AssetKit row, kitId = B.)
+- [x] Try to add Drill to Kit C via SQL `INSERT` — DB trigger rejects with `check_violation`.
 
 ## §14 Pre-existing flows — regression check
 
 Verify nothing broke in unchanged behaviour:
 
-- [ ] Add a single INDIVIDUAL asset to an empty kit. Confirm AssetKit row created (qty=1).
-- [ ] Remove an INDIVIDUAL asset from a kit. Confirm AssetKit row deleted.
-- [ ] Assign kit custody to a member. Confirm `buildKitCustodyInheritData` creates Custody rows with `kitCustodyId` and correct quantities (qty from AssetKit.quantity for qty-tracked, 1 for INDIVIDUAL).
-- [ ] Release kit custody. Confirm Custody rows for `kitCustodyId = …` are deleted.
-- [ ] Kit location cascade — adding assets to a kit with a location updates the assets' location.
-- [ ] Bulk delete kit. No orphan AssetKit rows.
+- [x] Add a single INDIVIDUAL asset to an empty kit. Confirm AssetKit row created (qty=1).
+- [x] Remove an INDIVIDUAL asset from a kit. Confirm AssetKit row deleted.
+- [x] Assign kit custody to a member. Confirm `buildKitCustodyInheritData` creates Custody rows with `kitCustodyId` and correct quantities (qty from AssetKit.quantity for qty-tracked, 1 for INDIVIDUAL).
+- [x] Release kit custody. Confirm Custody rows for `kitCustodyId = …` are deleted.
+- [x] Kit location cascade — adding assets to a kit with a location updates the assets' location.
+- [x] Bulk delete kit. No orphan AssetKit rows.
 
 ## §15 Activity events sanity
 
-- [ ] After all the above, query:
+- [x] After all the above, query:
   ```sql
   SELECT action, COUNT(*) FROM "ActivityEvent"
     WHERE "createdAt" > NOW() - INTERVAL '1 hour'
     GROUP BY action ORDER BY action;
   ```
   Expected categories: `ASSET_KIT_CHANGED` (adds/removes), `CUSTODY_ASSIGNED` (kit-in-custody qty increase or new add), `CUSTODY_RELEASED` (qty decrease or deselect inside in-custody kit).
-- [ ] **Negative:** no `ASSET_KIT_QUANTITY_CHANGED` events (decision baked into the plan: rely on note text + paired custody events for now).
+- [x] **Negative:** no `ASSET_KIT_QUANTITY_CHANGED` events (decision baked into the plan: rely on note text + paired custody events for now).
 
 ---
 
 ## Sign-off
 
-- [ ] All §0 SQL checks pass on dev.
-- [ ] §1–§9 happy paths pass on the UI.
-- [ ] §10 (tampered request) returns clean 400.
-- [ ] §11 (constraint trigger safety net) verified.
-- [ ] §12 (overcommitted edge case) handled.
-- [ ] §13 (INDIVIDUAL single-kit rule) enforced both UI + DB.
-- [ ] §14 (regression checks) all pass.
-- [ ] §15 (activity events) match expectations.
+- [x] All §0 SQL checks pass on dev.
+- [x] §1–§9 happy paths pass on the UI.
+- [x] §10 (tampered request) returns clean 400.
+- [x] §11 (constraint trigger safety net) verified.
+- [x] §12 (overcommitted edge case) handled.
+- [x] §13 (INDIVIDUAL single-kit rule) enforced both UI + DB.
+- [x] §14 (regression checks) all pass.
+- [x] §15 (activity events) match expectations.
 
 If all checks pass: ready to commit. Bundle into a single conventional-commit PR titled e.g. `feat(kits): multi-kit allocation + per-row qty input (Phase 4a-Polish-2)`.
