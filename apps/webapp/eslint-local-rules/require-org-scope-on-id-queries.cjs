@@ -54,18 +54,32 @@ function loadOrgScopedModels() {
 
 const ORG_SCOPED_MODELS = loadOrgScopedModels();
 
-/** Recursively check whether an ObjectExpression mentions a given property key. */
-function hasKeyDeep(objectExpression, keyName) {
-  if (!objectExpression || objectExpression.type !== "ObjectExpression") {
-    // Non-literal where (variable / spread) — can't verify, treat as safe.
+/**
+ * Recursively check whether a where-tree node mentions a given property key.
+ * Recurses through nested objects AND arrays so relational/logical Prisma
+ * filters (`AND`/`OR`/`NOT: [{ organizationId }, ...]`) are detected — without
+ * this, an org-scoped query using array filters is a false positive (and the
+ * rule is `error`, so that would break the build).
+ */
+function hasKeyDeep(node, keyName) {
+  if (!node) return true; // non-literal — can't verify, treat as safe
+  if (node.type === "ArrayExpression") {
+    return node.elements.some((el) => hasKeyDeep(el, keyName));
+  }
+  if (node.type !== "ObjectExpression") {
+    // variable / spread / call — can't verify statically, treat as safe
     return true;
   }
-  return objectExpression.properties.some((prop) => {
+  return node.properties.some((prop) => {
     if (prop.type === "SpreadElement") return true; // can't verify statically
     if (prop.type !== "Property" || prop.key.type !== "Identifier")
       return false;
     if (prop.key.name === keyName) return true;
-    if (prop.value && prop.value.type === "ObjectExpression") {
+    if (
+      prop.value &&
+      (prop.value.type === "ObjectExpression" ||
+        prop.value.type === "ArrayExpression")
+    ) {
       return hasKeyDeep(prop.value, keyName);
     }
     return false;

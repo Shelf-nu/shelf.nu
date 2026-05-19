@@ -673,6 +673,14 @@ export async function updateBasicBooking({
     // (for custodian change scenarios)
     const oldCustodianEmail = booking.custodianUser?.email;
 
+    // SECURITY (cross-org IDOR): tags come from form input and are connected
+    // unconditionally below. Prove they belong to this organization before
+    // connecting, mirroring the guard in createBooking.
+    const tagIds = tags?.map((t) => t.id) ?? [];
+    if (tagIds.length > 0) {
+      await assertTagsBelongToOrg({ tagIds, organizationId });
+    }
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
       description,
@@ -1098,6 +1106,14 @@ export async function reserveBooking({
       });
     }
 
+    // SECURITY (cross-org IDOR): tags come from form input and are connected
+    // below. Prove they belong to this organization before connecting,
+    // mirroring createBooking / updateBasicBooking.
+    const tagIds = tags?.map((t) => t.id) ?? [];
+    if (tagIds.length > 0) {
+      await assertTagsBelongToOrg({ tagIds, organizationId });
+    }
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.RESERVED,
       name,
@@ -1120,6 +1136,14 @@ export async function reserveBooking({
      * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
      */
     if (custodianTeamMemberId) {
+      // SECURITY (cross-org IDOR): custodianTeamMemberId comes from form input.
+      // Prove the team member belongs to this booking's organization before
+      // connecting it, mirroring updateBasicBooking / createBooking.
+      await assertTeamMemberBelongsToOrg({
+        teamMemberId: custodianTeamMemberId,
+        organizationId,
+      });
+
       dataToUpdate.custodianTeamMember = {
         connect: { id: custodianTeamMemberId },
       };
