@@ -103,6 +103,11 @@ import {
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertLocationBelongsToOrg,
+  assertTagsBelongToOrg,
+  assertTeamMemberBelongsToOrg,
+} from "~/utils/org-validation.server";
+import {
   createSignedUrl,
   parseFileFormData,
   uploadImageFromUrl,
@@ -241,6 +246,7 @@ async function setKitCustodyAfterAssetImport({
 
     if (kit && teamMember) {
       await db.kit.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: kit comes from the `kits` map built by createKitsIfNotExists({ organizationId }) at the call site (line ~2657); all ids are already org-scoped
         where: { id: kit.id },
         data: {
           status: KitStatus.IN_CUSTODY,
@@ -1476,10 +1482,26 @@ export async function updateAsset({
 
       const user = await loadUserForNotes();
 
+      // why: hard-reject a foreign location id (cross-org IDOR) using the
+      // shared guard, then fetch the row (still org-scoped) for its name.
+      if (currentLocationId) {
+        await assertLocationBelongsToOrg({
+          locationId: currentLocationId,
+          organizationId,
+        });
+      }
+      if (newLocationId) {
+        await assertLocationBelongsToOrg({
+          locationId: newLocationId,
+          organizationId,
+        });
+      }
+
       const currentLocation = currentLocationId
         ? await db.location.findFirst({
             where: {
               id: currentLocationId,
+              organizationId,
             },
           })
         : null;
@@ -1488,6 +1510,7 @@ export async function updateAsset({
         ? await db.location.findFirst({
             where: {
               id: newLocationId,
+              organizationId,
             },
           })
         : null;
@@ -1499,6 +1522,7 @@ export async function updateAsset({
         lastName: user.lastName || "",
         assetId: asset.id,
         userId,
+        organizationId,
         isRemoving: newLocationId === null,
       });
 
@@ -1567,6 +1591,7 @@ export async function updateAsset({
       await Promise.all([
         createAssetNameChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousName: assetBeforeUpdate.title,
           newName: title,
@@ -1574,6 +1599,7 @@ export async function updateAsset({
         }),
         createAssetDescriptionChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousDescription: assetBeforeUpdate.description,
           newDescription: description,
@@ -1581,6 +1607,7 @@ export async function updateAsset({
         }),
         createAssetCategoryChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousCategory: assetBeforeUpdate.category,
           newCategory: asset.category
@@ -1594,6 +1621,7 @@ export async function updateAsset({
         }),
         createAssetValuationChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousValuation: assetBeforeUpdate.valuation,
           newValuation: asset.valuation,
@@ -1679,6 +1707,7 @@ export async function updateAsset({
     if (isTagUpdate) {
       await createTagChangeNoteIfNeeded({
         assetId: asset.id,
+        organizationId,
         userId,
         previousTags,
         currentTags: asset.tags ?? [],
@@ -1724,6 +1753,9 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              // Org-scope the lookup so form-supplied custom field ids from
+              // another tenant cannot be resolved here (cross-org IDOR guard).
+              organizationId,
               active: true,
               deletedAt: null,
             },
@@ -1749,6 +1781,7 @@ export async function updateAsset({
               lastName: user?.lastName || "",
               assetId: asset.id,
               userId,
+              organizationId,
               isFirstTimeSet: change.isFirstTimeSet,
             })
           );
@@ -2112,6 +2145,22 @@ export function createCustomFieldsPayloadFromAsset(
   );
 }
 
+/**
+ * Creates one or more copies of an existing asset within the same organization.
+ *
+ * Copies the source asset's title, description, category, location, tags,
+ * valuation, custom field values and (best-effort) main image onto each
+ * duplicate.
+ *
+ * @param params.asset - The org-scoped source asset (with tags, custody, custom fields)
+ * @param params.userId - The acting user's ID
+ * @param params.amountOfDuplicates - How many copies to create
+ * @param params.organizationId - The caller's validated organization ID; all
+ *   duplicates and copied tags are constrained to this org
+ * @returns The list of created duplicate assets
+ * @throws {ShelfError} If a copied tag does not belong to `organizationId`
+ *   (cross-org guard) or if duplication otherwise fails
+ */
 export async function duplicateAsset({
   asset,
   userId,
@@ -2132,6 +2181,13 @@ export async function duplicateAsset({
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];
 
+    // why: defense-in-depth cross-org guard. The source `asset` is loaded
+    // org-scoped by the caller, but we re-validate the tag ids against the
+    // target `organizationId` before copying them onto the new assets so a
+    // tampered/stale payload can never connect tags from another workspace.
+    const copiedTagIds = asset.tags.map((tag) => tag.id);
+    await assertTagsBelongToOrg({ tagIds: copiedTagIds, organizationId });
+
     //irrespective category it has to copy all the custom fields;
     const customFields = await getActiveCustomFields({
       organizationId,
@@ -2145,7 +2201,7 @@ export async function duplicateAsset({
       userId,
       categoryId: asset.categoryId,
       locationId: asset.locationId ?? undefined,
-      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
     };
 
@@ -2173,6 +2229,7 @@ export async function duplicateAsset({
 
           if (typeof imagePath === "string") {
             await db.asset.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) on line ~2216; this only writes back its own mainImage
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -2430,6 +2487,16 @@ export async function getPaginatedAndFilterableAssets({
   }
 }
 
+/**
+ * Creates a system note recording a change to a custom field value on an asset.
+ *
+ * @param params.assetId - The asset the note is attached to
+ * @param params.userId - The acting user's ID
+ * @param params.organizationId - The asset's organization ID; scopes the note
+ *   write so it cannot be attached cross-org
+ * @returns void (no note is created when the change produces an empty message)
+ * @throws {ShelfError} If the note creation fails
+ */
 export async function createCustomFieldChangeNote({
   customFieldName,
   previousValue,
@@ -2438,6 +2505,7 @@ export async function createCustomFieldChangeNote({
   lastName,
   assetId,
   userId,
+  organizationId,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -2447,6 +2515,7 @@ export async function createCustomFieldChangeNote({
   lastName: string;
   assetId: Asset["id"];
   userId: User["id"];
+  organizationId: Organization["id"];
   isFirstTimeSet: boolean;
 }) {
   try {
@@ -2469,6 +2538,7 @@ export async function createCustomFieldChangeNote({
       type: "UPDATE",
       userId,
       assetId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -3614,6 +3684,7 @@ export async function bulkDeleteAssets({
         }
 
         await tx.asset.deleteMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3659-3665 with where { id in resolvedIds, organizationId }; every id here is already org-proven
           where: { id: { in: assets.map((asset) => asset.id) } },
         });
       });
@@ -3661,6 +3732,13 @@ export async function bulkDeleteAssets({
  *
  * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
  * (via `currentSearchParams` + `settings`).
+ *
+ * @param params.custodianId - Team member ID from request input; validated
+ *   against `organizationId` (cross-org IDOR guard) before any custody row
+ *   is written
+ * @param params.organizationId - The caller's validated organization ID
+ * @throws {ShelfError} If the custodian does not belong to `organizationId`,
+ *   or if any selected asset is not AVAILABLE
  */
 export async function bulkAssignCustody({
   userId,
@@ -3707,8 +3785,12 @@ export async function bulkAssignCustody({
           displayName: true,
         } satisfies Prisma.UserSelect,
       }),
-      db.teamMember.findUnique({
-        where: { id: custodianId },
+      // why: cross-org guard. `custodianId` comes from request input, so the
+      // team-member lookup is org-scoped — a foreign-org team member resolves
+      // to null here (and is hard-rejected by the assert inside the tx below)
+      // so custody can never be granted to a custodian from another workspace.
+      db.teamMember.findFirst({
+        where: { id: custodianId, organizationId },
         select: {
           name: true,
           user: {
@@ -3744,6 +3826,15 @@ export async function bulkAssignCustody({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      // why: hard cross-org guard inside the tx. Mirrors the org-scoped
+      // validation pattern used by `updateBookingAssets`. This throws before
+      // any custody row is written if `custodianId` belongs to another
+      // organization, preventing a cross-tenant IDOR via the bulk endpoint.
+      await assertTeamMemberBelongsToOrg(
+        { teamMemberId: custodianId, organizationId },
+        tx
+      );
+
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
        * release/checkin updated status but failed to delete the custody row. */
@@ -3761,6 +3852,7 @@ export async function bulkAssignCustody({
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
@@ -3917,6 +4009,7 @@ export async function bulkReleaseCustody({
 
       /** Updating status of assets to AVAILABLE */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
@@ -4035,11 +4128,21 @@ export async function bulkUpdateAssetLocation({
       });
     }
 
-    const newLocation = newLocationId
-      ? await db.location.findFirst({
-          where: { id: newLocationId, organizationId },
-        })
-      : null;
+    // why: parity with the singular `updateAsset` path. When a location is
+    // provided it MUST belong to the caller's org — hard-reject a foreign/
+    // invalid id instead of silently coercing it to "remove location"
+    // (which previously returned success while clearing the asset's location).
+    // An empty/absent `newLocationId` is a legitimate "remove location" op.
+    let newLocation: Awaited<ReturnType<typeof db.location.findFirst>> = null;
+    if (newLocationId) {
+      await assertLocationBelongsToOrg({
+        locationId: newLocationId,
+        organizationId,
+      });
+      newLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+      });
+    }
 
     // Filter out assets already at the target location
     const assetsToUpdate = assets.filter(
@@ -4050,6 +4153,7 @@ export async function bulkUpdateAssetLocation({
       if (assetsToUpdate.length > 0) {
         /** Updating location of assets to newLocation */
         await tx.asset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsToUpdate is derived from `assets` fetched on lines 4088-4092 with where { id in resolvedIds, organizationId }; every id is already org-proven
           where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
           data: { locationId: newLocation?.id ? newLocation.id : null },
         });
@@ -4259,6 +4363,7 @@ export async function bulkUpdateAssetCategory({
 
     await db.$transaction(async (tx) => {
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange is derived from assetsBeforeUpdate fetched on lines 4322-4326 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assetsThatChange.map((a) => a.id) } },
         data: { categoryId: newCategoryId },
       });
@@ -4288,6 +4393,7 @@ export async function bulkUpdateAssetCategory({
         createAssetCategoryChangeNote({
           assetId: asset.id,
           userId,
+          organizationId,
           previousCategory: asset.category,
           newCategory,
           loadUserForNotes,
@@ -4438,6 +4544,7 @@ export async function bulkAssignAssetTags({
       updatedAssets.map((asset) =>
         createTagChangeNoteIfNeeded({
           assetId: asset.id,
+          organizationId,
           userId,
           previousTags: previousTagsByAssetId.get(asset.id) ?? [],
           currentTags: asset.tags,
@@ -4573,6 +4680,7 @@ export async function relinkAssetQrCode({
 
   await Promise.all([
     db.qr.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
       where: { id: qr.id },
       data: { organizationId, userId },
     }),
@@ -4588,6 +4696,7 @@ export async function relinkAssetQrCode({
     createNote({
       assetId,
       userId,
+      organizationId,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
         id: userId,

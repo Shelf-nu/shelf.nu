@@ -36,6 +36,7 @@ export async function scheduleAssetReminder({
     );
 
     await db.assetReminder.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler-bookkeeping write (only sets activeSchedulerReference); both callers (createAssetReminder, editAssetReminder) pass an org-proven reminderId
       where: { id: data.reminderId },
       data: { activeSchedulerReference: reference },
     });

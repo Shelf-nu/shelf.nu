@@ -171,9 +171,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     // Send email notification if audit is assigned to someone other than the creator
     if (assignee && assignee !== userId) {
-      // Fetch full audit details for email
-      const auditForEmail = await db.auditSession.findUnique({
-        where: { id: session.id },
+      // Fetch full audit details for email. Scope by organizationId for
+      // defense-in-depth even though session was just created for this org.
+      const auditForEmail = await db.auditSession.findFirst({
+        where: { id: session.id, organizationId },
         include: {
           createdBy: {
             select: {

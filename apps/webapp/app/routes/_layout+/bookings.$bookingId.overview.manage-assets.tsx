@@ -275,6 +275,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const bookingAssets = await db.asset.findMany({
         where: {
           id: { notIn: removedAssetIds },
+          organizationId,
           bookings: { some: { id: bookingId } },
         },
         select: { id: true },
@@ -360,6 +361,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const potentiallyCheckedOutAssets = await db.asset.findMany({
       where: {
         id: { in: newAssetIds },
+        organizationId,
         status: AssetStatus.CHECKED_OUT,
       },
       select: { id: true, title: true, status: true },
@@ -409,6 +411,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         type: "UPDATE",
         userId: authSession.userId,
         assetIds: newAssetIds,
+        organizationId,
       });
     }
 

@@ -13,6 +13,12 @@ vi.mock("~/database/db.server", () => ({
       findFirstOrThrow: vi.fn(),
       findUnique: vi.fn(),
     },
+    // why: createNote/createNotes now call assertAssetsBelongToOrg, which runs
+    // db.asset.findMany to prove the assets belong to the caller's org. The
+    // tests must provide this so the org assertion passes.
+    asset: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -60,6 +66,16 @@ import {
 describe("note service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // why: assertAssetsBelongToOrg compares the count of asset rows it finds
+    // against the unique input ids. Echoing back exactly the requested ids
+    // makes the org-ownership assertion pass for whatever assetId(s) a test
+    // uses, without each test having to wire up its own asset mock.
+    vi.mocked(db.asset.findMany).mockImplementation(
+      (args: any) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id: string) => ({ id }))
+        ) as any
+    );
     // Reset note.create to successful state by default
     vi.mocked(db.note.create).mockResolvedValue({
       id: "note-1",
@@ -90,6 +106,7 @@ describe("note service", () => {
         content: "This is a test note",
         userId: "user-1",
         assetId: "asset-1",
+        organizationId: "org-1",
       });
 
       expect(db.note.create).toHaveBeenCalledWith({
@@ -130,6 +147,7 @@ describe("note service", () => {
         type: "UPDATE",
         userId: "user-1",
         assetId: "asset-1",
+        organizationId: "org-1",
       });
 
       expect(db.note.create).toHaveBeenCalledWith(
@@ -151,6 +169,7 @@ describe("note service", () => {
           content: "Test note",
           userId: "user-1",
           assetId: "asset-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -159,6 +178,7 @@ describe("note service", () => {
           content: "Test note",
           userId: "user-1",
           assetId: "asset-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow("Something went wrong while creating a note");
     });
@@ -172,6 +192,7 @@ describe("note service", () => {
         content: "Bulk operation note",
         userId: "user-1",
         assetIds: ["asset-1", "asset-2", "asset-3"],
+        organizationId: "org-1",
       });
 
       expect(db.note.createMany).toHaveBeenCalledWith({
@@ -208,6 +229,7 @@ describe("note service", () => {
         type: "UPDATE",
         userId: "user-1",
         assetIds: ["asset-1", "asset-2"],
+        organizationId: "org-1",
       });
 
       expect(db.note.createMany).toHaveBeenCalledWith({
@@ -225,6 +247,7 @@ describe("note service", () => {
         content: "Test note",
         userId: "user-1",
         assetIds: [],
+        organizationId: "org-1",
       });
 
       expect(db.note.createMany).toHaveBeenCalledWith({
@@ -244,6 +267,7 @@ describe("note service", () => {
           content: "Test note",
           userId: "user-1",
           assetIds: ["asset-1"],
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
@@ -252,6 +276,7 @@ describe("note service", () => {
           content: "Test note",
           userId: "user-1",
           assetIds: ["asset-1"],
+          organizationId: "org-1",
         })
       ).rejects.toThrow("Something went wrong while creating notes");
     });
@@ -329,6 +354,7 @@ describe("note service", () => {
         removedAssets: [],
         userId: "user-1",
         kit: kit as any,
+        organizationId: "org-1",
       });
 
       // Expect db.note.create to be called twice (once for each asset)
@@ -361,6 +387,7 @@ describe("note service", () => {
         removedAssets: [{ id: "asset-3", title: "Tripod", kit: kit as any }],
         userId: "user-1",
         kit: kit as any,
+        organizationId: "org-1",
       });
 
       // Expect db.note.create to be called once for the removed asset
@@ -394,6 +421,7 @@ describe("note service", () => {
         removedAssets: [{ id: "asset-3", title: "Tripod", kit: kit as any }],
         userId: "user-1",
         kit: kit as any,
+        organizationId: "org-1",
       });
 
       // Expect db.note.create to be called 3 times (2 added + 1 removed)
@@ -415,6 +443,7 @@ describe("note service", () => {
         removedAssets: [],
         userId: "user-1",
         kit: kit as any,
+        organizationId: "org-1",
       });
 
       // Should not create any notes
@@ -438,6 +467,7 @@ describe("note service", () => {
       await createAssetNameChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousName: "Old Name",
         newName: "New Name",
         loadUserForNotes: mockLoadUserForNotes,
@@ -480,6 +510,7 @@ describe("note service", () => {
       await createAssetNameChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousName: "Same Name",
         newName: "Same Name",
         loadUserForNotes: mockLoadUserForNotes,
@@ -505,6 +536,7 @@ describe("note service", () => {
       await createAssetDescriptionChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousDescription: null,
         newDescription: "New description",
         loadUserForNotes: mockLoadUserForNotes,
@@ -523,6 +555,7 @@ describe("note service", () => {
       await createAssetDescriptionChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousDescription: "Old description",
         newDescription: null,
         loadUserForNotes: mockLoadUserForNotes,
@@ -538,6 +571,7 @@ describe("note service", () => {
       await createAssetDescriptionChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousDescription: "Same description",
         newDescription: "Same description",
         loadUserForNotes: mockLoadUserForNotes,
@@ -563,6 +597,7 @@ describe("note service", () => {
       await createAssetCategoryChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousCategory: {
           id: "cat-1",
           name: "Electronics",
@@ -591,6 +626,7 @@ describe("note service", () => {
       await createAssetCategoryChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousCategory: null,
         newCategory: { id: "cat-1", name: "Electronics", color: "#FF0000" },
         loadUserForNotes: mockLoadUserForNotes,
@@ -606,6 +642,7 @@ describe("note service", () => {
       await createAssetCategoryChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousCategory: {
           id: "cat-1",
           name: "Electronics",
@@ -635,6 +672,7 @@ describe("note service", () => {
       await createAssetValuationChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousValuation: 100,
         newValuation: 150,
         currency: "USD" as any,
@@ -663,6 +701,7 @@ describe("note service", () => {
       await createAssetValuationChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousValuation: null,
         newValuation: 200,
         currency: "USD" as any,
@@ -680,6 +719,7 @@ describe("note service", () => {
       await createAssetValuationChangeNote({
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         previousValuation: 100,
         newValuation: 100,
         currency: "USD" as any,
@@ -708,6 +748,7 @@ describe("note service", () => {
       await createAssetNotesForAuditAddition({
         assetIds: ["asset-1", "asset-2", "asset-3"],
         userId: "user-1",
+        organizationId: "org-1",
         audit,
       });
 
@@ -759,6 +800,7 @@ describe("note service", () => {
       await createAssetNotesForAuditAddition({
         assetIds: ["asset-1"],
         userId: "nonexistent-user",
+        organizationId: "org-1",
         audit,
       });
 
@@ -780,6 +822,7 @@ describe("note service", () => {
       await createAssetNotesForAuditAddition({
         assetIds: [],
         userId: "user-1",
+        organizationId: "org-1",
         audit,
       });
 
@@ -800,6 +843,7 @@ describe("note service", () => {
         createAssetNotesForAuditAddition({
           assetIds: ["asset-1"],
           userId: "user-1",
+          organizationId: "org-1",
           audit,
         })
       ).rejects.toThrow(ShelfError);
@@ -808,6 +852,7 @@ describe("note service", () => {
         createAssetNotesForAuditAddition({
           assetIds: ["asset-1"],
           userId: "user-1",
+          organizationId: "org-1",
           audit,
         })
       ).rejects.toThrow(
@@ -833,6 +878,7 @@ describe("note service", () => {
       await createAssetNotesForAuditRemoval({
         assetIds: ["asset-1", "asset-2"],
         userId: "user-1",
+        organizationId: "org-1",
         audit,
       });
 
@@ -877,6 +923,7 @@ describe("note service", () => {
       await createAssetNotesForAuditRemoval({
         assetIds: ["asset-1"],
         userId: "nonexistent-user",
+        organizationId: "org-1",
         audit,
       });
 
@@ -898,6 +945,7 @@ describe("note service", () => {
       await createAssetNotesForAuditRemoval({
         assetIds: [],
         userId: "user-1",
+        organizationId: "org-1",
         audit,
       });
 
@@ -918,6 +966,7 @@ describe("note service", () => {
         createAssetNotesForAuditRemoval({
           assetIds: ["asset-1"],
           userId: "user-1",
+          organizationId: "org-1",
           audit,
         })
       ).rejects.toThrow(ShelfError);
@@ -926,6 +975,7 @@ describe("note service", () => {
         createAssetNotesForAuditRemoval({
           assetIds: ["asset-1"],
           userId: "user-1",
+          organizationId: "org-1",
           audit,
         })
       ).rejects.toThrow(

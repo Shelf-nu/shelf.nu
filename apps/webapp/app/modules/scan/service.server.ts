@@ -154,6 +154,21 @@ export async function getScanByQrId({ qrId }: { qrId: string }) {
   }
 }
 
+/**
+ * Writes a system note onto the asset linked to a scanned QR code.
+ *
+ * The QR (and therefore the asset and `organizationId`) is resolved via
+ * `getQr`. The resolved `organizationId` is forwarded to `createNote`, which
+ * asserts the asset belongs to that org — preventing a crafted QR/asset ID
+ * from attaching a note to another tenant's asset (cross-org IDOR).
+ *
+ * @param params.userId - Scanning user ID, or `"anonymous"`/null for anon scans
+ * @param params.qrId - The QR code ID that was scanned
+ * @param params.latitude - Optional GPS latitude captured with the scan
+ * @param params.longitude - Optional GPS longitude captured with the scan
+ * @param params.manuallyGenerated - Whether GPS was manually entered
+ * @throws {ShelfError} If the QR/asset lookup or note write fails
+ */
 export async function createScanNote({
   userId,
   qrId,
@@ -215,6 +230,10 @@ export async function createScanNote({
           type: "UPDATE",
           userId: authenticatedUserId,
           assetId,
+          // why: the QR (and therefore its asset) is scoped to this
+          // organizationId — pass it so the note write is validated
+          // against the asset's true org (cross-org IDOR guard)
+          organizationId,
         });
       } else {
         // User doesn't have access or is anonymous - log as unknown user
@@ -229,6 +248,9 @@ export async function createScanNote({
           type: "UPDATE",
           userId: ownerId,
           assetId,
+          // why: same QR-derived org as above; the anonymous-scan note
+          // must still be validated against the asset's true org
+          organizationId,
         });
       }
     }

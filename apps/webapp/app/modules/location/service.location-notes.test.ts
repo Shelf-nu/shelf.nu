@@ -207,6 +207,7 @@ describe("location service activity logging", () => {
         lastName: "Lovelace",
         assetId: "asset-1",
         userId: "user-1",
+        organizationId: "org-1",
         isRemoving: false,
       });
 
@@ -214,6 +215,7 @@ describe("location service activity logging", () => {
         expect.objectContaining({
           assetId: "asset-1",
           type: "UPDATE",
+          organizationId: "org-1",
         })
       );
     });

@@ -303,6 +303,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: NoteType.UPDATE,
       userId,
       assetIds: kit.assets.map((asset) => asset.id),
+      organizationId,
     });
 
     sendNotification({

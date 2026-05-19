@@ -347,8 +347,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * Get detailed asset information with bookings for the paginated assets
        */
       db.asset.findMany({
+        // SECURITY (cross-org IDOR): scope the asset fetch to the caller's
+        // organization so a foreign-org asset ID cannot be hydrated and
+        // surfaced in the booking overview.
         where: {
           id: { in: assetIdsToFetch },
+          organizationId,
         },
         include: {
           category: true,
@@ -404,6 +408,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetIds: booking.assets.map((a) => a.id),
         from: booking.from,
         to: booking.to,
+        organizationId,
       }),
 
       /** Get kit details for the kits in the current page */
@@ -414,6 +419,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               .filter((item) => item.type === "kit")
               .map((item) => item.id),
           },
+          organizationId,
         },
         include: {
           category: {
@@ -697,6 +703,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         type: "UPDATE",
         userId: userId,
         assetIds: deletedBooking.assets.map((a) => a.id),
+        organizationId,
       });
 
       sendNotification({
@@ -715,8 +722,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Booking lookup, working hours, and booking settings are independent — fetch in parallel
     const [basicBookingInfo, workingHours, bookingSettings] = await Promise.all(
       [
-        db.booking.findUniqueOrThrow({
-          where: { id },
+        db.booking.findFirstOrThrow({
+          where: { id, organizationId },
           select: { id: true, status: true, from: true, to: true },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -868,6 +875,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
+          organizationId,
         });
 
         sendNotification({
@@ -941,6 +949,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
+          organizationId,
         });
 
         sendNotification({
@@ -1055,6 +1064,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
+          organizationId,
         });
 
         sendNotification({
@@ -1211,12 +1221,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * here we are separating them and excluding assets that belong to kits
          * */
         const assets = await db.asset.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
         });
 
         const kits = await db.kit.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, name: true, assets: { select: { id: true } } },
         });
 

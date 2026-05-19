@@ -88,6 +88,7 @@ export async function action({ request }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: user.id,
       assetId: asset.id,
+      organizationId,
     });
 
     return data({ asset });

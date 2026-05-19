@@ -482,6 +482,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           .getPublicUrl(thumbnailData.path);
 
         await db.location.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: Shelf super-admin cross-org image-migration tool; gated by requireAdmin(userId) and intentionally operates on locations across all organizations (locationWithImages findMany has no org filter by design)
           where: { id: location.id },
           data: {
             imageUrl: publicUrl,
@@ -508,6 +509,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       await Promise.all(
         movedLocationIds.map((id) =>
           db.location.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: Shelf super-admin cross-org image-migration tool; gated by requireAdmin(userId), ids collected from the cross-org locationWithImages loop above
             where: { id },
             data: { image: { disconnect: true } },
           })

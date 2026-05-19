@@ -55,6 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
       type: "COMMENT",
       userId: user.id,
       assetId,
+      organizationId,
     });
 
     return data({ note });

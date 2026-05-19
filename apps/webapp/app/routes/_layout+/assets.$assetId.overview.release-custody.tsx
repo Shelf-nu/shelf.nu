@@ -214,6 +214,7 @@ export const action = async ({
         type: "UPDATE",
         userId: asset.userId,
         assetId: asset.id,
+        organizationId,
       });
 
       sendNotification({

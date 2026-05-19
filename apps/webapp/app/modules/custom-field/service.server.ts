@@ -315,7 +315,7 @@ export async function updateCustomField(payload: {
     })) as CustomField;
 
     const updatedField = await db.customField.update({
-      where: { id },
+      where: { id, organizationId },
       data: data,
     });
 
@@ -379,7 +379,7 @@ export async function softDeleteCustomField({
         // This frees up the original name for creating a new field
         const timestamp = Math.floor(Date.now() / 1000);
         const deletedField = await tx.customField.update({
-          where: { id },
+          where: { id, organizationId },
           data: {
             name: `${existingCustomField.name}_${timestamp}`,
             deletedAt: new Date(),

@@ -29,23 +29,37 @@ import {
   wrapUserLinkForNote,
   wrapTagForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 
 const label = "Note";
 
 export type TagSummary = Pick<Tag, "id" | "name">;
 
-/** Creates a singular note */
+/**
+ * Creates a singular note.
+ *
+ * `organizationId` is required and validated: the target asset must belong to
+ * that organization before the note is written. This prevents cross-org IDOR
+ * where a caller supplies an asset ID from another tenant.
+ *
+ * @param params.organizationId - Caller's validated organization ID
+ * @throws {ShelfError} 400 if the asset is not in `organizationId`
+ */
 export async function createNote({
   content,
   type,
   userId,
   assetId,
+  organizationId,
 }: Pick<Note, "content"> & {
   type?: Note["type"];
   userId: User["id"];
   assetId: Asset["id"];
+  organizationId: string;
 }) {
   try {
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+
     const data = {
       content,
       type: type || "COMMENT",
@@ -74,18 +88,30 @@ export async function createNote({
   }
 }
 
-/** Creates multiple notes with the same content */
+/**
+ * Creates multiple notes with the same content.
+ *
+ * `organizationId` is required and validated: every target asset must belong
+ * to that organization before the notes are written (cross-org IDOR guard).
+ *
+ * @param params.organizationId - Caller's validated organization ID
+ * @throws {ShelfError} 400 if any asset is not in `organizationId`
+ */
 export async function createNotes({
   content,
   type,
   userId,
   assetIds,
+  organizationId,
 }: Pick<Note, "content"> & {
   type?: Note["type"];
   userId: User["id"];
   assetIds: Asset["id"][];
+  organizationId: string;
 }) {
   try {
+    await assertAssetsBelongToOrg({ assetIds, organizationId });
+
     const data = assetIds.map((id) => ({
       content,
       type: type || "COMMENT",
@@ -129,6 +155,7 @@ export async function createBulkKitChangeNotes({
   removedAssets,
   userId,
   kit,
+  organizationId,
 }: {
   newlyAddedAssets: Prisma.AssetGetPayload<{
     select: { id: true; title: true; kit: true };
@@ -138,6 +165,8 @@ export async function createBulkKitChangeNotes({
   }>[];
   userId: User["id"];
   kit: Kit;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user
@@ -168,6 +197,7 @@ export async function createBulkKitChangeNotes({
           lastName: user.lastName ?? "",
           assetId: asset.id,
           userId,
+          organizationId,
           isRemoving: isAssetRemoved,
         });
       }
@@ -193,6 +223,7 @@ export async function createKitChangeNote({
   lastName,
   assetId,
   userId,
+  organizationId,
   isRemoving,
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
@@ -201,6 +232,8 @@ export async function createKitChangeNote({
   lastName: string;
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   isRemoving: boolean;
 }) {
   try {
@@ -255,6 +288,7 @@ export async function createKitChangeNote({
       type: "UPDATE",
       userId,
       assetId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -270,12 +304,15 @@ export async function createKitChangeNote({
 export async function createTagChangeNoteIfNeeded({
   assetId,
   userId,
+  organizationId,
   previousTags,
   currentTags,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousTags: TagSummary[];
   currentTags: TagSummary[];
   loadUserForNotes: () => Promise<BasicUserName>;
@@ -334,6 +371,7 @@ export async function createTagChangeNoteIfNeeded({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -343,12 +381,15 @@ export async function createTagChangeNoteIfNeeded({
 export async function createAssetNameChangeNote({
   assetId,
   userId,
+  organizationId,
   previousName,
   newName,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousName?: string | null;
   newName?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -369,6 +410,7 @@ export async function createAssetNameChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -378,12 +420,15 @@ export async function createAssetNameChangeNote({
 export async function createAssetDescriptionChangeNote({
   assetId,
   userId,
+  organizationId,
   previousDescription,
   newDescription,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousDescription?: string | null;
   newDescription?: string | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -404,6 +449,7 @@ export async function createAssetDescriptionChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -413,12 +459,15 @@ export async function createAssetDescriptionChangeNote({
 export async function createAssetCategoryChangeNote({
   assetId,
   userId,
+  organizationId,
   previousCategory,
   newCategory,
   loadUserForNotes,
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousCategory?: Pick<Category, "id" | "name" | "color"> | null;
   newCategory?: Pick<Category, "id" | "name" | "color"> | null;
   loadUserForNotes: LoadUserForNotesFn;
@@ -439,6 +488,7 @@ export async function createAssetCategoryChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -448,6 +498,7 @@ export async function createAssetCategoryChangeNote({
 export async function createAssetValuationChangeNote({
   assetId,
   userId,
+  organizationId,
   previousValuation,
   newValuation,
   currency,
@@ -456,6 +507,8 @@ export async function createAssetValuationChangeNote({
 }: {
   assetId: Asset["id"];
   userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
   previousValuation?: Prisma.Decimal | number | null;
   newValuation?: Prisma.Decimal | number | null;
   currency: Currency;
@@ -480,6 +533,7 @@ export async function createAssetValuationChangeNote({
     type: "UPDATE",
     userId,
     assetId,
+    organizationId,
   });
 }
 
@@ -490,10 +544,13 @@ export async function createAssetNotesForAuditAddition({
   assetIds,
   userId,
   audit,
+  organizationId,
 }: {
   assetIds: Asset["id"][];
   userId: User["id"];
   audit: Pick<AuditSession, "id" | "name">;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user.findUnique({
@@ -521,6 +578,7 @@ export async function createAssetNotesForAuditAddition({
       type: "UPDATE",
       userId,
       assetIds,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -540,10 +598,13 @@ export async function createAssetNotesForAuditRemoval({
   assetIds,
   userId,
   audit,
+  organizationId,
 }: {
   assetIds: Asset["id"][];
   userId: User["id"];
   audit: Pick<AuditSession, "id" | "name">;
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
 }) {
   try {
     const user = await db.user.findUnique({
@@ -571,6 +632,7 @@ export async function createAssetNotesForAuditRemoval({
       type: "UPDATE",
       userId,
       assetIds,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({

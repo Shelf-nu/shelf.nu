@@ -50,6 +50,11 @@ import {
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
+import {
+  assertCategoryBelongsToOrg,
+  assertLocationBelongsToOrg,
+  assertTeamMemberBelongsToOrg,
+} from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
@@ -139,6 +144,13 @@ export async function createKit({
             ],
           };
 
+    // why: categoryId comes from form input — prove it belongs to this
+    // kit's org before connecting, else an attacker links a foreign
+    // tenant's category (cross-org IDOR)
+    if (categoryId) {
+      await assertCategoryBelongsToOrg({ categoryId, organizationId });
+    }
+
     const data: Prisma.KitCreateInput = {
       name,
       description,
@@ -166,6 +178,9 @@ export async function createKit({
     }
 
     if (locationId) {
+      // why: locationId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertLocationBelongsToOrg({ locationId, organizationId });
       data.location = { connect: { id: locationId } };
     }
 
@@ -252,6 +267,9 @@ export async function updateKit({
 
     // If category id is passed and is different than uncategorized, connect the category
     if (categoryId && categoryId !== "uncategorized") {
+      // why: categoryId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertCategoryBelongsToOrg({ categoryId, organizationId });
       Object.assign(data, {
         category: {
           connect: {
@@ -262,6 +280,9 @@ export async function updateKit({
     }
 
     if (locationId) {
+      // why: locationId comes from form input — prove it belongs to this
+      // kit's org before connecting (cross-org IDOR guard)
+      await assertLocationBelongsToOrg({ locationId, organizationId });
       data.location = { connect: { id: locationId } };
     }
 
@@ -898,6 +919,9 @@ export async function releaseCustody({
       type: "UPDATE",
       userId,
       assetIds: kit.assets.map((asset) => asset.id),
+      // why: notes target this kit's assets — scope to the kit's org so
+      // they can only be written against same-tenant assets
+      organizationId,
     });
 
     return kit;
@@ -1122,6 +1146,7 @@ export async function bulkDeleteKits({
 
       /** Deleting all kits */
       await tx.kit.deleteMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `kits` ids come from the org-scoped findMany above (where includes organizationId via getKitsWhereInput / line 1110)
         where: { id: { in: kits.map((kit) => kit.id) } },
       });
 
@@ -1193,8 +1218,8 @@ export async function bulkAssignKitCustody({
           displayName: true,
         } satisfies Prisma.UserSelect,
       }),
-      db.teamMember.findUnique({
-        where: { id: custodianId },
+      db.teamMember.findFirst({
+        where: { id: custodianId, organizationId },
         select: {
           id: true,
           name: true,
@@ -1241,6 +1266,15 @@ export async function bulkAssignKitCustody({
      * 2. Update status of all kits to IN_CUSTODY
      */
     return await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): custodianId comes from request input. The
+      // org-scoped lookup above is only used for the note text — the writes
+      // below connect the raw id, so prove it belongs to this org first or an
+      // attacker could assign a foreign-org team member as kit/asset custodian.
+      await assertTeamMemberBelongsToOrg(
+        { teamMemberId: custodianId, organizationId },
+        tx
+      );
+
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
@@ -1251,6 +1285,7 @@ export async function bulkAssignKitCustody({
 
       /** Updating status of all kits */
       await tx.kit.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `kits` ids come from the org-scoped findMany above (where includes organizationId via getKitsWhereInput / line 1189)
         where: { id: { in: kits.map((kit) => kit.id) } },
         data: { status: KitStatus.IN_CUSTODY },
       });
@@ -1267,6 +1302,7 @@ export async function bulkAssignKitCustody({
 
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assets are derived from `kits` (kit.assets) loaded by the org-scoped findMany above; not from request input
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
@@ -1407,6 +1443,7 @@ export async function bulkReleaseKitCustody({
 
       /** Updating status of all kits to AVAILABLE */
       await tx.kit.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `kits` ids come from the org-scoped findMany above (where includes organizationId via getKitsWhereInput / line 1376)
         where: { id: { in: kits.map((kit) => kit.id) } },
         data: { status: KitStatus.AVAILABLE },
       });
@@ -1420,6 +1457,7 @@ export async function bulkReleaseKitCustody({
 
       /** Making all the assets of the kit AVAILABLE */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assets are derived from `kits` (kit.assets) loaded by the org-scoped findMany above; not from request input
         where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
@@ -1678,6 +1716,7 @@ export async function relinkKitQrCode({
 
   await Promise.all([
     db.qr.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: qr.organizationId checked against caller's organizationId above (guard at the `qr.organizationId && qr.organizationId !== organizationId` throw); null-org QR is a claimable code being assigned here
       where: { id: qr.id },
       data: { organizationId, userId },
     }),
@@ -1694,12 +1733,27 @@ export async function relinkKitQrCode({
   };
 }
 
+/**
+ * Resolves the asset IDs contained in the given kits, for adding to a booking.
+ *
+ * `organizationId` is required and scopes the kit lookup so a caller cannot
+ * pull assets out of kits belonging to another tenant (cross-org IDOR). Kits
+ * not in the org simply yield no assets.
+ *
+ * @param kitIds - Kit IDs sourced from request input
+ * @param organizationId - Caller's validated organization ID
+ * @returns Asset IDs belonging to the in-org kits
+ * @throws {ShelfError} on DB failure
+ */
 export async function getAvailableKitAssetForBooking(
-  kitIds: Kit["id"][]
+  kitIds: Kit["id"][],
+  organizationId: string
 ): Promise<string[]> {
   try {
     const selectedKits = await db.kit.findMany({
-      where: { id: { in: kitIds } },
+      // why: organizationId scoping prevents cross-org IDOR — without it a
+      // caller in Org A could resolve assets from Org B's kits.
+      where: { id: { in: kitIds }, organizationId },
       select: { assets: { select: { id: true, status: true } } },
     });
 
@@ -1767,7 +1821,14 @@ export async function updateKitLocation({
       // Connect both kit and its assets to the new location atomically with
       // the per-asset ASSET_LOCATION_CHANGED events.
       await db.$transaction(async (tx) => {
+        // newLocationId comes from request input — prove it belongs to the
+        // caller's org before connecting kit/assets to it (cross-org IDOR).
+        await assertLocationBelongsToOrg(
+          { locationId: newLocationId, organizationId },
+          tx
+        );
         await tx.location.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newLocationId proven org-owned by assertLocationBelongsToOrg above (same tx)
           where: { id: newLocationId },
           data: {
             kits: {
@@ -1810,8 +1871,8 @@ export async function updateKitLocation({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const location = await db.location.findUnique({
-          where: { id: newLocationId },
+        const location = await db.location.findFirst({
+          where: { id: newLocationId, organizationId },
           select: { name: true, id: true },
         });
 
@@ -1830,6 +1891,10 @@ export async function updateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to this kit (loaded scoped to
+              // organizationId) — pass the kit's org so the note is
+              // validated against the asset's true org
+              organizationId,
             })
           )
         );
@@ -1843,7 +1908,14 @@ export async function updateKitLocation({
       // Disconnect both kit and its assets atomically with the per-asset
       // ASSET_LOCATION_CHANGED events.
       await db.$transaction(async (tx) => {
+        // currentLocationId is supplied by the caller — prove it belongs to
+        // the caller's org before disconnecting kit/assets (cross-org IDOR).
+        await assertLocationBelongsToOrg(
+          { locationId: currentLocationId, organizationId },
+          tx
+        );
         await tx.location.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: currentLocationId proven org-owned by assertLocationBelongsToOrg above (same tx)
           where: { id: currentLocationId },
           data: {
             kits: {
@@ -1885,8 +1957,8 @@ export async function updateKitLocation({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const currentLocation = await db.location.findUnique({
-          where: { id: currentLocationId },
+        const currentLocation = await db.location.findFirst({
+          where: { id: currentLocationId, organizationId },
           select: { name: true, id: true },
         });
 
@@ -1905,6 +1977,10 @@ export async function updateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to this kit (loaded scoped to
+              // organizationId) — pass the kit's org so the note is
+              // validated against the asset's true org
+              organizationId,
             })
           )
         );
@@ -1983,7 +2059,14 @@ export async function bulkUpdateKitLocation({
       // Update location to connect both kits and their assets atomically
       // with the per-asset ASSET_LOCATION_CHANGED events.
       await db.$transaction(async (tx) => {
+        // newLocationId comes from request input — prove it belongs to the
+        // caller's org before connecting kits/assets to it (cross-org IDOR).
+        await assertLocationBelongsToOrg(
+          { locationId: newLocationId, organizationId },
+          tx
+        );
         await tx.location.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newLocationId proven org-owned by assertLocationBelongsToOrg above (same tx)
           where: { id: newLocationId },
           data: {
             kits: {
@@ -2026,8 +2109,8 @@ export async function bulkUpdateKitLocation({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const location = await db.location.findUnique({
-          where: { id: newLocationId },
+        const location = await db.location.findFirst({
+          where: { id: newLocationId, organizationId },
           select: { name: true, id: true },
         });
 
@@ -2046,6 +2129,10 @@ export async function bulkUpdateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org
+              organizationId,
             })
           )
         );
@@ -2066,6 +2153,7 @@ export async function bulkUpdateKitLocation({
 
         if (allAssets.length > 0) {
           await tx.asset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: allAssets are derived from `kitsWithAssets` loaded by the org-scoped findMany above (where includes organizationId via getKitsWhereInput / line 2009); not request input
             where: { id: { in: allAssets.map((asset) => asset.id) } },
             data: { locationId: null },
           });
@@ -2117,6 +2205,10 @@ export async function bulkUpdateKitLocation({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset belongs to a kit loaded scoped to
+              // organizationId — pass the org so the note is validated
+              // against the asset's true org
+              organizationId,
             })
           )
         );
@@ -2139,8 +2231,8 @@ export async function bulkUpdateKitLocation({
     });
 
     if (newLocationId && newLocationId.trim() !== "") {
-      const location = await db.location.findUnique({
-        where: { id: newLocationId },
+      const location = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
         select: { id: true, name: true },
       });
 
@@ -2421,6 +2513,7 @@ export async function updateKitAssets({
 
     await createBulkKitChangeNotes({
       kit,
+      organizationId,
       newlyAddedAssets,
       removedAssets: addOnly ? [] : removedAssets, // In addOnly mode, no assets are removed
       userId,
@@ -2467,6 +2560,7 @@ export async function updateKitAssets({
 
         await db.$transaction(async (tx) => {
           await tx.asset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newlyAddedAssets derived from `allAssetsForKit` loaded org-scoped at the `where: { id: { in: assetIds }, organizationId }` query; not raw request input
             where: { id: { in: newlyAddedAssets.map((asset) => asset.id) } },
             data: { locationId: kit.location!.id },
           });
@@ -2517,6 +2611,10 @@ export async function updateKitAssets({
               type: "UPDATE",
               userId,
               assetId: asset.id,
+              // why: asset resolved scoped to organizationId for this
+              // kit — pass the org so the note is validated against the
+              // asset's true org
+              organizationId,
             })
           )
         );
@@ -2529,6 +2627,7 @@ export async function updateKitAssets({
         if (assetsWithLocation.length > 0) {
           await db.$transaction(async (tx) => {
             await tx.asset.updateMany({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsWithLocation derived from `allAssetsForKit` loaded org-scoped at the `where: { id: { in: assetIds }, organizationId }` query; not raw request input
               where: {
                 id: { in: assetsWithLocation.map((asset) => asset.id) },
               },
@@ -2578,6 +2677,10 @@ export async function updateKitAssets({
                 type: "UPDATE",
                 userId,
                 assetId: asset.id,
+                // why: asset resolved scoped to organizationId for this
+                // kit — pass the org so the note is validated against
+                // the asset's true org
+                organizationId,
               })
             )
           );
@@ -2645,6 +2748,9 @@ export async function updateKitAssets({
         type: NoteType.UPDATE,
         userId,
         assetIds: assetsToInheritStatus.map((asset) => asset.id),
+        // why: assets resolved scoped to organizationId for this kit —
+        // pass the org so the notes are validated against same-tenant assets
+        organizationId,
       });
     }
 
@@ -2695,6 +2801,9 @@ export async function updateKitAssets({
         type: NoteType.UPDATE,
         userId,
         assetIds,
+        // why: assetIds derived from this kit's assets (loaded scoped to
+        // organizationId) — pass the org so notes target same-tenant assets
+        organizationId,
       });
     }
 
@@ -2714,6 +2823,7 @@ export async function updateKitAssets({
       await Promise.all(
         bookingsToUpdate.map((booking) =>
           db.booking.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking comes from kit.assets[].bookings; `kit` was loaded via findUniqueOrThrow scoped to { id: kitId, organizationId } (line ~2355), so these bookings belong to in-org assets
             where: { id: booking.id },
             data: {
               assets: {
@@ -2732,6 +2842,7 @@ export async function updateKitAssets({
      */
     if (kit.status === KitStatus.CHECKED_OUT) {
       await db.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newlyAddedAssets derived from `allAssetsForKit` loaded org-scoped at the `where: { id: { in: assetIds }, organizationId }` query (line ~2442); not raw request input
         where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
         data: { status: AssetStatus.CHECKED_OUT },
       });
@@ -2841,6 +2952,7 @@ export async function bulkRemoveAssetsFromKits({
 
       /** Removing assets from kits - AFTER custody is deleted */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` loaded org-scoped at the `where: { id: { in: resolvedIds }, organizationId }` query above; ids are not raw request input
         where: { id: { in: assets.map((a) => a.id) } },
         data: { kitId: null, status: AssetStatus.AVAILABLE },
       });
