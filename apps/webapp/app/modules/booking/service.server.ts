@@ -1337,6 +1337,19 @@ export async function checkoutBooking({
         });
       });
 
+    // SECURITY (defense-in-depth): reject checkout if any attached asset is
+    // not in this org BEFORE any asset-derived logic runs. A legacy
+    // pre-remediation cross-org link would otherwise (a) leak the foreign
+    // asset's title through the conflict/custody error messages below, and
+    // (b) let the booking transition while the org-scoped updateMany skips it.
+    // Legitimately-created bookings (assets validated at create/add) pass.
+    if (bookingFound.assets.length > 0) {
+      await assertAssetsBelongToOrg({
+        assetIds: bookingFound.assets.map((a) => a.id),
+        organizationId,
+      });
+    }
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.assets) {
       const conflictedAssets = bookingFound.assets.filter((asset) =>
@@ -1431,23 +1444,6 @@ export async function checkoutBooking({
      *
      * Using callback-form transaction to include activity events atomically. */
     await db.$transaction(async (tx) => {
-      // SECURITY (defense-in-depth): a legacy cross-org asset link created
-      // before the org-scoping remediation would otherwise let checkout
-      // transition the booking to ONGOING and emit checkout events for a
-      // foreign asset, while the org-scoped updateMany below silently skips
-      // it (status drift + misleading events). Fail safe: reject checkout if
-      // any attached asset is not in this org. Legitimately-created bookings
-      // (assets validated at create/add time) always pass this.
-      if (bookingFound.assets.length > 0) {
-        await assertAssetsBelongToOrg(
-          {
-            assetIds: bookingFound.assets.map((a) => a.id),
-            organizationId,
-          },
-          tx
-        );
-      }
-
       // SECURITY (cross-org IDOR): scope the status mutation to the caller's
       // organization so it can never flip the status of an asset that lives
       // in another workspace, even if a foreign asset ID slipped into the

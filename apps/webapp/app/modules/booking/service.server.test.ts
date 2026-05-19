@@ -83,7 +83,16 @@ vitest.mock("~/database/db.server", () => ({
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
-      findMany: vitest.fn().mockResolvedValue([]),
+      // why: assertAssetsBelongToOrg (checkout/create cross-org guard) calls
+      // db.asset.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
+      // Echo the requested ids so the guard passes for happy-path tests; other
+      // call sites (no id.in) still get [], and tests override per-case.
+      findMany: vitest.fn().mockImplementation((args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       update: vitest.fn().mockResolvedValue({}),
     },
@@ -1491,6 +1500,19 @@ describe("reserveBooking", () => {
 describe("checkoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: checkoutBooking now runs assertAssetsBelongToOrg over the booking's
+    // assets (right after load, before any asset-derived logic). Echo the
+    // requested ids so the org guard passes and tests can exercise the
+    // conflict / custody / happy-path flows. (clearAllMocks keeps prior
+    // describe implementations, so set this explicitly per describe.)
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }
+    );
   });
 
   const mockCheckoutParams = {
