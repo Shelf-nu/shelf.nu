@@ -4120,11 +4120,21 @@ export async function bulkUpdateAssetLocation({
       });
     }
 
-    const newLocation = newLocationId
-      ? await db.location.findFirst({
-          where: { id: newLocationId, organizationId },
-        })
-      : null;
+    // why: parity with the singular `updateAsset` path. When a location is
+    // provided it MUST belong to the caller's org — hard-reject a foreign/
+    // invalid id instead of silently coercing it to "remove location"
+    // (which previously returned success while clearing the asset's location).
+    // An empty/absent `newLocationId` is a legitimate "remove location" op.
+    let newLocation: Awaited<ReturnType<typeof db.location.findFirst>> = null;
+    if (newLocationId) {
+      await assertLocationBelongsToOrg({
+        locationId: newLocationId,
+        organizationId,
+      });
+      newLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+      });
+    }
 
     // Filter out assets already at the target location
     const assetsToUpdate = assets.filter(
