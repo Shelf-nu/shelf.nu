@@ -860,12 +860,14 @@ export async function transferOwnership({
 
       /** Update the role of current owner to ADMIN */
       await tx.userOrganization.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: currentOwnerUserOrg comes from the `userOrganization` findMany above scoped by `organizationId: currentOrganization.id` (lines 758-765), so this id is already org-proven
         where: { id: currentOwnerUserOrg.id },
         data: { roles: { set: [OrganizationRoles.ADMIN] } },
       });
 
       /** Update the role of new owner to OWNER */
       await tx.userOrganization.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newOwnerUserOrg comes from the `userOrganization` findMany above scoped by `organizationId: currentOrganization.id` (lines 758-765), so this id is already org-proven
         where: { id: newOwnerUserOrg.id },
         data: { roles: { set: [OrganizationRoles.OWNER] } },
       });

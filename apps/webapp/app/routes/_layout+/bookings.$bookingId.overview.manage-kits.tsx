@@ -314,7 +314,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const selectedKits = await db.kit.findMany({
-      where: { id: { in: kitIds } },
+      // Scope to caller's org: kitIds come from request input, so an
+      // attacker could otherwise reference kits from another workspace.
+      where: { id: { in: kitIds }, organizationId },
       select: {
         id: true,
         name: true,
@@ -410,7 +412,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
       const removedKits = await db.kit.findMany({
-        where: { id: { in: removedKitIds } },
+        // Scope to caller's org: removedKitIds come from request input, so an
+        // attacker could otherwise reference kits from another workspace.
+        where: { id: { in: removedKitIds }, organizationId },
         select: {
           id: true,
           name: true,

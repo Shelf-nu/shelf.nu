@@ -255,6 +255,7 @@ export async function deleteAuditImage({
 
     // Delete from database
     await db.auditImage.delete({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: image ownership already proven org-scoped above via db.auditImage.findFirst({ where: { id: imageId, organizationId } }) which throws if not found; delete() requires a unique-only selector so organizationId cannot be added here.
       where: {
         id: imageId,
       },

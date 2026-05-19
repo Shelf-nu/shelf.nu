@@ -64,7 +64,10 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
     },
     teamMember: {
+      // bulkAssignKitCustody now resolves the custodian via findFirst scoped
+      // to { id, organizationId } (cross-org IDOR guard), not findUnique.
       findUnique: vitest.fn().mockResolvedValue(null),
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     kitCustody: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -885,7 +888,7 @@ describe("bulkAssignKitCustody", () => {
     db.kit.findMany.mockResolvedValue(availableKits);
 
     //@ts-expect-error missing vitest type
-    db.teamMember.findUnique.mockResolvedValue({
+    db.teamMember.findFirst.mockResolvedValue({
       id: "custodian-1",
       name: "John Doe",
       user: { id: "user-1", firstName: "John", lastName: "Doe" },

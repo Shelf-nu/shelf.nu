@@ -167,7 +167,7 @@ describe("audit helpers", () => {
     beforeEach(() => {
       mockTx = {
         asset: {
-          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
         user: {
           findUnique: vi.fn(),
@@ -179,7 +179,7 @@ describe("audit helpers", () => {
     });
 
     it("creates a note for expected asset scan", async () => {
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-1",
         title: "Camera A",
       });
@@ -192,13 +192,15 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-1",
         assetId: "asset-1",
+        organizationId: "org-1",
         userId: "user-1",
         isExpected: true,
         tx: mockTx,
       });
 
-      expect(mockTx.asset.findUnique).toHaveBeenCalledWith({
-        where: { id: "asset-1" },
+      // Asset lookup must be org-scoped to prevent cross-org IDOR
+      expect(mockTx.asset.findFirst).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
         select: { id: true, title: true },
       });
 
@@ -223,7 +225,7 @@ describe("audit helpers", () => {
     });
 
     it("creates a note for unexpected asset scan", async () => {
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-2",
         title: "Laptop B",
       });
@@ -236,6 +238,7 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-2",
         assetId: "asset-2",
+        organizationId: "org-1",
         userId: "user-2",
         isExpected: false,
         tx: mockTx,
@@ -252,7 +255,7 @@ describe("audit helpers", () => {
     });
 
     it("includes asset link in note content", async () => {
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-3",
         title: "Monitor C",
       });
@@ -265,6 +268,7 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-3",
         assetId: "asset-3",
+        organizationId: "org-1",
         userId: "user-3",
         isExpected: true,
         tx: mockTx,
@@ -276,7 +280,7 @@ describe("audit helpers", () => {
     });
 
     it("fetches asset and user in parallel", async () => {
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-4",
         title: "Keyboard D",
       });
@@ -289,19 +293,20 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-4",
         assetId: "asset-4",
+        organizationId: "org-1",
         userId: "user-4",
         isExpected: true,
         tx: mockTx,
       });
 
       // Both queries should have been called
-      expect(mockTx.asset.findUnique).toHaveBeenCalled();
+      expect(mockTx.asset.findFirst).toHaveBeenCalled();
       expect(mockTx.user.findUnique).toHaveBeenCalled();
       expect(mockTx.auditNote.create).toHaveBeenCalled();
     });
 
     it("skips note creation when asset not found", async () => {
-      mockTx.asset.findUnique.mockResolvedValue(null);
+      mockTx.asset.findFirst.mockResolvedValue(null);
       mockTx.user.findUnique.mockResolvedValue({
         id: "user-5",
         firstName: "Dave",
@@ -311,17 +316,18 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-5",
         assetId: "nonexistent-asset",
+        organizationId: "org-1",
         userId: "user-5",
         isExpected: true,
         tx: mockTx,
       });
 
-      expect(mockTx.asset.findUnique).toHaveBeenCalled();
+      expect(mockTx.asset.findFirst).toHaveBeenCalled();
       expect(mockTx.auditNote.create).not.toHaveBeenCalled();
     });
 
     it("skips note creation when user not found", async () => {
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-6",
         title: "Mouse E",
       });
@@ -330,6 +336,7 @@ describe("audit helpers", () => {
       await createAssetScanNote({
         auditSessionId: "audit-6",
         assetId: "asset-6",
+        organizationId: "org-1",
         userId: "nonexistent-user",
         isExpected: true,
         tx: mockTx,
@@ -340,12 +347,13 @@ describe("audit helpers", () => {
     });
 
     it("skips note creation when both asset and user not found", async () => {
-      mockTx.asset.findUnique.mockResolvedValue(null);
+      mockTx.asset.findFirst.mockResolvedValue(null);
       mockTx.user.findUnique.mockResolvedValue(null);
 
       await createAssetScanNote({
         auditSessionId: "audit-7",
         assetId: "nonexistent-asset",
+        organizationId: "org-1",
         userId: "nonexistent-user",
         isExpected: false,
         tx: mockTx,
@@ -985,6 +993,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-1",
+        organizationId: "org-1",
         userId: "user-1",
         addedAssetIds: ["asset-1"],
         skippedCount: 0,
@@ -992,7 +1001,7 @@ describe("audit helpers", () => {
       });
 
       expect(mockTx.asset.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ["asset-1"] } },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         select: { id: true, title: true },
         orderBy: { title: "asc" },
       });
@@ -1021,6 +1030,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-2",
+        organizationId: "org-1",
         userId: "user-2",
         addedAssetIds: ["asset-1", "asset-2", "asset-3"],
         skippedCount: 0,
@@ -1050,6 +1060,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-3",
+        organizationId: "org-1",
         userId: "user-3",
         addedAssetIds: ["asset-1", "asset-2"],
         skippedCount: 3,
@@ -1073,6 +1084,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-4",
+        organizationId: "org-1",
         userId: "user-4",
         addedAssetIds: ["asset-1"],
         skippedCount: 0,
@@ -1100,6 +1112,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-5",
+        organizationId: "org-1",
         userId: "user-5",
         addedAssetIds: ["asset-1", "asset-2", "asset-3"],
         skippedCount: 0,
@@ -1107,7 +1120,10 @@ describe("audit helpers", () => {
       });
 
       expect(mockTx.asset.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ["asset-1", "asset-2", "asset-3"] } },
+        where: {
+          id: { in: ["asset-1", "asset-2", "asset-3"] },
+          organizationId: "org-1",
+        },
         select: { id: true, title: true },
         orderBy: { title: "asc" },
       });
@@ -1121,6 +1137,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-6",
+        organizationId: "org-1",
         userId: "nonexistent-user",
         addedAssetIds: ["asset-1"],
         skippedCount: 0,
@@ -1140,6 +1157,7 @@ describe("audit helpers", () => {
 
       await createAssetsAddedToAuditNote({
         auditSessionId: "audit-7",
+        organizationId: "org-1",
         userId: "user-7",
         addedAssetIds: ["nonexistent-asset"],
         skippedCount: 0,
@@ -1159,7 +1177,8 @@ describe("audit helpers", () => {
           findUnique: vi.fn(),
         },
         asset: {
-          findUnique: vi.fn(),
+          // Helper now uses org-scoped findFirst (was findUnique)
+          findFirst: vi.fn(),
         },
         auditNote: {
           create: vi.fn(),
@@ -1173,20 +1192,21 @@ describe("audit helpers", () => {
         firstName: "John",
         lastName: "Doe",
       });
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-1",
         title: "Camera A",
       });
 
       await createAssetRemovedFromAuditNote({
         auditSessionId: "audit-1",
+        organizationId: "org-1",
         assetId: "asset-1",
         userId: "user-1",
         tx: mockTx,
       });
 
-      expect(mockTx.asset.findUnique).toHaveBeenCalledWith({
-        where: { id: "asset-1" },
+      expect(mockTx.asset.findFirst).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
         select: { id: true, title: true },
       });
 
@@ -1206,13 +1226,14 @@ describe("audit helpers", () => {
         firstName: "Jane",
         lastName: "Smith",
       });
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-2",
         title: "Laptop B",
       });
 
       await createAssetRemovedFromAuditNote({
         auditSessionId: "audit-2",
+        organizationId: "org-1",
         assetId: "asset-2",
         userId: "user-2",
         tx: mockTx,
@@ -1231,13 +1252,14 @@ describe("audit helpers", () => {
         firstName: "Bob",
         lastName: "Wilson",
       });
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-3",
         title: "Monitor C",
       });
 
       await createAssetRemovedFromAuditNote({
         auditSessionId: "audit-3",
+        organizationId: "org-1",
         assetId: "asset-3",
         userId: "user-3",
         tx: mockTx,
@@ -1250,13 +1272,14 @@ describe("audit helpers", () => {
 
     it("skips note creation when user not found", async () => {
       mockTx.user.findUnique.mockResolvedValue(null);
-      mockTx.asset.findUnique.mockResolvedValue({
+      mockTx.asset.findFirst.mockResolvedValue({
         id: "asset-4",
         title: "Keyboard D",
       });
 
       await createAssetRemovedFromAuditNote({
         auditSessionId: "audit-4",
+        organizationId: "org-1",
         assetId: "asset-4",
         userId: "nonexistent-user",
         tx: mockTx,
@@ -1271,10 +1294,11 @@ describe("audit helpers", () => {
         firstName: "Alice",
         lastName: "Johnson",
       });
-      mockTx.asset.findUnique.mockResolvedValue(null);
+      mockTx.asset.findFirst.mockResolvedValue(null);
 
       await createAssetRemovedFromAuditNote({
         auditSessionId: "audit-5",
+        organizationId: "org-1",
         assetId: "nonexistent-asset",
         userId: "user-5",
         tx: mockTx,
@@ -1313,13 +1337,14 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-1",
+        organizationId: "org-1",
         assetIds: ["asset-1"],
         userId: "user-1",
         tx: mockTx,
       });
 
       expect(mockTx.asset.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ["asset-1"] } },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         select: { id: true, title: true },
         orderBy: { title: "asc" },
       });
@@ -1348,6 +1373,7 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-2",
+        organizationId: "org-1",
         assetIds: ["asset-1", "asset-2", "asset-3"],
         userId: "user-2",
         tx: mockTx,
@@ -1375,6 +1401,7 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-3",
+        organizationId: "org-1",
         assetIds: ["asset-1"],
         userId: "user-3",
         tx: mockTx,
@@ -1401,13 +1428,17 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-4",
+        organizationId: "org-1",
         assetIds: ["asset-1", "asset-2", "asset-3"],
         userId: "user-4",
         tx: mockTx,
       });
 
       expect(mockTx.asset.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ["asset-1", "asset-2", "asset-3"] } },
+        where: {
+          id: { in: ["asset-1", "asset-2", "asset-3"] },
+          organizationId: "org-1",
+        },
         select: { id: true, title: true },
         orderBy: { title: "asc" },
       });
@@ -1421,6 +1452,7 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-5",
+        organizationId: "org-1",
         assetIds: ["asset-1"],
         userId: "nonexistent-user",
         tx: mockTx,
@@ -1439,6 +1471,7 @@ describe("audit helpers", () => {
 
       await createAssetsRemovedFromAuditNote({
         auditSessionId: "audit-6",
+        organizationId: "org-1",
         assetIds: ["nonexistent-asset"],
         userId: "user-6",
         tx: mockTx,

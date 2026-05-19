@@ -55,6 +55,7 @@ export async function createAuditCreationNote({
 export async function createAssetScanNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   isExpected,
   tx,
@@ -63,6 +64,8 @@ export async function createAssetScanNote({
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   isExpected: boolean;
   tx: any; // Prisma transaction client
@@ -76,8 +79,8 @@ export async function createAssetScanNote({
   // Use pre-fetched data if available, otherwise fetch inside the transaction
   const [asset, scanner] = await Promise.all([
     prefetchedAsset ??
-      tx.asset.findUnique({
-        where: { id: assetId },
+      tx.asset.findFirst({
+        where: { id: assetId, organizationId },
         select: { id: true, title: true },
       }),
     prefetchedUser ??
@@ -119,17 +122,20 @@ export async function createAssetScanNote({
 export async function createAssetScanRemovedNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
   const [asset, remover] = await Promise.all([
-    tx.asset.findUnique({
-      where: { id: assetId },
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
     tx.user.findUnique({
@@ -621,12 +627,15 @@ export async function createAssetsAddedToAuditNote({
   auditSessionId,
   userId,
   addedAssetIds,
+  organizationId,
   skippedCount,
   tx,
 }: {
   auditSessionId: string;
   userId: string;
   addedAssetIds: string[];
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   skippedCount: number;
   tx: any; // Prisma transaction client
 }) {
@@ -641,7 +650,7 @@ export async function createAssetsAddedToAuditNote({
       },
     }),
     tx.asset.findMany({
-      where: { id: { in: addedAssetIds } },
+      where: { id: { in: addedAssetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
     }),
@@ -683,11 +692,14 @@ export async function createAssetsAddedToAuditNote({
 export async function createAssetRemovedFromAuditNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
@@ -701,8 +713,8 @@ export async function createAssetRemovedFromAuditNote({
         displayName: true,
       },
     }),
-    tx.asset.findUnique({
-      where: { id: assetId },
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
   ]);
@@ -736,11 +748,14 @@ export async function createAssetRemovedFromAuditNote({
 export async function createAssetsRemovedFromAuditNote({
   auditSessionId,
   assetIds,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetIds: string[];
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
@@ -755,7 +770,7 @@ export async function createAssetsRemovedFromAuditNote({
       },
     }),
     tx.asset.findMany({
-      where: { id: { in: assetIds } },
+      where: { id: { in: assetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
     }),

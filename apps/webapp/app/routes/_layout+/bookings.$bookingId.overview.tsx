@@ -722,8 +722,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Booking lookup, working hours, and booking settings are independent — fetch in parallel
     const [basicBookingInfo, workingHours, bookingSettings] = await Promise.all(
       [
-        db.booking.findUniqueOrThrow({
-          where: { id },
+        db.booking.findFirstOrThrow({
+          where: { id, organizationId },
           select: { id: true, status: true, from: true, to: true },
         }),
         getWorkingHoursForOrganization(organizationId),

@@ -182,8 +182,11 @@ export async function renamePreset({
       });
     }
 
-    // Update the preset within transaction
+    // Update the preset within transaction.
+    // ownership (id + organizationId + ownerId) is proven on lines 146-157
+    // within this same tx before this update.
     return tx.assetFilterPreset.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ownership (id + organizationId + ownerId) proven on lines 146-157 in this same tx
       where: { id },
       data: { name: trimmedName },
     });
@@ -205,7 +208,10 @@ export async function deletePreset({
 }) {
   await assertPresetOwnership({ id, organizationId, ownerId });
 
-  return db.assetFilterPreset.delete({ where: { id } });
+  return db.assetFilterPreset.delete({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assertPresetOwnership above proves id + organizationId + ownerId before this delete
+    where: { id },
+  });
 }
 /** End of deletePreset function */
 
@@ -226,6 +232,7 @@ export async function togglePresetStar({
   await assertPresetOwnership({ id, organizationId, ownerId });
 
   return db.assetFilterPreset.update({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assertPresetOwnership above proves id + organizationId + ownerId before this update
     where: { id },
     data: { starred },
   });

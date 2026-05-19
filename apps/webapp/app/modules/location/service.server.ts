@@ -863,6 +863,7 @@ export async function updateLocation(payload: {
     await createLocationEditNotes({
       locationId: id,
       userId,
+      organizationId,
       previous: currentLocation,
       next: {
         name,
@@ -890,11 +891,13 @@ export async function updateLocation(payload: {
 async function createLocationEditNotes({
   locationId,
   userId,
+  organizationId,
   previous,
   next,
 }: {
   locationId: string;
   userId: string;
+  organizationId: string;
   previous: {
     name: string;
     description: string | null;
@@ -949,8 +952,8 @@ async function createLocationEditNotes({
 
     let newParentDisplay = "*none*";
     if (next.parentId) {
-      const newParent = await db.location.findUnique({
-        where: { id: next.parentId },
+      const newParent = await db.location.findFirst({
+        where: { id: next.parentId, organizationId },
         select: { id: true, name: true },
       });
       newParentDisplay = newParent
@@ -1066,6 +1069,7 @@ export async function bulkDeleteLocations({
     return await db.$transaction(async (tx) => {
       /** Deleting all locations */
       await tx.location.deleteMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause (lines 1062-1067), so they are already org-proven before this delete
         where: { id: { in: locations.map((location) => location.id) } },
       });
 

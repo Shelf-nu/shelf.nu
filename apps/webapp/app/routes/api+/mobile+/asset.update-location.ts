@@ -103,7 +103,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // aggregations include mobile-initiated location changes.
     const updatedAsset = await db.$transaction(async (tx) => {
       const updated = await tx.asset.update({
-        where: { id: assetId },
+        where: { id: assetId, organizationId },
         data: { locationId },
         select: {
           id: true,

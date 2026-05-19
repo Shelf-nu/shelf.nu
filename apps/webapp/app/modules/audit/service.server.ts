@@ -22,6 +22,7 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -312,8 +313,8 @@ export async function createAuditSession(
       });
     }
 
-    const sessionWithAssignments = await tx.auditSession.findUnique({
-      where: { id: session.id },
+    const sessionWithAssignments = await tx.auditSession.findFirst({
+      where: { id: session.id, organizationId },
       include: {
         assignments: true,
       },
@@ -800,6 +801,7 @@ export async function scheduleNextAuditJob({
     const id = await scheduler.sendAfter(QueueNames.auditQueue, data, {}, when);
     if (id) {
       await db.auditSession.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping. data is AuditSchedulerData (no organizationId); callers are the background pg-boss worker and org-validated audit-create/update flows. The id is a trusted internal payload, not user request input; update() requires a unique-only where regardless.
         where: { id: data.id },
         data: { activeSchedulerReference: id },
       });
@@ -826,11 +828,16 @@ export async function scheduleNextAuditJob({
 /**
  * Cancel all scheduled reminder jobs for an audit
  * Should be called when audit is completed or cancelled
+ *
+ * @param auditId - The audit session whose reminders should be cancelled
+ * @param organizationId - Caller's organization; scopes the lookup so a
+ *   cross-org audit id can never resolve here (defense-in-depth — callers
+ *   already org-validate the audit before invoking this helper)
  */
-async function cancelAuditReminders(auditId: string) {
+async function cancelAuditReminders(auditId: string, organizationId: string) {
   try {
-    const auditSession = await db.auditSession.findUnique({
-      where: { id: auditId },
+    const auditSession = await db.auditSession.findFirst({
+      where: { id: auditId, organizationId },
       select: { activeSchedulerReference: true },
     });
 
@@ -843,6 +850,7 @@ async function cancelAuditReminders(auditId: string) {
 
     await scheduler.cancel(auditSession.activeSchedulerReference);
     await db.auditSession.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the findFirst above (returns early if not found in organizationId); update() requires a unique-only where so organizationId cannot be added here.
       where: { id: auditId },
       data: { activeSchedulerReference: null },
     });
@@ -1160,6 +1168,7 @@ export async function recordAuditScan(
         },
       }),
       db.asset.findUnique({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.
         where: { id: assetId },
         select: { id: true, title: true, organizationId: true },
       }),
@@ -1225,6 +1234,7 @@ export async function recordAuditScan(
         // If this is the first scan and audit is still PENDING, activate it
         if (session.status === AuditStatus.PENDING) {
           await tx.auditSession.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
             where: { id: auditSessionId },
             data: {
               status: AuditStatus.ACTIVE,
@@ -1319,6 +1329,7 @@ export async function recordAuditScan(
 
         // Update the audit session counts
         const updatedSession = await tx.auditSession.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditSessionId },
           data: {
             foundAssetCount: isExpected
@@ -1337,6 +1348,7 @@ export async function recordAuditScan(
         await createAssetScanNote({
           auditSessionId,
           assetId,
+          organizationId,
           userId,
           isExpected,
           tx,
@@ -1648,6 +1660,7 @@ export async function completeAuditSession({
 
       // Update session to completed
       await tx.auditSession.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: sessionId proven to belong to organizationId by the findUnique guard at the top of this tx (throws 404 otherwise); update() requires a unique-only where so organizationId cannot be added here.
         where: { id: sessionId },
         data: {
           status: AuditStatus.COMPLETED,
@@ -1690,8 +1703,8 @@ export async function completeAuditSession({
     });
 
     // Fetch full audit details for email notification
-    const completedAudit = await db.auditSession.findUnique({
-      where: { id: sessionId },
+    const completedAudit = await db.auditSession.findFirst({
+      where: { id: sessionId, organizationId },
       select: {
         id: true,
         name: true,
@@ -1779,7 +1792,7 @@ export async function completeAuditSession({
     }
 
     // Cancel all scheduled reminder jobs
-    await cancelAuditReminders(sessionId);
+    await cancelAuditReminders(sessionId, organizationId);
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -2173,8 +2186,8 @@ export async function cancelAuditSession({
 
     // Re-fetch to return the up-to-date row (preserves the previous return
     // contract — callers expect the AuditSession back).
-    const updatedAudit = await db.auditSession.findUniqueOrThrow({
-      where: { id: auditSessionId },
+    const updatedAudit = await db.auditSession.findFirstOrThrow({
+      where: { id: auditSessionId, organizationId },
     });
 
     // Fetch acting user's info for the activity note + email attribution.
@@ -2268,7 +2281,7 @@ export async function cancelAuditSession({
     });
 
     // Cancel all scheduled reminder jobs
-    await cancelAuditReminders(auditSessionId);
+    await cancelAuditReminders(auditSessionId, organizationId);
 
     return updatedAudit;
   } catch (cause) {
@@ -2396,6 +2409,16 @@ export async function addAssetsToAudit({
 
       // Create new audit asset entries
       if (newAssetIds.length > 0) {
+        // why: assetIds come from request input. Prove every one belongs to the
+        // caller's org before connecting them to the audit — otherwise an
+        // attacker could attach another tenant's assets to their own audit
+        // (cross-org IDOR on the create path; the singular createAuditSession
+        // already org-validates its assets, this is bulk parity).
+        await assertAssetsBelongToOrg(
+          { assetIds: newAssetIds, organizationId },
+          tx
+        );
+
         await tx.auditAsset.createMany({
           data: newAssetIds.map((assetId) => ({
             auditSessionId: auditId,
@@ -2407,6 +2430,7 @@ export async function addAssetsToAudit({
 
         // Update audit session counts
         await tx.auditSession.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditId },
           data: {
             expectedAssetCount: { increment: newAssetIds.length },
@@ -2424,6 +2448,7 @@ export async function addAssetsToAudit({
           auditSessionId: auditId,
           userId,
           addedAssetIds: newAssetIds,
+          organizationId,
           skippedCount,
           tx,
         });
@@ -2533,6 +2558,7 @@ export async function removeAssetFromAudit({
       // If it was an expected asset, decrement expectedAssetCount
       if (auditAsset.expected) {
         await tx.auditSession.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditId },
           data: {
             expectedAssetCount: { decrement: 1 },
@@ -2545,6 +2571,7 @@ export async function removeAssetFromAudit({
       await createAssetRemovedFromAuditNote({
         auditSessionId: auditId,
         assetId: auditAsset.assetId,
+        organizationId,
         userId,
         tx,
       });
@@ -2643,6 +2670,7 @@ export async function removeAssetsFromAudit({
       // Update audit session counts
       if (expectedCount > 0) {
         await tx.auditSession.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditId },
           data: {
             expectedAssetCount: { decrement: expectedCount },
@@ -2655,6 +2683,7 @@ export async function removeAssetsFromAudit({
       await createAssetsRemovedFromAuditNote({
         auditSessionId: auditId,
         assetIds,
+        organizationId,
         userId,
         tx,
       });
@@ -2940,6 +2969,10 @@ export async function bulkArchiveAudits({
       const result = await tx.auditSession.updateMany({
         where: {
           id: { in: audits.map((a) => a.id) },
+          // Defense-in-depth: ids already came from an org-scoped findMany
+          // above, but scope the write too so a cross-org id can never be
+          // archived even if the read filter regresses.
+          organizationId,
           status: { in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED] },
         },
         data: { status: AuditStatus.ARCHIVED },

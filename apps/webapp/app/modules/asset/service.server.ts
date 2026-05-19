@@ -246,6 +246,7 @@ async function setKitCustodyAfterAssetImport({
 
     if (kit && teamMember) {
       await db.kit.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: kit comes from the `kits` map built by createKitsIfNotExists({ organizationId }) at the call site (line ~2657); all ids are already org-scoped
         where: { id: kit.id },
         data: {
           status: KitStatus.IN_CUSTODY,
@@ -1752,6 +1753,9 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              // Org-scope the lookup so form-supplied custom field ids from
+              // another tenant cannot be resolved here (cross-org IDOR guard).
+              organizationId,
               active: true,
               deletedAt: null,
             },
@@ -2225,6 +2229,7 @@ export async function duplicateAsset({
 
           if (typeof imagePath === "string") {
             await db.asset.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) on line ~2216; this only writes back its own mainImage
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -3679,6 +3684,7 @@ export async function bulkDeleteAssets({
         }
 
         await tx.asset.deleteMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3659-3665 with where { id in resolvedIds, organizationId }; every id here is already org-proven
           where: { id: { in: assets.map((asset) => asset.id) } },
         });
       });
@@ -3846,6 +3852,7 @@ export async function bulkAssignCustody({
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
@@ -4002,6 +4009,7 @@ export async function bulkReleaseCustody({
 
       /** Updating status of assets to AVAILABLE */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
@@ -4145,6 +4153,7 @@ export async function bulkUpdateAssetLocation({
       if (assetsToUpdate.length > 0) {
         /** Updating location of assets to newLocation */
         await tx.asset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsToUpdate is derived from `assets` fetched on lines 4088-4092 with where { id in resolvedIds, organizationId }; every id is already org-proven
           where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
           data: { locationId: newLocation?.id ? newLocation.id : null },
         });
@@ -4354,6 +4363,7 @@ export async function bulkUpdateAssetCategory({
 
     await db.$transaction(async (tx) => {
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange is derived from assetsBeforeUpdate fetched on lines 4322-4326 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assetsThatChange.map((a) => a.id) } },
         data: { categoryId: newCategoryId },
       });
@@ -4670,6 +4680,7 @@ export async function relinkAssetQrCode({
 
   await Promise.all([
     db.qr.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
       where: { id: qr.id },
       data: { organizationId, userId },
     }),

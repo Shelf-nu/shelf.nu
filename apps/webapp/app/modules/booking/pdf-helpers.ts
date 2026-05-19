@@ -81,6 +81,9 @@ export async function fetchAllPdfRelatedData(
       db.asset.findMany({
         where: {
           id: { in: booking?.assets.map((a) => a.id) || [] },
+          // Defense-in-depth: scope to the caller's org even though the
+          // asset ids originate from an already org-scoped booking
+          organizationId,
         },
         include: {
           category: {

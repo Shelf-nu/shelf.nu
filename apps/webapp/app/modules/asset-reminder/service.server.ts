@@ -260,6 +260,7 @@ export async function editAssetReminder({
     }
 
     const updatedReminder = await db.assetReminder.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow on lines 247-249 (where id + organizationId)
       where: { id: reminder.id },
       data: {
         name,

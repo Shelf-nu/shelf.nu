@@ -41,6 +41,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     /** We get the invite based on the id of the params */
     const invite = await db.invite
       .findFirstOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; the viewer is not yet a member of the org, so there is no caller organizationId to scope by — the invite record itself establishes the org relationship (and authenticated users are additionally validated via checkUserAndInviteMatch below)
         where: {
           id: inviteId,
         },
