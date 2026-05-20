@@ -308,20 +308,30 @@ export async function updateScanGeolocation({
 }) {
   const scan = await db.scan.findUnique({
     where: { id: scanId },
-    select: { id: true, createdAt: true, qrId: true, latitude: true },
+    select: {
+      id: true,
+      createdAt: true,
+      qrId: true,
+      latitude: true,
+      longitude: true,
+    },
   });
 
-  // why: GPS update is **write-once**. A successful update sets latitude
-  // (and longitude) once; any subsequent attempt — even with a valid
-  // scanId+qrId still in the 5-min window — is rejected. This collapses the
-  // residual attack surface (a leaked /qr/<id>?scanId=<id> URL) to a
-  // seconds-wide race the legitimate client almost always wins, since the
-  // browser posts coordinates immediately after page load. No schema change
-  // or capability-token plumbing required for an anonymous scan-log field.
+  // why: GPS update is **symmetrically write-once** — reject if EITHER
+  // coordinate is already populated, not only latitude. The route currently
+  // requires both, but `updateScanGeolocation` accepts each as optional, so
+  // an asymmetric latitude-only check would let a longitude-only write slip
+  // through any future internal caller or schema relaxation. Combined with
+  // the 5-min window and the qrId binding, this collapses the residual
+  // attack surface (a leaked /qr/<id>?scanId=<id> URL) to a seconds-wide
+  // race the legitimate client almost always wins, since the browser posts
+  // coordinates immediately after page load. No schema change or capability-
+  // token plumbing required for an anonymous scan-log field.
   if (
     !scan ||
     scan.qrId !== qrId ||
     scan.latitude !== null ||
+    scan.longitude !== null ||
     Date.now() - scan.createdAt.getTime() > SCAN_GEO_UPDATE_WINDOW_MS
   ) {
     throw new ShelfError({

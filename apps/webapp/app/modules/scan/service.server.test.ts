@@ -60,6 +60,7 @@ describe("updateScanGeolocation", () => {
       createdAt: fresh(),
       qrId: "different-qr",
       latitude: null,
+      longitude: null,
     });
 
     await expect(
@@ -80,6 +81,7 @@ describe("updateScanGeolocation", () => {
       createdAt: stale(),
       qrId: QR_ID,
       latitude: null,
+      longitude: null,
     });
 
     await expect(
@@ -93,7 +95,7 @@ describe("updateScanGeolocation", () => {
     expect(db.scan.update).not.toHaveBeenCalled();
   });
 
-  it("rejects when GPS was already set — write-once (no write)", async () => {
+  it("rejects when latitude is already set — write-once (no write)", async () => {
     // why: this is the residual closure for the leaked-URL attack. Even when
     // scanId + qrId both match and the window is open, a scan whose GPS was
     // already written cannot be overwritten.
@@ -103,6 +105,31 @@ describe("updateScanGeolocation", () => {
       createdAt: fresh(),
       qrId: QR_ID,
       latitude: "50.0",
+      longitude: null,
+    });
+
+    await expect(
+      updateScanGeolocation({
+        scanId: SCAN_ID,
+        qrId: QR_ID,
+        latitude: "10",
+        longitude: "20",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+    expect(db.scan.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects when only longitude is already set — symmetric write-once (no write)", async () => {
+    // why: an asymmetric latitude-only guard would let a longitude-only
+    // partial write slip through any future internal caller or schema
+    // relaxation. The guard rejects if EITHER coordinate is populated.
+    //@ts-expect-error vitest mock typing
+    db.scan.findUnique.mockResolvedValue({
+      id: SCAN_ID,
+      createdAt: fresh(),
+      qrId: QR_ID,
+      latitude: null,
+      longitude: "50.0",
     });
 
     await expect(
@@ -123,6 +150,7 @@ describe("updateScanGeolocation", () => {
       createdAt: fresh(),
       qrId: QR_ID,
       latitude: null,
+      longitude: null,
     });
 
     await updateScanGeolocation({
