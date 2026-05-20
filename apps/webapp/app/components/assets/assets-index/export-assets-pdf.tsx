@@ -52,11 +52,17 @@ export type AssetIndexPdfProps = {
   totalRowCount: number;
 };
 
-/** Hard cap on rows in a single PDF export (PRD §14 Q2 — suggested value). */
-export const MAX_PDF_ROWS = 500;
-
-/** Default page orientation (PRD §14 Q3 — suggested value). */
+/**
+ * Default page orientation. Sealed at "landscape" per PRD §14 Q3 (CTO
+ * answer 2026-05-20). The asset index is column-heavy.
+ */
 export const PDF_ORIENTATION: "landscape" | "portrait" = "landscape";
+
+// NOTE (v0.4): no MAX_PDF_ROWS constant. Per PRD §14 Q2 (CTO answer
+// 2026-05-20), this feature does NOT cap row count — matching the
+// existing booking-overview-pdf.tsx and audit-receipt-pdf.tsx, which
+// also have no cap. Browser print dialog handles whatever the user
+// asks for; CSV remains the answer for catastrophic sizes.
 
 /**
  * Loader-layer helper: turns AssetIndexSettings.columns JSON into the
