@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.3.1, test-path corrected)
+# PRD — Asset-Index PDF Export (v0.4, §14 sealed)
 
 | Field | Value |
 |---|---|
@@ -176,10 +176,10 @@ export function ExportAssetsPdfButton(props: {
 }): JSX.Element;
 
 // Server loader for the export route — Suite A wires against this with
-// `getAsset*` and `getOrganizationTierLimit` mocked.
-export async function loader(args: LoaderFunctionArgs): Promise<{
-  asset: never;  // route returns rendered HTML, not JSON; type kept for parity
-}>;
+// `getAsset*` and `getOrganizationTierLimit` mocked. Returns a rendered
+// HTML Response (the printable view as a self-contained document); the
+// browser-side react-to-print triggers from that page. NOT JSON.
+export async function loader(args: LoaderFunctionArgs): Promise<Response>;
 ```
 
 The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+sorting is a loader-layer concern, rendering is a component-layer concern, and tests A1 (helper) and A1b (component render order) verify each cleanly without overlap or tautology.
@@ -191,7 +191,7 @@ The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+so
 
 | # | Test group | Assertion | Pulls into existence |
 |---|---|---|---|
-| A0 | Loader-wiring | With `getOrganizationTierLimit` mocked to `{canExportAssets:false}`, the loader returns a 403 (or the existing `ShelfError` shape); with `{canExportAssets:true}` it returns rendered HTML containing the workspace name; `getAssetsWhereInput` is called with the request's `currentSearchParams` (proves filter round-trip) | Server loader at `routes/_layout+/assets.export.$fileName.pdf.tsx` reuses existing select-all/filter pattern; tier-gated identically to CSV |
+| A0 | Loader-wiring | With `getOrganizationTierLimit` mocked to `{canExportAssets:false}`, the loader returns a 403 (or the existing `ShelfError` shape); with `{canExportAssets:true}` it returns a `Response` containing rendered HTML with the workspace name; `getAssetsWhereInput` is called with the request's `currentSearchParams` (proves filter round-trip) | Server loader at `routes/_layout+/assets.export.$fileName[.pdf].tsx` reuses existing select-all/filter pattern; tier-gated identically to CSV |
 | A1 | `selectVisibleColumns()` filter + sort | Given a `RawColumnEntry[]` mix containing `visible:false` entries and non-sequential `position` values, the helper returns only `visible:true` entries sorted by `position` ascending. Pure fn, no React, no DB | `selectVisibleColumns()` helper (loader-layer) |
 | A1b | Component renders columns in input order, no reordering | RTL render of `AssetIndexPdf` with `columns: [{c, 0}, {a, 1}, {b, 2}]` → DOM column order is exactly `c, a, b`. Asserts the component takes its input as authoritative (no implicit re-filter/re-sort) — complements A1 cleanly so filter-ownership lives in one place | `AssetIndexPdf` renders headers/cells in input column order |
 | A2 | Custom-field columns render | `columns` containing dynamic custom-field entries renders their `label` headers and values from `row.values[name]`. **Sub-assertion:** a malicious string in a custom-field value renders as text, not HTML (React auto-escapes; explicit guard against future regression) | `AssetIndexPdf` is column-name-agnostic — pure mapping |
@@ -200,13 +200,13 @@ The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+so
 | A5 | Filter summary line surfaces filters | A row with applied filters renders a human-readable filter line in the header; with no filters, the line is empty | Filter-summary helper (pure) |
 | A6 | Footer shows generation metadata | Footer contains `generatedAt` (formatted via existing `DateS`), `generatedBy.displayName`, and `totalRowCount` | Footer pure render |
 | A7 | Print-CSS + page-break structure | The printable view (a) has a `@media print` rule registered, (b) wraps rows in a container element carrying `page-break-inside: avoid` (Tailwind `break-inside-avoid` or equivalent class on each row), and (c) **uses a native `<thead>` element**, so headers repeat per print page via the browser's built-in `display: table-header-group` default — **no custom `.repeat-on-print` class is introduced**. Asserted via DOM structure (presence of `<thead>`, presence of the break-avoid class) in happy-dom; the actual visual repeat across multiple printed pages in real Safari + Chrome is verified manually in the PR-2 checklist (jsdom cannot simulate browser print pagination) | Tailwind print utilities + native `<thead>` element on the printable component |
-| A8 | Large-selection truncation | When `totalRowCount > MAX_PDF_ROWS` (constant; see §14 Q2) the renderer truncates and shows a clear truncation banner naming the cap and inviting CSV for full export | Cap constant + truncation branch |
+| ~~A8~~ | ~~Large-selection truncation~~ | **REMOVED in v0.4.** Per §14 Q2 resolution: existing `booking-overview-pdf.tsx` and `audit-receipt-pdf.tsx` do NOT cap row count (verified by grep — no `MAX`/`limit`/`truncate` in either). This PRD invented a cap that breaks pattern consistency. Per Nikolay: *"If we generate the PDF in the same manner we do in the other places, I don't see a reason to do this."* Mitigation for very large selections is the same as for the existing PDFs: the user's browser print dialog handles whatever they ask for; CSV remains the answer if they're hitting browser memory limits, but Shelf does not silently truncate | (nothing — removed) |
 | A9 | Filename is sanitized | The download filename uses the existing `sanitizeFilename()` helper from `~/utils/sanitize-filename` (already used by audit PDF); contains workspace slug + ISO date | Filename builder pure fn |
 | A10 | Permission gate at loader, not button | Even if the button is somehow rendered for a free user, hitting the route loader directly returns the same 403/ShelfError — the gate is server-side, never UI-only | `requirePermission({entity:asset, action:export})` at loader top |
 | A11 | No new server PDF dependency | A static assertion test: importing the new files does not transitively import `@react-pdf/renderer`, `pdfkit`, `jspdf`, or any other server PDF lib. (Failsafe against drift) | Maintain the react-to-print-only architecture |
 | **A12** | **Cross-org IDOR — selection from a different org is excluded** | Mock `requirePermission` to return `organizationId: "org-A"`. Seed the request's selection / `currentSearchParams` with an asset ID belonging to `org-B`. Hit the loader. Assert: (a) the PDF body contains zero rows referencing the org-B asset id, (b) `getAssetsWhereInput` was called with `organizationId: "org-A"` (the caller's org, not anything from the request payload), and (c) the response shape is the normal success shape (silent filter, not a 5xx — the existing `getAssetsWhereInput` pattern scopes by org, an attacker simply sees their own org's data) | Server loader relies exclusively on `getAssetsWhereInput({organizationId, currentSearchParams})` for the asset query; **never** trusts asset IDs from request input without org-scoping. This is the known Shelf bug class per `.claude/rules/org-scope-user-supplied-ids.md` (*"the original bug: edit validated, create did not"*); the read path here must not repeat it |
 
-Net-new test count target: ~25 cases across 14 groups (A1/A1b split + A12 cross-org IDOR per `.claude/rules/org-scope-user-supplied-ids.md`). Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
+Net-new test count target: ~22 cases across 13 groups (v0.3 had 14 incl. A8 — A8 removed in v0.4 per §14 Q2). Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
 
 ### 6.2 Suite B — empty
 
@@ -252,7 +252,7 @@ Net-new code v1 must produce — that's it:
 
 - `AssetIndexPdf` printable component (the layout)
 - `ExportAssetsPdfButton` action button + dialog (wraps `useReactToPrint`)
-- Server loader at `assets.export.$fileName.pdf.tsx` (tier gate + select-all/filter + row shaping)
+- Server loader at `assets.export.$fileName[.pdf].tsx` (tier gate + select-all/filter + row shaping)
 - A small filter-summary helper (pure, named, testable)
 - A small filename builder (pure, named, testable)
 - Minimal wiring into the existing export menu
@@ -268,7 +268,7 @@ The feature is client-side print rendering. **No new server compute, no new stor
 | # | Risk | Mitigation | v1 status |
 |---|---|---|---|
 | 1 | **Safari print rendering** diverges from Chrome (memory: shelf.nu jank lives in Safari) | A7 asserts the print CSS is *applied*; PR-2 carries the manual Safari checklist (or WebKit smoke test) to verify it *renders right* | ⚠️ Split: applied=A7, renders-right=PR-2 |
-| 2 | **Huge selection (select-all across thousands)** crashes the print dialog or the browser | Hard cap `MAX_PDF_ROWS` (see §14 Q2); A8 asserts truncation behavior + truncation banner naming the cap and pointing to CSV. The cap is a constant in code, not configurable | ✅ |
+| 2 | **Huge selection** stresses the browser print dialog | Match the existing PDF precedent — neither `booking-overview-pdf.tsx` nor `audit-receipt-pdf.tsx` cap row count, and we don't introduce one here (per §14 Q2). The browser's print dialog handles whatever the user asks for; CSV remains the answer for catastrophic sizes. If real-world data later shows browser crashes are common, revisit with telemetry from `selected_count` distribution (§13) | ✅ (matches precedent; no cap shipped) |
 | 3 | Tier gate enforced only in UI (button hidden) and bypassable by hitting the route URL directly | A10 asserts loader returns 403 regardless of UI state | ✅ |
 | 4 | Server PDF dependency drift (someone adds `@react-pdf/renderer` later "to make it nicer") | A11 static-imports assertion fails if any server PDF library appears in the dependency graph of the new files | ✅ |
 | 5 | Schema drift via this PRD (an "improvement" tacks on a column to `AssetIndexSettings`) | §5 clause (3) HALTs on any `packages/database/prisma/` diff; this PRD must not mutate schema | ✅ |
@@ -282,7 +282,7 @@ Notably absent (would be ship-blockers in a different feature, not this one): GD
 | Phase | Description | Exit criterion |
 |---|---|---|
 | 1 | Ship behind feature flag `enableAssetIndexPdfExport` OFF | Suite A green; CI clean |
-| 2 | Enable for Shelf team workspace + Carlos's GBP workspace | One week without print-rendering or selection-cap incidents |
+| 2 | Enable for Shelf team workspace + Carlos's GBP workspace | One week without print-rendering incidents (no cap to incident on per §14 Q2) |
 | 3 | **WebKit pass** (PR-2 closes; Safari render confirmed visually correct) | Designer + CTO sign-off |
 | 4 | Flag ON for all orgs with `canExportAssets=true` (i.e. same audience as CSV export) | Funnel events emit; A/B not required (parity feature) |
 
@@ -292,18 +292,23 @@ Minimal funnel; this is a parity feature, not a conversion lever.
 
 ```text
 asset_pdf_export_button_clicked   { workspace_id, plan, selected_count, include_images }
-asset_pdf_export_completed        { workspace_id, plan, row_count, include_images, hit_cap }
-asset_pdf_export_truncated        { workspace_id, plan, requested_count, cap }
+asset_pdf_export_completed        { workspace_id, plan, row_count, include_images }
 ```
 
-Useful tells: ratio of `truncated:completed` → cap may be too low; `include_images` true-rate → confirms the default tracks user intent.
+(Removed in v0.4: `asset_pdf_export_truncated` and `hit_cap` field — there is no cap, per §14 Q2.)
 
-## 14. Open questions — actual blockers only
+Useful tells: `include_images` true-rate → confirms the default tracks user intent; `selected_count` distribution → if very large selections become common we may want to revisit the cap question with real data, but not pre-emptively.
 
-1. **Reaffirm: columns from `AssetIndexSettings` verbatim, no inline picker.** Confirmed in scoping; locked unless objection in CTO review.
-2. **`MAX_PDF_ROWS` cap value.** Suggestion: **500**. Rationale: ~500 rows with thumbnails is the soft ceiling where browser print stays performant on a mid-range laptop; CSV remains the answer above that. Open to a different number if you have data. The cap is a code constant, not configurable per workspace in v1.
-3. **Page orientation default.** Suggestion: **landscape**. The asset index is column-heavy; most user views will not fit portrait. Booking PDF uses portrait but it has a different shape. Confirm or flip.
-4. **Server-rendered vs purely client-rendered.** Both existing PDFs (`booking-overview-pdf.tsx`, `audit-receipt-pdf.tsx`) are *client-rendered* React components triggered by `useReactToPrint`. We follow that. The server loader's job is *data preparation*, not rendering. Confirm this is the intended architecture (mirrors precedent; no reason to deviate).
+## 14. Open questions — all resolved in v0.4
+
+All four sealed via Nikolay's review comment on PR #2562 (2026-05-20).
+
+1. **Columns from `AssetIndexSettings` verbatim, no inline picker.** ✅ **Confirmed.** Quoted: *"Yes for now I would make it consistent. If they want to print less columns they can be temp disabled in the column picker."*
+2. **Row cap.** ✅ **Resolved: NO cap.** Nikolay pushed back: *"If we generate the PDF in the same manner we do in the other places, I don't see a reason to do this."* Verified by grep: `booking-overview-pdf.tsx` and `audit-receipt-pdf.tsx` have zero MAX/limit/truncate. v0.4 removes A8, `MAX_PDF_ROWS`, the truncated event, and updates risk #2.
+3. **Page orientation default: landscape.** ✅ **Confirmed.** Quoted: *"Agreed."*
+4. **Client-rendered react-to-print architecture.** ✅ **Confirmed.** Quoted: *"For now this is tried and tested so I would use it. If one day we decide to do something else, we can migrate all our pdf generation functionality."*
+
+§14 is now closed. The §4.2 adequacy gate is the only remaining human checkpoint before `/goal` runs.
 
 ## 15. Appendix
 
@@ -370,4 +375,22 @@ Added 2026-05-20 ahead of implementation, applying `.claude/rules/org-scope-user
 
 ---
 
-*v0.3 closes the one IDOR-class gap CR's security review would have flagged. The §4.2 adequacy gate remains the single human checkpoint before `/goal` is set. Open questions §14 are scoping confirmations; risk #1's Safari rendering is the one quality-pass gate before general release.*
+### 15.6 §14 sealed + filename/sig/cap corrections (v0.3.1 → v0.4)
+
+Applied 2026-05-20 from Nikolay's §14 answers + Codex P1 + CR review-pass-2.
+
+| Source | Change |
+|---|---|
+| **Nikolay §14 Q1** | Columns verbatim — locked |
+| **Nikolay §14 Q2** | **Cap removed.** Nikolay pushed back on `MAX_PDF_ROWS`; grep confirmed neither `booking-overview-pdf.tsx` nor `audit-receipt-pdf.tsx` cap row count. Dropped: A8 test, `MAX_PDF_ROWS` constant from §6.0, `asset_pdf_export_truncated` event from §13, `hit_cap` field. Risk #2 reframed: matches existing PDF precedent; rely on browser print + CSV fallback. The cap I proposed was unjustified consistency-breaking work — a real win for "less dumb" |
+| **Nikolay §14 Q3** | Landscape — locked |
+| **Nikolay §14 Q4** | react-to-print — locked |
+| **Codex P1 (line 218)** | `assets.export.$fileName.pdf.tsx` → `assets.export.$fileName[.pdf].tsx` (remix-flat-routes literal-extension bracketing; was inconsistent across the PRD) |
+| **CR inline (line 219)** | Same: unify to `[.pdf]` canonical form |
+| **CR outside-diff (lines 180-182)** | Loader return type: `Promise<{asset:never}>` → `Promise<Response>` (matches actual HTML-Response contract per A0) |
+| Test count: ~25 → ~22 cases / 14 → 13 groups | A8 removed |
+| Companion update | Impl PR #2564 stub file gets `MAX_PDF_ROWS` constant + A8 test removed in the same batch — paused-but-aligned |
+
+---
+
+*v0.4 closes §14. The §4.2 adequacy gate is now the only remaining human checkpoint before `/goal` is set. Risk #1 (Safari rendering) is the one quality-pass gate before general release. PRD is sealed pending CTO ratification.*
