@@ -12,8 +12,8 @@
  * @see PRD-asset-index-pdf-export.md §6.1
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // why: A9 contract requires the existing sanitizeFilename helper is invoked.
 // Mock it before importing the file-under-test so the import wires through.

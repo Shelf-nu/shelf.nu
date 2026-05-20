@@ -48,7 +48,9 @@ vi.mock("~/database/db.server", () => ({
 
 // why: requirePermission is the auth seam — mocking it lets us pin the
 // organizationId returned to the loader for IDOR + tier tests.
-const requirePermissionMock = vi.fn();
+// Variadic typed signature satisfies the wrapper's TS2556 contract
+// (CR finding on b40fe9dce, route test line 50).
+const requirePermissionMock = vi.fn((..._args: unknown[]) => ({} as unknown));
 vi.mock("~/utils/roles.server", () => ({
   PermissionAction: { read: "read", export: "export" } as const,
   PermissionEntity: { asset: "asset" } as const,
@@ -56,8 +58,9 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 // why: tier read seam — verified real helper at
-// apps/webapp/app/modules/tier/service.server.ts:107
-const getOrganizationTierLimitMock = vi.fn();
+// apps/webapp/app/modules/tier/service.server.ts:107.
+// Variadic typed signature satisfies the wrapper's TS2556 contract.
+const getOrganizationTierLimitMock = vi.fn((..._args: unknown[]) => ({} as unknown));
 vi.mock("~/modules/tier/service.server", () => ({
   getOrganizationTierLimit: (...args: unknown[]) =>
     getOrganizationTierLimitMock(...args),
