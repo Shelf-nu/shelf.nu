@@ -144,9 +144,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
+
+    // Trust-bound qrId from the URL path (NOT from form data) — used to
+    // verify the supplied scanId actually belongs to this QR.
+    const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
     const { latitude, longitude, scanId } = parseData(
       await request.formData(),
@@ -160,12 +164,14 @@ export async function action({ request }: ActionFunctionArgs) {
     /**
      * This handles the automatic geolocation update when we have scanId
      * formData. SECURITY: this route is public/unauthenticated and `scanId`
-     * is attacker-controlled — updateScanGeolocation only permits updating a
-     * recently-created scan, so arbitrary/old scan records cannot be tampered.
+     * is attacker-controlled — `updateScanGeolocation` permits the update only
+     * when the scan was created within a short window AND its `qrId` matches
+     * the URL path's `qrId`, so a leaked scanId alone cannot tamper.
      */
     if (scanId) {
       await updateScanGeolocation({
         scanId,
+        qrId,
         latitude,
         longitude,
       });

@@ -22,15 +22,22 @@ import type { Prisma } from "@prisma/client";
 
 /** Top-level relation keys the scanner drawers may add to the asset include. */
 const ALLOWED_ASSET_EXTRA_INCLUDE = new Set(["kit", "location", "category"]);
-/** Top-level relation keys allowed on the kit include (none requested today). */
+/** Top-level relation keys allowed on the kit include (conservative, low-risk
+ * same-org relations; no caller requires more today). */
 const ALLOWED_KIT_EXTRA_INCLUDE = new Set(["category", "location"]);
 
 /**
- * Allow only the shapes the drawers send: `true`, or a flat `{ select: {...} }`.
- * Reject `{ include: ... }` and anything else so relation traversal / deep
- * nesting cannot be injected.
+ * Allow only the shapes the drawers send: `true`, or a *strictly flat*
+ * `{ select: { <field>: boolean, ... } }` (scalar field selection only).
+ *
+ * Reject `{ include: ... }`, any non-boolean value inside `select` (which
+ * would let an attacker traverse relations via nested select, e.g.
+ * `{ select: { assets: { select: { bookings: true } } } }`), and anything
+ * else — so relation traversal / deep nesting cannot be injected.
  */
-function sanitizeValue(value: unknown): true | { select: object } | undefined {
+function sanitizeValue(
+  value: unknown
+): true | { select: Record<string, boolean> } | undefined {
   if (value === true) return true;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const keys = Object.keys(value as Record<string, unknown>);
@@ -42,7 +49,16 @@ function sanitizeValue(value: unknown): true | { select: object } | undefined {
       typeof select === "object" &&
       !Array.isArray(select)
     ) {
-      return { select: select as object };
+      // SECURITY: every value in `select` must be a boolean (scalar field
+      // pick). Nested objects/arrays here would re-enable relation traversal
+      // under an allowlisted top-level key — the exact bypass the sanitizer
+      // exists to prevent.
+      const selectObj = select as Record<string, unknown>;
+      const isFlat = Object.values(selectObj).every(
+        (v) => typeof v === "boolean"
+      );
+      if (!isFlat) return undefined;
+      return { select: selectObj as Record<string, boolean> };
     }
   }
   return undefined;

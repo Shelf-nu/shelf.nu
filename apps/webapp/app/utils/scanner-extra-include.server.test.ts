@@ -50,6 +50,30 @@ describe("sanitizeAssetExtraInclude", () => {
     ).toBeUndefined();
   });
 
+  it("rejects nested-select relation traversal under an allowlisted key", () => {
+    // Regression: a `{ select: { <relation>: { select|include: ... } } }`
+    // payload under an allowlisted key was previously accepted as-is, letting
+    // an attacker traverse relations (e.g. kit.assets.bookings) despite the
+    // top-level allowlist. The fix enforces a *flat* select (boolean values
+    // only), so any nested object/array inside select is rejected.
+    expect(
+      sanitizeAssetExtraInclude({
+        kit: { select: { assets: { select: { bookings: true } } } },
+      })
+    ).toBeUndefined();
+    expect(
+      sanitizeAssetExtraInclude({
+        kit: { select: { assets: { include: { bookings: true } } } },
+      })
+    ).toBeUndefined();
+    // Mixed: one valid boolean + one nested → reject the whole value
+    expect(
+      sanitizeAssetExtraInclude({
+        kit: { select: { id: true, assets: { select: { id: true } } } },
+      })
+    ).toBeUndefined();
+  });
+
   it("returns undefined for non-objects, arrays and empty results", () => {
     expect(sanitizeAssetExtraInclude(undefined)).toBeUndefined();
     expect(sanitizeAssetExtraInclude("kit")).toBeUndefined();

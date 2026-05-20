@@ -277,33 +277,42 @@ const SCAN_GEO_UPDATE_WINDOW_MS = 5 * 60 * 1000;
  *
  * SECURITY (CWE-639 / CWE-862): that route requires no authentication and
  * `scanId` is fully attacker-controlled. Calling `updateScan` directly there
- * let anyone overwrite the GPS of *any* scan record by id. We only permit
- * updating a scan created within {@link SCAN_GEO_UPDATE_WINDOW_MS}, which
- * matches the legitimate immediate client-side geolocation post and prevents
- * tampering of arbitrary or historical scan records.
+ * let anyone overwrite the GPS of *any* scan record by id. We require BOTH:
+ *
+ *  1. the scan was created within {@link SCAN_GEO_UPDATE_WINDOW_MS} (matches
+ *     the legitimate immediate client-side geolocation post; prevents
+ *     tampering of arbitrary or historical scan records), AND
+ *  2. the scan's `qrId` matches the QR id from the route's URL path — so a
+ *     leaked `scanId` alone (URL share / Referer) cannot be used; an attacker
+ *     would need the matching qrId for that specific scan as well.
  *
  * @param params.scanId - Scan id from public form input (untrusted)
+ * @param params.qrId - QR id from the URL path (the trust-bound route param)
  * @param params.latitude - Geolocation latitude
  * @param params.longitude - Geolocation longitude
  * @returns The updated scan
- * @throws {ShelfError} 403 if the scan is missing or older than the window
+ * @throws {ShelfError} 403 if the scan is missing, the qrId does not match,
+ *                      or the scan is older than the window
  */
 export async function updateScanGeolocation({
   scanId,
+  qrId,
   latitude,
   longitude,
 }: {
   scanId: Scan["id"];
+  qrId: string;
   latitude?: Scan["latitude"];
   longitude?: Scan["longitude"];
 }) {
   const scan = await db.scan.findUnique({
     where: { id: scanId },
-    select: { id: true, createdAt: true },
+    select: { id: true, createdAt: true, qrId: true },
   });
 
   if (
     !scan ||
+    scan.qrId !== qrId ||
     Date.now() - scan.createdAt.getTime() > SCAN_GEO_UPDATE_WINDOW_MS
   ) {
     throw new ShelfError({
@@ -313,7 +322,7 @@ export async function updateScanGeolocation({
       label,
       status: 403,
       shouldBeCaptured: false,
-      additionalData: { scanId },
+      additionalData: { scanId, qrId },
     });
   }
 
