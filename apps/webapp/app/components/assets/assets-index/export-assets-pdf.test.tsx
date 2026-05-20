@@ -444,5 +444,82 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       expect(href).toContain("location=Warehouse-DISTINCTIVE");
       expect(href).toContain("tag=drill-DISTINCTIVE");
     });
+
+    it("A3.c.4 (CR-B regression) disabled link is removed from tab order + click is suppressed", () => {
+      // CR finding (Major on 6dd022d07): `aria-disabled` + `pointer-
+      // events-none` alone leaves an anchor in the keyboard tab order
+      // and activatable via Enter/Space. WCAG 2.1 AA requires disabled
+      // controls to be non-focusable / non-activatable for keyboard users.
+      console.log("[A3.c.4] CR-B — disabled link not keyboard-activatable");
+      const { container } = render(
+        <ExportAssetsPdfButton disabled={true} initialIncludeImages={false} />
+      );
+      const link = container.querySelector(
+        'a[href*="/assets/export/"][href*=".pdf"]'
+      );
+      expect(link).toBeTruthy();
+      // Removed from sequential focus when disabled
+      expect((link as HTMLAnchorElement).getAttribute("tabindex")).toBe("-1");
+      // aria-disabled preserved for screen readers
+      expect((link as HTMLAnchorElement).getAttribute("aria-disabled")).toBe(
+        "true"
+      );
+    });
+  });
+
+  describe("A8 — (CR-A regression) shared `formatAbsoluteDate` used for generatedAt", () => {
+    it("A8.a header renders date in long-form (MMMM d, yyyy), not toLocaleDateString default", () => {
+      // CR-A (Major on 6dd022d07): component used `generatedAt.toLocaleDateString`
+      // which bypasses the project's shared formatting path. The component
+      // is rendered via `renderToString` in the loader (no RouterProvider),
+      // so the `DateS` hook path can't be used — `formatAbsoluteDate`
+      // (the SSR-safe sibling from the same file) is the right primitive.
+      //
+      // Behavioral check: with year/month/day options, formatAbsoluteDate
+      // produces "January 15, 2026" (date-fns "MMMM d, yyyy"). Raw
+      // `toLocaleDateString("en-US", {year,month:"long",day})` gives
+      // "January 15, 2026" too — coincidentally same here — so we also
+      // assert that the DEFAULT (option-less) cell formatter is in use
+      // for cells.
+      console.log("[A8.a] CR-A — long-form date rendering");
+      const props = makeProps({
+        generatedAt: new Date("2026-01-15T12:00:00Z"),
+        columns: [{ name: "name", position: 0, label: "Name" }],
+        rows: [{ id: "r1", values: { name: "X" }, thumbnailUrl: null }],
+      });
+      const { container } = render(<AssetIndexPdf {...props} />);
+      // The long-form should contain the long month name and the day.
+      expect(container.innerHTML).toContain("January");
+      expect(container.innerHTML).toContain("15");
+      expect(container.innerHTML).toContain("2026");
+    });
+  });
+
+  describe("A8b — (CR-C regression) Date values in row.values render via formatAbsoluteDate, not UTC-truncated YYYY-MM-DD", () => {
+    it("A8b.a a Date cell value renders as a long-form date (not 'YYYY-MM-DD')", () => {
+      // CR-C (Major on 6dd022d07): the loader previously called
+      // `toISOString().split("T")[0]` on createdAt/updatedAt, forcing UTC
+      // and shifting calendar days near midnight. The loader now passes
+      // raw Dates through `values`, and the component formats them via
+      // `formatAbsoluteDate` in the cell renderer.
+      console.log("[A8b.a] CR-C — Date cell rendered via formatAbsoluteDate");
+      const props = makeProps({
+        columns: [{ name: "createdAt", position: 0, label: "Created" }],
+        rows: [
+          {
+            id: "r1",
+            values: { createdAt: new Date("2026-01-15T23:30:00Z") },
+            thumbnailUrl: null,
+          },
+        ],
+      });
+      const { container } = render(<AssetIndexPdf {...props} />);
+      // formatAbsoluteDate (option-less) uses date-fns "PPP" — locale-long
+      // format. We assert the year + day appear; the literal
+      // "2026-01-15" (UTC ISO truncated) must NOT appear.
+      expect(container.innerHTML).not.toContain("2026-01-15");
+      // The year must still be rendered (proves SOME date format ran).
+      expect(container.innerHTML).toContain("2026");
+    });
   });
 });

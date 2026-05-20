@@ -13,6 +13,7 @@
 
 import type { JSX } from "react";
 import { useState } from "react";
+import { formatAbsoluteDate } from "~/components/shared/date";
 import { useSearchParams } from "~/hooks/search-params";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 
@@ -40,10 +41,19 @@ export type RawColumnEntry = {
   position: number;
 };
 
-/** A single row in the PDF, keyed by column name. */
+/**
+ * A single row in the PDF, keyed by column name.
+ *
+ * `values` may include `Date` for date-typed columns (createdAt, updatedAt).
+ * The cell renderer formats Dates through the project's shared
+ * `formatAbsoluteDate` helper rather than a raw `toLocaleDateString` or
+ * `toISOString` call (CR-C fix on commit 6dd022d07: previous UTC-truncation
+ * could shift the calendar day for assets near midnight in the user's
+ * timezone).
+ */
 export type PdfAssetRow = {
   id: string;
-  values: Record<string, string | number | null>;
+  values: Record<string, string | number | Date | null>;
   thumbnailUrl: string | null; // resolved server-side; null when no image
 };
 
@@ -180,8 +190,14 @@ export function AssetIndexPdf(props: AssetIndexPdfProps): JSX.Element {
     totalRowCount,
   } = props;
 
-  // Format the date for display
-  const formattedDate = generatedAt.toLocaleDateString("en-US", {
+  // CR-A fix (Major on commit 6dd022d07): use the project's shared date
+  // formatter rather than a raw `toLocaleDateString` call. We use
+  // `formatAbsoluteDate` (the SSR-safe sibling of `DateS` exported from
+  // `~/components/shared/date`) because this component is rendered via
+  // `renderToString` inside the loader — there is no RouterProvider in
+  // that path, so the `DateS` component's `useHints` hook can't resolve
+  // request-info. `formatAbsoluteDate` is hookless and locale-aware.
+  const formattedDate = formatAbsoluteDate(generatedAt, {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -269,6 +285,12 @@ export function AssetIndexPdf(props: AssetIndexPdfProps): JSX.Element {
                       alt="Asset thumbnail"
                       className="size-12 object-cover"
                     />
+                  ) : row.values[col.name] instanceof Date ? (
+                    // CR-C fix (Major on commit 6dd022d07): format Date values
+                    // via the shared `formatAbsoluteDate` helper rather than
+                    // `toISOString().split("T")[0]` — UTC truncation could
+                    // shift the calendar day at the user's timezone boundary.
+                    formatAbsoluteDate(row.values[col.name] as Date)
                   ) : (
                     // Render the value from the row, React auto-escapes for XSS safety
                     String(row.values[col.name] ?? "")
@@ -344,12 +366,28 @@ export function ExportAssetsPdfButton(props: {
         />
         <span className="text-sm">Include thumbnails</span>
       </label>
+      {/*
+        CR-B fix (Major on commit 6dd022d07): WCAG 2.1 AA — `aria-disabled`
+        + `pointer-events-none` alone does NOT remove an anchor from the
+        sequential tab order. A keyboard user could focus the link and
+        activate it with Enter/Space. Add `tabIndex={-1}` when disabled
+        and `preventDefault` on click to make the disabled state real for
+        keyboard + mouse users alike, while keeping `aria-disabled` so
+        screen readers announce the state.
+      */}
       <a
         href={exportHref}
         className={`rounded bg-primary-500 px-3 py-1.5 text-sm font-medium text-white ${
           disabled ? "pointer-events-none opacity-50" : "hover:bg-primary-600"
         }`}
         aria-disabled={disabled}
+        tabIndex={disabled ? -1 : 0}
+        onClick={(e) => {
+          if (disabled) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
       >
         Export PDF
       </a>

@@ -309,7 +309,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const custodyDisplay = asset.custody?.custodian
       ? resolveTeamMemberName(asset.custody.custodian)
       : "";
-    const values: Record<string, string | number | null> = {
+    // CR-C fix (Major on commit 6dd022d07): pass raw Date through to the
+    // component cell renderer rather than pre-formatting via
+    // `toISOString().split("T")[0]`. The previous UTC-truncation shifted
+    // the calendar day for assets near midnight in the user's timezone.
+    // The component now formats Date values via `formatAbsoluteDate`
+    // (project's shared SSR-safe formatter) so dates stay consistent with
+    // the rest of the app.
+    const values: Record<string, string | number | Date | null> = {
       id: asset.id,
       name: asset.title,
       title: asset.title, // backward-compat with older saved settings
@@ -319,12 +326,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       description: asset.description ?? "",
       valuation: asset.valuation ?? "",
       availableToBook: asset.availableToBook ? "Yes" : "No",
-      createdAt: asset.createdAt
-        ? new Date(asset.createdAt).toISOString().split("T")[0]
-        : "",
-      updatedAt: asset.updatedAt
-        ? new Date(asset.updatedAt).toISOString().split("T")[0]
-        : "",
+      createdAt: asset.createdAt ?? null,
+      updatedAt: asset.updatedAt ?? null,
       category: asset.category?.name ?? "",
       location: asset.location?.name ?? "",
       kit: asset.kit?.name ?? "",

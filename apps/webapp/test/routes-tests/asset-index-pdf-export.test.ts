@@ -340,8 +340,15 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       ];
       for (const f of files) {
         const src = readFileSync(resolve(repoRoot, f), "utf8");
+        // CR-D fix (Minor on commit 6dd022d07): the original first regex
+        // was the bare `/@react-pdf\/renderer/` which matches plain prose
+        // — a documentation-only mention (like a comment "uses
+        // react-to-print, not @react-pdf/renderer") would fail A11 without
+        // any real dependency regression. Narrow it to actual
+        // import/require syntax to match the structure of the other
+        // patterns below.
         const forbidden = [
-          /@react-pdf\/renderer/,
+          /(?:from\s+|import\s*\(|require\s*\()\s*['"]@react-pdf\/renderer['"]/,
           /from\s+['"]pdfkit['"]/,
           /from\s+['"]jspdf['"]/,
           /from\s+['"]puppeteer['"]/,
