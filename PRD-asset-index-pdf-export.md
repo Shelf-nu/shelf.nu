@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.2, review-pass-1)
+# PRD — Asset-Index PDF Export (v0.3, IDOR-hardened)
 
 | Field | Value |
 |---|---|
@@ -204,8 +204,9 @@ The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+so
 | A9 | Filename is sanitized | The download filename uses the existing `sanitizeFilename()` helper from `~/utils/sanitize-filename` (already used by audit PDF); contains workspace slug + ISO date | Filename builder pure fn |
 | A10 | Permission gate at loader, not button | Even if the button is somehow rendered for a free user, hitting the route loader directly returns the same 403/ShelfError — the gate is server-side, never UI-only | `requirePermission({entity:asset, action:export})` at loader top |
 | A11 | No new server PDF dependency | A static assertion test: importing the new files does not transitively import `@react-pdf/renderer`, `pdfkit`, `jspdf`, or any other server PDF lib. (Failsafe against drift) | Maintain the react-to-print-only architecture |
+| **A12** | **Cross-org IDOR — selection from a different org is excluded** | Mock `requirePermission` to return `organizationId: "org-A"`. Seed the request's selection / `currentSearchParams` with an asset ID belonging to `org-B`. Hit the loader. Assert: (a) the PDF body contains zero rows referencing the org-B asset id, (b) `getAssetsWhereInput` was called with `organizationId: "org-A"` (the caller's org, not anything from the request payload), and (c) the response shape is the normal success shape (silent filter, not a 5xx — the existing `getAssetsWhereInput` pattern scopes by org, an attacker simply sees their own org's data) | Server loader relies exclusively on `getAssetsWhereInput({organizationId, currentSearchParams})` for the asset query; **never** trusts asset IDs from request input without org-scoping. This is the known Shelf bug class per `.claude/rules/org-scope-user-supplied-ids.md` (*"the original bug: edit validated, create did not"*); the read path here must not repeat it |
 
-Net-new test count target: ~24 cases across 13 groups (A1 + A1b split per CodeRabbit/Codex feedback). Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
+Net-new test count target: ~25 cases across 14 groups (A1/A1b split + A12 cross-org IDOR per `.claude/rules/org-scope-user-supplied-ids.md`). Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
 
 ### 6.2 Suite B — empty
 
@@ -272,6 +273,7 @@ The feature is client-side print rendering. **No new server compute, no new stor
 | 4 | Server PDF dependency drift (someone adds `@react-pdf/renderer` later "to make it nicer") | A11 static-imports assertion fails if any server PDF library appears in the dependency graph of the new files | ✅ |
 | 5 | Schema drift via this PRD (an "improvement" tacks on a column to `AssetIndexSettings`) | §5 clause (3) HALTs on any `packages/database/prisma/` diff; this PRD must not mutate schema | ✅ |
 | 6 | Custom-field columns rendered without proper escaping → HTML injection in the printable view | The printable React component renders values via JSX text children (React auto-escapes); A2 asserts headers and values from custom fields render verbatim; a single test asserts a malicious string in a custom-field value renders as text, not HTML | ✅ (add to A2 as a sub-assertion) |
+| 7 | **Cross-org IDOR** via the selection / search-params: an attacker-supplied asset ID belonging to another org gets included in the PDF — a known Shelf bug class per `.claude/rules/org-scope-user-supplied-ids.md` ("the original bug: edit validated, create did not") | Server loader uses `getAssetsWhereInput({organizationId, currentSearchParams})` exclusively (no input asset IDs trusted unscoped). A12 asserts: a request supplying a foreign-org asset ID gets that asset silently filtered out (caller's-org-scoped query, not a 5xx) | ✅ (A12 added in v0.3) |
 
 Notably absent (would be ship-blockers in a different feature, not this one): GDPR cascade, atomicity, partial-index races, signed-URL leaks to free tier (none of those apply to a tier-gated explicit user-invoked export).
 
@@ -356,4 +358,16 @@ Test count update: ~22 → ~24 cases across 12 → 13 groups (A1 + A1b split).
 
 ---
 
-*v0.2 incorporates the first automated-review pass. The §4.2 adequacy gate remains the single human checkpoint before `/goal` is set. Open questions §14 are scoping confirmations; risk #1's Safari rendering is the one quality-pass gate before general release.*
+### 15.5 IDOR hardening (v0.2 → v0.3)
+
+Added 2026-05-20 ahead of implementation, applying `.claude/rules/org-scope-user-supplied-ids.md` to this feature's read path.
+
+| Change | Why |
+|---|---|
+| New test **A12** — cross-org IDOR negative test | The export route receives asset selection via search params (user-supplied IDs). Per the org-scope rule (*"the original bug: edit validated, create did not"*), any user-supplied ID consumed by a query must be proven org-scoped. We already use `getAssetsWhereInput({organizationId, currentSearchParams})` which scopes correctly; A12 makes the guarantee a test, not an implementation memory. CR/Codex security review would flag the absence; front-loading this is exactly what `feedback_pre_pr_self_review` is for |
+| New risk register row #7 | Promotes cross-org IDOR to a named ship-blocker rather than implicit in the reuse map |
+| Test count: ~24 → ~25 cases / 13 → 14 groups | A12 added |
+
+---
+
+*v0.3 closes the one IDOR-class gap CR's security review would have flagged. The §4.2 adequacy gate remains the single human checkpoint before `/goal` is set. Open questions §14 are scoping confirmations; risk #1's Safari rendering is the one quality-pass gate before general release.*
