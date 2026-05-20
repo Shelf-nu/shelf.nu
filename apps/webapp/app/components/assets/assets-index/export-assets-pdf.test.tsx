@@ -12,8 +12,16 @@
  * @see PRD-asset-index-pdf-export.md §6.1
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+// why: A9 contract requires the existing sanitizeFilename helper is invoked.
+// Mock it before importing the file-under-test so the import wires through.
+const sanitizeFilenameMock = vi.fn((s: string) => s.replace(/[^\w.-]+/g, "_"));
+vi.mock("~/utils/sanitize-filename", () => ({
+  sanitizeFilename: (...args: unknown[]) => sanitizeFilenameMock(...(args as [string])),
+}));
+
 import {
   AssetIndexPdf,
   ExportAssetsPdfButton,
@@ -25,6 +33,19 @@ import {
   type PdfColumn,
   type RawColumnEntry,
 } from "./export-assets-pdf";
+
+/**
+ * Pinned per PRD §6.0: the "Include thumbnails" checkbox's accessible
+ * name MUST be exactly this string. Locking it here keeps the test
+ * deterministic instead of regex-fuzzy and gives the implementer a
+ * single source of truth for the label.
+ */
+const INCLUDE_THUMBS_LABEL = "Include thumbnails";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  sanitizeFilenameMock.mockImplementation((s: string) => s.replace(/[^\w.-]+/g, "_"));
+});
 
 /** Minimal valid props builder so each test can override what it cares about. */
 function makeProps(overrides: Partial<AssetIndexPdfProps> = {}): AssetIndexPdfProps {
@@ -120,14 +141,15 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     it("A3.a starts unchecked when initialIncludeImages=false", () => {
       console.log("[A3.a] thumbnail toggle initial=false");
       render(<ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />);
-      const cb = screen.getByRole("checkbox", { name: /include.*image/i });
+      // exact accessible-name match per pinned PRD §6.0 contract
+      const cb = screen.getByRole("checkbox", { name: INCLUDE_THUMBS_LABEL });
       expect((cb as HTMLInputElement).checked).toBe(false);
     });
 
     it("A3.b starts checked when initialIncludeImages=true", () => {
       console.log("[A3.b] thumbnail toggle initial=true");
       render(<ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />);
-      const cb = screen.getByRole("checkbox", { name: /include.*image/i });
+      const cb = screen.getByRole("checkbox", { name: INCLUDE_THUMBS_LABEL });
       expect((cb as HTMLInputElement).checked).toBe(true);
     });
   });
@@ -157,15 +179,38 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       const { container } = render(<AssetIndexPdf {...props} />);
       expect(container.querySelectorAll("img").length).toBe(0);
     });
+
+    it("A4.c includeImages=true but thumbnailUrl=null renders no <img> for that row", () => {
+      console.log("[A4.c] null-thumb fallback");
+      // why: in real workspaces many assets lack photos — must not render
+      // a broken/empty <img> for those rows even when includeImages=true.
+      const props = makeProps({
+        includeImages: true,
+        rows: [
+          { id: "1", values: { id: "1" }, thumbnailUrl: null },
+          { id: "2", values: { id: "2" }, thumbnailUrl: null },
+        ],
+      });
+      const { container } = render(<AssetIndexPdf {...props} />);
+      expect(container.querySelectorAll("img").length).toBe(0);
+    });
   });
 
   describe("A5 — filter summary line", () => {
-    it("A5.a summarises filters from URL search params", () => {
+    it("A5.a summarises filter values from any non-empty URL search params", () => {
       console.log("[A5.a] summarizeFilters with filters");
-      const sp = new URLSearchParams("location=Warehouse+1&tag=drill");
+      // why: not pinning specific param NAMES (asset-index filter conventions
+      // may use any of `location=`, `filter[location]=`, etc.). The contract
+      // is: given non-empty search params containing distinctive values, the
+      // summary string surfaces those values to humans. Implementer chooses
+      // which params are filter params; this test asserts the VALUES make it
+      // into the human-readable string.
+      const sp = new URLSearchParams();
+      sp.set("location", "Warehouse-Distinctive-123");
+      sp.set("tag", "drill-distinctive-456");
       const summary = summarizeFilters(sp);
-      expect(summary).toMatch(/Warehouse 1/);
-      expect(summary).toMatch(/drill/);
+      expect(summary).toContain("Warehouse-Distinctive-123");
+      expect(summary).toContain("drill-distinctive-456");
     });
 
     it("A5.b returns empty string when no filters", () => {
@@ -222,15 +267,28 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
   // which also have zero MAX/limit/truncate.
 
   describe("A9 — filename sanitization", () => {
-    it("A9.a builds a sanitised filename containing the workspace slug and ISO date", () => {
+    it("A9.a builds a filename containing the workspace slug and ISO date", () => {
       console.log("[A9.a] valid name");
       const fn = buildPdfFilename("Acme Inc.", new Date("2026-05-20T00:00:00Z"));
       expect(fn).toMatch(/2026-05-20/);
       expect(fn.endsWith(".pdf")).toBe(true);
     });
 
-    it("A9.b strips path-traversal + special characters from workspace name", () => {
-      console.log("[A9.b] special chars stripped");
+    it("A9.b ENFORCES that the existing sanitizeFilename helper is invoked (not a custom sanitizer)", () => {
+      console.log("[A9.b] helper enforcement");
+      // why: the PRD §6.1 contract is "uses the existing sanitizeFilename helper".
+      // A lazy impl could write its own sanitizer and pass a regex assertion;
+      // mocking and asserting the call enforces reuse of the canonical helper.
+      buildPdfFilename("../etc/passwd Acme™ 🚀", new Date("2026-01-01T00:00:00Z"));
+      expect(sanitizeFilenameMock).toHaveBeenCalled();
+      // and pass the raw workspace name as the input (not a pre-sanitised string)
+      expect(sanitizeFilenameMock).toHaveBeenCalledWith(
+        expect.stringContaining("Acme"),
+      );
+    });
+
+    it("A9.c output never contains path-traversal characters", () => {
+      console.log("[A9.c] no traversal chars in output");
       const fn = buildPdfFilename("../etc/passwd Acme™ 🚀", new Date("2026-01-01T00:00:00Z"));
       expect(fn).not.toContain("/");
       expect(fn).not.toContain("..");

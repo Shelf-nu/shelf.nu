@@ -16,13 +16,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // why: testing the loader's permission/tier/query wiring without
 // executing actual database operations or HTTP plumbing.
+// The asset.findMany mock RETURNS DIFFERENT ROWS based on the where
+// clause's organizationId — this is what lets A12 assert behavioral
+// IDOR exclusion (the foreign-org asset id never appears in output)
+// instead of a structural-proxy "was the org id passed correctly".
+const ORG_A_ASSET = { id: "asset-A-1", title: "AssetInOrgA", organizationId: "org-A" };
+const ORG_B_ASSET = { id: "asset-B-9", title: "AssetInOrgB", organizationId: "org-B" };
 vi.mock("~/database/db.server", () => ({
   db: {
-    asset: { findMany: vi.fn(async () => []) },
-    organization: { findFirst: vi.fn(async () => ({ id: "org-A", userId: "owner-A" })) },
+    asset: {
+      findMany: vi.fn(async (args: { where?: { organizationId?: string } } = {}) => {
+        const org = args.where?.organizationId;
+        if (org === "org-A") return [ORG_A_ASSET];
+        if (org === "org-B") return [ORG_B_ASSET];
+        return [];
+      }),
+    },
+    organization: {
+      findFirst: vi.fn(async () => ({
+        id: "org-A",
+        userId: "owner-A",
+        name: "Workspace-A",  // A0.b fixture: real workspace name in output
+      })),
+    },
   },
 }));
 
@@ -45,10 +65,24 @@ vi.mock("~/modules/tier/service.server", () => ({
 
 // why: the asset-query seam — we assert the loader calls this with the
 // caller's organizationId (not anything from request input).
-const getAssetsWhereInputMock = vi.fn(() => ({}));
+// The mock RETURNS the where clause it received so db.asset.findMany
+// can org-scope its returned rows (drives A12 behavioral assertion).
+const getAssetsWhereInputMock = vi.fn(
+  (args: { organizationId: string }) => ({ organizationId: args.organizationId })
+);
 vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: (...args: unknown[]) => getAssetsWhereInputMock(...args),
+  getAssetsWhereInput: (...args: unknown[]) => getAssetsWhereInputMock(...(args as [{ organizationId: string }])),
 }));
+
+// why: assert the existing filename sanitizer is invoked (A9 contract)
+const sanitizeFilenameMock = vi.fn((s: string) => s.replace(/[^\w.-]+/g, "_"));
+vi.mock("~/utils/sanitize-filename", () => ({
+  sanitizeFilename: (...args: unknown[]) => sanitizeFilenameMock(...(args as [string])),
+}));
+
+// why: a workspace name will be needed in the A0.b output; pin it via
+// requirePermission's organization fixture for cross-test consistency.
+const WORKSPACE_NAME = "Workspace-A";
 
 import { loader } from "~/routes/_layout+/assets.export.$fileName[.pdf]";
 
@@ -65,10 +99,13 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     vi.clearAllMocks();
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-A",
-      organizations: [{ id: "org-A", userId: "owner-A" }],
+      organizations: [{ id: "org-A", userId: "owner-A", name: WORKSPACE_NAME }],
       userOrganizations: [{ organizationId: "org-A" }],
+      currentOrganization: { id: "org-A", userId: "owner-A", name: WORKSPACE_NAME },
       role: "ADMIN",
     });
+    // Restore sanitizeFilename's default behaviour after clearAllMocks
+    sanitizeFilenameMock.mockImplementation((s: string) => s.replace(/[^\w.-]+/g, "_"));
   });
 
   describe("A0 — loader wiring (permission + tier + filter round-trip)", () => {
@@ -86,7 +123,8 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       // loader returns a Response with text/html body
       expect(res).toBeInstanceOf(Response);
       const html = await (res as Response).text();
-      expect(html).toContain("Test Workspace");
+      // workspace name pinned via the requirePermission mock above
+      expect(html).toContain(WORKSPACE_NAME);
     });
 
     it("A0.c filter round-trip: getAssetsWhereInput called with the request's currentSearchParams", async () => {
@@ -121,14 +159,25 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
   describe("A11 — no server PDF library imported", () => {
     it("A11 new feature files do not import @react-pdf/renderer, pdfkit, jspdf, or puppeteer", () => {
       console.log("[A11] no server PDF dep");
+      // why: resolve paths relative to THIS test file (not process.cwd()), so
+      // the assertion holds regardless of where vitest is invoked from.
+      // NOTE: this checks DIRECT imports only — transitive imports are not
+      // walked (PRD §15.7 documents this as a deferred caveat; a proper
+      // import-graph walker is its own micro-project).
+      const here = fileURLToPath(new URL(".", import.meta.url));
+      const repoRoot = resolve(here, "../../../..");  // test/routes-tests -> repo root
       const files = [
         "apps/webapp/app/components/assets/assets-index/export-assets-pdf.tsx",
         "apps/webapp/app/routes/_layout+/assets.export.$fileName[.pdf].tsx",
       ];
       for (const f of files) {
-        const src = readFileSync(resolve(process.cwd(), "../..", f), "utf8");
-        // adjust for the cwd vitest runs from — try both repo root and apps/webapp
-        const forbidden = [/@react-pdf\/renderer/, /from\s+['"]pdfkit['"]/, /from\s+['"]jspdf['"]/, /from\s+['"]puppeteer['"]/];
+        const src = readFileSync(resolve(repoRoot, f), "utf8");
+        const forbidden = [
+          /@react-pdf\/renderer/,
+          /from\s+['"]pdfkit['"]/,
+          /from\s+['"]jspdf['"]/,
+          /from\s+['"]puppeteer['"]/,
+        ];
         for (const re of forbidden) {
           expect(src, `file ${f} matched forbidden pattern ${re}`).not.toMatch(re);
         }
@@ -136,22 +185,28 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     });
   });
 
-  describe("A12 — cross-org IDOR negative test", () => {
-    it("A12 asset query is org-scoped to the CALLER's org, never trusts input asset IDs", async () => {
-      console.log("[A12] cross-org IDOR rejected");
+  describe("A12 — cross-org IDOR negative test (BEHAVIORAL)", () => {
+    it("A12 foreign-org asset id never appears in the response HTML", async () => {
+      console.log("[A12] cross-org IDOR behaviorally excluded");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      // Attacker is in org-A but supplies a foreign-org asset id via search params
-      const url = "https://shelf.test/assets/export/x.pdf?assetIds=asset-from-org-B";
-      await loader(reqFor(url) as never).catch(() => undefined);
-      // The query MUST be built with the caller's organizationId (org-A),
-      // not anything from the request payload.
+      // Attacker is in org-A but supplies org-B's asset id via search params
+      const url = `https://shelf.test/assets/export/x.pdf?assetIds=${ORG_B_ASSET.id}`;
+      const res = await loader(reqFor(url) as never);
+      expect(res).toBeInstanceOf(Response);
+      const html = await (res as Response).text();
+      // BEHAVIORAL: org-B's asset id MUST NOT appear in the body
+      expect(html).not.toContain(ORG_B_ASSET.id);
+      expect(html).not.toContain(ORG_B_ASSET.title);
+      // AND org-A's own asset SHOULD appear (proves the loader actually
+      // rendered something, not just returned empty — distinguishes
+      // "correctly filtered" from "broken and returns nothing")
+      expect(html).toContain(ORG_A_ASSET.id);
+      // STRUCTURAL backstop: the query was built with the caller's org id,
+      // never anything from request input.
       expect(getAssetsWhereInputMock).toHaveBeenCalled();
       const [call] = getAssetsWhereInputMock.mock.calls;
       const args = call?.[0] as { organizationId: string };
       expect(args.organizationId).toBe("org-A");
-      // And the assertion is by-construction: getAssetsWhereInput org-scopes,
-      // so an asset id from org-B simply will not match — this is the existing
-      // verified pattern per .claude/rules/org-scope-user-supplied-ids.md.
     });
   });
 });
