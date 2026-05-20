@@ -19,7 +19,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock it before importing the file-under-test so the import wires through.
 const sanitizeFilenameMock = vi.fn((s: string) => s.replace(/[^\w.-]+/g, "_"));
 vi.mock("~/utils/sanitize-filename", () => ({
-  sanitizeFilename: (...args: unknown[]) => sanitizeFilenameMock(...(args as [string])),
+  sanitizeFilename: (...args: unknown[]) =>
+    sanitizeFilenameMock(...(args as [string])),
 }));
 
 import {
@@ -44,17 +45,25 @@ const INCLUDE_THUMBS_LABEL = "Include thumbnails";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  sanitizeFilenameMock.mockImplementation((s: string) => s.replace(/[^\w.-]+/g, "_"));
+  sanitizeFilenameMock.mockImplementation((s: string) =>
+    s.replace(/[^\w.-]+/g, "_")
+  );
 });
 
 /** Minimal valid props builder so each test can override what it cares about. */
-function makeProps(overrides: Partial<AssetIndexPdfProps> = {}): AssetIndexPdfProps {
+function makeProps(
+  overrides: Partial<AssetIndexPdfProps> = {}
+): AssetIndexPdfProps {
   const cols: PdfColumn[] = [
     { name: "id", position: 0, label: "ID" },
     { name: "status", position: 1, label: "Status" },
   ];
   const rows: PdfAssetRow[] = [
-    { id: "asset-1", values: { id: "SAM-0001", status: "AVAILABLE" }, thumbnailUrl: null },
+    {
+      id: "asset-1",
+      values: { id: "SAM-0001", status: "AVAILABLE" },
+      thumbnailUrl: null,
+    },
   ];
   return {
     branding: { workspaceName: "Test Workspace", workspaceLogoUrl: null },
@@ -104,7 +113,9 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
         ],
       });
       render(<AssetIndexPdf {...props} />);
-      const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+      const headers = screen
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent);
       expect(headers).toEqual(["ColC", "ColA", "ColB"]);
     });
   });
@@ -114,7 +125,9 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       console.log("[A2.a] custom-field columns render");
       const props = makeProps({
         columns: [{ name: "cf_serial", position: 0, label: "Serial #" }],
-        rows: [{ id: "x", values: { cf_serial: "SN-ABC-123" }, thumbnailUrl: null }],
+        rows: [
+          { id: "x", values: { cf_serial: "SN-ABC-123" }, thumbnailUrl: null },
+        ],
       });
       render(<AssetIndexPdf {...props} />);
       expect(screen.getByText("Serial #")).toBeTruthy();
@@ -126,7 +139,11 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       const props = makeProps({
         columns: [{ name: "cf_note", position: 0, label: "Note" }],
         rows: [
-          { id: "x", values: { cf_note: "<img src=x onerror=alert(1)>" }, thumbnailUrl: null },
+          {
+            id: "x",
+            values: { cf_note: "<img src=x onerror=alert(1)>" },
+            thumbnailUrl: null,
+          },
         ],
       });
       const { container } = render(<AssetIndexPdf {...props} />);
@@ -140,7 +157,9 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
   describe("A3 — thumbnail checkbox initial state mirrors AssetIndexSettings.showAssetImage", () => {
     it("A3.a starts unchecked when initialIncludeImages=false", () => {
       console.log("[A3.a] thumbnail toggle initial=false");
-      render(<ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />);
+      render(
+        <ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />
+      );
       // exact accessible-name match per pinned PRD §6.0 contract
       const cb = screen.getByRole("checkbox", { name: INCLUDE_THUMBS_LABEL });
       expect((cb as HTMLInputElement).checked).toBe(false);
@@ -148,7 +167,9 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
     it("A3.b starts checked when initialIncludeImages=true", () => {
       console.log("[A3.b] thumbnail toggle initial=true");
-      render(<ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />);
+      render(
+        <ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />
+      );
       const cb = screen.getByRole("checkbox", { name: INCLUDE_THUMBS_LABEL });
       expect((cb as HTMLInputElement).checked).toBe(true);
     });
@@ -160,12 +181,22 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       const props = makeProps({
         includeImages: true,
         rows: [
-          { id: "1", values: { id: "1" }, thumbnailUrl: "https://example.test/a.webp" },
-          { id: "2", values: { id: "2" }, thumbnailUrl: "https://example.test/b.webp" },
+          {
+            id: "1",
+            values: { id: "1" },
+            thumbnailUrl: "https://example.test/a.webp",
+          },
+          {
+            id: "2",
+            values: { id: "2" },
+            thumbnailUrl: "https://example.test/b.webp",
+          },
         ],
       });
       const { container } = render(<AssetIndexPdf {...props} />);
-      expect(container.querySelectorAll("img").length).toBeGreaterThanOrEqual(2);
+      expect(container.querySelectorAll("img").length).toBeGreaterThanOrEqual(
+        2
+      );
     });
 
     it("A4.b renders zero <img> when includeImages=false", () => {
@@ -173,7 +204,11 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       const props = makeProps({
         includeImages: false,
         rows: [
-          { id: "1", values: { id: "1" }, thumbnailUrl: "https://example.test/a.webp" },
+          {
+            id: "1",
+            values: { id: "1" },
+            thumbnailUrl: "https://example.test/a.webp",
+          },
         ],
       });
       const { container } = render(<AssetIndexPdf {...props} />);
@@ -269,7 +304,10 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
   describe("A9 — filename sanitization", () => {
     it("A9.a builds a filename containing the workspace slug and ISO date", () => {
       console.log("[A9.a] valid name");
-      const fn = buildPdfFilename("Acme Inc.", new Date("2026-05-20T00:00:00Z"));
+      const fn = buildPdfFilename(
+        "Acme Inc.",
+        new Date("2026-05-20T00:00:00Z")
+      );
       expect(fn).toMatch(/2026-05-20/);
       expect(fn.endsWith(".pdf")).toBe(true);
     });
@@ -279,20 +317,59 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       // why: the PRD §6.1 contract is "uses the existing sanitizeFilename helper".
       // A lazy impl could write its own sanitizer and pass a regex assertion;
       // mocking and asserting the call enforces reuse of the canonical helper.
-      buildPdfFilename("../etc/passwd Acme™ 🚀", new Date("2026-01-01T00:00:00Z"));
+      buildPdfFilename(
+        "../etc/passwd Acme™ 🚀",
+        new Date("2026-01-01T00:00:00Z")
+      );
       expect(sanitizeFilenameMock).toHaveBeenCalled();
       // and pass the raw workspace name as the input (not a pre-sanitised string)
       expect(sanitizeFilenameMock).toHaveBeenCalledWith(
-        expect.stringContaining("Acme"),
+        expect.stringContaining("Acme")
       );
     });
 
     it("A9.c output never contains path-traversal characters", () => {
       console.log("[A9.c] no traversal chars in output");
-      const fn = buildPdfFilename("../etc/passwd Acme™ 🚀", new Date("2026-01-01T00:00:00Z"));
+      const fn = buildPdfFilename(
+        "../etc/passwd Acme™ 🚀",
+        new Date("2026-01-01T00:00:00Z")
+      );
       expect(fn).not.toContain("/");
       expect(fn).not.toContain("..");
       expect(fn).not.toContain("\\");
+    });
+  });
+
+  describe("A3.c — button wires the export navigation (not pure-display)", () => {
+    it("A3.c.1 renders a navigation element (anchor or form) targeting the export route", () => {
+      console.log("[A3.c.1] navigation element exists");
+      const { container } = render(
+        <ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />
+      );
+      // CONTRACT: clicking this button must actually trigger an export.
+      // It must render EITHER (a) an <a href> pointing at /assets/export/X.pdf,
+      // OR (b) a <form action> pointing there. A pure-display checkbox with
+      // no export trigger is non-functional and fails this test — A3 only
+      // proved the toggle's initial state, not that the toggle exports anything.
+      const anchor = container.querySelector(
+        'a[href*="/assets/export/"][href*=".pdf"]'
+      );
+      const form = container.querySelector(
+        'form[action*="/assets/export/"][action*=".pdf"]'
+      );
+      expect(anchor || form).toBeTruthy();
+    });
+
+    it("A3.c.2 initialIncludeImages=true encodes includeImages=true into the navigation target", () => {
+      console.log("[A3.c.2] includeImages reflected in navigation");
+      const { container } = render(
+        <ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />
+      );
+      // The checkbox state must round-trip into the navigation target —
+      // not just local React state. Either the anchor's href, a form's
+      // action, or a hidden form input must encode includeImages=true.
+      const html = container.innerHTML;
+      expect(html).toMatch(/includeImages[=:]\s*["']?true["']?/i);
     });
   });
 });

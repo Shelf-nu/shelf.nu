@@ -27,7 +27,8 @@ import type { LoaderFunctionArgs } from "react-router";
  *
  * @throws TDD-red until implementation lands.
  */
-export async function loader(_args: LoaderFunctionArgs) {
+export async function loader(_args: LoaderFunctionArgs): Promise<Response> {
+  await Promise.resolve(); // Satisfies require-await for TDD stub
   throw new Error(
     "loader: not implemented (TDD red — see PRD §6.1 A0/A10/A12)"
   );
