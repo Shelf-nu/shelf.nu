@@ -13,6 +13,7 @@
 
 import type { JSX } from "react";
 import { useState } from "react";
+import { useSearchParams } from "~/hooks/search-params";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 
 /** A column header + ordering descriptor, ready for render. */
@@ -253,16 +254,16 @@ export function AssetIndexPdf(props: AssetIndexPdfProps): JSX.Element {
                   )}
                 </td>
               ))}
-              {/* Render thumbnail in its own column when includeImages is true */}
-              {includeImages && row.thumbnailUrl && (
-                <td className="border-r border-gray-300 p-2.5">
-                  <img
-                    src={row.thumbnailUrl}
-                    alt="Asset thumbnail"
-                    className="size-12 object-cover"
-                  />
-                </td>
-              )}
+              {/*
+                B2 fix (per CR re-review on 46d0da59f): removed the standalone
+                trailing <td> that rendered a duplicate thumbnail outside the
+                column loop. It (a) double-rendered the <img> for rows already
+                covered by the col.name==="image" branch above, and (b) broke
+                table semantics by adding a cell with no matching <th> in
+                <thead>. Thumbnail rendering now happens EXCLUSIVELY through
+                the column-loop path: the loader must include a column named
+                "image" in `columns` when thumbnails are requested.
+              */}
             </tr>
           ))}
         </tbody>
@@ -292,10 +293,18 @@ export function ExportAssetsPdfButton(props: {
   const { disabled, initialIncludeImages } = props;
   const [includeImages, setIncludeImages] = useState(initialIncludeImages);
 
-  // Build export URL with includeImages param
-  const exportParams = new URLSearchParams();
+  // B1 fix (per CR re-review on 46d0da59f): forward the CURRENT URL's
+  // filter/search params into the export href so clicking "Export PDF"
+  // honors the user's active filters. The previous impl built the href
+  // from an empty URLSearchParams, silently dropping location/tag/search/
+  // etc. — clicking always exported the full unfiltered set, breaking
+  // the "user's current view IS the spec" principle (PRD §3 Principle 2).
+  const [currentSearchParams] = useSearchParams();
+  const exportParams = new URLSearchParams(currentSearchParams);
   if (includeImages) {
     exportParams.set("includeImages", "true");
+  } else {
+    exportParams.delete("includeImages");
   }
   const queryString = exportParams.toString();
   const exportHref = `/assets/export/asset-export.pdf${

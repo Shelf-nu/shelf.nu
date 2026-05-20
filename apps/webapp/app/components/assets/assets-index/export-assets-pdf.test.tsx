@@ -15,6 +15,17 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// why: ExportAssetsPdfButton uses ~/hooks/search-params (the Shelf wrapper
+// over react-router's useSearchParams) to forward the current URL's
+// filter params into the export href. The Shelf wrapper transitively
+// uses useLoaderData which requires a data-router context — too heavy
+// to set up per test. Mock it: per-test, set the returned params via
+// useSearchParamsMock.mockReturnValue.
+const useSearchParamsMock = vi.fn();
+vi.mock("~/hooks/search-params", () => ({
+  useSearchParams: (...args: unknown[]) => useSearchParamsMock(...args),
+}));
+
 // why: A9 contract requires the existing sanitizeFilename helper is invoked.
 // Mock it before importing the file-under-test so the import wires through.
 const sanitizeFilenameMock = vi.fn((s: string) => s.replace(/[^\w.-]+/g, "_"));
@@ -48,7 +59,18 @@ beforeEach(() => {
   sanitizeFilenameMock.mockImplementation((s: string) =>
     s.replace(/[^\w.-]+/g, "_")
   );
+  // Default: no current URL params (override per-test for filter-forward tests)
+  useSearchParamsMock.mockReturnValue([new URLSearchParams(), vi.fn()]);
 });
+
+/**
+ * Helper: set the current URL search params the hook should return for
+ * the next render. Use this before render() in any test that exercises
+ * the export-href filter-forwarding contract (per B1 fix on 46d0da59f).
+ */
+function setCurrentSearchParams(query: string): void {
+  useSearchParamsMock.mockReturnValue([new URLSearchParams(query), vi.fn()]);
+}
 
 /** Minimal valid props builder so each test can override what it cares about. */
 function makeProps(
@@ -178,8 +200,17 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
   describe("A4 — thumbnails conditional render", () => {
     it("A4.a renders an <img> per row when includeImages=true and thumbnailUrl is set", () => {
       console.log("[A4.a] includeImages=true renders images");
+      // B2 fix (CR re-review on 46d0da59f): the <img> render now lives
+      // exclusively in the column-loop branch where col.name === "image".
+      // The loader's job is to inject this column when includeImages=true;
+      // the test mirrors that by including the column explicitly here so
+      // the contract is enforced at the component boundary too.
       const props = makeProps({
         includeImages: true,
+        columns: [
+          { name: "id", position: 0, label: "ID" },
+          { name: "image", position: 1, label: "Image" },
+        ],
         rows: [
           {
             id: "1",
@@ -370,6 +401,29 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       // action, or a hidden form input must encode includeImages=true.
       const html = container.innerHTML;
       expect(html).toMatch(/includeImages[=:]\s*["']?true["']?/i);
+    });
+
+    it("A3.c.3 current URL filter params are forwarded into the export href (B1 fix)", () => {
+      console.log("[A3.c.3] filter params forwarded");
+      // CR B1 finding (re-review on 46d0da59f): an earlier impl built the
+      // export href from an empty URLSearchParams, silently dropping the
+      // user's active filters. This test pins that the current URL's
+      // filter params are CARRIED OVER into the export navigation —
+      // clicking "Export PDF" must respect the user's filtered view per
+      // PRD §3 Principle 2.
+      setCurrentSearchParams(
+        "location=Warehouse-DISTINCTIVE&tag=drill-DISTINCTIVE"
+      );
+      const { container } = render(
+        <ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />
+      );
+      const link = container.querySelector(
+        'a[href*="/assets/export/"][href*=".pdf"]'
+      );
+      expect(link).toBeTruthy();
+      const href = (link as HTMLAnchorElement).getAttribute("href") ?? "";
+      expect(href).toContain("location=Warehouse-DISTINCTIVE");
+      expect(href).toContain("tag=drill-DISTINCTIVE");
     });
   });
 });

@@ -119,6 +119,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ];
   }
 
+  // B2 fix (per CR re-review on 46d0da59f): the component's <img> render
+  // now lives EXCLUSIVELY in the column-loop branch (col.name === "image").
+  // When the user requests thumbnails, prepend an "image" column at
+  // position -1 so it renders first in the PDF; otherwise the column-
+  // loop branch never fires and no thumbnails appear. Skip if the user's
+  // settings already include an "image" column (avoid duplicate).
+  if (includeImages && !columns.some((c) => c.name === "image")) {
+    columns = [{ name: "image", position: -1, label: "Image" }, ...columns];
+  }
+
   // Transform assets to PdfAssetRow format
   const rows: PdfAssetRow[] = assets.map((asset) => ({
     id: asset.id,
