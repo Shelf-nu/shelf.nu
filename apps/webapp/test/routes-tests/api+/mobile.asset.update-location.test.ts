@@ -32,17 +32,27 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobilePermission: vi.fn(),
 }));
 
-// why: external database — we don't want to hit the real database in tests
-vi.mock("~/database/db.server", () => ({
-  db: {
-    asset: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-    location: {
-      findFirst: vi.fn(),
-    },
+// why: external database — we don't want to hit the real database in tests.
+// Phase 4b: placement is written through the AssetLocation pivot inside a
+// $transaction, then re-read with findUniqueOrThrow. The mock surface mirrors
+// the production route's calls.
+const dbMocks = vi.hoisted(() => ({
+  asset: {
+    findUnique: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
   },
+  assetLocation: {
+    create: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  location: {
+    findFirst: vi.fn(),
+  },
+  $transaction: vi.fn(),
+}));
+
+vi.mock("~/database/db.server", () => ({
+  db: dbMocks,
 }));
 
 // why: external service — we don't want to create real notes in the database
@@ -112,23 +122,37 @@ describe("POST /api/mobile/asset/update-location", () => {
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+
+    // Phase 4b: $transaction proxies through to the mock delegates so the
+    // route's tx.assetLocation.{deleteMany,create} + tx.asset.findUniqueOrThrow
+    // chain resolves against the same vi.fn() spies we assert against.
+    dbMocks.$transaction.mockImplementation((cb: any) => cb(dbMocks));
   });
 
   it("should update asset location and create a note", async () => {
+    // Phase 4b: the route reads previous placement via `assetLocations` pivot
+    // (singular `location` was removed from Asset).
     (db.asset.findUnique as any).mockResolvedValue({
       id: "asset-1",
       title: "Test Laptop",
-      location: { id: "loc-old", name: "Old Office" },
+      type: "INDIVIDUAL",
+      quantity: 1,
+      assetLocations: [{ location: { id: "loc-old", name: "Old Office" } }],
       assetKits: [],
     });
     (db.location.findFirst as any).mockResolvedValue({
       id: "loc-new",
       name: "New Office",
     });
-    (db.asset.update as any).mockResolvedValue({
+    // Phase 4b: pivot replace inside the tx — wipe existing rows, create the
+    // new placement, then re-read the asset through the same `assetLocations`
+    // include shape so the route can collapse it via `getPrimaryLocation`.
+    (dbMocks.assetLocation.deleteMany as any).mockResolvedValue({ count: 1 });
+    (dbMocks.assetLocation.create as any).mockResolvedValue({});
+    (dbMocks.asset.findUniqueOrThrow as any).mockResolvedValue({
       id: "asset-1",
       title: "Test Laptop",
-      location: { id: "loc-new", name: "New Office" },
+      assetLocations: [{ location: { id: "loc-new", name: "New Office" } }],
     });
     (createNote as any).mockResolvedValue({ id: "note-1" });
 
@@ -141,7 +165,22 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(result instanceof Response).toBe(true);
     const body = await (result as unknown as Response).json();
     expect(body.asset.id).toBe("asset-1");
+    // The route synthesises a singular `location` on the response via
+    // `getPrimaryLocation`, so the API surface stays stable for mobile.
     expect(body.asset.location.name).toBe("New Office");
+
+    // Phase 4b: assert the pivot writes happened inside the tx.
+    expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: "asset-1" },
+    });
+    expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
+      data: {
+        assetId: "asset-1",
+        locationId: "loc-new",
+        organizationId: "org-1",
+        quantity: 1,
+      },
+    });
 
     expect(createNote).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -171,7 +210,11 @@ describe("POST /api/mobile/asset/update-location", () => {
     (db.asset.findUnique as any).mockResolvedValue({
       id: "asset-1",
       title: "Kit Asset",
-      location: null,
+      type: "INDIVIDUAL",
+      quantity: 1,
+      // Phase 4b: placement comes from the AssetLocation pivot — empty array
+      // means no current placement.
+      assetLocations: [],
       assetKits: [{ kit: { id: "kit-1", name: "Server Kit" } }],
     });
 

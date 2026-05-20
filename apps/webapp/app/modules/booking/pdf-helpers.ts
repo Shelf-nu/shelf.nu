@@ -14,6 +14,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 import { groupAndSortAssetsByKit } from "./helpers";
 import { getBooking } from "./service.server";
+import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
@@ -116,9 +117,13 @@ export async function fetchAllPdfRelatedData(
             },
           },
           qrCodes: true,
-          location: {
+          assetLocations: {
             select: {
-              name: true,
+              location: {
+                select: {
+                  name: true,
+                },
+              },
             },
           },
           // `kit` / `kitId` fields below so `groupAndSortAssetsByKit`
@@ -156,6 +161,7 @@ export async function fetchAllPdfRelatedData(
         ...asset,
         kitId: assetKit?.id ?? null,
         kit: assetKit ? { id: assetKit.id, name: assetKit.name } : null,
+        location: getPrimaryLocation(asset),
       };
     });
 

@@ -12,7 +12,7 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { Button } from "~/components/shared/button";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { LoaderData } from "~/routes/_layout+/locations.$locationId.scan-assets-kits";
 import type {
   AssetFromQr,
@@ -30,12 +30,18 @@ export const addScannedAssetsOrKitsToLocationSchema = z.object({
   kitIds: z.array(z.string()).optional().default([]),
 });
 
-/** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
+/**
+ * Extend the type so we can use it. This is based on the extra asset
+ * includes passed to the row — location is reached through the
+ * `AssetLocation` pivot, so the extra include projects `assetLocations`.
+ */
 type AssetFromQrWithLocation = AssetFromQr & {
-  location: {
-    id: string;
-    name: string;
-  };
+  assetLocations: {
+    location: {
+      id: string;
+      name: string;
+    };
+  }[];
 };
 
 /**
@@ -79,10 +85,16 @@ export default function AddAssetsKitsToLocationDrawer({
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Asset blockers
+  // Asset blockers — the loader includes `asset` on each pivot row;
+  // re-narrow here because Prisma + useLoaderData<typeof loader> lose
+  // the precise include shape through `getLocation`'s widened
+  // `LocationInclude` arg.
+  const pivotRows = location.assetLocations as Array<{
+    asset: { id: string };
+  }>;
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) => location.assets.some((a) => a?.id === asset.id))
+    .filter((asset) => pivotRows.some((al) => al?.asset?.id === asset.id))
     .map((a) => !!a && a.id);
 
   // Kit blockers
@@ -171,10 +183,14 @@ export default function AddAssetsKitsToLocationDrawer({
         return null;
       }}
       assetExtraInclude={{
-        location: {
+        assetLocations: {
           select: {
-            id: true,
-            name: true,
+            location: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
       }}
@@ -209,46 +225,45 @@ export function AssetRow({
   location,
 }: {
   asset: AssetFromQrWithLocation;
-  location: Pick<
-    Prisma.LocationGetPayload<{
-      include: {
-        assets: {
-          select: {
-            id: true;
-          };
-        };
-      };
-    }>,
-    "id" | "assets"
-  >;
+  // Use a structural shape rather than `Pick<LocationGetPayload<...>>` so
+  // the drawer accepts any caller whose `location` carries the required
+  // fields, regardless of whatever extra relations the caller includes.
+  location: {
+    id: string;
+    assetLocations: { asset: { id: string } }[];
+  };
 }) {
+  const primaryLocation = getPrimaryLocation(asset);
+
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
     // Custom preset for "already in this kit"
     {
-      condition: location.assets.some((a: any) => a?.id === asset.id),
+      condition: location.assetLocations.some(
+        (al) => al?.asset?.id === asset.id
+      ),
       badgeText: "Already added to this location",
       tooltipTitle: "Asset is part of location",
       tooltipContent: "This asset is already added to the current location.",
       priority: 70,
     },
     {
-      condition: !!asset.locationId && asset.locationId !== location.id,
+      condition: !!primaryLocation && primaryLocation.id !== location.id,
       badgeText: "Part of another location",
       tooltipTitle: "Asset is part of another location",
       tooltipContent: (
         <>
           This asset is currently part of another kit
-          {asset?.location ? (
+          {primaryLocation ? (
             <>
               :{" "}
               <Button
-                to={`/locations/${asset.location.id}`}
+                to={`/locations/${primaryLocation.id}`}
                 target="_blank"
                 variant="link-gray"
                 className={"text-xs"}
               >
-                {asset.location.name}
+                {primaryLocation.name}
               </Button>
               <br />
             </>

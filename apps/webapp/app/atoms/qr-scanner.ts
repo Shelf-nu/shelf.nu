@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@prisma/client";
 import { atom } from "jotai";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -270,7 +271,7 @@ export const auditResultsAtom = atom((get) => {
         auditStatus: expectedAssetIds.has(assetData.id)
           ? ("found" as const)
           : ("unexpected" as const),
-        locationName: assetData.location?.name ?? null,
+        locationName: getPrimaryLocation(assetData)?.name ?? null,
       } satisfies AuditScannedItem;
     });
 

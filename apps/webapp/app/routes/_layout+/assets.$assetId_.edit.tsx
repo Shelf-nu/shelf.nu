@@ -20,6 +20,7 @@ import {
   updateAsset,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -83,6 +84,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
         },
+        // Pull the primary placement so the edit form can pre-fill the
+        // location picker.
+        assetLocations: {
+          select: { location: { select: { id: true } } },
+        },
         barcodes: {
           select: {
             id: true,
@@ -104,7 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         defaults: {
           category: asset.categoryId,
-          location: asset.locationId,
+          location: getPrimaryLocation(asset)?.id ?? null,
         },
         tagUseFor: TagUseFor.ASSET,
       }),
@@ -308,7 +314,7 @@ export default function AssetEditPage() {
           title={asset.title}
           categoryId={asset.categoryId}
           assetModelId={asset.assetModelId}
-          locationId={asset.locationId}
+          locationId={getPrimaryLocation(asset)?.id ?? null}
           description={asset.description}
           valuation={asset.valuation}
           type={asset.type}

@@ -271,7 +271,7 @@ export function AdvancedIndexColumn({
               >
                 <LocationBadge
                   location={{
-                    id: item.location.id ?? item.locationId,
+                    id: item.location.id,
                     name: item.location.name,
                     parentId: item.location.parentId ?? undefined,
                     childCount: item.location.childCount ?? 0,

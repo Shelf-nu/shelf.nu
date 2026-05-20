@@ -180,7 +180,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       organizationId,
       extraInclude: {
-        location: LOCATION_WITH_HIERARCHY,
+        assetLocations: {
+          select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+        },
       },
     });
 

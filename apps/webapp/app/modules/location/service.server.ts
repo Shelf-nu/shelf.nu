@@ -7,7 +7,7 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -44,6 +44,7 @@ import {
 } from "./utils";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import { getPrimaryLocation } from "../asset/utils";
 import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
@@ -235,10 +236,61 @@ export async function getLocation(
       },
     } satisfies Prisma.LocationInclude["parent"];
 
+    /**
+     * Assets at a location are queried via the `AssetLocation` pivot —
+     * there is no `Location.assets` relation. We run a separate
+     * `db.asset.findMany` filtered by
+     * `assetLocations: { some: { locationId: id } }` and synthesize the
+     * `assets` array onto the wrapper return below. Consumers that read
+     * `location.assets` from the old shape must read `assets` from the
+     * wrapper return value (e.g.
+     * `app/routes/_layout+/locations.$locationId.assets.tsx`).
+     */
     const locationInclude: Prisma.LocationInclude = include
       ? { ...include, parent: parentInclude }
-      : {
-          assets: {
+      : { parent: parentInclude };
+
+    // Scope the assets query to the location via the AssetLocation
+    // pivot. Search/teamMember filters are added on top.
+    const assetsWhereForLocation: Prisma.AssetWhereInput = {
+      assetLocations: { some: { locationId: id } },
+      ...assetsWhere,
+    };
+
+    const [location, totalAssetsWithinLocation, assets] = await Promise.all([
+      /** Get the items */
+      db.location.findFirstOrThrow({
+        where: {
+          OR: [
+            { id, organizationId },
+            ...(userOrganizations?.length
+              ? [{ id, organizationId: { in: otherOrganizationIds } }]
+              : []),
+          ],
+        },
+        include: locationInclude,
+      }),
+
+      /** Count them */
+      db.asset.count({
+        where: {
+          assetLocations: { some: { locationId: id } },
+        },
+      }),
+
+      /**
+       * Paginated assets placed at this location (Phase 4b).
+       * Returned alongside the location so consumers can keep using the
+       * existing `{ location, assets, totalAssetsWithinLocation }`
+       * contract without depending on a `Location.assets` relation.
+       */
+      include
+        ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
+        : db.asset.findMany({
+            skip,
+            take,
+            where: assetsWhereForLocation,
+            orderBy: { [orderBy]: orderDirection },
             include: {
               category: {
                 select: {
@@ -275,34 +327,7 @@ export async function getLocation(
                 },
               },
             },
-            skip,
-            take,
-            where: assetsWhere,
-            orderBy: { [orderBy]: orderDirection },
-          },
-          parent: parentInclude,
-        };
-
-    const [location, totalAssetsWithinLocation] = await Promise.all([
-      /** Get the items */
-      db.location.findFirstOrThrow({
-        where: {
-          OR: [
-            { id, organizationId },
-            ...(userOrganizations?.length
-              ? [{ id, organizationId: { in: otherOrganizationIds } }]
-              : []),
-          ],
-        },
-        include: locationInclude,
-      }),
-
-      /** Count them */
-      db.asset.count({
-        where: {
-          locationId: id,
-        },
-      }),
+          }),
     ]);
 
     /* User is accessing the location in the wrong organization. In that case we need special 404 handling. */
@@ -333,7 +358,16 @@ export async function getLocation(
       });
     }
 
-    return { location, totalAssetsWithinLocation };
+    /**
+     * Phase 4b contract change: `assets` is now a sibling of `location`
+     * on the return value (synthesized from a separate
+     * `db.asset.findMany` filtered by the `AssetLocation` pivot).
+     * Previously consumers read `location.assets` — that relation no
+     * longer exists. Route consumers (e.g.
+     * `app/routes/_layout+/locations.$locationId.assets.tsx`) must read
+     * `assets` from this wrapper, not from `location.assets`.
+     */
+    return { location, totalAssetsWithinLocation, assets };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 
@@ -502,7 +536,9 @@ export async function getLocationSubtreeDepth(params: {
 }
 
 export const LOCATION_LIST_INCLUDE = {
-  _count: { select: { kits: true, assets: true, children: true } },
+  // Asset count comes from the `AssetLocation` pivot rather than a
+  // direct `Location.assets` relation (which doesn't exist).
+  _count: { select: { kits: true, assetLocations: true, children: true } },
   parent: {
     select: {
       id: true,
@@ -569,9 +605,10 @@ export async function getLocationTotalValuation({
 }: {
   locationId: Location["id"];
 }) {
+  // Filter via the `AssetLocation` pivot — there is no `Asset.locationId`.
   const result = await db.asset.aggregate({
     _sum: { valuation: true },
-    where: { locationId },
+    where: { assetLocations: { some: { locationId } } },
   });
 
   return result._sum.valuation ?? 0;
@@ -1440,14 +1477,22 @@ async function createBulkLocationChangeNotes({
   userId,
   location,
 }: {
+  // Assets have no direct `Asset.location` relation; placement is read
+  // through the `AssetLocation` pivot. We surface the pivot's location
+  // via `assetLocations.select.location` and read the primary placement
+  // with `getPrimaryLocation` in the body below.
   modifiedAssets: Prisma.AssetGetPayload<{
     select: {
       title: true;
       id: true;
-      location: {
+      assetLocations: {
         select: {
-          name: true;
-          id: true;
+          location: {
+            select: {
+              name: true;
+              id: true;
+            };
+          };
         };
       };
       user: {
@@ -1494,8 +1539,9 @@ async function createBulkLocationChangeNotes({
       const isRemoving = removedAssetIds.includes(asset.id);
       const isNew = assetIds.includes(asset.id);
       const newLocation = isRemoving ? null : location;
-      const currentLocation = asset.location
-        ? { name: asset.location.name, id: asset.location.id }
+      const assetPrimaryLocation = getPrimaryLocation(asset);
+      const currentLocation = assetPrimaryLocation
+        ? { name: assetPrimaryLocation.name, id: assetPrimaryLocation.id }
         : null;
 
       if (isNew || isRemoving) {
@@ -1530,8 +1576,9 @@ async function createBulkLocationChangeNotes({
       // Group added assets by their previous location for "Moved from" context
       const byPrevLoc = new Map<string, string>();
       for (const asset of modifiedAssets) {
-        if (assetIds.includes(asset.id) && asset.location) {
-          byPrevLoc.set(asset.location.id, asset.location.name);
+        const prevLoc = getPrimaryLocation(asset);
+        if (assetIds.includes(asset.id) && prevLoc) {
+          byPrevLoc.set(prevLoc.id, prevLoc.name);
         }
       }
       const prevLocLinks = [...byPrevLoc.entries()].map(([id, name]) =>
@@ -1558,13 +1605,14 @@ async function createBulkLocationChangeNotes({
         { name: string; assets: typeof addedAssets }
       >();
       for (const asset of modifiedAssets) {
-        if (!assetIds.includes(asset.id) || !asset.location) continue;
-        const existing = byPrevLocation.get(asset.location.id);
+        const prevLoc = getPrimaryLocation(asset);
+        if (!assetIds.includes(asset.id) || !prevLoc) continue;
+        const existing = byPrevLocation.get(prevLoc.id);
         if (existing) {
           existing.assets.push({ id: asset.id, title: asset.title });
         } else {
-          byPrevLocation.set(asset.location.id, {
-            name: asset.location.name,
+          byPrevLocation.set(prevLoc.id, {
+            name: prevLoc.name,
             assets: [{ id: asset.id, title: asset.title }],
           });
         }
@@ -1618,6 +1666,9 @@ export async function updateLocationAssets({
   removedAssetIds: Asset["id"][];
 }) {
   try {
+    // Load the location alongside the assets currently placed at it via
+    // the `AssetLocation` pivot. We need the assets list for ALL_SELECTED
+    // expansion and to skip no-op connects below.
     const location = await db.location
       .findUniqueOrThrow({
         where: {
@@ -1625,7 +1676,9 @@ export async function updateLocationAssets({
           organizationId,
         },
         include: {
-          assets: true,
+          assetLocations: {
+            select: { assetId: true },
+          },
         },
       })
       .catch((cause) => {
@@ -1662,7 +1715,8 @@ export async function updateLocationAssets({
         select: { id: true },
       });
 
-      const locationAssets = location.assets.map((asset) => asset.id);
+      // Derive currently-placed asset IDs from the AssetLocation pivot.
+      const locationAssets = location.assetLocations.map((al) => al.assetId);
       /**
        * New assets that needs to be added are
        * - Previously added assets
@@ -1690,16 +1744,24 @@ export async function updateLocationAssets({
 
     /**
      * Filter out assets already at this location - they don't need notes
-     * since no actual change is happening for them.
+     * since no actual change is happening for them. Existing placements
+     * come from the pivot rows we loaded above (`location.assetLocations`).
      */
-    const existingAssetIds = new Set(location.assets.map((a) => a.id));
+    const existingAssetIds = new Set(
+      location.assetLocations.map((al) => al.assetId)
+    );
     const actuallyNewAssetIds = assetIds.filter(
       (id) => !existingAssetIds.has(id)
     );
 
     /**
-     * We need to query all the modified assets so we know their location before the change
-     * That way we can later create notes for all the location changes
+     * We need to query all the modified assets so we know their
+     * location before the change so we can later create notes for all
+     * the location changes.
+     *
+     * Select `type` + `quantity` (needed to compute the pivot row's
+     * `quantity` on create) and read the previous placement via the
+     * `AssetLocation` pivot. `getPrimaryLocation` reads the first pivot row.
      */
     const modifiedAssets = await db.asset
       .findMany({
@@ -1712,10 +1774,16 @@ export async function updateLocationAssets({
         select: {
           title: true,
           id: true,
-          location: {
+          type: true,
+          quantity: true,
+          assetLocations: {
             select: {
-              name: true,
-              id: true,
+              location: {
+                select: {
+                  name: true,
+                  id: true,
+                },
+              },
             },
           },
           user: {
@@ -1741,35 +1809,49 @@ export async function updateLocationAssets({
     // Use transaction to ensure all location updates and activity events are atomic
     await db.$transaction(async (tx) => {
       if (assetIds.length > 0) {
-        /** We update the location with the new assets */
-        await tx.location.update({
-          where: {
-            id: locationId,
-            organizationId,
-          },
-          data: {
-            assets: {
-              connect: assetIds.map((id) => ({
-                id,
-              })),
-            },
-          },
-        });
+        /**
+         * Connect-by-pivot. Build `AssetLocation` rows for every asset
+         * being attached to this location. Quantity is the asset's
+         * `quantity` for QUANTITY_TRACKED, otherwise 1 (matches the bulk
+         * `updateAssetsWithNewLocation` pattern in
+         * `asset/service.server.ts`).
+         *
+         * Only insert pivots for assets not already placed here — the
+         * `@@unique([assetId, locationId])` composite would otherwise
+         * conflict on no-op connects.
+         */
+        if (actuallyNewAssetIds.length > 0) {
+          const newPivotRows = modifiedAssets
+            .filter((a) => actuallyNewAssetIds.includes(a.id))
+            .map((asset) => ({
+              assetId: asset.id,
+              locationId,
+              organizationId,
+              quantity:
+                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
+                  ? asset.quantity
+                  : 1,
+            }));
+          if (newPivotRows.length > 0) {
+            await tx.assetLocation.createMany({
+              data: newPivotRows,
+              skipDuplicates: true,
+            });
+          }
+        }
       }
 
       /** If some assets were removed, we also need to handle those */
       if (removedAssetIds.length > 0) {
-        await tx.location.update({
+        // Disconnect-by-pivot. Drop the `AssetLocation` rows tying these
+        // assets to this location (scoped to organizationId for
+        // defense-in-depth, even though the location lookup above
+        // already confirmed org ownership).
+        await tx.assetLocation.deleteMany({
           where: {
+            assetId: { in: removedAssetIds },
+            locationId,
             organizationId,
-            id: locationId,
-          },
-          data: {
-            assets: {
-              disconnect: removedAssetIds.map((id) => ({
-                id,
-              })),
-            },
           },
         });
       }
@@ -1934,7 +2016,10 @@ export async function updateLocationKits({
     );
 
     if (kitIds.length > 0) {
-      // Get all asset IDs from the kits that are being added to this location
+      // Get all asset IDs from the kits that are being added to this
+      // location. Pull `type` + `quantity` on the kit's assets to compute
+      // the new `AssetLocation.quantity`, and read each asset's previous
+      // placement through the `assetLocations` pivot.
       const kitsToAdd = await db.kit.findMany({
         where: { id: { in: kitIds }, organizationId },
         select: {
@@ -1948,7 +2033,13 @@ export async function updateLocationKits({
                 select: {
                   id: true,
                   title: true,
-                  location: { select: { id: true, name: true } },
+                  type: true,
+                  quantity: true,
+                  assetLocations: {
+                    select: {
+                      location: { select: { id: true, name: true } },
+                    },
+                  },
                 },
               },
             },
@@ -1960,25 +2051,44 @@ export async function updateLocationKits({
         kit.assetKits.map((ak) => ak.asset.id)
       );
 
-      /** We update the location with the new kits and their assets */
-      await db.location
-        .update({
-          where: {
-            id: locationId,
-            organizationId,
-          },
-          data: {
-            kits: {
-              connect: kitIds.map((id) => ({
-                id,
-              })),
+      /**
+       * Kits remain a direct relation on Location, but assets are placed
+       * via the `AssetLocation` pivot. We wrap the `kits.connect`
+       * mutation and the pivot inserts in a single transaction so the
+       * cascade is atomic. `skipDuplicates` matters because an asset
+       * already placed at this location (e.g. added solo before its kit
+       * was reparented) would violate `@@unique([assetId, locationId])`
+       * — the no-op is the desired behaviour.
+       */
+      const flattenedKitAssets = kitsToAdd.flatMap((kit) => kit.assetKits);
+      await db
+        .$transaction(async (tx) => {
+          await tx.location.update({
+            where: {
+              id: locationId,
+              organizationId,
             },
-            assets: {
-              connect: assetIds.map((id) => ({
-                id,
-              })),
+            data: {
+              kits: {
+                connect: kitIds.map((id) => ({ id })),
+              },
             },
-          },
+          });
+
+          if (flattenedKitAssets.length > 0) {
+            await tx.assetLocation.createMany({
+              data: flattenedKitAssets.map(({ asset }) => ({
+                assetId: asset.id,
+                locationId,
+                organizationId,
+                quantity:
+                  asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
+                    ? asset.quantity
+                    : 1,
+              })),
+              skipDuplicates: true,
+            });
+          }
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -2082,12 +2192,13 @@ export async function updateLocationKits({
           .flatMap((kit) => kit.assetKits.map((ak) => ak.asset))
           .filter((asset) => !existingKitAssetIds.has(asset.id));
 
-        // Create individual notes for each asset
+        // Create individual notes for each asset — previous placement
+        // comes from the `AssetLocation` pivot.
         await Promise.all(
           allAssets.map((asset) =>
             createNote({
               content: getKitLocationUpdateNoteContent({
-                currentLocation: asset.location, // Use the asset's current location
+                currentLocation: getPrimaryLocation(asset),
                 newLocation: location,
                 userId,
                 firstName: user?.firstName ?? "",
@@ -2121,24 +2232,32 @@ export async function updateLocationKits({
         kit.assetKits.map((ak) => ak.asset.id)
       );
 
-      await db.location
-        .update({
-          where: {
-            organizationId,
-            id: locationId,
-          },
-          data: {
-            kits: {
-              disconnect: removedKitIds.map((id) => ({
-                id,
-              })),
+      // Detach kits via the direct relation and drop the corresponding
+      // `AssetLocation` pivot rows for the kit's assets, atomically in
+      // one transaction.
+      await db
+        .$transaction(async (tx) => {
+          await tx.location.update({
+            where: {
+              organizationId,
+              id: locationId,
             },
-            assets: {
-              disconnect: removedAssetIds.map((id) => ({
-                id,
-              })),
+            data: {
+              kits: {
+                disconnect: removedKitIds.map((id) => ({ id })),
+              },
             },
-          },
+          });
+
+          if (removedAssetIds.length > 0) {
+            await tx.assetLocation.deleteMany({
+              where: {
+                assetId: { in: removedAssetIds },
+                locationId,
+                organizationId,
+              },
+            });
+          }
         })
         .catch((cause) => {
           throw new ShelfError({

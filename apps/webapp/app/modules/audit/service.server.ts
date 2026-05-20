@@ -46,6 +46,7 @@ import {
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { getPrimaryLocation } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
@@ -644,9 +645,13 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
-                location: {
+                assetLocations: {
                   select: {
-                    name: true,
+                    location: {
+                      select: {
+                        name: true,
+                      },
+                    },
                   },
                 },
               },
@@ -713,7 +718,7 @@ export async function getAuditSessionDetails({
         auditImagesCount: auditAsset._count?.images ?? 0,
         mainImage: auditAsset.asset?.mainImage ?? null,
         thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-        locationName: auditAsset.asset?.location?.name ?? null,
+        locationName: getPrimaryLocation(auditAsset.asset)?.name ?? null,
       }));
 
     return {
@@ -935,8 +940,12 @@ export async function getAssetsForAuditSession({
           },
         },
         {
-          location: {
-            name: { contains: searchTerm, mode: "insensitive" },
+          assetLocations: {
+            some: {
+              location: {
+                name: { contains: searchTerm, mode: "insensitive" },
+              },
+            },
           },
         },
       ];
@@ -959,14 +968,19 @@ export async function getAssetsForAuditSession({
           },
         },
         tags: TAG_WITH_COLOR_SELECT,
-        location: {
+        assetLocations: {
           select: {
-            id: true,
-            name: true,
-            parentId: true,
-            _count: {
+            quantity: true,
+            location: {
               select: {
-                children: true,
+                id: true,
+                name: true,
+                parentId: true,
+                _count: {
+                  select: {
+                    children: true,
+                  },
+                },
               },
             },
           },
@@ -1000,6 +1014,7 @@ export async function getAssetsForAuditSession({
     // Enrich assets with audit status data for "ALL" filter
     const enrichedAssets = assets.map((asset) => ({
       ...asset,
+      location: getPrimaryLocation(asset),
       auditData: auditStatusMap.get(asset.id) || null,
     }));
 
@@ -1302,9 +1317,13 @@ export async function getAuditScans({
           select: {
             id: true,
             title: true,
-            location: {
+            assetLocations: {
               select: {
-                name: true,
+                location: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -1390,7 +1409,7 @@ export async function getAuditScans({
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
-        assetLocationName: scan.asset?.location?.name ?? null,
+        assetLocationName: getPrimaryLocation(scan.asset)?.name ?? null,
       };
     });
   } catch (cause) {

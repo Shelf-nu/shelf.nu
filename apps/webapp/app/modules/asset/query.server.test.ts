@@ -398,7 +398,10 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"locationId" IS NOT NULL');
+      // An asset has a location iff at least one AssetLocation pivot row exists.
+      expect(sql).toContain(
+        'EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)'
+      );
     });
 
     it("handles 'in-location' with isNot operator (inverts to no location)", () => {
@@ -412,7 +415,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"locationId" IS NULL');
+      expect(sql).toContain(
+        'NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)'
+      );
     });
 
     it("handles 'without-location' with is operator", () => {
@@ -426,7 +431,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"locationId" IS NULL');
+      expect(sql).toContain(
+        'NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)'
+      );
     });
 
     it("handles containsAny with only 'in-location'", () => {
@@ -440,7 +447,9 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      expect(sql).toContain('"locationId" IS NOT NULL');
+      expect(sql).toContain(
+        'EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)'
+      );
     });
 
     it("handles containsAny with both 'in-location' and 'without-location' (matches all)", () => {
@@ -455,8 +464,7 @@ describe("generateWhereClause - special filter values", () => {
       const sql = getSqlString(result);
 
       // Should not add any location-specific conditions
-      expect(sql).not.toContain('"locationId" IS NULL');
-      expect(sql).not.toContain('"locationId" IS NOT NULL');
+      expect(sql).not.toContain('"AssetLocation"');
     });
 
     it("handles containsAny with 'without-location' + specific IDs (OR logic)", () => {
@@ -470,9 +478,13 @@ describe("generateWhereClause - special filter values", () => {
       const result = generateWhereClause(orgId, null, [filter]);
       const sql = getSqlString(result);
 
-      // Should include both: no location OR specific location
-      expect(sql).toContain('"locationId" IS NULL');
-      expect(sql).toContain("Location");
+      // Should include both branches: no AssetLocation row OR a row for the
+      // specific location id.
+      expect(sql).toContain(
+        'NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)'
+      );
+      expect(sql).toContain('"AssetLocation"');
+      expect(sql).toContain('al."locationId" = ANY');
     });
   });
 

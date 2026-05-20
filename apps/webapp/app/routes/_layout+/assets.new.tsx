@@ -12,6 +12,7 @@ import {
   getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -229,10 +230,13 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       }),
     ];
 
-    if (asset.location) {
+    // The note only references the single primary location set at creation time;
+    // qty-tracked assets can hold multiple AssetLocation rows but only one is primary.
+    const primaryLocation = getPrimaryLocation(asset);
+    if (primaryLocation) {
       const locationLink = wrapLinkForNote(
-        `/locations/${asset.location.id}`,
-        asset.location.name.trim()
+        `/locations/${primaryLocation.id}`,
+        primaryLocation.name.trim()
       );
       postCreationTasks.push(
         createNote({

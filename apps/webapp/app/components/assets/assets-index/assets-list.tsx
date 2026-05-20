@@ -28,7 +28,7 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
@@ -220,7 +220,10 @@ export const ListAssetContent = ({
   bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
-  const { category, tags, custody: custodyArray, location } = item;
+  const { category, tags, custody: custodyArray } = item;
+  // Render only the single primary-location badge in the list column —
+  // a qty-tracked asset can sit at multiple locations via AssetLocation.
+  const location = getPrimaryLocation(item);
   const kit = item.assetKits?.[0]?.kit ?? null;
   const {
     primary: primaryCustody,

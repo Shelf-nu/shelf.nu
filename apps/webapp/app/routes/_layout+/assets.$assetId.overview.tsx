@@ -53,7 +53,11 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
+import {
+  getPrimaryKit,
+  getPrimaryLocation,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
@@ -198,10 +202,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        */
       inCustody: number;
       /**
-       * Phase 4a-Polish-2: sum of `AssetKit.quantity` across every kit
-       * this asset participates in. Surfaced on the sidebar so users
-       * can see how many units are earmarked for kit use, and used in
-       * the `available` / `custodyAvailable` formulas so kit-earmarked
+       * Sum of `AssetKit.quantity` across every kit this asset
+       * participates in. Surfaced on the sidebar so users can see how
+       * many units are earmarked for kit use, and used in the
+       * `available` / `custodyAvailable` formulas so kit-earmarked
        * units don't masquerade as free stock.
        */
       inKits: number;
@@ -324,7 +328,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           getLocationsForCreateAndEdit({
             request,
             organizationId,
-            defaultLocation: asset.locationId,
+            defaultLocation: getPrimaryLocation(asset)?.id ?? undefined,
           }),
         ])
       : [
@@ -595,7 +599,7 @@ export default function AssetOverview() {
       storedValue: customFieldsValueMap.get(def.id) ?? null,
     }));
 
-  const location = asset && asset.location;
+  const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
   const fetcher = useFetcher();
   const zo = useZorm(
@@ -716,9 +720,9 @@ export default function AssetOverview() {
                 renderEditor={() => (
                   <LocationSelect
                     isBulk={false}
-                    locationId={asset.location?.id ?? undefined}
+                    locationId={location?.id ?? undefined}
                     fieldName="newLocationId"
-                    defaultValue={asset.location?.id ?? undefined}
+                    defaultValue={location?.id ?? undefined}
                     hideClearButton={false}
                     hideCurrentLocationInput={false}
                   />
@@ -1129,12 +1133,12 @@ export default function AssetOverview() {
 
           {(() => {
             /**
-             * Phase 4a-Polish-2: a QUANTITY_TRACKED asset can belong to
-             * multiple kits at distinct slices. Render one row per
-             * membership with the per-kit quantity badge on qty-tracked
-             * assets; INDIVIDUAL assets keep the single-name layout
-             * since they're DB-locked to one kit and have no meaningful
-             * "quantity per kit" to surface.
+             * A QUANTITY_TRACKED asset can belong to multiple kits at
+             * distinct slices. Render one row per membership with the
+             * per-kit quantity badge on qty-tracked assets; INDIVIDUAL
+             * assets keep the single-name layout since they're DB-locked
+             * to one kit and have no meaningful "quantity per kit" to
+             * surface.
              */
             type KitMembership = {
               quantity: number;

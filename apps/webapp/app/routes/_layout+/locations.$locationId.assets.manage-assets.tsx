@@ -48,7 +48,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import type { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { updateLocationAssets } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -94,8 +94,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
           include: {
             kits: { select: { id: true } },
-            assets: {
-              select: { id: true },
+            // Use `include` (not `select`) at the AssetLocation pivot so
+            // Prisma's LocationInclude type narrows through and exposes
+            // nested `asset` in the result type.
+            assetLocations: {
+              include: { asset: { select: { id: true } } },
             },
           },
         })
@@ -238,28 +241,34 @@ export default function AddAssetsToLocation() {
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
   const locationKitIds = location.kits.map((k) => k.id);
-  const locationAssetsCount = location.assets.length;
+  // Flatten the AssetLocation pivot rows to the simple `asset[]` shape
+  // the component logic expects.
+  const locationAssets = useMemo(
+    () => location.assetLocations.map((al) => al.asset),
+    [location.assetLocations]
+  );
+  const locationAssetsCount = locationAssets.length;
   const hasUnsavedChanges = selectedBulkItemsCount !== locationAssetsCount;
 
   const manageKitsUrl = `/locations/${location.id}/kits/manage-kits`;
 
   const removedAssets = useMemo(
     () =>
-      location.assets.filter(
+      locationAssets.filter(
         (asset) =>
           !selectedBulkItems.some(
             (selectedItem) => selectedItem.id === asset.id
           )
       ),
-    [location.assets, selectedBulkItems]
+    [locationAssets, selectedBulkItems]
   );
 
   /**
    * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedBulkItems(location.assets);
-  }, [location.assets, setSelectedBulkItems]);
+    setSelectedBulkItems(locationAssets);
+  }, [locationAssets, setSelectedBulkItems]);
 
   return (
     <Tabs
@@ -445,7 +454,9 @@ const RowComponent = ({
 }: {
   item: Prisma.AssetGetPayload<{
     include: {
-      location: typeof LOCATION_WITH_HIERARCHY;
+      assetLocations: {
+        select: { location: typeof LOCATION_WITH_HIERARCHY };
+      };
       category: true;
       tags: true;
     };
@@ -491,18 +502,22 @@ const RowComponent = ({
         </div>
       </Td>
 
-      {/* Location */}
+      {/* Location — primary placement via the AssetLocation pivot. */}
       <Td>
-        {item.location ? (
-          <LocationBadge
-            location={{
-              id: item.location.id,
-              name: item.location.name,
-              parentId: item.location.parentId ?? undefined,
-              childCount: item.location._count?.children ?? 0,
-            }}
-          />
-        ) : null}
+        {(() => {
+          const primary = getPrimaryLocation(item);
+          if (!primary) return null;
+          return (
+            <LocationBadge
+              location={{
+                id: primary.id,
+                name: primary.name,
+                parentId: primary.parentId ?? undefined,
+                childCount: primary._count?.children ?? 0,
+              }}
+            />
+          );
+        })()}
       </Td>
 
       {/* Category */}

@@ -26,6 +26,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -275,15 +276,17 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
 // Implement item renderers
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  const primaryLocation = getPrimaryLocation(asset);
+
   // Use predefined presets to create label configurations for asset rows
   const availabilityConfigs = [
-    ...(asset.location
+    ...(primaryLocation
       ? [
           {
             condition: true,
-            badgeText: `Currently in: ${asset.location.name}`,
+            badgeText: `Currently in: ${primaryLocation.name}`,
             tooltipTitle: "Current Location",
-            tooltipContent: `Asset is currently located in ${asset.location.name}`,
+            tooltipContent: `Asset is currently located in ${primaryLocation.name}`,
             priority: 60,
             className: "bg-gray-50 border-gray-200 text-gray-700",
           },

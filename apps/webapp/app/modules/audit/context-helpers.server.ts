@@ -126,7 +126,7 @@ export async function getAssetsForLocationContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      locationId: { in: locationIds },
+      assetLocations: { some: { locationId: { in: locationIds } } },
     },
     select: {
       id: true,

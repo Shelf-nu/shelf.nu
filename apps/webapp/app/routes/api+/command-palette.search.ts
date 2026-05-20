@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "~/database/db.server";
 import { getAssets } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -245,6 +246,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             barcodes: {
               select: { id: true, value: true, type: true },
             },
+            // Pulled so the search-result row can show the asset's
+            // primary placement (read via `getPrimaryLocation`).
+            assetLocations: {
+              select: { location: { select: { name: true } } },
+            },
           },
         }),
 
@@ -303,7 +309,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assets: true } },
+                _count: { select: { assetLocations: true } },
               },
             })
           : Promise.resolve([]),
@@ -353,7 +359,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             mainImage: asset.mainImage,
             mainImageExpiration:
               asset.mainImageExpiration?.toISOString() ?? null,
-            locationName: asset.location?.name ?? null,
+            // `getAssets` widens its `extraInclude` arg to
+            // `Prisma.AssetInclude`, so the return type can't narrow back
+            // to the `assetLocations` shape we requested above. Cast at
+            // the boundary — the docstring on `getPrimaryLocation`
+            // documents this as the escape hatch.
+            locationName:
+              getPrimaryLocation(
+                asset as unknown as {
+                  assetLocations: { location: { name: string } }[];
+                }
+              )?.name ?? null,
             description: asset.description,
             qrCodes: asset.qrCodes?.map((qr) => qr.id) ?? [],
             categoryName: asset.category?.name ?? null,
@@ -403,7 +419,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: location.name,
           description: location.description || null,
           address: location.address || null,
-          assetCount: location._count?.assets || 0,
+          assetCount: location._count?.assetLocations || 0,
         })),
         teamMembers: teamMembers.map((member) => ({
           id: member.id,

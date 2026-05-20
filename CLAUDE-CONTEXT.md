@@ -945,22 +945,107 @@ it single-kit (operator-custody assignment is independent of kit
 allocation under the non-overlapping-axes model, so it may be fine
 to leave — but the "held via kit" badge logic should be re-checked).
 
-#### Phase 4b — Location pivot (second)
+#### Phase 4b — Location pivot + qty allocation (second) — CODE COMPLETE + REVIEWED, STAGED (awaiting manual test pass + commit)
 
-**Scope:** structurally identical to 4a but for Location. Larger
-surface because every asset has a location:
+**Status as of 2026-05-20:** structural + qty-allocation code complete, post-review cleanups applied, **54 files staged**, nothing committed.
+`pnpm webapp:validate` GREEN — **2177 / 2177 tests** (lint + typecheck + tests all clean). Schema applied to dev DB (996 rows backfilled, both triggers active, RLS on). Manual testing plan at `TESTING-PHASE-4B.md` (15 sections).
 
-- Schema: `AssetLocation` Prisma model with same shape + triggers.
-- Migration: introduce, backfill from `Asset.locationId`, drop the
-  column.
-- Service / loader / UI: location detail, location manage-assets
-  picker, scan drawers, location filters, asset list location column.
-- **Mobile API contract change.** The mobile companion currently
-  returns `Asset.location` as a singular object. Either synthesise a
-  "primary placement" for backward compat or ship a mobile-app PR in
-  lockstep — decide at plan time.
+Bonus folded in (per user call on 2026-05-19): the **Phase 4a-Polish-2 kit fan-out regression** in `query.server.ts` is fixed — LATERAL primary-pick now applied to BOTH kit and location joins in the asset-index raw SQL.
+
+Sweep stats: 187 TS errors → 0 across ~37 files. Three parallel subagents cleared ~26 mechanical leaf files; the deep core (`asset/service.server.ts`, `location/service.server.ts`, `kit/service.server.ts`, picker, asset overview) done with care + iterative typecheck. 14 pre-existing tests updated for the pivot shape.
+
+**File-by-file review (2026-05-20) — caught 4 design issues; all fixed:**
+
+1. **Phase-prefix comments in production code.** ~84 narration comments like `// Phase 4b: location now lives on the AssetLocation pivot` were noise — they reference the PR rather than explaining _why_ the code is the way it is. Cleaned up: 22 deleted (pure narration), ~58 rewritten to keep permanent design intent without time-bound framing. Migrations + testing docs left alone (those _are_ phase-organized history). Rule reinforced: comments explain WHY (permanent), not which PR introduced them.
+
+2. **`getPrimaryLocation` / `getPrimaryKit` couldn't infer `TLoc`/`TKit`** because the original signature used `asset: unknown` (a 4a-era workaround for Prisma `MergeInclude` shape loss). Fixed by changing the signature to take a typed input — `asset: { assetLocations?: Array<{ location?: TLoc | null }> } | null | undefined`. Now inference works and call sites are `getPrimaryLocation(asset)` with no generic. **This change exposed 7 real loader-include bugs** the previous `unknown` cast was silently absorbing — all fixed (see "Bugs caught by inference fix" below). Documented `as unknown as` escape hatch in JSDoc for the one legitimate case (`command-palette.search.ts`'s `getAssets({ extraInclude })` widens to `Prisma.AssetInclude` and loses shape).
+
+3. **`AdvancedIndexAsset` had both `locationId: string | null` AND `location: { id; … } | null`.** Same id, accessed two ways. Pre-pivot `Asset.locationId` was a real column; post-pivot both come from the same LATERAL pick. Removed the scalar from the type AND the SQL projection (`'locationId', aq."assetLocationId"`) AND the one consumer's redundant `??` fallback (`advanced-asset-columns.tsx:274`). One canonical path: `item.location.id`. (Column alias `aq."assetLocationId"` stays — still feeds the `'id'` inside the `location` jsonb.)
+
+4. **`primaryLocOf` local wrappers** in `kit/service.server.ts` (×3) + `asset/service.server.ts` (×1) became dead weight after the inference fix. They existed to dedupe the `getPrimaryLocation<{ id; name }>(asset)` call inside tight loops. All four wrappers + their `KitAsset` / `BulkKitAsset` / `NewlyAddedAsset` type aliases removed; 26 call sites now use `getPrimaryLocation(asset)` directly. Then a second sweep caught ~30 sites where the explicit generic was inlined directly on `getPrimaryLocation<...>(...)` rather than via a wrapper — all stripped. Zero explicit generics remain in app code.
+
+**Bugs caught by the inference fix (genuinely shipping-breaking, silently masked by `unknown`):**
+
+- `kit/types.ts` `KIT_SELECT_FIELDS_FOR_LIST_ITEMS` still selected the gone `Asset.location` relation → kit-page rows would render no location.
+- `utils/scanner-includes.server.ts` `ASSET_INCLUDE` had stale `location: { select: { id, name } }` instead of `assetLocations` → scanner overlay would show no location.
+- `asset/service.server.ts` `duplicateAsset` source-asset type didn't include `assetLocations` → duplicates would lose location.
+- `assets.$assetId.overview.update-location.tsx` `getAsset` had no include → "current location" pre-fill always null.
+- `assets.$assetId_.edit.tsx` `getAsset` had no include → edit form's location pre-fill always null.
+- `locations.$locationId.assets.manage-assets.tsx` `RowComponent` hardcoded `location: typeof LOCATION_WITH_HIERARCHY` (the gone relation) → `never`, badge would never render.
+- `api+/command-palette.search.ts` search-result loader didn't pull `assetLocations` → results showed no location.
+
+All seven would have been silent runtime "missing location" bugs in production.
+
+**Scope decision (2026-05-19):** 4b ships the structural pivot **and**
+the 4a-Polish-2-equivalent qty-allocation UI **in one phase / one
+migration** — no structural-only intermediate (4a split structural
+from triggers only to de-risk a first-of-kind pattern; that pattern
+is now proven, and there is no separate "Location polish" release
+planned). Plan file: `~/.claude/plans/` (Phase 4b plan).
+
+- Schema + **single** migration: `AssetLocation` pivot, backfill
+  from `Asset.locationId` (qty-tracked → `Asset.quantity`, INDIVIDUAL
+  → 1), drop `Asset.locationId` column, ENABLE RLS, **both** triggers
+  from day one (`enforce_individual_asset_single_location` BEFORE +
+  `enforce_asset_location_sum_within_total` DEFERRABLE CONSTRAINT).
+  No intermediate `@@unique([assetId])`.
+- Service / query / loader / UI sweep (~108 files): location detail,
+  location manage-assets picker, scan drawers, location filters,
+  asset-list location column. `getPrimaryLocation` helper mirrors
+  `getPrimaryKit`.
+- **Raw-SQL fan-out fix (key divergence from Kit):** Kit's
+  `LEFT JOIN AssetKit` was safe un-aggregated because
+  `@@unique([assetId])` held in 4a. `LEFT JOIN AssetLocation` fans
+  out immediately for multi-placement qty-tracked — must use a
+  LATERAL aggregate / primary-pick (mirror the existing
+  `custody_agg` LATERAL in `query.server.ts`).
+- **Polish-2 kit fan-out regression — folded into 4b scope
+  (decided 2026-05-19).** Phase 4a-Polish-2 (commit `bebaf4ec6`)
+  dropped `AssetKit.@@unique([assetId])` but left the asset-index
+  `LEFT JOIN AssetKit ak LEFT JOIN Kit k` + `GROUP BY … k.id, k.name`
+  assuming one kit row per asset. A multi-kit qty-tracked asset
+  therefore duplicates as multiple rows in the global asset index.
+  Latent (no multi-kit data lived in the index during Polish-2
+  manual testing). Since 4b rewrites this exact join block, the kit
+  join gets the same LATERAL primary-pick fix here rather than a
+  separate hotfix. **4b's test pass must re-verify the kit index
+  with a multi-kit asset in view** (Polish-2 only tested kit pages +
+  DB, not the global index).
+- **Qty-allocation UI (folded in, was the "polish"):** per-row qty
+  input on the location manage-assets picker, `getLocationPickerMeta`
+  helper (mirror `getKitPickerMeta`), server-side strict-available
+  re-check, asset-overview "Placed at locations" multi-location card
+  - "In locations" Quantity-Overview row (mirror "Included in kits" /
+    "In kits").
+- **Picker MAX = orthogonal model (decided 2026-05-19, deviates from
+  Kit on purpose):** `Asset.quantity − sum(other locations) +
+currentAtThisLocation`. Does **NOT** subtract custody or bookings —
+  location is physical placement and is orthogonal to
+  responsibility/reservation per the PRD (a pen sits at Office 1 even
+  while Johnny has custody of it). Only hard constraint:
+  `sum(AssetLocation) ≤ Asset.quantity` (the DEFERRED trigger). This
+  resolves the "revisit whether Location should match Kit's
+  non-overlapping model" flag — answer: **no, Location is
+  orthogonal.**
+- **No in-custody cascade** (simplification vs the kit polish):
+  locations are never put in custody, so there is no
+  `CUSTODY_ASSIGNED/RELEASED` ripple, no info-box dialog. That entire
+  branch of the kit polish does not exist for Location.
+- **Mobile API contract:** synthesise a singular "primary placement"
+  for backward compat (oldest `AssetLocation` by `createdAt`),
+  routed through `getPrimaryLocation`. Mirrors how 4a handled kit in
+  `api+/mobile+/bookings.$bookingId.ts`. 8 mobile endpoints incl. 2
+  write paths (`asset.update-location.ts`, `bulk-update-location.ts`)
+  → pivot-replace in a tx, response shape preserved. No lockstep
+  mobile-app PR; a real array-shape mobile PR is post-4c.
+- **Kit→asset location cascade (Phase-4b-specific coupling):**
+  `updateKitLocations` in `kit/service.server.ts` writes asset
+  locations as a side effect of a kit location change — rewrite to
+  per-asset `tx.assetLocation` upsert/replace. `Kit.locationId`
+  itself stays a FK (only the asset side pivots).
 - Reports impact: location filters in reports (already deferred via
-  `TESTING-REPORTS.md`) will need re-verification once 4b is in.
+  `TESTING-REPORTS.md`) will need re-verification once 4b is in —
+  NOT scoped into 4b.
 
 #### Phase 4c — Split / merge UX (third)
 
@@ -1039,7 +1124,12 @@ rendering layer one PR per axis:
   `createBulkKitChangeNotes` + the cross-kit-move / removal note
   writers in `kit/service.server.ts`.
 - **Location-change notes** include moved unit count from
-  `AssetLocation.quantity` once 4b lands.
+  `AssetLocation.quantity`. **UNBLOCKED 2026-05-20** — Phase 4b shipped
+  the `AssetLocation` pivot with `quantity` populated; the
+  `ASSET_LOCATION_CHANGED` events already fire per-asset with
+  `meta.viaKit` where relevant. Sweep `getLocationUpdateNoteContent` +
+  the `updateAsset` / `bulkUpdateLocation` / `updateKitLocations` note
+  writers to render the unit count.
 - **Booking notes** (checkout, partial check-in, check-in) — sweep
   remaining note-writers to match the existing "× N" rendering on
   sidebar / email / PDF.
@@ -1078,7 +1168,8 @@ scope in `docs/proposals/quantitative-assets.md` → Phase 4e.
 9. `20260430100759_add_kit_custody_id_to_custody` — Phase 3d-Polish-2: discriminator FK + one-shot backfill UPDATE for kit-allocated rows
 10. `20260504132547_enable_rls_for_booking_model_request` — RLS policy for `BookingModelRequest` (auto-generated alongside session work)
 11. `20260511120000_add_asset_kit_pivot` — Phase 4a: introduce `AssetKit` pivot, backfill from `Asset.kitId`, drop the column, ENABLE RLS
-12. `20260514100000_drop_asset_kit_unique_add_triggers` — Phase 4a-Polish-2: `DROP INDEX "AssetKit_assetId_key"`, add `enforce_individual_asset_single_kit` (BEFORE) + `enforce_asset_kit_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, backfill QUANTITY_TRACKED pivot rows to `quantity = Asset.quantity`. **Applied to dev DB; UNCOMMITTED (see Phase 4a-Polish-2 status).**
+12. `20260514100000_drop_asset_kit_unique_add_triggers` — Phase 4a-Polish-2: `DROP INDEX "AssetKit_assetId_key"`, add `enforce_individual_asset_single_kit` (BEFORE) + `enforce_asset_kit_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, backfill QUANTITY_TRACKED pivot rows to `quantity = Asset.quantity`. Committed in `bebaf4ec6`.
+13. `20260519143054_add_asset_location_pivot` — Phase 4b: introduce `AssetLocation` pivot, backfill from `Asset.locationId` (qty-tracked → `Asset.quantity`, INDIVIDUAL → 1), add `enforce_individual_asset_single_location` (BEFORE) + `enforce_asset_location_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, drop `Asset.locationId` column + FK + index, ENABLE RLS. Single migration (no structural-only intermediate; final shape ships day one). **Applied to dev DB; staged not committed (see Phase 4b status).**
 
 ---
 
@@ -1232,14 +1323,40 @@ booking phase-3 endpoints, 5 SELF_SERVICE-bulk-custody guard tests
 on the centralised service, 5 `performKitDeletion` helper tests, 4
 mobile route role-forwarding regression tests).
 
-**Current baseline (Phase 4a-Polish-2, UNCOMMITTED):**
+**Phase 4a-Polish-2 baseline (committed `bebaf4ec6` + `d27ade085`):**
 `pnpm webapp:validate` green — **2177 / 2177** tests across 166
 files. The +6 vs the Phase 4a-shipped 2171 are the new
 `kit/service.server.test.ts` picker contract tests. Lint +
 typecheck clean. `pnpm webapp:doctor --diff main` 95/100 (one
-accepted `no-giant-component` finding on the picker route). All of
-this is in the working tree only — see the Phase 4a-Polish-2 status
-block for the staged-but-unapproved commit.
+accepted `no-giant-component` finding on the picker route).
+
+**Current baseline (Phase 4b, STAGED + reviewed — uncommitted):**
+`pnpm webapp:validate` green — **2177 / 2177** tests across 166
+files (no count delta vs Polish-2: 4b's tests modify existing files
+rather than adding new ones; the test suite was reshaped to match
+the pivot, not extended). Lint + typecheck clean.
+**54 files staged**, +1735 / -586. Pre-commit hooks not yet run.
+Branch: `feat-quantities`, ahead of `origin/feat-quantities` by 2
+commits (Polish-2 + docs).
+
+The 4b staged diff covers:
+
+- Schema + migration `20260519143054_add_asset_location_pivot`
+- ~37 production files swept off `Asset.location`/`locationId` →
+  `assetLocations` pivot + `getPrimaryLocation` reads
+- 14 existing tests updated to the new pivot fixture shape
+- `getPrimaryLocation` + `getPrimaryKit` signature change (inference
+  works; no explicit generic at any call site in app code)
+- 7 latent loader-include bugs uncovered + fixed (see Phase 4b status)
+- `AdvancedIndexAsset.locationId` / SQL `'locationId'` projection /
+  `??` fallback redundancy removed — single canonical path
+  (`item.location.id`)
+- 4 `primaryLocOf` local wrappers + their per-function type aliases
+  removed; all 30+ call sites use the bare `getPrimaryLocation`
+- ~80 phase-prefix comments cleaned up (22 deleted, ~58 rewritten to
+  describe permanent design intent rather than the PR)
+- `TESTING-PHASE-4B.md` (15 sections) — manual test plan, NOT yet
+  walked through
 
 `TESTING-KIT-CUSTODY-CORRECTNESS.md` manual walkthrough complete —
 all sections ticked off or marked as covered-by-unit-test (6b: kit

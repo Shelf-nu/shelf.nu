@@ -54,7 +54,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { PickerAssetMeta } from "~/modules/kit/picker-meta.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
@@ -243,9 +243,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // Phase 4a-Polish-2: hydrate per-asset picker metadata for the
-    // QUANTITY_TRACKED rows on this page. See `getKitPickerMeta` for the
-    // strict-available formula and its subtleties.
+    // Hydrate per-asset picker metadata for the QUANTITY_TRACKED rows on
+    // this page. See `getKitPickerMeta` for the strict-available formula
+    // and its subtleties.
     const pickerMetaByAssetId = await getKitPickerMeta({
       kitId,
       organizationId,
@@ -735,7 +735,8 @@ const RowComponent = ({
     initialKitQuantities: Record<string, number>;
   };
 }) => {
-  const { category, tags, location } = item;
+  const { category, tags } = item;
+  const location = getPrimaryLocation(item);
   const isQty = isQuantityTracked(item);
   // QUANTITY_TRACKED rows behave as "available" for the picker regardless
   // of row-level status — Option B handles partial allocation on assign.

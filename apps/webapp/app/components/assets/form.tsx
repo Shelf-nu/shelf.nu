@@ -133,7 +133,6 @@ type Props = Partial<
     | "mainImageExpiration"
     | "categoryId"
     | "assetModelId"
-    | "locationId"
     | "description"
     | "valuation"
     | "type"
@@ -147,6 +146,12 @@ type Props = Partial<
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
+  /**
+   * Location is not a column on `Asset` — it lives on the `AssetLocation`
+   * pivot. Callers derive the single primary-location id via
+   * `getPrimaryLocation()` and pass it explicitly.
+   */
+  locationId?: string | null;
 };
 
 // react-doctor:no-giant-component — deferred for follow-up refactor

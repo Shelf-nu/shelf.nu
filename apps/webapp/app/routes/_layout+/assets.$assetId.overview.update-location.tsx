@@ -10,6 +10,7 @@ import {
   getLocationsForCreateAndEdit,
   updateAsset,
 } from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -49,12 +50,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id,
       userOrganizations,
       request,
+      include: {
+        // Needed so the picker can pre-fill the current primary placement.
+        assetLocations: { select: { location: { select: { id: true } } } },
+      },
     });
 
     const { locations } = await getLocationsForCreateAndEdit({
       organizationId,
       request,
-      defaultLocation: asset.locationId,
+      defaultLocation: getPrimaryLocation(asset)?.id ?? null,
     });
 
     return payload({
@@ -137,7 +142,10 @@ export default function Custody() {
             <p>Adjust the location of this asset.</p>
           </div>
           <div className=" relative z-50 mb-8">
-            <LocationSelect locationId={asset.locationId} isBulk={false} />
+            <LocationSelect
+              locationId={getPrimaryLocation(asset)?.id ?? null}
+              isBulk={false}
+            />
           </div>
 
           <div className="flex gap-3">

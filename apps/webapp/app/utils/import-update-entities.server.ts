@@ -8,6 +8,7 @@
  */
 import type { Asset, CustomField } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { getRandomColor } from "~/utils/get-random-color";
 import type {
   AssetChangePreview,
@@ -37,7 +38,11 @@ export async function fetchAssetsForUpdate(
     where: { [dbField]: { in: identifierValues }, organizationId },
     include: {
       category: { select: { name: true } },
-      location: { select: { id: true, name: true } },
+      // Pull location through the pivot and flatten to a singular `location`
+      // below so the CSV-update diff logic keeps its `asset.location` contract.
+      assetLocations: {
+        select: { location: { select: { id: true, name: true } } },
+      },
       tags: { select: { id: true, name: true } },
       customFields: { include: { customField: true } },
     },
@@ -46,15 +51,20 @@ export async function fetchAssetsForUpdate(
   // Key by the identifier field value so CSV rows can look up their asset
   return new Map(
     assets.map((a) => {
-      const asset = a as Asset & {
+      const raw = a as Asset & {
         category: { name: string } | null;
-        location: { id: string; name: string } | null;
+        assetLocations: { location: { id: string; name: string } }[];
         tags: { id: string; name: string }[];
         customFields: {
           id: string;
           value: unknown;
           customField: CustomField;
         }[];
+      };
+      // Synthesise the singular `location` the diff code expects.
+      const asset = {
+        ...raw,
+        location: getPrimaryLocation(raw),
       };
       const key = dbField === "id" ? asset.id : asset.sequentialId ?? "";
       return [key, asset];

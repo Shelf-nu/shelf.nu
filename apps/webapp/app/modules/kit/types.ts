@@ -110,7 +110,12 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
       color: true,
     },
   },
-  location: LOCATION_WITH_HIERARCHY,
+  // Placement lives on the AssetLocation pivot. `quantity` is pulled so
+  // the kit-page row can render per-location slices for qty-tracked
+  // assets; the badge consumer reads the primary placement.
+  assetLocations: {
+    select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+  },
   tags: TAG_WITH_COLOR_SELECT,
 };
 

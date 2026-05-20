@@ -567,34 +567,35 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     }
   }
 
-  // Add location handling using asset's locationId since we're using LEFT JOIN
+  // Location handling — an asset's placement lives on the `AssetLocation`
+  // pivot (qty-tracked can be at many locations; INDIVIDUAL capped at one
+  // by trigger). EXISTS checks against AssetLocation give a yes/no answer
+  // per asset without fan-out.
   if (filter.name === "location") {
     switch (filter.operator) {
       case "is":
         if (filter.value === "in-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
         if (filter.value === "without-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
-        //Reference the Location table for name comparison
+        // Match assets placed at the specified location via AssetLocation.
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Location"
-          WHERE id = a."locationId" AND id = ${filter.value}
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ${filter.value}
         )`;
 
       case "isNot":
         if (filter.value === "in-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
         if (filter.value === "without-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
-        return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (
-            SELECT 1 FROM public."Location"
-            WHERE id = a."locationId" AND id = ${filter.value}
-          ) OR a."locationId" IS NULL
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ${filter.value}
         )`;
 
       case "containsAny": {
@@ -616,7 +617,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
         // Handle "in-location" - assets that have a location
         if (hasLocation) {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
 
         // Handle "without-location" - assets that don't have a location
@@ -624,7 +625,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           const locationIds = values.filter((v) => v !== "without-location");
 
           if (locationIds.length === 0) {
-            return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+            return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
           }
 
           const locationIdsArray = Prisma.join(
@@ -632,10 +633,10 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             ", "
           );
           return Prisma.sql`${whereClause} AND (
-            a."locationId" IS NULL
+            NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)
             OR EXISTS (
-              SELECT 1 FROM public."Location"
-              WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
+              SELECT 1 FROM public."AssetLocation" al
+              WHERE al."assetId" = a.id AND al."locationId" = ANY(ARRAY[${locationIdsArray}]::text[])
             )
           )`;
         }
@@ -645,8 +646,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Location"
-          WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ANY(ARRAY[${locationIdsArray}]::text[])
         )`;
       }
 
@@ -1877,7 +1878,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."mainImage" AS "assetMainImage",
       a."thumbnailImage" AS "assetThumbnailImage",
       a."mainImageExpiration" AS "assetMainImageExpiration",
-      a."locationId" AS "assetLocationId",
+      l.id AS "assetLocationId",
       a."organizationId" AS "assetOrganizationId",
       a.status AS "assetStatus",
       a.type AS "assetType",
@@ -1998,15 +1999,33 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
-  -- Kit membership goes through the AssetKit pivot. The
-  -- @@unique([assetId]) constraint on AssetKit guarantees at most one
-  -- pivot row per asset, so this LEFT JOIN still yields one output row
-  -- per asset (no fan-out).
-  LEFT JOIN public."AssetKit" ak ON ak."assetId" = a.id
-  LEFT JOIN public."Kit" k ON ak."kitId" = k.id
+  -- Kit membership goes through the AssetKit pivot. Phase 4a-Polish-2
+  -- dropped AssetKit.@@unique([assetId]) (multi-kit qty-tracked), so a
+  -- plain LEFT JOIN AssetKit would fan out and duplicate the asset in
+  -- the index. Use a LATERAL primary-pick (oldest pivot row) to keep
+  -- exactly one kit row per asset — the asset index shows a single
+  -- "primary kit"; the full membership list lives on the asset page.
+  LEFT JOIN LATERAL (
+    SELECT k.id, k.name, k.status
+    FROM public."AssetKit" ak
+    JOIN public."Kit" k ON ak."kitId" = k.id
+    WHERE ak."assetId" = a.id
+    ORDER BY ak."createdAt" ASC
+    LIMIT 1
+  ) k ON TRUE
   LEFT JOIN public."Category" c ON a."categoryId" = c.id
   LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
-  LEFT JOIN public."Location" l ON a."locationId" = l.id
+  -- Placement goes through the AssetLocation pivot. Same fan-out concern
+  -- as kit (qty-tracked can be at many locations) — LATERAL primary-pick
+  -- yields one "primary location" per asset.
+  LEFT JOIN LATERAL (
+    SELECT l.id, l.name, l."parentId"
+    FROM public."AssetLocation" al
+    JOIN public."Location" l ON al."locationId" = l.id
+    WHERE al."assetId" = a.id
+    ORDER BY al."createdAt" ASC
+    LIMIT 1
+  ) l ON TRUE
   LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
   LEFT JOIN public."Tag" t ON att."B" = t.id
   LEFT JOIN LATERAL (
@@ -2090,7 +2109,6 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'categoryId', aq."assetCategoryId",
           'assetModelId', aq."assetModelId",
           'assetModelName', aq."assetModelName",
-          'locationId', aq."assetLocationId",
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
           'type', aq."assetType",

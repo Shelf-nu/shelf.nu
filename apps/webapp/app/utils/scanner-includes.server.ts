@@ -21,10 +21,11 @@ export const CUSTODY_INCLUDE = {
 };
 
 export const ASSET_INCLUDE = {
-  location: {
+  // Asset placement lives on the `AssetLocation` pivot. Consumers read
+  // the primary placement via `getPrimaryLocation`.
+  assetLocations: {
     select: {
-      id: true,
-      name: true,
+      location: { select: { id: true, name: true } },
     },
   },
   assetKits: {

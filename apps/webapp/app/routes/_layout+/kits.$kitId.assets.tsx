@@ -23,7 +23,7 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -168,7 +168,10 @@ export default function KitAssets() {
 }
 
 function ListContent({ item }: { item: ListItemForKitPage }) {
-  const { location, category, tags } = item;
+  const { category, tags } = item;
+  // Render only the single primary-location badge — a qty-tracked asset
+  // can sit at multiple locations via AssetLocation.
+  const location = getPrimaryLocation(item);
 
   // `kitId` from the URL — used below to pick this asset's pivot row out
   // of `item.assetKits` (the asset can be in multiple kits since
@@ -210,16 +213,15 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                       /**
                        * Render `· N units in kit` for qty-tracked rows.
                        *
-                       * Phase 4a-Polish-2: `AssetKit.quantity` is the
-                       * source of truth — the picker writes it, the
-                       * kit-custody inherit helper reads it, reports read
-                       * it. We surface the kit-specific count only; the
-                       * asset's total is irrelevant on the kit page (and
-                       * a user comparing N/M would be confused if the
-                       * same qty-tracked asset is split across multiple
-                       * kits). The `find()` is defensive — the asset was
-                       * fetched via `assetKits: { some: { kitId } }`, so
-                       * a missing row shouldn't happen.
+                       * `AssetKit.quantity` is the source of truth — the
+                       * picker writes it, the kit-custody inherit helper
+                       * reads it, reports read it. Surface the kit-specific
+                       * count only; the asset's total is irrelevant on the
+                       * kit page (and a user comparing N/M would be confused
+                       * if the same qty-tracked asset is split across
+                       * multiple kits). The `find()` is defensive — the
+                       * asset was fetched via `assetKits: { some: { kitId } }`,
+                       * so a missing row shouldn't happen.
                        */
                       const unit = item.unitOfMeasure || "units";
                       const inKit =

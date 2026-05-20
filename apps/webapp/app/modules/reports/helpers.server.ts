@@ -54,6 +54,7 @@ import type {
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
 import { refreshExpiredAssetImages } from "../asset/service.server";
+import { getPrimaryLocation } from "../asset/utils";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -163,7 +164,7 @@ export async function bookingComplianceReport(
     // pivot makes this join expressible directly in the where clause.
     if (locationId) {
       where.bookingAssets = {
-        some: { asset: { locationId } },
+        some: { asset: { assetLocations: { some: { locationId } } } },
       };
     }
 
@@ -1302,7 +1303,7 @@ export async function idleAssetsReport(
     }
 
     if (locationId) {
-      assetWhere.locationId = locationId;
+      assetWhere.assetLocations = { some: { locationId } };
     }
 
     // Fetch data — `fetchIdleAssetRows` re-signs any expired thumbnail URLs
@@ -1412,9 +1413,13 @@ async function fetchIdleAssetRows(
           name: true,
         },
       },
-      location: {
+      assetLocations: {
         select: {
-          name: true,
+          location: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
       // Pull the most-recent COMPLETE booking via the pivot. We sort
@@ -1460,7 +1465,7 @@ async function fetchIdleAssetRows(
       assetName: asset.title,
       thumbnailImage: asset.thumbnailImage,
       category: asset.category?.name || null,
-      location: asset.location?.name || null,
+      location: getPrimaryLocation(asset)?.name || null,
       lastBookedAt,
       daysSinceLastUse,
       status: asset.status,
@@ -1783,8 +1788,12 @@ async function fetchCustodyRows(
           category: {
             select: { name: true },
           },
-          location: {
-            select: { name: true },
+          assetLocations: {
+            select: {
+              location: {
+                select: { name: true },
+              },
+            },
           },
         },
       },
@@ -1816,7 +1825,7 @@ async function fetchCustodyRows(
       thumbnailImage:
         refreshedThumbnailByAssetId.get(c.asset.id) ?? c.asset.thumbnailImage,
       category: c.asset.category?.name || null,
-      location: c.asset.location?.name || null,
+      location: getPrimaryLocation(c.asset)?.name || null,
       custodianId: c.custodian.id,
       custodianName: stripNameSuffix(c.custodian.name),
       assignedAt,
@@ -1959,7 +1968,7 @@ export async function topBookedAssetsReport(
     }
 
     if (locationId) {
-      assetWhere.locationId = locationId;
+      assetWhere.assetLocations = { some: { locationId } };
     }
 
     // Fetch data — `fetchTopBookedAssetRows` re-signs expired thumbnail URLs
@@ -2050,7 +2059,11 @@ async function fetchTopBookedAssetRows(
               mainImageExpiration: true,
               thumbnailImage: true,
               category: { select: { name: true } },
-              location: { select: { name: true } },
+              assetLocations: {
+                select: {
+                  location: { select: { name: true } },
+                },
+              },
             },
           },
         },
@@ -2111,7 +2124,7 @@ async function fetchTopBookedAssetRows(
             title: asset.title,
             thumbnailImage: asset.thumbnailImage,
             category: asset.category?.name || null,
-            location: asset.location?.name || null,
+            location: getPrimaryLocation(asset)?.name || null,
           },
           bookingCount: 0,
           totalDays: 0,
@@ -2396,37 +2409,71 @@ async function computeDistributionByCategory(
 async function computeDistributionByLocation(
   organizationId: string
 ): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["locationId"],
+  // Pull every asset with its AssetLocation pivot rows (+ location name)
+  // so we can bucket each asset under each location it occupies. A
+  // QUANTITY_TRACKED asset can span multiple locations, so it may
+  // contribute to several buckets; assets with no pivot rows fall into
+  // "No Location".
+  const assets = await db.asset.findMany({
     where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
+    select: {
+      id: true,
+      valuation: true,
+      assetLocations: {
+        select: {
+          location: { select: { id: true, name: true } },
+        },
+      },
+    },
   });
 
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
+  // bucketKey → { name, assetCount, totalValue }. Counts are per
+  // (asset, location) pair to mirror the previous groupBy semantics.
+  const buckets = new Map<
+    string,
+    { name: string; assetCount: number; totalValue: number | null }
+  >();
 
-  // Fetch location names
-  const locationIds = assets
-    .map((a) => a.locationId)
-    .filter((id): id is string => id !== null);
+  const addToBucket = (key: string, name: string, valuation: number | null) => {
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.assetCount += 1;
+      existing.totalValue =
+        valuation === null
+          ? existing.totalValue
+          : (existing.totalValue ?? 0) + valuation;
+    } else {
+      buckets.set(key, {
+        name,
+        assetCount: 1,
+        totalValue: valuation,
+      });
+    }
+  };
 
-  const locations = await db.location.findMany({
-    where: { id: { in: locationIds } },
-    select: { id: true, name: true },
-  });
+  for (const asset of assets) {
+    if (asset.assetLocations.length === 0) {
+      addToBucket("without-location", "No Location", asset.valuation);
+      continue;
+    }
+    for (const pivot of asset.assetLocations) {
+      addToBucket(pivot.location.id, pivot.location.name, asset.valuation);
+    }
+  }
 
-  const locationMap = new Map(locations.map((l) => [l.id, l.name]));
+  const totalAssets = Array.from(buckets.values()).reduce(
+    (sum, b) => sum + b.assetCount,
+    0
+  );
 
-  return assets
-    .map((a) => ({
-      id: a.locationId || "without-location",
-      groupName: a.locationId
-        ? locationMap.get(a.locationId) || "Unknown"
-        : "No Location",
-      assetCount: a._count.id,
+  return Array.from(buckets.entries())
+    .map(([id, b]) => ({
+      id,
+      groupName: b.name,
+      assetCount: b.assetCount,
       percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
     }))
     .sort((a, b) => b.assetCount - a.assetCount);
 }
@@ -2560,7 +2607,7 @@ export async function assetInventoryReport(
       where.categoryId = { in: categoryIds };
     }
     if (locationIds && locationIds.length > 0) {
-      where.locationId = { in: locationIds };
+      where.assetLocations = { some: { locationId: { in: locationIds } } };
     }
     if (statuses && statuses.length > 0) {
       where.status = { in: statuses as AssetStatus[] };
@@ -2636,7 +2683,11 @@ async function fetchInventoryRows(
       valuation: true,
       createdAt: true,
       category: { select: { name: true } },
-      location: { select: { name: true } },
+      assetLocations: {
+        select: {
+          location: { select: { name: true } },
+        },
+      },
       custody: {
         select: {
           custodian: { select: { name: true } },
@@ -2658,7 +2709,7 @@ async function fetchInventoryRows(
     assetName: a.title,
     thumbnailImage: a.thumbnailImage,
     category: a.category?.name || null,
-    location: a.location?.name || null,
+    location: getPrimaryLocation(a)?.name || null,
     status: a.status,
     // Phase 2 turned `Asset.custody` into a `Custody[]` array, so we
     // pick the first row (assets with no custody resolve to `null`
@@ -3037,7 +3088,7 @@ export async function assetUtilizationReport(
     // Build asset where clause
     const assetWhere: Prisma.AssetWhereInput = { organizationId };
     if (categoryId) assetWhere.categoryId = categoryId;
-    if (locationId) assetWhere.locationId = locationId;
+    if (locationId) assetWhere.assetLocations = { some: { locationId } };
 
     // Calculate total days in period
     const totalDays = Math.ceil(
@@ -3062,7 +3113,11 @@ export async function assetUtilizationReport(
         thumbnailImage: true,
         valuation: true,
         category: { select: { name: true } },
-        location: { select: { name: true } },
+        assetLocations: {
+          select: {
+            location: { select: { name: true } },
+          },
+        },
         bookingAssets: {
           where: {
             booking: {
@@ -3123,7 +3178,7 @@ export async function assetUtilizationReport(
         assetName: asset.title,
         thumbnailImage: asset.thumbnailImage,
         category: asset.category?.name || null,
-        location: asset.location?.name || null,
+        location: getPrimaryLocation(asset)?.name || null,
         totalDays,
         daysInUse,
         utilizationRate,

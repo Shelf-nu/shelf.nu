@@ -93,7 +93,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { perPage } = cookie;
 
     const [
-      { location, totalAssetsWithinLocation },
+      // `assets` is returned alongside `location` — there is no direct
+      // Location.assets relation; getLocation runs a separate pivot-filtered
+      // findMany and synthesizes the array here.
+      { location, totalAssetsWithinLocation, assets },
       { teamMembers, totalTeamMembers },
     ] = await Promise.all([
       getLocation({
@@ -137,7 +140,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       location,
       header,
       modelName,
-      items: location.assets,
+      items: assets,
       page,
       totalItems,
       perPage,

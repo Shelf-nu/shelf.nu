@@ -32,21 +32,42 @@ export function isQuantityTracked(
 /**
  * Returns the asset's primary kit (or null) from the `AssetKit` pivot.
  *
- * `AssetKit.@@unique([assetId])` enforces "at most one kit per asset",
- * so "primary" means "the only kit". The generic lets callers ask for
- * whatever kit shape their loader actually projected (e.g. `{ id; name }`
- * vs `{ id; name; status }`) without losing precision.
+ * `TKit` is inferred from the asset's projected shape: pass any value
+ * whose type carries `assetKits: { kit: ... }[]` and the helper picks
+ * up the nested kit type automatically. Callers loading a deeply-merged
+ * shape Prisma fails to narrow can still override with an explicit
+ * `getPrimaryKit<MyKit>(asset as unknown)` cast at the call site.
  *
- * The `unknown` cast inside is a workaround for Prisma's `MergeInclude`
- * not always preserving the deep `assetKits.select.kit` shape through
- * the `getAsset` / `getKit` generics — centralising the cast here keeps
- * the surrounding code clean.
- *
- * @param asset - Any asset-like value loaded with `assetKits: { select: { kit: { ... } } }`
- * @returns The first pivot row's kit, narrowed to `TKit`, or `null` when the asset has no kit
+ * @returns The first pivot row's kit, or `null` when the asset has no kit
  */
-export function getPrimaryKit<TKit>(asset: unknown): TKit | null {
-  const pivot = (asset as { assetKits?: Array<{ kit?: TKit | null }> })
-    ?.assetKits;
-  return pivot?.[0]?.kit ?? null;
+export function getPrimaryKit<TKit>(
+  asset: { assetKits?: Array<{ kit?: TKit | null }> } | null | undefined
+): TKit | null {
+  return asset?.assetKits?.[0]?.kit ?? null;
+}
+
+/**
+ * Returns the asset's primary location (or null) from the
+ * `AssetLocation` pivot.
+ *
+ * For INDIVIDUAL assets the `enforce_individual_asset_single_location`
+ * trigger guarantees ≤1 row, so "primary" means "the only location".
+ * For QUANTITY_TRACKED assets spanning multiple locations, "primary" is
+ * the first pivot row (callers needing the full breakdown should read
+ * `asset.assetLocations` directly).
+ *
+ * `TLoc` is inferred from the asset's projected shape — no need to
+ * re-declare the location shape at every call site as long as the
+ * loader projected it. Callers loading a shape Prisma fails to narrow
+ * can override with an explicit `getPrimaryLocation<MyLoc>(asset as unknown)`.
+ *
+ * @returns The first pivot row's location, or `null` when the asset is unplaced
+ */
+export function getPrimaryLocation<TLoc>(
+  asset:
+    | { assetLocations?: Array<{ location?: TLoc | null }> }
+    | null
+    | undefined
+): TLoc | null {
+  return asset?.assetLocations?.[0]?.location ?? null;
 }

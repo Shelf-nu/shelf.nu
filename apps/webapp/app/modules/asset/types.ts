@@ -42,8 +42,11 @@ export interface UpdateAssetPayload {
   categoryId?: Asset["categoryId"];
   /** Pass null to clear the asset model association */
   assetModelId?: string | null;
-  newLocationId?: Asset["locationId"];
-  currentLocationId?: Asset["locationId"];
+  // `Asset.locationId` no longer exists (location lives on the
+  // `AssetLocation` pivot). These carry the single primary-location id
+  // through the update flow.
+  newLocationId?: string | null;
+  currentLocationId?: string | null;
   mainImage?: Asset["mainImage"];
   thumbnailImage?: string | null;
   mainImageExpiration?: Asset["mainImageExpiration"];
@@ -145,7 +148,6 @@ export type AdvancedIndexAsset = Pick<
   | "thumbnailImage"
   | "mainImageExpiration"
   | "categoryId"
-  | "locationId"
   | "organizationId"
   | "status"
   | "type"

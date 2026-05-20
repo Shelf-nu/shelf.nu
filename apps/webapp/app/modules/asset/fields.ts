@@ -43,7 +43,11 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    location: LOCATION_WITH_HIERARCHY,
+    // `quantity` is pulled so loaders can show per-location slices and
+    // derive the "placed / unplaced" split for qty-tracked assets.
+    assetLocations: {
+      select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+    },
     custody: {
       select: {
         createdAt: true,
@@ -92,10 +96,10 @@ export const getAssetOverviewFields = (
       },
     },
     assetModel: { select: { id: true, name: true } },
-    // Phase 4a-Polish-2: a QUANTITY_TRACKED asset can sit in multiple kits at
-    // distinct slices. Pull `quantity` so the asset-overview sidebar can list
-    // each kit with its allocation and so the loader can derive a true
-    // "available" pool (units NOT in any kit, custody, or active booking).
+    // A QUANTITY_TRACKED asset can sit in multiple kits at distinct slices.
+    // Pull `quantity` so the asset-overview sidebar can list each kit with
+    // its allocation and so the loader can derive a true "available" pool
+    // (units NOT in any kit, custody, or active booking).
     assetKits: {
       select: {
         quantity: true,
@@ -172,7 +176,11 @@ export const assetIndexFields = ({
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    location: LOCATION_WITH_HIERARCHY,
+    // `quantity` is pulled so loaders can show per-location slices and
+    // derive the "placed / unplaced" split for qty-tracked assets.
+    assetLocations: {
+      select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+    },
     custody: {
       select: {
         quantity: true,
@@ -303,9 +311,10 @@ export const advancedAssetIndexFields = () => {
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    location: {
+    assetLocations: {
       select: {
-        name: true,
+        quantity: true,
+        location: { select: { name: true } },
       },
     },
     custody: {

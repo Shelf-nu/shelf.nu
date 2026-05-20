@@ -104,6 +104,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         custody: { include: { custodian: true } },
         tags: true,
         customFields: true,
+        // Pulled so the duplicate inherits the source asset's primary
+        // placement (`duplicateAsset` reads it via `getPrimaryLocation`).
+        assetLocations: {
+          select: { location: { select: { id: true } } },
+        },
       },
     });
 

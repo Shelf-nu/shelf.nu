@@ -536,14 +536,16 @@ export function getAssetsWhereInput({
 
   if (locationIds && locationIds.length > 0) {
     if (locationIds.includes("without-location")) {
+      // "in these locations" → at least one pivot row matches; "without
+      // location" → no pivot rows at all.
       where.OR = [
         ...(where.OR ?? []),
-        { locationId: { in: locationIds } },
-        { locationId: null },
+        { assetLocations: { some: { locationId: { in: locationIds } } } },
+        { assetLocations: { none: {} } },
       ];
     } else {
-      where.location = {
-        id: { in: locationIds },
+      where.assetLocations = {
+        some: { locationId: { in: locationIds } },
       };
     }
   }

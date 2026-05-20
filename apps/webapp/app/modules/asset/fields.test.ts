@@ -36,7 +36,7 @@ describe("getAssetOverviewFields", () => {
       "category",
       "qrCodes",
       "tags",
-      "location",
+      "assetLocations",
       "custody",
       "organization",
       "customFields",

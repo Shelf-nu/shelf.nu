@@ -6,6 +6,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
@@ -46,7 +47,11 @@ export async function action({ request }: ActionFunctionArgs) {
       select: {
         id: true,
         title: true,
-        location: { select: { id: true, name: true } },
+        type: true,
+        quantity: true,
+        assetLocations: {
+          select: { location: { select: { id: true, name: true } } },
+        },
         assetKits: {
           select: { kit: { select: { id: true, name: true } } },
         },
@@ -83,16 +88,36 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Update the asset's location
-    const updatedAsset = await db.asset.update({
-      where: { id: assetId },
-      data: { locationId },
-      select: {
-        id: true,
-        title: true,
-        location: { select: { id: true, name: true } },
-      },
+    // Setting a single primary location is a pivot replace: wipe any
+    // existing AssetLocation rows then create the new link.
+    // QUANTITY_TRACKED assets place their full quantity at the location;
+    // INDIVIDUAL assets are always quantity 1.
+    const pivotQuantity =
+      isQuantityTracked(asset) && asset.quantity != null ? asset.quantity : 1;
+
+    const updatedAsset = await db.$transaction(async (tx) => {
+      await tx.assetLocation.deleteMany({ where: { assetId } });
+      await tx.assetLocation.create({
+        data: { assetId, locationId, organizationId, quantity: pivotQuantity },
+      });
+
+      return tx.asset.findUniqueOrThrow({
+        where: { id: assetId },
+        select: {
+          id: true,
+          title: true,
+          assetLocations: {
+            select: { location: { select: { id: true, name: true } } },
+          },
+        },
+      });
     });
+
+    const { assetLocations: _, ...updatedAssetRest } = updatedAsset;
+    const updatedAssetWithLocation = {
+      ...updatedAssetRest,
+      location: getPrimaryLocation(updatedAsset),
+    };
 
     // Create activity note (matches webapp format)
     const actor = wrapUserLinkForNote({
@@ -106,11 +131,13 @@ export async function action({ request }: ActionFunctionArgs) {
       location.name.trim()
     );
 
+    const previousLocation = getPrimaryLocation(asset);
+
     let noteContent: string;
-    if (asset.location) {
+    if (previousLocation) {
       const currentLocationLink = wrapLinkForNote(
-        `/locations/${asset.location.id}`,
-        asset.location.name.trim()
+        `/locations/${previousLocation.id}`,
+        previousLocation.name.trim()
       );
       noteContent = `${actor} updated the location from ${currentLocationLink} to ${newLocationLink} via mobile app.`;
     } else {
@@ -124,7 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId: asset.id,
     });
 
-    return data({ asset: updatedAsset });
+    return data({ asset: updatedAssetWithLocation });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

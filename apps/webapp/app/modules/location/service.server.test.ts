@@ -24,9 +24,11 @@ describe("getLocationTotalValuation", () => {
 
     const total = await getLocationTotalValuation({ locationId: "loc-123" });
 
+    // Asset placement lives on the AssetLocation pivot, so the aggregation
+    // filters via `assetLocations: { some }` rather than `Asset.locationId`.
     expect(aggregateMock).toHaveBeenCalledWith({
       _sum: { valuation: true },
-      where: { locationId: "loc-123" },
+      where: { assetLocations: { some: { locationId: "loc-123" } } },
     });
     expect(total).toBe(1234.56);
   });

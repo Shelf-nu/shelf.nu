@@ -216,8 +216,11 @@ model Asset {
   organizationId String
   category       Category?    @relation(fields: [categoryId], references: [id])
   categoryId     String?
-  location       Location?    @relation(fields: [locationId], references: [id])
-  locationId     String?
+  // No `Asset.location` / `locationId` FK — location lives on the
+  // `AssetLocation` pivot (see `assetLocations` below). QUANTITY_TRACKED
+  // assets can be placed at multiple locations at distinct slices;
+  // INDIVIDUAL assets are capped at one row via the
+  // `enforce_individual_asset_single_location` trigger.
 
   custody      Custody[]
   notes        Note[]
@@ -232,6 +235,7 @@ model Asset {
   auditEntries    AuditAsset[]
   auditScans      AuditScan[]
   assetKits      AssetKit[]
+  assetLocations AssetLocation[]
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -243,7 +247,6 @@ model Asset {
   @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
   @@index([valuation, organizationId], name: "Asset_valuation_organizationId_idx")
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
-  @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([assetModelId, organizationId], name: "Asset_assetModelId_organizationId_idx")
   @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
@@ -726,9 +729,12 @@ model Location {
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   organizationId String
 
-  assets Asset[]
-  kits   Kit[]
-  notes  LocationNote[] @relation("LocationNotes")
+  // Asset placement is via the `AssetLocation` pivot; `kits` stays a
+  // direct relation since `Kit.locationId` remains a FK (kits have a
+  // single location, like INDIVIDUAL assets).
+  assetLocations AssetLocation[]
+  kits           Kit[]
+  notes          LocationNote[] @relation("LocationNotes")
 
   // Self-relation for nested locations
   parentId String?
@@ -832,6 +838,7 @@ model Organization {
   members TeamMember[]
   assets  Asset[]
   assetKits AssetKit[]
+  assetLocations AssetLocation[]
 
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
@@ -1556,15 +1563,43 @@ model AssetKit {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  // Phase 4a-Polish-2: the global "one kit per asset" constraint is
-  // replaced with a DB trigger `enforce_individual_asset_single_kit`
-  // that only caps INDIVIDUAL assets at 1 row, leaving QUANTITY_TRACKED
-  // assets free to belong to multiple kits. The composite below still
-  // prevents the same asset from being listed twice in the same kit.
-  // See migration `20260514..._drop_asset_kit_unique_add_triggers`.
+  // The "INDIVIDUAL asset belongs to at most one kit" cap is enforced
+  // by the `enforce_individual_asset_single_kit` trigger rather than a
+  // `@@unique([assetId])` constraint — QUANTITY_TRACKED assets are
+  // intentionally free to belong to multiple kits at distinct slices.
+  // The composite below still prevents listing the same asset twice in
+  // the same kit.
   @@unique([assetId, kitId])
   @@index([kitId])
   @@index([organizationId])
+}
+
+model AssetLocation {
+  id             String       @id @default(cuid())
+  asset          Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId        String
+  location       Location     @relation(fields: [locationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  locationId     String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  quantity       Int          @default(1)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Intentionally no `@@unique([assetId])` — QUANTITY_TRACKED assets
+  // can be split across multiple locations. The "INDIVIDUAL asset at
+  // one location" cap is enforced by the
+  // `enforce_individual_asset_single_location` trigger, and the
+  // `sum(quantity) <= Asset.quantity` invariant by the deferred
+  // `enforce_asset_location_sum_within_total` constraint trigger. The
+  // composite below still prevents listing the same asset twice at the
+  // same location.
+  @@unique([assetId, locationId])
+  @@index([locationId])
+  @@index([organizationId])
+  @@index([assetId])
 }
 
 model AssetReminder {

@@ -4,6 +4,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -75,7 +76,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           mainImageExpiration: true,
           thumbnailImage: true,
           category: { select: { id: true, name: true } },
-          location: { select: { id: true, name: true } },
+          // Select location through the pivot and flatten to a singular
+          // `location` below to keep the mobile JSON contract flat.
+          assetLocations: {
+            select: { location: { select: { id: true, name: true } } },
+          },
           custody: {
             select: {
               custodian: {
@@ -91,8 +96,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.asset.count({ where }),
     ]);
 
+    // Flatten the AssetLocation pivot back to a singular `location` so the
+    // mobile JSON contract stays unchanged (Phase 4b).
+    const assetsWithLocation = assets.map((asset) => {
+      const { assetLocations: _, ...rest } = asset;
+      return {
+        ...rest,
+        location: getPrimaryLocation(asset),
+      };
+    });
+
     return data({
-      assets,
+      assets: assetsWithLocation,
       page,
       perPage,
       totalCount,

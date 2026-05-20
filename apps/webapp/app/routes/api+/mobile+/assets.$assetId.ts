@@ -5,6 +5,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 
@@ -44,7 +45,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         updatedAt: true,
         userId: true,
         category: { select: { id: true, name: true, color: true } },
-        location: { select: { id: true, name: true } },
+        // Select location through the pivot and synthesise the singular
+        // `location` below so the mobile JSON contract stays flat.
+        assetLocations: {
+          select: { location: { select: { id: true, name: true } } },
+        },
         custody: {
           select: {
             createdAt: true,
@@ -107,11 +112,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    // Strip internal user id; keep mainImageExpiration so the client can
-    // decide when to call the refresh endpoint.
-    const { userId: _, ...assetData } = asset;
+    // Strip internal user id and the raw `assetLocations` pivot; keep
+    // mainImageExpiration so the client can decide when to call the
+    // refresh endpoint. Synthesise the singular `location` (Phase 4b).
+    const { userId: _, assetLocations: __, ...assetData } = asset;
+    const location = getPrimaryLocation(asset);
 
-    return data({ asset: assetData });
+    return data({ asset: { ...assetData, location } });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(

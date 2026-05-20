@@ -16,6 +16,7 @@ import type {
 } from "@prisma/client";
 import {
   AssetStatus,
+  AssetType,
   BookingStatus,
   ErrorCorrection,
   KitStatus,
@@ -33,7 +34,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -809,12 +810,12 @@ export async function getAssets(params: {
       if (locationIds.includes("without-location")) {
         where.OR = [
           ...(where.OR ?? []),
-          { locationId: { in: locationIds } },
-          { locationId: null },
+          { assetLocations: { some: { locationId: { in: locationIds } } } },
+          { assetLocations: { none: {} } },
         ];
       } else {
-        where.location = {
-          id: { in: locationIds },
+        where.assetLocations = {
+          some: { locationId: { in: locationIds } },
         };
       }
     }
@@ -993,7 +994,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
         -- Note: custody_agg.custody must be in GROUP BY because the
         -- SELECT references it. It is the per-asset aggregated jsonb
         -- array from the lateral subquery; jsonb supports equality so
@@ -1212,16 +1213,9 @@ export async function createAsset({
         });
       }
 
-      /** If a locationId is passed, link the location to the asset. */
-      if (locationId) {
-        Object.assign(data, {
-          location: {
-            connect: {
-              id: locationId,
-            },
-          },
-        });
-      }
+      // Placement can't be set inline in the asset create (the AssetLocation
+      // pivot needs the assetId), so it's created in the tx below right
+      // after the asset row.
 
       /** If a tags is passed, link the category to the asset. */
       if (tags && tags?.set?.length > 0) {
@@ -1311,11 +1305,26 @@ export async function createAsset({
         const created = await tx.asset.create({
           data,
           include: {
-            location: true,
+            assetLocations: { include: { location: true } },
             user: true,
             custody: true,
           },
         });
+
+        // Create the AssetLocation pivot row now that we have the assetId.
+        // Quantity is type-aware to match the sum-within-total trigger
+        // semantics: qty-tracked = full pool, INDIVIDUAL = 1.
+        if (locationId) {
+          await tx.assetLocation.create({
+            data: {
+              assetId: created.id,
+              locationId,
+              organizationId,
+              quantity:
+                type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
+            },
+          });
+        }
 
         // Activity event must be inside transaction for atomicity
         await recordEvent(
@@ -1330,7 +1339,18 @@ export async function createAsset({
           tx
         );
 
-        return created;
+        // Re-read so the returned shape has the pivot we just created
+        // (the initial create's include came back empty for it).
+        return locationId
+          ? tx.asset.findUniqueOrThrow({
+              where: { id: created.id },
+              include: {
+                assetLocations: { include: { location: true } },
+                user: true,
+                custody: true,
+              },
+            })
+          : created;
       });
 
       // Successfully created asset, exit the retry loop
@@ -1551,23 +1571,13 @@ export async function updateAsset({
           shouldBeCaptured: false,
         });
       }
-      Object.assign(data, {
-        location: {
-          connect: {
-            id: newLocationId,
-          },
-        },
-      });
+      // We can't inline a `connect` on `data` for location anymore — the
+      // AssetLocation pivot write happens in the $transaction below
+      // alongside the asset update.
     }
 
     /** disconnecting location relation if a user clears locations */
-    if (currentLocationId && !newLocationId) {
-      Object.assign(data, {
-        location: {
-          disconnect: true,
-        },
-      });
-    }
+    // (no-op here too; the pivot deleteMany happens in the tx below.)
 
     /** If a tags is passed, link the category to the asset. */
     if (isTagUpdate) {
@@ -1635,15 +1645,55 @@ export async function updateAsset({
       });
     }
 
-    const asset = await db.asset.update({
-      where: { id, organizationId },
-      data,
-      include: {
-        location: true,
-        tags: true,
-        category: true,
-        organization: true,
-      },
+    // Bundle the asset update and AssetLocation pivot ops in a single tx
+    // so a location change is atomic (and so the sum-within-total trigger
+    // sees the final state at COMMIT).
+    const asset = await db.$transaction(async (tx) => {
+      const updated = await tx.asset.update({
+        where: { id, organizationId },
+        data,
+        include: {
+          assetLocations: { include: { location: true } },
+          tags: true,
+          category: true,
+          organization: true,
+        },
+      });
+
+      if (isChangingLocation) {
+        // Always clear any existing primary placement first. INDIVIDUAL
+        // is capped at 1 by trigger; for QUANTITY_TRACKED this also
+        // collapses any multi-placement back to the new primary —
+        // multi-placement edits go through the location picker route
+        // instead of this single-location asset edit form.
+        await tx.assetLocation.deleteMany({ where: { assetId: id } });
+        if (newLocationId) {
+          await tx.assetLocation.create({
+            data: {
+              assetId: id,
+              locationId: newLocationId,
+              organizationId,
+              quantity:
+                updated.type === AssetType.QUANTITY_TRACKED && updated.quantity
+                  ? updated.quantity
+                  : 1,
+            },
+          });
+        }
+      }
+
+      // Re-read so the returned `assetLocations` reflects the pivot ops.
+      return isChangingLocation
+        ? tx.asset.findUniqueOrThrow({
+            where: { id, organizationId },
+            include: {
+              assetLocations: { include: { location: true } },
+              tags: true,
+              category: true,
+              organization: true,
+            },
+          })
+        : updated;
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -2325,6 +2375,8 @@ export async function duplicateAsset({
       custody: { include: { custodian: true } };
       tags: true;
       customFields: true;
+      // Needed so the duplicate can copy the primary placement.
+      assetLocations: { select: { location: { select: { id: true } } } };
     };
   }>;
   userId: string;
@@ -2346,7 +2398,7 @@ export async function duplicateAsset({
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
-      locationId: asset.locationId ?? undefined,
+      locationId: getPrimaryLocation(asset)?.id ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
     };
@@ -2698,7 +2750,7 @@ export async function fetchAssetsForExport({
       },
       include: {
         category: true,
-        location: true,
+        assetLocations: { include: { location: true } },
         notes: true,
         custody: {
           include: {
@@ -4304,7 +4356,16 @@ export async function bulkUpdateAssetLocation({
         select: {
           id: true,
           title: true,
-          location: true,
+          type: true,
+          quantity: true,
+          // We only care about the primary placement here (the bulk
+          // location update sets a single new location per asset).
+          assetLocations: {
+            select: {
+              locationId: true,
+              location: { select: { id: true, name: true } },
+            },
+          },
           assetKits: { select: { kit: { select: { id: true, name: true } } } },
         },
       }),
@@ -4347,16 +4408,30 @@ export async function bulkUpdateAssetLocation({
 
     // Filter out assets already at the target location
     const assetsToUpdate = assets.filter(
-      (a) => a.location?.id !== newLocation?.id
+      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
     );
 
     await db.$transaction(async (tx) => {
       if (assetsToUpdate.length > 0) {
-        /** Updating location of assets to newLocation */
-        await tx.asset.updateMany({
-          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
-          data: { locationId: newLocation?.id ? newLocation.id : null },
+        // Per-asset pivot replace: drop any existing AssetLocation rows
+        // for the asset, then create the new one (skipped when clearing).
+        // The DEFERRED sum-within-total trigger re-checks at COMMIT.
+        await tx.assetLocation.deleteMany({
+          where: { assetId: { in: assetsToUpdate.map((a) => a.id) } },
         });
+        if (newLocation) {
+          await tx.assetLocation.createMany({
+            data: assetsToUpdate.map((asset) => ({
+              assetId: asset.id,
+              locationId: newLocation.id,
+              organizationId,
+              quantity:
+                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
+                  ? asset.quantity
+                  : 1,
+            })),
+          });
+        }
 
         /** Creating notes for the assets */
         await tx.note.createMany({
@@ -4364,7 +4439,7 @@ export async function bulkUpdateAssetLocation({
             const isRemoving = !newLocationId;
 
             const content = getLocationUpdateNoteContent({
-              currentLocation: asset.location,
+              currentLocation: getPrimaryLocation(asset),
               newLocation,
               userId,
               firstName: user?.firstName ?? "",
@@ -4392,7 +4467,7 @@ export async function bulkUpdateAssetLocation({
             assetId: asset.id,
             locationId: newLocation?.id ?? undefined,
             field: "locationId",
-            fromValue: asset.location?.id ?? null,
+            fromValue: getPrimaryLocation(asset)?.id ?? null,
             toValue: newLocation?.id ?? null,
           })),
           tx
@@ -4408,26 +4483,27 @@ export async function bulkUpdateAssetLocation({
     });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
-      (a) => a.location?.id !== newLocation?.id
+      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
     );
     const assetData = actuallyChanged.map((a) => ({
       id: a.id,
       title: a.title,
     }));
 
-    // Group assets by their previous location
+    // Group assets by their previous (primary) location
     const byPrevLocation = new Map<
       string,
       { name: string; assets: typeof assetData }
     >();
     for (const asset of actuallyChanged) {
-      if (!asset.location) continue;
-      const existing = byPrevLocation.get(asset.location.id);
+      const prev = getPrimaryLocation(asset);
+      if (!prev) continue;
+      const existing = byPrevLocation.get(prev.id);
       if (existing) {
         existing.assets.push({ id: asset.id, title: asset.title });
       } else {
-        byPrevLocation.set(asset.location.id, {
-          name: asset.location.name,
+        byPrevLocation.set(prev.id, {
+          name: prev.name,
           assets: [{ id: asset.id, title: asset.title }],
         });
       }

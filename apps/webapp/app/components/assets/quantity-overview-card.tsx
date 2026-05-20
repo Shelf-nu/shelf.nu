@@ -59,10 +59,9 @@ export interface QuantityOverviewCardProps {
    */
   inCustodyQuantity?: number;
   /**
-   * Phase 4a-Polish-2: sum of `AssetKit.quantity` across every kit this
-   * asset participates in. Surfaced on its own "In kits" row when > 0
-   * so users see how many units are earmarked for kit use — these are
-   * not free stock.
+   * Sum of `AssetKit.quantity` across every kit this asset participates in.
+   * Surfaced on its own "In kits" row when > 0 so users see how many units
+   * are earmarked for kit use — these are not free stock.
    */
   inKitsQuantity?: number;
   /** Quantity reserved in upcoming bookings (RESERVED status) */
@@ -203,11 +202,11 @@ export function QuantityOverviewCard({
         value={formatWithUnit(available, unit)}
         warning={isLowStock}
       />
-      {/* Phase 4a-Polish-2: render the kit allocation total only when the
-          asset is actually in a kit. Mirrors the same conditional pattern
-          used for "Reserved" / "Checked out" below — clutter-free for
-          assets that don't belong to any kit. The detailed per-kit
-          breakdown lives in the dedicated "Included in kits" card. */}
+      {/* Render the kit allocation total only when the asset is actually
+          in a kit. Mirrors the same conditional pattern used for "Reserved"
+          / "Checked out" below — clutter-free for assets that don't belong
+          to any kit. The detailed per-kit breakdown lives in the dedicated
+          "Included in kits" card. */}
       {inKits > 0 ? (
         <OverviewRow label="In kits" value={formatWithUnit(inKits, unit)} />
       ) : null}

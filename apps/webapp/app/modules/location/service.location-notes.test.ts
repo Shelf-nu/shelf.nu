@@ -22,6 +22,14 @@ const dbMocks = vi.hoisted(() => ({
     // why: org-scope assertion in updateLocationAssets calls db.asset.count
     count: vi.fn(),
   },
+  // why: Phase 4b moved placement off Asset.locationId onto the AssetLocation
+  // pivot. updateLocationAssets/updateLocationKits now create/delete pivot
+  // rows directly inside the transaction, so the delegate must be mockable.
+  assetLocation: {
+    createMany: vi.fn(),
+    deleteMany: vi.fn(),
+    findMany: vi.fn(),
+  },
   // why: kit model stubs for fetching kits affected by location changes
   kit: {
     findMany: vi.fn(),
@@ -40,6 +48,7 @@ const dbMocks = vi.hoisted(() => ({
     const txClient = {
       location: dbMocks.location,
       asset: dbMocks.asset,
+      assetLocation: dbMocks.assetLocation,
       kit: dbMocks.kit,
       user: dbMocks.user,
     };
@@ -138,7 +147,10 @@ describe("location service activity logging", () => {
       address: "Old St",
       latitude: null,
       longitude: null,
-      assets: [],
+      // Placement comes from the AssetLocation pivot, not a direct `assets`
+      // relation. updateLocationAssets reads `location.assetLocations` to
+      // derive the current placement set.
+      assetLocations: [],
       kits: [],
     });
 
@@ -225,7 +237,11 @@ describe("location service activity logging", () => {
         {
           id: "asset-1",
           title: "Camera",
-          location: { id: "loc-3", name: "Warehouse" },
+          type: "INDIVIDUAL",
+          quantity: 1,
+          // `getPrimaryLocation` reads `assetLocations[0].location` from
+          // the pivot to derive prior placement.
+          assetLocations: [{ location: { id: "loc-3", name: "Warehouse" } }],
           user: { id: "user-1", firstName: "Ada", lastName: "Lovelace" },
         },
       ]);
