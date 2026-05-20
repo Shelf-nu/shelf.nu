@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.3, IDOR-hardened)
+# PRD — Asset-Index PDF Export (v0.3.1, test-path corrected)
 
 | Field | Value |
 |---|---|
@@ -90,7 +90,7 @@ Set only after §4.2 passes. Anti-gaming clauses prove themselves via literal co
 output for each pasted into the transcript on the final turn:
 
 (1) `pnpm webapp:test -- --run apps/webapp/app/components/assets/assets-index/export-assets-pdf.test.tsx
-     apps/webapp/app/routes/_layout+/assets.export.$fileName.pdf.test.ts`
+     apps/webapp/test/routes-tests/asset-index-pdf-export.test.ts`
     exits 0; summary shows zero failed, zero skipped, zero todo; passing-
     assertion count >= BASELINE_ASSERTIONS recorded at §4.2 (paste summary);
 (2) `pnpm webapp:lint` exits 0 and `pnpm turbo typecheck` exits 0 (paste both);
@@ -187,7 +187,7 @@ The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+so
 ### 6.1 Suite A — the entire `/goal` scope
 
 `apps/webapp/app/components/assets/assets-index/export-assets-pdf.test.tsx` +
-`apps/webapp/app/routes/_layout+/assets.export.$fileName.pdf.test.ts`.
+`apps/webapp/test/routes-tests/asset-index-pdf-export.test.ts`.
 
 | # | Test group | Assertion | Pulls into existence |
 |---|---|---|---|
@@ -216,7 +216,7 @@ There are no DB-semantic invariants in this feature. The select-all/filter patte
 
 **PR-1 — the feature `/goal` PR (this PRD).** Honestly machine-verified by Suite A (§6.1). Ships:
 - `apps/webapp/app/components/assets/assets-index/export-assets-pdf.tsx` (printable component, AssetIndexPdf + ExportAssetsPdfButton)
-- `apps/webapp/app/routes/_layout+/assets.export.$fileName.pdf.tsx` (server loader: permission gate + tier gate + filter/select-all + row shaping for the component)
+- `apps/webapp/app/routes/_layout+/assets.export.$fileName[.pdf].tsx` (server loader: permission gate + tier gate + filter/select-all + row shaping for the component)
 - Wire `<ExportAssetsPdfButton>` into the existing export menu next to the CSV button (the menu UI minimally extended, not redesigned)
 
 **PR-2 — human-driven follow-up (not `/goal`-driven; out of scope here).** Subjective polish reviewed by CTO + designer:
