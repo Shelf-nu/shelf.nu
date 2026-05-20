@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment node
+ */
+/**
  * Suite A — Asset-Index PDF Export (loader side).
  *
  * TDD RED STATE (commit 1): the loader is a throwing stub, so every test
