@@ -63,7 +63,8 @@
       "@tremor/react>react-day-picker": "^9.14.0",
       "@tremor/react>react-dom": "19.2.1",
       "cross-spawn": "~7.0.6",
-      "p-map": "4.0.0"
+      "p-map": "4.0.0",
+      "path-to-regexp@<0.1.13": "0.1.13"
     },
     "patchedDependencies": {
       "expo-image@55.0.6": "patches/expo-image@55.0.6.patch"
