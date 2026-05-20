@@ -23,12 +23,21 @@ export type PdfColumn = {
   label: string; // human-rendered header
 };
 
-/** Raw column entry shape as it lives in AssetIndexSettings.columns JSON. */
+/**
+ * Raw column entry shape as it lives in `AssetIndexSettings.columns` JSON.
+ *
+ * Mirrors the `Column` type at
+ * `apps/webapp/app/modules/asset-index-settings/helpers.ts`: persisted
+ * entries have NO `label` field. The display label is derived at render
+ * time via a name→label resolver (see `selectVisibleColumns`'s
+ * `labelFor` arg). Treating `label` as required here was the C1 bug
+ * Codex flagged on commit 3d7ba0589: real saved JSON produced
+ * `label: undefined`, so PDF headers rendered blank.
+ */
 export type RawColumnEntry = {
   name: string;
   visible: boolean;
   position: number;
-  label: string;
 };
 
 /** A single row in the PDF, keyed by column name. */
@@ -68,17 +77,29 @@ export const PDF_ORIENTATION: "landscape" | "portrait" = "landscape";
 
 /**
  * Loader-layer helper: turns AssetIndexSettings.columns JSON into the
- * component-ready list (visible only, sorted by position ascending).
+ * component-ready list (visible only, sorted by position ascending,
+ * with display labels derived via `labelFor`).
+ *
  * Pure function — no I/O. Test ownership: PRD §6.1 A1.
  *
+ * The `labelFor` argument is required because persisted column entries
+ * in `AssetIndexSettings.columns` have no `label` field — they live as
+ * `{name, visible, position}`. Callers pass `parseColumnName` (from
+ * `~/modules/asset-index-settings/helpers`) so fixed fields and custom
+ * fields both resolve correctly.
+ *
  * @param raw - The raw column entries from AssetIndexSettings.columns
+ * @param labelFor - Resolver mapping a column name to its display label
  * @returns Visible columns only, sorted by position ascending
  */
-export function selectVisibleColumns(raw: RawColumnEntry[]): PdfColumn[] {
+export function selectVisibleColumns(
+  raw: RawColumnEntry[],
+  labelFor: (name: string) => string
+): PdfColumn[] {
   return raw
     .filter((col) => col.visible)
     .sort((a, b) => a.position - b.position)
-    .map(({ name, position, label }) => ({ name, position, label }));
+    .map(({ name, position }) => ({ name, position, label: labelFor(name) }));
 }
 
 /**

@@ -101,25 +101,44 @@ function makeProps(
 }
 
 describe("Suite A — Asset-Index PDF Export (component)", () => {
-  describe("A1 — selectVisibleColumns (filter + sort)", () => {
+  describe("A1 — selectVisibleColumns (filter + sort + derived labels)", () => {
+    // C1 regression (Codex P1 on commit 3d7ba0589): RawColumnEntry no
+    // longer carries `label` — labels are derived via the `labelFor`
+    // resolver passed by the caller. A1.a + A1.b cover filter+sort; A1.c
+    // covers label derivation.
+    const labelFor = (name: string): string => `LBL-${name.toUpperCase()}`;
+
     it("A1.a returns only visible:true entries, sorted by position ascending", () => {
       console.log("[A1.a] selectVisibleColumns filter+sort");
       const raw: RawColumnEntry[] = [
-        { name: "a", visible: true, position: 2, label: "A" },
-        { name: "b", visible: false, position: 1, label: "B" },
-        { name: "c", visible: true, position: 0, label: "C" },
+        { name: "a", visible: true, position: 2 },
+        { name: "b", visible: false, position: 1 },
+        { name: "c", visible: true, position: 0 },
       ];
-      const result = selectVisibleColumns(raw);
+      const result = selectVisibleColumns(raw, labelFor);
       expect(result.map((c) => c.name)).toEqual(["c", "a"]);
     });
 
     it("A1.b returns an empty array when all entries are visible:false", () => {
       console.log("[A1.b] selectVisibleColumns all-hidden");
       expect(
-        selectVisibleColumns([
-          { name: "a", visible: false, position: 0, label: "A" },
-        ])
+        selectVisibleColumns(
+          [{ name: "a", visible: false, position: 0 }],
+          labelFor
+        )
       ).toEqual([]);
+    });
+
+    it("A1.c derives the display label for each visible column via labelFor", () => {
+      console.log("[A1.c] selectVisibleColumns derives labels");
+      const raw: RawColumnEntry[] = [
+        { name: "valuation", visible: true, position: 0 },
+        { name: "name", visible: true, position: 1 },
+      ];
+      const result = selectVisibleColumns(raw, labelFor);
+      // Label must come from labelFor — proves the helper does NOT depend
+      // on a persisted `label` field (which real saved JSON lacks).
+      expect(result.map((c) => c.label)).toEqual(["LBL-VALUATION", "LBL-NAME"]);
     });
   });
 
