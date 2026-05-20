@@ -116,26 +116,34 @@ const userFindUniqueMock = vi.fn(
   })
 );
 
+// Module-scoped so E1 tests can inspect the `orderBy` arg the loader
+// passed to Prisma.
+const assetFindManyMock = vi.fn(
+  async (
+    args: {
+      where?: { organizationId?: string; id?: unknown };
+      orderBy?: unknown;
+    } = {}
+  ) => {
+    // F1 GUARD (per CR §4.2 review): the PRD contract says the loader
+    // must use getAssetsWhereInput EXCLUSIVELY and never add an id-
+    // filter from request input. If a spec-violating impl adds
+    // `where.id = { in: [...] }`, this mock returns nothing so the
+    // positive A12 assertion (org-A asset DOES appear) fails — which
+    // correctly BLOCKS /goal from green-lighting the violation.
+    if (args.where?.id !== undefined) return [];
+    const org = args.where?.organizationId;
+    if (org === "org-A") return [ORG_A_ASSET];
+    if (org === "org-B") return [ORG_B_ASSET];
+    return [];
+  }
+);
+
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
-      findMany: vi.fn(
-        async (
-          args: { where?: { organizationId?: string; id?: unknown } } = {}
-        ) => {
-          // F1 GUARD (per CR §4.2 review): the PRD contract says the loader
-          // must use getAssetsWhereInput EXCLUSIVELY and never add an id-
-          // filter from request input. If a spec-violating impl adds
-          // `where.id = { in: [...] }`, this mock returns nothing so the
-          // positive A12 assertion (org-A asset DOES appear) fails — which
-          // correctly BLOCKS /goal from green-lighting the violation.
-          if (args.where?.id !== undefined) return [];
-          const org = args.where?.organizationId;
-          if (org === "org-A") return [ORG_A_ASSET];
-          if (org === "org-B") return [ORG_B_ASSET];
-          return [];
-        }
-      ),
+      findMany: (...args: unknown[]) =>
+        (assetFindManyMock as unknown as (...a: unknown[]) => unknown)(...args),
     },
     organization: {
       findFirst: vi.fn(async () => ({
@@ -636,6 +644,144 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       const html = await (res as Response).text();
       // Footer fallback when no displayable name is available.
       expect(html).toContain("User");
+    });
+  });
+
+  describe("A0.j — (E1 regression) loader applies user's sort from URL to asset query", () => {
+    it("A0.j.1 ?orderBy=valuation&orderDirection=asc → findMany called with {valuation:'asc'}", async () => {
+      // Codex P2 on 7609b8d97: loader forwarded URL params but findMany
+      // had no orderBy, so PDF rows used DB-default ordering instead of
+      // the user's current view sort.
+      console.log("[A0.j.1] E1 — orderBy plumbed to findMany");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      await loader(
+        reqFor(
+          "https://shelf.test/assets/export/x.pdf?orderBy=valuation&orderDirection=asc"
+        ) as never
+      );
+      const call = assetFindManyMock.mock.calls[0]?.[0] as {
+        orderBy?: Record<string, string>;
+      };
+      expect(call?.orderBy).toEqual({ valuation: "asc" });
+    });
+
+    it("A0.j.2 no orderBy param → defaults to {createdAt:'desc'}", async () => {
+      console.log("[A0.j.2] E1 — default sort when no param");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
+      const call = assetFindManyMock.mock.calls[0]?.[0] as {
+        orderBy?: Record<string, string>;
+      };
+      expect(call?.orderBy).toEqual({ createdAt: "desc" });
+    });
+
+    it("A0.j.3 unknown orderBy field → falls back to default (no Prisma blow-up)", async () => {
+      // Allowlist guard: a stale URL or hostile input passing `orderBy=` to
+      // a non-existent / non-scalar field must not cause a Prisma error or
+      // attempt to order by an arbitrary string.
+      console.log("[A0.j.3] E1 — unknown field falls back to default");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      await loader(
+        reqFor(
+          "https://shelf.test/assets/export/x.pdf?orderBy=evilField&orderDirection=asc"
+        ) as never
+      );
+      const call = assetFindManyMock.mock.calls[0]?.[0] as {
+        orderBy?: Record<string, string>;
+      };
+      expect(call?.orderBy).toEqual({ createdAt: "desc" });
+    });
+
+    it("A0.j.4 asset-index 'name' alias maps to Prisma 'title'", async () => {
+      // The asset-index UI calls the title column "name"; the Prisma
+      // scalar is `title`. The allowlist must translate.
+      console.log("[A0.j.4] E1 — name → title alias");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      await loader(
+        reqFor(
+          "https://shelf.test/assets/export/x.pdf?orderBy=name&orderDirection=asc"
+        ) as never
+      );
+      const call = assetFindManyMock.mock.calls[0]?.[0] as {
+        orderBy?: Record<string, string>;
+      };
+      expect(call?.orderBy).toEqual({ title: "asc" });
+    });
+  });
+
+  describe("A0.k — (E2 regression) non-renderable columns excluded from PDF", () => {
+    it("A0.k.1 'actions' column from settings does NOT render a header in the PDF", async () => {
+      // Codex P2 on 7609b8d97: settings.columns includes `actions` (UI-
+      // only) and deferred fields like `upcomingReminder` that the PDF
+      // row mapper doesn't populate. Including them produced blank
+      // trailing cells per row — misleading on first export.
+      console.log("[A0.k.1] E2 — actions column excluded");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
+        id: "settings-A",
+        userId: "user-1",
+        organizationId: "org-A",
+        columns: [
+          { name: "name", visible: true, position: 0 },
+          { name: "actions", visible: true, position: 1 },
+        ],
+        freezeColumn: true,
+        showAssetImage: false,
+      });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // `actions` derived label is "Actions" (per columnsLabelsMap). It
+      // must NOT appear as a header in the rendered table.
+      // We scope to <th>…</th> because the word "Actions" could legitimately
+      // appear elsewhere (it doesn't today, but be safe).
+      // why: `<th\b` (word boundary) prevents matching `<thead>`, which
+      // would otherwise greedy-capture cross-cell content up to the first
+      // `</th>` and conflate it with header text.
+      const headers = Array.from(
+        html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)
+      ).map((m) => m[1].trim());
+      expect(headers).not.toContain("Actions");
+      // "Name" must still appear (proves the allowlist didn't strip everything).
+      expect(headers).toContain("Name");
+    });
+
+    it("A0.k.2 deferred columns (upcomingReminder, upcomingBookings) excluded", async () => {
+      console.log("[A0.k.2] E2 — deferred columns excluded");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
+        id: "settings-A",
+        userId: "user-1",
+        organizationId: "org-A",
+        columns: [
+          { name: "name", visible: true, position: 0 },
+          { name: "upcomingReminder", visible: true, position: 1 },
+          { name: "upcomingBookings", visible: true, position: 2 },
+          { name: "valuation", visible: true, position: 3 },
+        ],
+        freezeColumn: true,
+        showAssetImage: false,
+      });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // why: `<th\b` (word boundary) prevents matching `<thead>`, which
+      // would otherwise greedy-capture cross-cell content up to the first
+      // `</th>` and conflate it with header text.
+      const headers = Array.from(
+        html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)
+      ).map((m) => m[1].trim());
+      // The two deferred columns' derived labels (from columnsLabelsMap):
+      //   upcomingReminder → "Upcoming Reminder"
+      //   upcomingBookings → "Upcoming Bookings"
+      // Neither must appear as a PDF header.
+      expect(headers).not.toContain("Upcoming Reminder");
+      expect(headers).not.toContain("Upcoming Bookings");
+      // The renderable columns DO appear.
+      expect(headers).toContain("Name");
+      expect(headers).toContain("Value");
     });
   });
 });
