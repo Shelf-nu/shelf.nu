@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.4.1, post-cap stale-comment fix)
+# PRD — Asset-Index PDF Export (v0.5, §4.2-adversarial-pass)
 
 | Field | Value |
 |---|---|
@@ -52,11 +52,12 @@ These are the default tie-breakers. §14 open questions may override a specific 
 
 The Vitest + RTL suite is committed as commit 1, then approved by CTO/reviewing agent against §6.0 interfaces and §6.1 assertions before `/goal` is set. Criteria:
 
-- Every Suite A (§6.1) row has ≥1 test whose assertion is the *behavioral* claim, not a structural proxy.
-- Each test fails for the right reason on `main` (red-first proof pasted in PR before any implementation commit).
+- Every Suite A (§6.1) row has ≥1 test whose assertion is the *behavioral* claim, not a structural proxy. **Security-class tests (e.g. A12 cross-org IDOR) MUST be behavioral** — asserting "the IDOR is excluded from output", not "the call was made with the right arg". A structural-proxy security test is worse than no test (it manufactures false confidence) — see §4.6.
+- Each test fails for the right reason on `main` (red-first proof pasted in PR before any implementation commit). A test that fails due to a missing fixture / unspecified accessible-name / fragile path is failing for the *wrong* reason and burns `/goal` turns chasing it.
 - No `.skip` / `.only` / `.todo`. `BASELINE_ASSERTIONS` recorded as the floor.
 - Suite A includes a **loader-wiring** test that drives the real loader with mocked `getAsset` / `getOrganizationTierLimit` to prove the wiring without a real DB.
 - **Safari print-CSS** is a known browser-rendering risk and gets its own explicit assertion (test A7) on the print-CSS media query and page-break classes — not a "test in browser later" promise.
+- **Reviewer ≠ author.** The agent / human running the §4.2 gate MUST NOT be the one who wrote the test suite. Self-review is structurally compromised; an author will rationalise their own omissions, tautologies, and proxies. If only the author is available, the gate must be run twice — once by the author (red-team mode, adversarial pass), then again by an independent agent or human before `/goal` is set. Added 2026-05-20 after the v0.4.1 gate review surfaced author-blindspot findings (#1 A12 structural-proxy, #2 wrong-reason fails) that a clean second pass caught.
 
 ### 4.3 Pipeline
 
@@ -169,7 +170,13 @@ export type RawColumnEntry = {
 };
 export function selectVisibleColumns(raw: RawColumnEntry[]): PdfColumn[];
 
-// The action button + dialog (RTL-testable, no data fetching here either)
+// The action button + dialog (RTL-testable, no data fetching here either).
+//
+// PINNED CONTRACT (per §4.2 "red-for-right-reason" criterion): the
+// "Include thumbnails" checkbox's accessible name MUST be exactly the
+// string "Include thumbnails" — no localisation indirection in v1, no
+// "Include images" / "Add asset photos" variants. Locked here so the
+// A3 test asserts the exact string instead of fuzzy regex.
 export function ExportAssetsPdfButton(props: {
   disabled: boolean;
   initialIncludeImages: boolean;     // defaults to AssetIndexSettings.showAssetImage
@@ -393,4 +400,24 @@ Applied 2026-05-20 from Nikolay's §14 answers + Codex P1 + CR review-pass-2.
 
 ---
 
-*v0.4 closes §14. The §4.2 adequacy gate is now the only remaining human checkpoint before `/goal` is set. Risk #1 (Safari rendering) is the one quality-pass gate before general release. PRD is sealed pending CTO ratification.*
+### 15.7 §4.2 adversarial review-pass corrections (v0.4.1 → v0.5)
+
+Self-§4.2 gate run on PR #2564 commit `b40fe9dce` surfaced six findings, four addressed (Option C+ accepted by Nikolay). Process correction added in §4.2 (reviewer ≠ author).
+
+| # | Finding | Resolution |
+|---|---|---|
+| #1 (🔴) | **A12 was structural-proxy, not behavioral.** Original test asserted only `getAssetsWhereInput` was called with the caller's org id — but the helper was *mocked away*. The security property (foreign-org asset excluded from output) wasn't actually verified | **Fixed.** `db.asset.findMany` mock now returns DIFFERENT rows based on `where.organizationId` (ORG_A_ASSET vs ORG_B_ASSET). A12 asserts: (a) the foreign-org asset id NEVER appears in the response HTML, (b) org-A's own asset DOES appear (proves "filtered correctly" vs "broken empty"), (c) structural backstop kept |
+| #2 (🔴) | Multiple tests would fail for the **wrong reason** on `main` (violates §4.2 criterion). A0.b had no workspace-name fixture; A3 used regex-fuzzy accessible name; A5 pinned param names that may not match asset-index conventions; A11 used `process.cwd()` (fragile) | **Fixed.** A0.b: `requirePermission` mock now includes `name: WORKSPACE_NAME` on the organization fixture. A3: §6.0 contract pinned `"Include thumbnails"` as the exact accessible name; tests use it. A5: stopped pinning param names; tests use distinctive *values* that surface regardless of which params the impl picks. A11: switched to `fileURLToPath(import.meta.url)` resolution |
+| #4 (🟡) | A9 sanitization was loose — didn't verify the existing `sanitizeFilename` helper was actually invoked. A lazy impl could write a worse custom sanitiser and pass | **Fixed.** `vi.mock("~/utils/sanitize-filename")` + `expect(sanitizeFilenameMock).toHaveBeenCalledWith(workspaceName)`. A9 split into A9.a (basic shape), A9.b (helper enforcement), A9.c (output safety) |
+| #6 (🟡) | A4 didn't cover the `includeImages=true, thumbnailUrl=null` edge case — common in real workspaces where many assets lack photos | **Fixed.** New A4.c asserts zero `<img>` when rows have null thumbnail urls even if `includeImages=true` |
+| #3 (🟠) | A11 only checks DIRECT imports, not transitive — PRD wording said "transitively" | **Deferred + documented.** A real import-graph walker is its own micro-project. Kept the direct-import check as the v1 protection; PRD wording softened to acknowledge the gap. Re-trigger condition: any new `@react-pdf/renderer`-class dep gets introduced anywhere in the repo |
+| #5 (🟢) | A6 date assertion (`textContent.toContain("2026")`) is too loose | **Skipped.** Pure cosmetic nit; revisit if the date rendering ever has a bug |
+| (PRD §4.2 process) | **Reviewer == author** (I wrote both PRD §6.1 and the test suite) is a structural conflict the PRD didn't address | **Added.** §4.2 now requires reviewer ≠ author. The author may run an adversarial first pass, but the gate is only "passed" after an independent reviewer signs off |
+
+Test count: ~22 → ~23 cases / 13 → 13 groups (A4.c + A9.b/c added; A12 expanded same group).
+
+The §4.2 gate now passes on the *content* (suite covers what the spec promises behaviorally); the *process* still needs an independent second pass before `/goal` runs.
+
+---
+
+*v0.5 hardens the test suite per the §4.2 adversarial review and the Musk-algorithm step-1 lens applied to high-volume features. The §4.2 gate's content criteria are met; the process criterion (reviewer ≠ author) requires one more independent pass before `/goal` is set. Risk #1 (Safari rendering) remains the one quality-pass gate before general release. PRD is sealed pending that independent pass.*
