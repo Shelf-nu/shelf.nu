@@ -292,7 +292,8 @@ const SCAN_GEO_UPDATE_WINDOW_MS = 5 * 60 * 1000;
  * @param params.longitude - Geolocation longitude
  * @returns The updated scan
  * @throws {ShelfError} 403 if the scan is missing, the qrId does not match,
- *                      or the scan is older than the window
+ *                      the scan is older than the window, or its GPS was
+ *                      already set (write-once)
  */
 export async function updateScanGeolocation({
   scanId,
@@ -307,12 +308,20 @@ export async function updateScanGeolocation({
 }) {
   const scan = await db.scan.findUnique({
     where: { id: scanId },
-    select: { id: true, createdAt: true, qrId: true },
+    select: { id: true, createdAt: true, qrId: true, latitude: true },
   });
 
+  // why: GPS update is **write-once**. A successful update sets latitude
+  // (and longitude) once; any subsequent attempt — even with a valid
+  // scanId+qrId still in the 5-min window — is rejected. This collapses the
+  // residual attack surface (a leaked /qr/<id>?scanId=<id> URL) to a
+  // seconds-wide race the legitimate client almost always wins, since the
+  // browser posts coordinates immediately after page load. No schema change
+  // or capability-token plumbing required for an anonymous scan-log field.
   if (
     !scan ||
     scan.qrId !== qrId ||
+    scan.latitude !== null ||
     Date.now() - scan.createdAt.getTime() > SCAN_GEO_UPDATE_WINDOW_MS
   ) {
     throw new ShelfError({
