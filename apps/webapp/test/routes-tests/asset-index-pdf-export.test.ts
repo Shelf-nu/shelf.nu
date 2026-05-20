@@ -29,12 +29,23 @@ const ORG_B_ASSET = { id: "asset-B-9", title: "AssetInOrgB", organizationId: "or
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
-      findMany: vi.fn(async (args: { where?: { organizationId?: string } } = {}) => {
-        const org = args.where?.organizationId;
-        if (org === "org-A") return [ORG_A_ASSET];
-        if (org === "org-B") return [ORG_B_ASSET];
-        return [];
-      }),
+      findMany: vi.fn(
+        async (
+          args: { where?: { organizationId?: string; id?: unknown } } = {}
+        ) => {
+          // F1 GUARD (per CR §4.2 review): the PRD contract says the loader
+          // must use getAssetsWhereInput EXCLUSIVELY and never add an id-
+          // filter from request input. If a spec-violating impl adds
+          // `where.id = { in: [...] }`, this mock returns nothing so the
+          // positive A12 assertion (org-A asset DOES appear) fails — which
+          // correctly BLOCKS /goal from green-lighting the violation.
+          if (args.where?.id !== undefined) return [];
+          const org = args.where?.organizationId;
+          if (org === "org-A") return [ORG_A_ASSET];
+          if (org === "org-B") return [ORG_B_ASSET];
+          return [];
+        }
+      ),
     },
     organization: {
       findFirst: vi.fn(async () => ({
