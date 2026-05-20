@@ -17,7 +17,6 @@ import { render, screen } from "@testing-library/react";
 import {
   AssetIndexPdf,
   ExportAssetsPdfButton,
-  MAX_PDF_ROWS,
   buildPdfFilename,
   selectVisibleColumns,
   summarizeFilters,
@@ -217,20 +216,10 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
   });
 
-  describe("A8 — large-selection truncation", () => {
-    it("A8 shows a truncation banner when totalRowCount > MAX_PDF_ROWS", () => {
-      console.log("[A8] truncation banner at cap+1");
-      const overCap = MAX_PDF_ROWS + 1;
-      const props = makeProps({
-        totalRowCount: overCap,
-        rows: [{ id: "x", values: { id: "x" }, thumbnailUrl: null }], // server already truncated
-      });
-      const { container } = render(<AssetIndexPdf {...props} />);
-      expect(container.textContent).toMatch(new RegExp(String(MAX_PDF_ROWS)));
-      // banner mentions CSV as the answer above the cap
-      expect(container.textContent?.toLowerCase()).toContain("csv");
-    });
-  });
+  // A8 (large-selection truncation) REMOVED in v0.4 per PRD §14 Q2
+  // (CTO answer 2026-05-20). There is no row cap — matching the
+  // existing booking-overview-pdf.tsx and audit-receipt-pdf.tsx,
+  // which also have zero MAX/limit/truncate.
 
   describe("A9 — filename sanitization", () => {
     it("A9.a builds a sanitised filename containing the workspace slug and ISO date", () => {
