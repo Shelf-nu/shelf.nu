@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.4, §14 sealed)
+# PRD — Asset-Index PDF Export (v0.4.1, post-cap stale-comment fix)
 
 | Field | Value |
 |---|---|
@@ -155,7 +155,7 @@ export type AssetIndexPdfProps = {
                                                    // below, where test A1 lives
   rows: PdfAssetRow[];
   includeImages: boolean;                          // toggle at export
-  totalRowCount: number;                           // for the footer count + truncation note
+  totalRowCount: number;                           // for the footer count (no truncation in v0.4 — see §14 Q2)
 };
 
 export function AssetIndexPdf(props: AssetIndexPdfProps): JSX.Element;
