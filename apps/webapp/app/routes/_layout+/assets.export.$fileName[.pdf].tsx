@@ -26,6 +26,7 @@ import {
 import { db } from "~/database/db.server";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { parseColumnName } from "~/modules/asset-index-settings/helpers";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -33,7 +34,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanExportAssets } from "~/utils/subscription.server";
-import { resolveTeamMemberName } from "~/utils/user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 
 /**
  * Minimal HTML-escape for text interpolated into the response template.
@@ -73,8 +74,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  // A10: Permission gate enforced at loader (not UI-only)
-  const { organizationId, organizations, currentOrganization } =
+  // A10: Permission gate enforced at loader (not UI-only).
+  // `role` and `currentOrganization.barcodesEnabled` are required by the
+  // canonical `getAssetIndexSettings` service (D1 fix below).
+  const { organizationId, organizations, currentOrganization, role } =
     await requirePermission({
       userId,
       request,
@@ -152,42 +155,33 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     },
   });
 
-  // A0.d: Fetch user's AssetIndexSettings to get their column configuration
-  const assetIndexSettings = await db.assetIndexSettings.findFirst({
-    where: { userId, organizationId },
-    select: { columns: true },
+  // A0.d / D1 fix (per Codex P2 on commit 7d5ff8bee): load the user's
+  // AssetIndexSettings through the canonical service rather than a raw
+  // `db.assetIndexSettings.findFirst`. The service creates default
+  // settings on first export and runs `validateColumns` — both of which
+  // a raw findFirst skips, leaving first-export users with an ad-hoc
+  // 5-column layout instead of the canonical defaults from
+  // `~/modules/asset-index-settings/helpers.defaultFields`.
+  const settings = await getAssetIndexSettings({
+    userId,
+    organizationId,
+    canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+    role,
   });
 
   // C1 fix (per Codex P1 on commit 3d7ba0589): persisted column entries
   // in `AssetIndexSettings.columns` have no `label` field — they are
   // `{name, visible, position}` per `~/modules/asset-index-settings/helpers`.
-  // The previous cast-to-`RawColumnEntry[]` left `label` undefined, so
-  // configured columns rendered blank headers. We now pass `parseColumnName`
-  // as the label resolver: it handles fixed fields via `columnsLabelsMap`
-  // and custom fields by stripping the `cf_` prefix.
+  // We pass `parseColumnName` as the label resolver: it handles fixed
+  // fields via `columnsLabelsMap` and custom fields by stripping `cf_`.
   const labelFor = (name: string): string => parseColumnName(name) ?? name;
-  let columns: PdfColumn[];
-  if (
-    assetIndexSettings?.columns &&
-    Array.isArray(assetIndexSettings.columns)
-  ) {
-    // User has custom column settings - use selectVisibleColumns to filter/sort
-    columns = selectVisibleColumns(
-      assetIndexSettings.columns as RawColumnEntry[],
-      labelFor
-    );
-  } else {
-    // No user settings - use default columns. Names match the asset-index
-    // convention (`name`, not `title`) so the value-mapping path below
-    // resolves uniformly for both the defaults and saved-settings paths.
-    columns = [
-      { name: "id", position: 0, label: labelFor("id") },
-      { name: "name", position: 1, label: labelFor("name") },
-      { name: "status", position: 2, label: labelFor("status") },
-      { name: "category", position: 3, label: labelFor("category") },
-      { name: "location", position: 4, label: labelFor("location") },
-    ];
-  }
+  let columns: PdfColumn[] = selectVisibleColumns(
+    // The service guarantees `settings.columns` is a non-empty Column[]
+    // (created + validated upstream). Narrow the JSON shape to the
+    // RawColumnEntry contract the component-layer helper expects.
+    settings.columns as unknown as RawColumnEntry[],
+    labelFor
+  );
 
   // B2 fix (per CR re-review on 46d0da59f): the component's <img> render
   // now lives EXCLUSIVELY in the column-loop branch (col.name === "image").
@@ -254,6 +248,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
   });
 
+  // D2 fix (per Codex P2 on commit 7d5ff8bee): the previous code
+  // hardcoded `generatedBy: "User"`, so every export footer lost the
+  // actual identity of the exporter — misleading in multi-user
+  // organizations and breaks audit value. Fetch the authenticated
+  // user's name fields and pass through `resolveUserDisplayName`
+  // (which handles displayName / firstName+lastName / fallback).
+  const exporter = await db.user.findUnique({
+    where: { id: userId },
+    select: { displayName: true, firstName: true, lastName: true },
+  });
+  const exporterDisplayName = resolveUserDisplayName(exporter) || "User";
+
   // Render the component to HTML string
   const html = renderToString(
     <AssetIndexPdf
@@ -262,7 +268,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         workspaceLogoUrl: null,
       }}
       generatedAt={new Date()}
-      generatedBy={{ displayName: "User" }}
+      generatedBy={{ displayName: exporterDisplayName }}
       filterSummary={filterSummary}
       columns={columns}
       rows={rows}

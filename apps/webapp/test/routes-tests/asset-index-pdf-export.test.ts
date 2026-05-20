@@ -89,7 +89,9 @@ const USER_COLUMN_FIXTURE = [
 ];
 
 // Module-scoped mocks so tests can override per-case via mockResolvedValueOnce.
-const assetIndexSettingsMock = vi.fn(async (..._args: unknown[]) => ({
+// D1 (Codex P2 on 7d5ff8bee): loader now reads settings via the canonical
+// `getAssetIndexSettings` service, not raw `db.assetIndexSettings.findFirst`.
+const getAssetIndexSettingsMock = vi.fn(async (..._args: unknown[]) => ({
   id: "settings-A",
   userId: "user-1",
   organizationId: "org-A",
@@ -97,6 +99,22 @@ const assetIndexSettingsMock = vi.fn(async (..._args: unknown[]) => ({
   freezeColumn: true,
   showAssetImage: true,
 }));
+
+// D2 (Codex P2 on 7d5ff8bee): loader fetches the authenticated user for
+// the `generatedBy` footer (replaces hardcoded "User"). Return type
+// widened so per-test overrides can resolve to `null` (user-missing case).
+type UserNameRow = {
+  displayName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+} | null;
+const userFindUniqueMock = vi.fn(
+  async (..._args: unknown[]): Promise<UserNameRow> => ({
+    displayName: null,
+    firstName: "DISTINCTIVE-FIRST",
+    lastName: "DISTINCTIVE-LAST",
+  })
+);
 
 vi.mock("~/database/db.server", () => ({
   db: {
@@ -126,10 +144,18 @@ vi.mock("~/database/db.server", () => ({
         name: "Workspace-A", // A0.b fixture: real workspace name in output
       })),
     },
-    assetIndexSettings: {
-      findFirst: (...args: unknown[]) => assetIndexSettingsMock(...args),
+    user: {
+      findUnique: (...args: unknown[]) => userFindUniqueMock(...args),
     },
   },
+}));
+
+// why: settings-service seam (D1) — assert loader uses the canonical
+// service so first-export users get canonical defaults + validated columns,
+// not the ad-hoc fallback that the raw findFirst path produced.
+vi.mock("~/modules/asset-index-settings/service.server", () => ({
+  getAssetIndexSettings: (...args: unknown[]) =>
+    getAssetIndexSettingsMock(...args),
 }));
 
 // why: requirePermission is the auth seam — mocking it lets us pin the
@@ -209,16 +235,22 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     sanitizeFilenameMock.mockImplementation((s: string) =>
       s.replace(/[^\w.-]+/g, "_")
     );
-    // Restore the default AssetIndexSettings.findFirst behaviour after
+    // Restore the default getAssetIndexSettings behaviour after
     // clearAllMocks so per-test `mockResolvedValueOnce` overrides compose
     // correctly with subsequent calls.
-    assetIndexSettingsMock.mockImplementation(async () => ({
+    getAssetIndexSettingsMock.mockImplementation(async () => ({
       id: "settings-A",
       userId: "user-1",
       organizationId: "org-A",
       columns: USER_COLUMN_FIXTURE,
       freezeColumn: true,
       showAssetImage: true,
+    }));
+    // D2 default: distinctive first/last so footer assertions can spot it.
+    userFindUniqueMock.mockImplementation(async () => ({
+      displayName: null,
+      firstName: "DISTINCTIVE-FIRST",
+      lastName: "DISTINCTIVE-LAST",
     }));
   });
 
@@ -398,7 +430,7 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       // columns, not just the original 5.
       console.log("[A0.d.3] C2 — full row-value coverage");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      assetIndexSettingsMock.mockResolvedValueOnce({
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
         id: "settings-A",
         userId: "user-1",
         organizationId: "org-A",
@@ -516,6 +548,94 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       // No `?includeImages=true`, so the rendered HTML must contain no <img>
       // tags (the loader passes includeImages=false to the component).
       expect(html).not.toMatch(/<img\b/i);
+    });
+  });
+
+  describe("A0.h — (D1 regression) loader uses canonical getAssetIndexSettings service", () => {
+    it("A0.h.1 calls getAssetIndexSettings({userId, organizationId, canUseBarcodes, role})", async () => {
+      // Codex P2 on 7d5ff8bee: raw `db.assetIndexSettings.findFirst` skipped
+      // the service's create-on-missing + validateColumns logic, leaving
+      // first-export users with an ad-hoc 5-column layout instead of the
+      // canonical defaults from helpers.defaultFields.
+      console.log("[A0.h.1] D1 — loader uses settings service");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
+      expect(getAssetIndexSettingsMock).toHaveBeenCalled();
+      const args = getAssetIndexSettingsMock.mock.calls[0]?.[0] as {
+        userId: string;
+        organizationId: string;
+        canUseBarcodes?: boolean;
+        role?: string;
+      };
+      expect(args.userId).toBe("user-1");
+      expect(args.organizationId).toBe("org-A");
+      // `role` is forwarded from requirePermission so the service can
+      // create role-appropriate defaults when settings are missing.
+      expect(args.role).toBe("ADMIN");
+      // `canUseBarcodes` derives from currentOrganization.barcodesEnabled;
+      // the requirePermission fixture omits it, so the loader must default
+      // to `false` rather than `undefined`.
+      expect(args.canUseBarcodes).toBe(false);
+    });
+
+    it("A0.h.2 canUseBarcodes is forwarded as true when currentOrganization.barcodesEnabled", async () => {
+      console.log("[A0.h.2] D1 — barcodesEnabled forwarded");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      requirePermissionMock.mockResolvedValueOnce({
+        organizationId: "org-A",
+        organizations: [
+          { id: "org-A", userId: "owner-A", name: WORKSPACE_NAME },
+        ],
+        userOrganizations: [{ organizationId: "org-A" }],
+        currentOrganization: {
+          id: "org-A",
+          userId: "owner-A",
+          name: WORKSPACE_NAME,
+          barcodesEnabled: true,
+        },
+        role: "OWNER",
+      });
+      await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
+      const args = getAssetIndexSettingsMock.mock.calls[0]?.[0] as {
+        canUseBarcodes?: boolean;
+        role?: string;
+      };
+      expect(args.canUseBarcodes).toBe(true);
+      expect(args.role).toBe("OWNER");
+    });
+  });
+
+  describe("A0.i — (D2 regression) generatedBy uses real exporter identity", () => {
+    it("A0.i.1 PDF footer contains the authenticated user's display name (not 'User')", async () => {
+      // Codex P2 on 7d5ff8bee: hardcoded `generatedBy: "User"` lost the
+      // actual exporter identity, breaking audit/metadata in multi-user orgs.
+      console.log("[A0.i.1] D2 — real exporter identity in footer");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // Distinctive firstName+lastName from default mock must appear.
+      expect(html).toContain("DISTINCTIVE-FIRST DISTINCTIVE-LAST");
+      // And the loader must have actually consulted the user table.
+      expect(userFindUniqueMock).toHaveBeenCalled();
+      const args = userFindUniqueMock.mock.calls[0]?.[0] as {
+        where?: { id?: string };
+      };
+      expect(args?.where?.id).toBe("user-1");
+    });
+
+    it("A0.i.2 falls back to 'User' when the user record cannot be resolved", async () => {
+      console.log("[A0.i.2] D2 — graceful fallback when user missing");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      // Simulate user missing or all-name-fields blank.
+      userFindUniqueMock.mockResolvedValueOnce(null);
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // Footer fallback when no displayable name is available.
+      expect(html).toContain("User");
     });
   });
 });
