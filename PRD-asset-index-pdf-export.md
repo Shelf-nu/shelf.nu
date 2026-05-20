@@ -1,4 +1,4 @@
-# PRD — Asset-Index PDF Export (v0.1)
+# PRD — Asset-Index PDF Export (v0.2, review-pass-1)
 
 | Field | Value |
 |---|---|
@@ -63,7 +63,7 @@ The Vitest + RTL suite is committed as commit 1, then approved by CTO/reviewing 
 1. Commit 1 = full suite, all red. Red run pasted in PR.
 2. §4.2 gate passes; suite is frozen contract.
 3. `/goal` set (§5), auto mode on, loop runs unattended.
-4. Terminates on full pass + anti-constraints. Turn-80 stop with anything red is a failure for human review, never completion.
+4. Terminates on full pass + anti-constraints. **A turn-60 stop with anything red is a failure for human review, never completion** (the cap is set in §5; this PRD uses 60, smaller than the image-history PRD's 80, since this feature has fewer unknowns).
 
 ### 4.4 Verifiable vs not
 
@@ -85,7 +85,7 @@ Asset-Index PDF Export is the opposite: every assertion is either a pure functio
 
 Set only after §4.2 passes. Anti-gaming clauses prove themselves via literal command output pasted into the transcript on the final turn (the evaluator cannot run tools).
 
-```
+```text
 /goal The branch satisfies ALL of the following, with the literal command
 output for each pasted into the transcript on the final turn:
 
@@ -148,13 +148,26 @@ export type AssetIndexPdfProps = {
   generatedAt: Date;
   generatedBy: { displayName: string };
   filterSummary: string;                           // e.g. "Location: Warehouse 1 · Tag: drill"
-  columns: PdfColumn[];                            // already filtered to visible, sorted by position
+  columns: PdfColumn[];                            // PRE-FILTERED + PRE-SORTED by
+                                                   // selectVisibleColumns(); the component
+                                                   // does NOT re-filter or re-sort —
+                                                   // that ownership belongs to the helper
+                                                   // below, where test A1 lives
   rows: PdfAssetRow[];
   includeImages: boolean;                          // toggle at export
   totalRowCount: number;                           // for the footer count + truncation note
 };
 
 export function AssetIndexPdf(props: AssetIndexPdfProps): JSX.Element;
+
+// Pure helper invoked by the LOADER (not the component) that turns the
+// AssetIndexSettings.columns JSON (entries with visible:false and arbitrary
+// position) into the component-ready list. This is where the
+// filter+sort ownership lives and where test A1 asserts behavior.
+export type RawColumnEntry = {
+  name: string; visible: boolean; position: number; label: string;
+};
+export function selectVisibleColumns(raw: RawColumnEntry[]): PdfColumn[];
 
 // The action button + dialog (RTL-testable, no data fetching here either)
 export function ExportAssetsPdfButton(props: {
@@ -169,6 +182,8 @@ export async function loader(args: LoaderFunctionArgs): Promise<{
 }>;
 ```
 
+The `selectVisibleColumns()` / `AssetIndexPdf` split is deliberate: filtering+sorting is a loader-layer concern, rendering is a component-layer concern, and tests A1 (helper) and A1b (component render order) verify each cleanly without overlap or tautology.
+
 ### 6.1 Suite A — the entire `/goal` scope
 
 `apps/webapp/app/components/assets/assets-index/export-assets-pdf.test.tsx` +
@@ -177,19 +192,20 @@ export async function loader(args: LoaderFunctionArgs): Promise<{
 | # | Test group | Assertion | Pulls into existence |
 |---|---|---|---|
 | A0 | Loader-wiring | With `getOrganizationTierLimit` mocked to `{canExportAssets:false}`, the loader returns a 403 (or the existing `ShelfError` shape); with `{canExportAssets:true}` it returns rendered HTML containing the workspace name; `getAssetsWhereInput` is called with the request's `currentSearchParams` (proves filter round-trip) | Server loader at `routes/_layout+/assets.export.$fileName.pdf.tsx` reuses existing select-all/filter pattern; tier-gated identically to CSV |
-| A1 | Column order honors `AssetIndexSettings` | RTL render with `columns` in non-sequential `position` order → DOM column order matches `position`-sorted; hidden columns (visible=false) do not appear | `AssetIndexPdf` reads `columns` verbatim, filters & sorts by position |
-| A2 | Custom-field columns render | `columns` containing dynamic custom-field entries renders their `label` headers and values from `row.values[name]` | `AssetIndexPdf` is column-name-agnostic — pure mapping |
+| A1 | `selectVisibleColumns()` filter + sort | Given a `RawColumnEntry[]` mix containing `visible:false` entries and non-sequential `position` values, the helper returns only `visible:true` entries sorted by `position` ascending. Pure fn, no React, no DB | `selectVisibleColumns()` helper (loader-layer) |
+| A1b | Component renders columns in input order, no reordering | RTL render of `AssetIndexPdf` with `columns: [{c, 0}, {a, 1}, {b, 2}]` → DOM column order is exactly `c, a, b`. Asserts the component takes its input as authoritative (no implicit re-filter/re-sort) — complements A1 cleanly so filter-ownership lives in one place | `AssetIndexPdf` renders headers/cells in input column order |
+| A2 | Custom-field columns render | `columns` containing dynamic custom-field entries renders their `label` headers and values from `row.values[name]`. **Sub-assertion:** a malicious string in a custom-field value renders as text, not HTML (React auto-escapes; explicit guard against future regression) | `AssetIndexPdf` is column-name-agnostic — pure mapping |
 | A3 | Thumbnails default to `showAssetImage` | `ExportAssetsPdfButton` mounted with `initialIncludeImages={false}` shows the checkbox unchecked; with `true`, checked | Toggle wired to the user's existing index pref |
 | A4 | Thumbnails included iff `includeImages=true` | RTL render: with `includeImages:true` + rows having `thumbnailUrl`, an `<img>` (or `<AssetImage>`) appears per row; with `includeImages:false`, zero `<img>` in the printable view | Conditional render branch |
 | A5 | Filter summary line surfaces filters | A row with applied filters renders a human-readable filter line in the header; with no filters, the line is empty | Filter-summary helper (pure) |
 | A6 | Footer shows generation metadata | Footer contains `generatedAt` (formatted via existing `DateS`), `generatedBy.displayName`, and `totalRowCount` | Footer pure render |
-| A7 | Print-CSS + page breaks | The printable view has `@media print` styles applied; rows have a `page-break-inside: avoid` class; the header repeats per page (`thead.repeat-on-print` or equivalent). Asserted on the resolved computed styles via `window.matchMedia` + jsdom/happy-dom checks; **AND** a Playwright/manual checklist item exists in PR-2 to confirm the same in real Safari | CSS module / Tailwind print utilities on the printable component |
+| A7 | Print-CSS + page-break structure | The printable view (a) has a `@media print` rule registered, (b) wraps rows in a container element carrying `page-break-inside: avoid` (Tailwind `break-inside-avoid` or equivalent class on each row), and (c) **uses a native `<thead>` element**, so headers repeat per print page via the browser's built-in `display: table-header-group` default — **no custom `.repeat-on-print` class is introduced**. Asserted via DOM structure (presence of `<thead>`, presence of the break-avoid class) in happy-dom; the actual visual repeat across multiple printed pages in real Safari + Chrome is verified manually in the PR-2 checklist (jsdom cannot simulate browser print pagination) | Tailwind print utilities + native `<thead>` element on the printable component |
 | A8 | Large-selection truncation | When `totalRowCount > MAX_PDF_ROWS` (constant; see §14 Q2) the renderer truncates and shows a clear truncation banner naming the cap and inviting CSV for full export | Cap constant + truncation branch |
 | A9 | Filename is sanitized | The download filename uses the existing `sanitizeFilename()` helper from `~/utils/sanitize-filename` (already used by audit PDF); contains workspace slug + ISO date | Filename builder pure fn |
 | A10 | Permission gate at loader, not button | Even if the button is somehow rendered for a free user, hitting the route loader directly returns the same 403/ShelfError — the gate is server-side, never UI-only | `requirePermission({entity:asset, action:export})` at loader top |
 | A11 | No new server PDF dependency | A static assertion test: importing the new files does not transitively import `@react-pdf/renderer`, `pdfkit`, `jspdf`, or any other server PDF lib. (Failsafe against drift) | Maintain the react-to-print-only architecture |
 
-Net-new test count target: ~22 cases across 12 groups. Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
+Net-new test count target: ~24 cases across 13 groups (A1 + A1b split per CodeRabbit/Codex feedback). Each test logs its id and outcome; the runner prints `Tests: N passed, 0 failed, 0 skipped` for the evaluator.
 
 ### 6.2 Suite B — empty
 
@@ -272,7 +288,7 @@ Notably absent (would be ship-blockers in a different feature, not this one): GD
 
 Minimal funnel; this is a parity feature, not a conversion lever.
 
-```
+```text
 asset_pdf_export_button_clicked   { workspace_id, plan, selected_count, include_images }
 asset_pdf_export_completed        { workspace_id, plan, row_count, include_images, hit_cap }
 asset_pdf_export_truncated        { workspace_id, plan, requested_count, cap }
@@ -323,4 +339,21 @@ The mocked harness verifies all of it honestly. The reuse map carries most of th
 
 ---
 
-*v0.1 of a property-nature-aware, reuse-first, harness-independent feature PRD. The §4.2 adequacy gate is the single human checkpoint before `/goal` is set. Open questions §14 are scoping confirmations; risk #1's Safari rendering is the one quality-pass gate before general release.*
+### 15.4 Review-pass-1 corrections (v0.1 → v0.2)
+
+Applied 2026-05-20 from CodeRabbit + ChatGPT Codex automated review on PR #2562.
+
+| Source | Severity | Finding | Resolution |
+|---|---|---|---|
+| Codex inline | P2 | Turn-cap mismatch: §4.3 said "Turn-80 stop" while §5 caps at 60. Same run could be classified pass/fail depending on which section was read | §4.3 now explicitly says **turn-60**, references §5 as the cap source, and notes the smaller cap vs the image-history PRD's 80 |
+| Codex inline | P2 | A1 vs §6.0 internal contradiction: A1 asserted hidden columns are filtered, but §6.0 declared `columns` already pre-filtered at the component boundary — making A1 tautological or owning the wrong layer | Added pure helper `selectVisibleColumns()` in §6.0 as the loader-layer owner of filter+sort. A1 now tests this helper; new A1b tests the component renders input order verbatim. Clean SoC, no contradiction |
+| CodeRabbit nitpick | Quick win | Test A7's `thead.repeat-on-print` was ambiguous (custom class or native?) | Decided: **native `<thead>`** (default `display: table-header-group` repeats on print). No custom class introduced. A7 reworded to assert presence of `<thead>` + break-avoid class in DOM; visual multi-page repeat verified in PR-2 manual checklist (jsdom can't simulate print pagination) |
+| CodeRabbit nitpick | Quick win | §13 events code block missing language fence | Added `text` |
+| CodeRabbit nitpick | Quick win | §5 `/goal` code block missing language fence | Added `text` |
+| (bonus) | n/a | A2 custom-field XSS regression guard | Added sub-assertion to A2: malicious string in a custom-field value renders as text not HTML (React auto-escape) — was already in risk #6 but the test ownership was implicit; now explicit |
+
+Test count update: ~22 → ~24 cases across 12 → 13 groups (A1 + A1b split).
+
+---
+
+*v0.2 incorporates the first automated-review pass. The §4.2 adequacy gate remains the single human checkpoint before `/goal` is set. Open questions §14 are scoping confirmations; risk #1's Safari rendering is the one quality-pass gate before general release.*
