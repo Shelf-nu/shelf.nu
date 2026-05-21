@@ -358,7 +358,13 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         // CR-D fix on commit a93118d60: narrow the @react-pdf/renderer
         // regex to actual import syntax so a documentation-only mention
         // doesn't false-positive the test.
+        //
+        // CR-E fix on commit ba15ce0bb: CR-D missed the bare side-effect
+        // import form `import '@react-pdf/renderer';` (no `from`, no
+        // parens). Added a dedicated regex for that shape so the guard
+        // can't be bypassed by a side-effect-only registration.
         const forbidden = [
+          /import\s+['"]@react-pdf\/renderer['"]/,
           /(?:from\s+|import\s*\(|require\s*\()\s*['"]@react-pdf\/renderer['"]/,
           /from\s+['"]pdfkit['"]/,
           /from\s+['"]jspdf['"]/,
