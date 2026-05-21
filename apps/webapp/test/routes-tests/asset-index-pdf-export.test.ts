@@ -4,16 +4,18 @@
 /**
  * Suite A — Asset-Index PDF Export (loader side).
  *
- * TDD RED STATE (commit 1): the loader is a throwing stub, so every test
- * below is red. Mocks for permission/tier/db are set up as the
- * implementation will need them, so a future green run requires the
- * loader to actually wire through these existing primitives.
+ * Tests pin the loader against the advanced-mode asset pipeline (post-F1
+ * refactor on round-5 review). Mocks for permission/tier/settings/asset-
+ * query/filters are set up as the loader needs them; assertions are
+ * behavioral on the rendered HTML where possible (cell text, headers,
+ * filter summary, exporter identity) and structural where the wiring
+ * itself is the contract (e.g. A0.h calls getAssetIndexSettings with the
+ * right args; A12 IDOR is org-scoped).
  *
- * Test IDs map 1:1 to PRD-asset-index-pdf-export.md §6.1 rows.
- * Each test logs its ID (the /goal evaluator reads the transcript to
- * count passes).
+ * Test IDs map 1:1 to PRD §6.1 rows; new IDs (A0.l/m/n/o) cover the F1/F2
+ * findings from the round-5 review.
  *
- * @see PRD-asset-index-pdf-export.md §6.1 (A0, A10, A11, A12)
+ * @see PRD-asset-index-pdf-export.md §6.1
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -21,21 +23,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// why: testing the loader's permission/tier/query wiring without
-// executing actual database operations or HTTP plumbing.
-// The asset.findMany mock RETURNS DIFFERENT ROWS based on the where
-// clause's organizationId — this is what lets A12 assert behavioral
-// IDOR exclusion (the foreign-org asset id never appears in output)
-// instead of a structural-proxy "was the org id passed correctly".
-// Distinctive scalar values picked so assertions can't collide with HTML
-// chrome (Tailwind classes, label text, etc.). These also exercise the
-// C2 row-value mapping for non-id/title columns.
+// ───────────────────────────────────────────────────────────────────────────
+// Fixtures — AdvancedIndexAsset shape (matches `app/modules/asset/types.ts`).
+// Distinctive values picked so cell assertions can't collide with HTML
+// chrome (Tailwind classes, label text, etc.).
+// ───────────────────────────────────────────────────────────────────────────
 const ORG_A_ASSET = {
   id: "asset-A-1",
   title: "AssetInOrgA",
   organizationId: "org-A",
-  mainImage: "https://example.test/a.webp",
-  thumbnailImage: "https://example.test/a-thumb.webp",
   sequentialId: "SAM-DISTINCTIVE-0001",
   description: "DISTINCTIVE-DESC-LOREM",
   valuation: 1234,
@@ -43,24 +39,57 @@ const ORG_A_ASSET = {
   createdAt: new Date("2026-01-15T10:00:00Z"),
   updatedAt: new Date("2026-02-20T15:30:00Z"),
   status: "AVAILABLE",
-  category: { name: "DISTINCTIVE-CAT-XYZ" },
-  location: { name: "DISTINCTIVE-LOC-WAREHOUSE" },
-  kit: { name: "DISTINCTIVE-KIT-ALPHA" },
-  tags: [{ name: "DISTINCTIVE-TAG-DRILL" }, { name: "DISTINCTIVE-TAG-POWER" }],
-  qrCodes: [{ id: "DISTINCTIVE-QR-ABCDEF" }],
+  mainImage: "https://example.test/a.webp",
+  thumbnailImage: "https://example.test/a-thumb.webp",
+  qrId: "DISTINCTIVE-QR-ABCDEF",
+  category: { id: "cat-1", name: "DISTINCTIVE-CAT-XYZ", color: "#fff" },
+  location: { id: "loc-1", name: "DISTINCTIVE-LOC-WAREHOUSE" },
+  kit: { id: "kit-1", name: "DISTINCTIVE-KIT-ALPHA" },
+  tags: [
+    { id: "tag-1", name: "DISTINCTIVE-TAG-DRILL", color: "#000" },
+    { id: "tag-2", name: "DISTINCTIVE-TAG-POWER", color: "#000" },
+  ],
   custody: {
-    custodian: {
-      name: "DISTINCTIVE-CUSTODIAN-JANE",
-      user: null,
-    },
+    custodian: { name: "DISTINCTIVE-CUSTODIAN-JANE", user: null },
   },
+  customFields: [
+    {
+      id: "cfv-1",
+      value: { raw: "DISTINCTIVE-CF-SERIAL-VALUE" },
+      customField: {
+        id: "cf-1",
+        name: "Serial",
+        helpText: null,
+        required: false,
+        type: "TEXT",
+        options: [],
+      },
+    },
+    {
+      id: "cfv-2",
+      value: { raw: 9999, valueBoolean: null },
+      customField: {
+        id: "cf-2",
+        name: "Cost",
+        helpText: null,
+        required: false,
+        type: "AMOUNT",
+        options: [],
+      },
+    },
+  ],
+  barcodes: [
+    { id: "bc-1", type: "Code128", value: "DISTINCTIVE-BC-CODE128-001" },
+    { id: "bc-2", type: "Code39", value: "DISTINCTIVE-BC-CODE39-002" },
+  ],
+  upcomingReminder: undefined,
+  bookings: undefined,
 };
+
 const ORG_B_ASSET = {
   id: "asset-B-9",
   title: "AssetInOrgB",
   organizationId: "org-B",
-  mainImage: null,
-  thumbnailImage: null,
   sequentialId: null,
   description: null,
   valuation: null,
@@ -68,29 +97,36 @@ const ORG_B_ASSET = {
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
   status: "AVAILABLE",
+  mainImage: null,
+  thumbnailImage: null,
+  qrId: "qr-org-b",
   category: null,
   location: null,
   kit: null,
   tags: [],
-  qrCodes: [],
   custody: null,
+  customFields: [],
+  barcodes: [],
+  upcomingReminder: undefined,
+  bookings: undefined,
 };
 
 // User's AssetIndexSettings.columns fixture. Mirrors the REAL persisted
 // JSON shape: `{name, visible, position}` only — NO `label` field. C1
 // fix (Codex P1 on commit 3d7ba0589): the loader must derive labels via
-// `parseColumnName` from `~/modules/asset-index-settings/helpers`. The
-// expected derived labels (per `columnsLabelsMap`) are:
-//   valuation → "Value"  |  name → "Name"  |  status → "Status"
+// `parseColumnName`. Default mix exercises a visible scalar, a visible
+// scalar in a different position, and a hidden column.
 const USER_COLUMN_FIXTURE = [
   { name: "name", visible: true, position: 1 },
   { name: "valuation", visible: true, position: 0 },
   { name: "status", visible: false, position: 2 },
 ];
 
-// Module-scoped mocks so tests can override per-case via mockResolvedValueOnce.
-// D1 (Codex P2 on 7d5ff8bee): loader now reads settings via the canonical
-// `getAssetIndexSettings` service, not raw `db.assetIndexSettings.findFirst`.
+// ───────────────────────────────────────────────────────────────────────────
+// Mocks — module-scoped so per-test overrides + assertions are possible.
+// ───────────────────────────────────────────────────────────────────────────
+
+// D1: canonical settings loader. Defaults to USER_COLUMN_FIXTURE.
 const getAssetIndexSettingsMock = vi.fn(async (..._args: unknown[]) => ({
   id: "settings-A",
   userId: "user-1",
@@ -98,11 +134,10 @@ const getAssetIndexSettingsMock = vi.fn(async (..._args: unknown[]) => ({
   columns: USER_COLUMN_FIXTURE,
   freezeColumn: true,
   showAssetImage: true,
+  mode: "SIMPLE",
 }));
 
-// D2 (Codex P2 on 7d5ff8bee): loader fetches the authenticated user for
-// the `generatedBy` footer (replaces hardcoded "User"). Return type
-// widened so per-test overrides can resolve to `null` (user-missing case).
+// D2: real exporter identity for footer.
 type UserNameRow = {
   displayName: string | null;
   firstName: string | null;
@@ -116,60 +151,57 @@ const userFindUniqueMock = vi.fn(
   })
 );
 
-// Module-scoped so E1 tests can inspect the `orderBy` arg the loader
-// passed to Prisma.
-const assetFindManyMock = vi.fn(
-  async (
-    args: {
-      where?: { organizationId?: string; id?: unknown };
-      orderBy?: unknown;
-    } = {}
-  ) => {
-    // F1 GUARD (per CR §4.2 review): the PRD contract says the loader
-    // must use getAssetsWhereInput EXCLUSIVELY and never add an id-
-    // filter from request input. If a spec-violating impl adds
-    // `where.id = { in: [...] }`, this mock returns nothing so the
-    // positive A12 assertion (org-A asset DOES appear) fails — which
-    // correctly BLOCKS /goal from green-lighting the violation.
-    if (args.where?.id !== undefined) return [];
-    const org = args.where?.organizationId;
-    if (org === "org-A") return [ORG_A_ASSET];
-    if (org === "org-B") return [ORG_B_ASSET];
-    return [];
+// F1: advanced-mode asset pipeline. Returns `{assets}`; mock org-scopes
+// the returned rows based on the input organizationId so A12 IDOR
+// assertions hold (org-A request gets org-A asset, org-B asset is
+// invisible to org-A regardless of any spoofed input).
+const getAdvancedPaginatedAndFilterableAssetsMock = vi.fn(
+  async (args: { organizationId?: string } = {}) => {
+    const org = args.organizationId;
+    if (org === "org-A") return { assets: [ORG_A_ASSET] };
+    if (org === "org-B") return { assets: [ORG_B_ASSET] };
+    return { assets: [] };
   }
+);
+
+// Filter-resolution helper used by both the URL and cookie paths.
+const getAdvancedFiltersFromRequestMock = vi.fn(
+  async (..._args: unknown[]) => ({
+    filters: "",
+    serializedCookie: undefined,
+    redirectNeeded: false,
+  })
 );
 
 vi.mock("~/database/db.server", () => ({
   db: {
-    asset: {
-      findMany: (...args: unknown[]) =>
-        (assetFindManyMock as unknown as (...a: unknown[]) => unknown)(...args),
-    },
-    organization: {
-      findFirst: vi.fn(async () => ({
-        id: "org-A",
-        userId: "owner-A",
-        name: "Workspace-A", // A0.b fixture: real workspace name in output
-      })),
-    },
     user: {
       findUnique: (...args: unknown[]) => userFindUniqueMock(...args),
     },
   },
 }));
 
-// why: settings-service seam (D1) — assert loader uses the canonical
-// service so first-export users get canonical defaults + validated columns,
-// not the ad-hoc fallback that the raw findFirst path produced.
 vi.mock("~/modules/asset-index-settings/service.server", () => ({
   getAssetIndexSettings: (...args: unknown[]) =>
     getAssetIndexSettingsMock(...args),
 }));
 
-// why: requirePermission is the auth seam — mocking it lets us pin the
-// organizationId returned to the loader for IDOR + tier tests.
-// Variadic typed signature satisfies the wrapper's TS2556 contract
-// (CR finding on b40fe9dce, route test line 50).
+vi.mock("~/modules/asset/service.server", () => ({
+  getAdvancedPaginatedAndFilterableAssets: (...args: unknown[]) =>
+    (
+      getAdvancedPaginatedAndFilterableAssetsMock as unknown as (
+        ...a: unknown[]
+      ) => unknown
+    )(...args),
+}));
+
+vi.mock("~/utils/cookies.server", () => ({
+  getAdvancedFiltersFromRequest: (...args: unknown[]) =>
+    getAdvancedFiltersFromRequestMock(...args),
+}));
+
+// requirePermission seam — pins organizationId / role / currentOrganization.
+// Variadic typed signature satisfies the wrapper's TS2556 contract.
 const requirePermissionMock = vi.fn((..._args: unknown[]) => ({}) as unknown);
 vi.mock("~/utils/roles.server", () => ({
   PermissionAction: { read: "read", export: "export" } as const,
@@ -177,9 +209,8 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: (...args: unknown[]) => requirePermissionMock(...args),
 }));
 
-// why: tier read seam — verified real helper at
-// apps/webapp/app/modules/tier/service.server.ts:107.
-// Variadic typed signature satisfies the wrapper's TS2556 contract.
+// Tier read seam — verified real helper at
+// `app/modules/tier/service.server.ts:107`. Drives A0.a / paid checks.
 const getOrganizationTierLimitMock = vi.fn(
   (..._args: unknown[]) => ({}) as unknown
 );
@@ -188,27 +219,12 @@ vi.mock("~/modules/tier/service.server", () => ({
     getOrganizationTierLimitMock(...args),
 }));
 
-// why: the asset-query seam — we assert the loader calls this with the
-// caller's organizationId (not anything from request input).
-// The mock RETURNS the where clause it received so db.asset.findMany
-// can org-scope its returned rows (drives A12 behavioral assertion).
-const getAssetsWhereInputMock = vi.fn((args: { organizationId: string }) => ({
-  organizationId: args.organizationId,
-}));
-vi.mock("~/modules/asset/utils.server", () => ({
-  getAssetsWhereInput: (...args: unknown[]) =>
-    getAssetsWhereInputMock(...(args as [{ organizationId: string }])),
-}));
-
-// why: assert the existing filename sanitizer is invoked (A9 contract)
 const sanitizeFilenameMock = vi.fn((s: string) => s.replace(/[^\w.-]+/g, "_"));
 vi.mock("~/utils/sanitize-filename", () => ({
   sanitizeFilename: (...args: unknown[]) =>
     sanitizeFilenameMock(...(args as [string])),
 }));
 
-// why: a workspace name will be needed in the A0.b output; pin it via
-// requirePermission's organization fixture for cross-test consistency.
 const WORKSPACE_NAME = "Workspace-A";
 
 import { loader } from "~/routes/_layout+/assets.export.$fileName[.pdf]";
@@ -236,16 +252,13 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         id: "org-A",
         userId: "owner-A",
         name: WORKSPACE_NAME,
+        currency: "USD",
       },
       role: "ADMIN",
     });
-    // Restore sanitizeFilename's default behaviour after clearAllMocks
     sanitizeFilenameMock.mockImplementation((s: string) =>
       s.replace(/[^\w.-]+/g, "_")
     );
-    // Restore the default getAssetIndexSettings behaviour after
-    // clearAllMocks so per-test `mockResolvedValueOnce` overrides compose
-    // correctly with subsequent calls.
     getAssetIndexSettingsMock.mockImplementation(async () => ({
       id: "settings-A",
       userId: "user-1",
@@ -253,16 +266,21 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       columns: USER_COLUMN_FIXTURE,
       freezeColumn: true,
       showAssetImage: true,
+      mode: "SIMPLE",
     }));
-    // D2 default: distinctive first/last so footer assertions can spot it.
     userFindUniqueMock.mockImplementation(async () => ({
       displayName: null,
       firstName: "DISTINCTIVE-FIRST",
       lastName: "DISTINCTIVE-LAST",
     }));
+    getAdvancedFiltersFromRequestMock.mockImplementation(async () => ({
+      filters: "",
+      serializedCookie: undefined,
+      redirectNeeded: false,
+    }));
   });
 
-  describe("A0 — loader wiring (permission + tier + filter round-trip)", () => {
+  describe("A0 — loader wiring (permission + tier + filter pipeline)", () => {
     it("A0.a free-tier (canExportAssets=false) → throws 403/ShelfError", async () => {
       console.log("[A0.a] free tier rejected");
       getOrganizationTierLimitMock.mockResolvedValue({
@@ -273,41 +291,43 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       ).rejects.toThrow();
     });
 
-    it("A0.b paid-tier (canExportAssets=true) → returns rendered HTML containing workspace name", async () => {
+    it("A0.b paid-tier renders HTML containing workspace name", async () => {
       console.log("[A0.b] paid tier renders");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
-      // loader returns a Response with text/html body
       expect(res).toBeInstanceOf(Response);
       const html = await (res as Response).text();
-      // workspace name pinned via the requirePermission mock above
       expect(html).toContain(WORKSPACE_NAME);
     });
 
-    it("A0.c filter round-trip: getAssetsWhereInput called with the request's currentSearchParams", async () => {
-      console.log("[A0.c] filter round-trip");
+    it("A0.c filter round-trip: getAdvancedFiltersFromRequest resolves URL params and forwards them into the asset pipeline", async () => {
+      console.log("[A0.c] filter round-trip via advanced pipeline");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAdvancedFiltersFromRequestMock.mockResolvedValueOnce({
+        filters: "location=W1&tag=drill",
+        serializedCookie: undefined,
+        redirectNeeded: false,
+      });
       await loader(
         reqFor(
           "https://shelf.test/assets/export/x.pdf?location=W1&tag=drill"
         ) as never
-      ).catch(() => undefined);
-      expect(getAssetsWhereInputMock).toHaveBeenCalled();
-      const [call] = getAssetsWhereInputMock.mock.calls;
-      const args = call?.[0] as {
+      );
+      // The filter-resolution helper was consulted with the request + org.
+      expect(getAdvancedFiltersFromRequestMock).toHaveBeenCalled();
+      // The resolved filters were forwarded into the asset pipeline.
+      expect(getAdvancedPaginatedAndFilterableAssetsMock).toHaveBeenCalled();
+      const pipelineArgs = getAdvancedPaginatedAndFilterableAssetsMock.mock
+        .calls[0]?.[0] as {
         organizationId: string;
-        currentSearchParams?: URLSearchParams | string;
+        filters?: string;
+        takeAll?: boolean;
       };
-      expect(args.organizationId).toBe("org-A");
-      // currentSearchParams should carry the filter params from the request
-      const sp =
-        args.currentSearchParams instanceof URLSearchParams
-          ? args.currentSearchParams
-          : new URLSearchParams(String(args.currentSearchParams ?? ""));
-      expect(sp.get("location")).toBe("W1");
-      expect(sp.get("tag")).toBe("drill");
+      expect(pipelineArgs.organizationId).toBe("org-A");
+      expect(pipelineArgs.filters).toBe("location=W1&tag=drill");
+      expect(pipelineArgs.takeAll).toBe(true);
     });
   });
 
@@ -327,26 +347,17 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
   describe("A11 — no server PDF library imported", () => {
     it("A11 new feature files do not import @react-pdf/renderer, pdfkit, jspdf, or puppeteer", () => {
       console.log("[A11] no server PDF dep");
-      // why: resolve paths relative to THIS test file (not process.cwd()), so
-      // the assertion holds regardless of where vitest is invoked from.
-      // NOTE: this checks DIRECT imports only — transitive imports are not
-      // walked (PRD §15.7 documents this as a deferred caveat; a proper
-      // import-graph walker is its own micro-project).
       const here = fileURLToPath(new URL(".", import.meta.url));
-      const repoRoot = resolve(here, "../../../.."); // test/routes-tests -> repo root
+      const repoRoot = resolve(here, "../../../..");
       const files = [
         "apps/webapp/app/components/assets/assets-index/export-assets-pdf.tsx",
         "apps/webapp/app/routes/_layout+/assets.export.$fileName[.pdf].tsx",
       ];
       for (const f of files) {
         const src = readFileSync(resolve(repoRoot, f), "utf8");
-        // CR-D fix (Minor on commit 6dd022d07): the original first regex
-        // was the bare `/@react-pdf\/renderer/` which matches plain prose
-        // — a documentation-only mention (like a comment "uses
-        // react-to-print, not @react-pdf/renderer") would fail A11 without
-        // any real dependency regression. Narrow it to actual
-        // import/require syntax to match the structure of the other
-        // patterns below.
+        // CR-D fix on commit a93118d60: narrow the @react-pdf/renderer
+        // regex to actual import syntax so a documentation-only mention
+        // doesn't false-positive the test.
         const forbidden = [
           /(?:from\s+|import\s*\(|require\s*\()\s*['"]@react-pdf\/renderer['"]/,
           /from\s+['"]pdfkit['"]/,
@@ -366,24 +377,24 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     it("A12 foreign-org asset id never appears in the response HTML", async () => {
       console.log("[A12] cross-org IDOR behaviorally excluded");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      // Attacker is in org-A but supplies org-B's asset id via search params
+      // Attacker is in org-A but supplies org-B's asset id via search params.
       const url = `https://shelf.test/assets/export/x.pdf?assetIds=${ORG_B_ASSET.id}`;
       const res = await loader(reqFor(url) as never);
       expect(res).toBeInstanceOf(Response);
       const html = await (res as Response).text();
-      // BEHAVIORAL: org-B's asset id MUST NOT appear in the body
+      // BEHAVIORAL: org-B's asset id MUST NOT appear in the body.
       expect(html).not.toContain(ORG_B_ASSET.id);
       expect(html).not.toContain(ORG_B_ASSET.title);
       // AND org-A's own asset SHOULD appear (proves the loader actually
-      // rendered something, not just returned empty — distinguishes
-      // "correctly filtered" from "broken and returns nothing")
+      // rendered something, not just returned empty).
       expect(html).toContain(ORG_A_ASSET.id);
-      // STRUCTURAL backstop: the query was built with the caller's org id,
-      // never anything from request input.
-      expect(getAssetsWhereInputMock).toHaveBeenCalled();
-      const [call] = getAssetsWhereInputMock.mock.calls;
-      const args = call?.[0] as { organizationId: string };
-      expect(args.organizationId).toBe("org-A");
+      // STRUCTURAL backstop: the asset pipeline was called with the
+      // caller's organizationId, never anything from request input.
+      const pipelineArgs = getAdvancedPaginatedAndFilterableAssetsMock.mock
+        .calls[0]?.[0] as {
+        organizationId: string;
+      };
+      expect(pipelineArgs.organizationId).toBe("org-A");
     });
   });
 
@@ -394,55 +405,29 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
-      expect(res).toBeInstanceOf(Response);
       const html = await (res as Response).text();
-      // C1: labels are DERIVED from columnsLabelsMap by the loader (not
-      // taken from a persisted `label` field — the fixture has none).
-      // Visible columns: name → "Name", valuation → "Value".
+      // C1: labels derived via parseColumnName → name="Name", valuation="Value".
       expect(html).toContain("Value");
       expect(html).toContain("Name");
-      // Position order: valuation (position 0) appears BEFORE name (position 1) in DOM.
-      // We assert this on the <th> headers via the column key (`valuation` and `name`)
-      // baked into the React `key={col.name}` of <th> — search for that to avoid
-      // collisions with the generic word "Name" elsewhere.
-      const valIdx = html.indexOf('key="valuation"');
-      const nameIdx = html.indexOf('key="name"');
-      // React strips the `key` from output; fall back to data-asset-id style
-      // by checking the cell text in the body row ordering instead.
+      // Position order: valuation (position 0) before name (position 1).
       const valBodyIdx = html.indexOf("1234"); // ORG_A_ASSET.valuation
       const nameBodyIdx = html.indexOf("AssetInOrgA"); // ORG_A_ASSET.title
       expect(valBodyIdx).toBeGreaterThan(-1);
       expect(nameBodyIdx).toBeGreaterThan(-1);
-      // In the body row, valuation cell (column position 0) comes before name (position 1).
       expect(valBodyIdx).toBeLessThan(nameBodyIdx);
-      // Use the key-based check only if React did emit them (some test setups do);
-      // otherwise the body-order assertion above carries the proof.
-      if (valIdx > -1 && nameIdx > -1) {
-        expect(valIdx).toBeLessThan(nameIdx);
-      }
     });
 
     it("A0.d.2 (C1 regression) saved column entries with NO label field still render headers", async () => {
-      // Codex P1 on commit 3d7ba0589: persisted AssetIndexSettings.columns
-      // JSON does not carry `label`; loader must derive via parseColumnName.
       console.log("[A0.d.2] C1 — derived labels render for label-less entries");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // The fixture has NO `label` keys. If the loader regressed to
-      // reading `col.label`, headers would render as "undefined" or empty.
       expect(html).not.toContain("undefined");
-      // The two derived labels must be present in <th> positions —
-      // already asserted in A0.d.1 above. This test additionally asserts
-      // the NEGATIVE: no "undefined" string leaks into the document.
     });
 
     it("A0.d.3 (C2 regression) row values populate for columns beyond id/title/status", async () => {
-      // Codex P1 on commit 3d7ba0589: cell rendering reads
-      // row.values[col.name] — must cover all supported fixed-field
-      // columns, not just the original 5.
       console.log("[A0.d.3] C2 — full row-value coverage");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       getAssetIndexSettingsMock.mockResolvedValueOnce({
@@ -450,8 +435,6 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         userId: "user-1",
         organizationId: "org-A",
         columns: [
-          // All visible, sequential positions — exercise the cell mapper
-          // for the columns Codex flagged as silently empty.
           { name: "sequentialId", visible: true, position: 0 },
           { name: "description", visible: true, position: 1 },
           { name: "valuation", visible: true, position: 2 },
@@ -463,30 +446,26 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         ],
         freezeColumn: true,
         showAssetImage: true,
+        mode: "SIMPLE",
       });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // Each distinctive value from ORG_A_ASSET must appear in a cell.
-      expect(html).toContain("SAM-DISTINCTIVE-0001"); // sequentialId
-      expect(html).toContain("DISTINCTIVE-DESC-LOREM"); // description
-      expect(html).toContain("1234"); // valuation
-      expect(html).toContain("Yes"); // availableToBook → "Yes"
-      expect(html).toContain("DISTINCTIVE-KIT-ALPHA"); // kit.name
-      expect(html).toContain("DISTINCTIVE-TAG-DRILL"); // tags[0].name
-      expect(html).toContain("DISTINCTIVE-TAG-POWER"); // tags[1].name
-      expect(html).toContain("DISTINCTIVE-CUSTODIAN-JANE"); // custody.custodian.name
-      expect(html).toContain("DISTINCTIVE-QR-ABCDEF"); // qrCodes[0].id
+      expect(html).toContain("SAM-DISTINCTIVE-0001");
+      expect(html).toContain("DISTINCTIVE-DESC-LOREM");
+      expect(html).toContain("1234");
+      expect(html).toContain("Yes");
+      expect(html).toContain("DISTINCTIVE-KIT-ALPHA");
+      expect(html).toContain("DISTINCTIVE-TAG-DRILL");
+      expect(html).toContain("DISTINCTIVE-TAG-POWER");
+      expect(html).toContain("DISTINCTIVE-CUSTODIAN-JANE");
+      expect(html).toContain("DISTINCTIVE-QR-ABCDEF");
     });
   });
 
   describe("A0.g — (C3 regression) HTML-escape workspace name in <title>", () => {
     it("A0.g.1 workspace name with HTML injection payload is escaped, not interpolated raw", async () => {
-      // Codex P1 on commit 3d7ba0589: workspace names are user-controlled.
-      // A name containing `</title><script>` would break out of the title
-      // context in the static template (the React body auto-escapes; the
-      // surrounding template does not — loader must escape manually).
       console.log("[A0.g.1] C3 — workspace name escaped in <title>");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const xssPayload = `Evil</title><script>alert('xss')</script>`;
@@ -498,6 +477,7 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
           id: "org-A",
           userId: "owner-A",
           name: xssPayload,
+          currency: "USD",
         },
         role: "ADMIN",
       });
@@ -505,18 +485,11 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // The raw `<script>` substring MUST NOT appear in the title region.
-      // We scope by extracting the document head's title and asserting
-      // the literal markup is escaped.
       const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/);
       expect(titleMatch).not.toBeNull();
       const titleInner = titleMatch![1];
-      // Escaped form: literal `&lt;script&gt;` (or similar) must be present;
-      // the raw `<script>` substring must NOT.
       expect(titleInner).not.toContain("<script>");
       expect(titleInner).toContain("&lt;script&gt;");
-      // And the closing `</title>` of the injected payload must be escaped too —
-      // otherwise the title context would have closed early.
       expect(titleInner).toContain("&lt;/title&gt;");
     });
   });
@@ -525,21 +498,19 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     it("A0.e.1 filter param values from the request appear in the rendered HTML", async () => {
       console.log("[A0.e.1] filter summary surfaces");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      // Use distinctive filter values that can't be confused with anything else
       const res = await loader(
         reqFor(
           "https://shelf.test/assets/export/x.pdf?location=DISTINCTIVE-LOC-XYZ&tag=DISTINCTIVE-TAG-ABC"
         ) as never
       );
       const html = await (res as Response).text();
-      // The filter values must surface in the HTML (proves summarizeFilters is wired)
       expect(html).toContain("DISTINCTIVE-LOC-XYZ");
       expect(html).toContain("DISTINCTIVE-TAG-ABC");
     });
   });
 
   describe("A0.f — includeImages URL param round-trips to thumbnails", () => {
-    it("A0.f.1 ?includeImages=true with assets that have thumbnailImage renders <img> elements", async () => {
+    it("A0.f.1 ?includeImages=true renders <img> elements", async () => {
       console.log("[A0.f.1] includeImages=true renders thumbnails");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const res = await loader(
@@ -548,30 +519,22 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         ) as never
       );
       const html = await (res as Response).text();
-      // ORG_A_ASSET.thumbnailImage is set; with includeImages=true, an <img>
-      // referencing that URL (or one derived from it) must appear.
       expect(html).toMatch(/<img\b[^>]*src=/i);
     });
 
-    it("A0.f.2 ?includeImages=false (or absent) renders zero <img>", async () => {
+    it("A0.f.2 ?includeImages absent renders zero <img>", async () => {
       console.log("[A0.f.2] includeImages absent renders no thumbnails");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // No `?includeImages=true`, so the rendered HTML must contain no <img>
-      // tags (the loader passes includeImages=false to the component).
       expect(html).not.toMatch(/<img\b/i);
     });
   });
 
   describe("A0.h — (D1 regression) loader uses canonical getAssetIndexSettings service", () => {
     it("A0.h.1 calls getAssetIndexSettings({userId, organizationId, canUseBarcodes, role})", async () => {
-      // Codex P2 on 7d5ff8bee: raw `db.assetIndexSettings.findFirst` skipped
-      // the service's create-on-missing + validateColumns logic, leaving
-      // first-export users with an ad-hoc 5-column layout instead of the
-      // canonical defaults from helpers.defaultFields.
       console.log("[A0.h.1] D1 — loader uses settings service");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
@@ -584,16 +547,11 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
       };
       expect(args.userId).toBe("user-1");
       expect(args.organizationId).toBe("org-A");
-      // `role` is forwarded from requirePermission so the service can
-      // create role-appropriate defaults when settings are missing.
       expect(args.role).toBe("ADMIN");
-      // `canUseBarcodes` derives from currentOrganization.barcodesEnabled;
-      // the requirePermission fixture omits it, so the loader must default
-      // to `false` rather than `undefined`.
       expect(args.canUseBarcodes).toBe(false);
     });
 
-    it("A0.h.2 canUseBarcodes is forwarded as true when currentOrganization.barcodesEnabled", async () => {
+    it("A0.h.2 canUseBarcodes propagates when currentOrganization.barcodesEnabled=true", async () => {
       console.log("[A0.h.2] D1 — barcodesEnabled forwarded");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       requirePermissionMock.mockResolvedValueOnce({
@@ -607,32 +565,36 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
           userId: "owner-A",
           name: WORKSPACE_NAME,
           barcodesEnabled: true,
+          currency: "USD",
         },
         role: "OWNER",
       });
       await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
-      const args = getAssetIndexSettingsMock.mock.calls[0]?.[0] as {
+      const settingsArgs = getAssetIndexSettingsMock.mock.calls[0]?.[0] as {
         canUseBarcodes?: boolean;
         role?: string;
       };
-      expect(args.canUseBarcodes).toBe(true);
-      expect(args.role).toBe("OWNER");
+      expect(settingsArgs.canUseBarcodes).toBe(true);
+      expect(settingsArgs.role).toBe("OWNER");
+      // And the same flag flows into the asset pipeline so barcode
+      // columns are hydrated.
+      const pipelineArgs = getAdvancedPaginatedAndFilterableAssetsMock.mock
+        .calls[0]?.[0] as {
+        canUseBarcodes?: boolean;
+      };
+      expect(pipelineArgs.canUseBarcodes).toBe(true);
     });
   });
 
   describe("A0.i — (D2 regression) generatedBy uses real exporter identity", () => {
     it("A0.i.1 PDF footer contains the authenticated user's display name (not 'User')", async () => {
-      // Codex P2 on 7d5ff8bee: hardcoded `generatedBy: "User"` lost the
-      // actual exporter identity, breaking audit/metadata in multi-user orgs.
       console.log("[A0.i.1] D2 — real exporter identity in footer");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // Distinctive firstName+lastName from default mock must appear.
       expect(html).toContain("DISTINCTIVE-FIRST DISTINCTIVE-LAST");
-      // And the loader must have actually consulted the user table.
       expect(userFindUniqueMock).toHaveBeenCalled();
       const args = userFindUniqueMock.mock.calls[0]?.[0] as {
         where?: { id?: string };
@@ -643,86 +605,133 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
     it("A0.i.2 falls back to 'User' when the user record cannot be resolved", async () => {
       console.log("[A0.i.2] D2 — graceful fallback when user missing");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      // Simulate user missing or all-name-fields blank.
       userFindUniqueMock.mockResolvedValueOnce(null);
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // Footer fallback when no displayable name is available.
       expect(html).toContain("User");
     });
   });
 
-  describe("A0.j — (E1 regression) loader applies user's sort from URL to asset query", () => {
-    it("A0.j.1 ?orderBy=valuation&orderDirection=asc → findMany called with {valuation:'asc'}", async () => {
-      // Codex P2 on 7609b8d97: loader forwarded URL params but findMany
-      // had no orderBy, so PDF rows used DB-default ordering instead of
-      // the user's current view sort.
-      console.log("[A0.j.1] E1 — orderBy plumbed to findMany");
-      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      await loader(
-        reqFor(
-          "https://shelf.test/assets/export/x.pdf?orderBy=valuation&orderDirection=asc"
-        ) as never
-      );
-      const call = assetFindManyMock.mock.calls[0]?.[0] as {
-        orderBy?: Record<string, string>;
-      };
-      expect(call?.orderBy).toEqual({ valuation: "asc" });
-    });
-
-    it("A0.j.2 no orderBy param → defaults to {createdAt:'desc'}", async () => {
-      console.log("[A0.j.2] E1 — default sort when no param");
+  describe("A0.l — (F1 regression) loader uses canonical advanced-mode asset pipeline", () => {
+    it("A0.l.1 calls getAdvancedPaginatedAndFilterableAssets with takeAll=true and request/settings forwarded", async () => {
+      // Codex F1 on commit 6dd022d07: the loader previously used a
+      // simple-mode `db.asset.findMany` + `getAssetsWhereInput`, which
+      // ignored ADVANCED-mode operators and custom-field filters and
+      // couldn't hydrate `customFields` / `barcodes`. The advanced
+      // pipeline (what CSV uses) is the canonical primitive.
+      console.log("[A0.l.1] F1 — advanced pipeline + takeAll");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       await loader(reqFor("https://shelf.test/assets/export/x.pdf") as never);
-      const call = assetFindManyMock.mock.calls[0]?.[0] as {
-        orderBy?: Record<string, string>;
+      expect(getAdvancedPaginatedAndFilterableAssetsMock).toHaveBeenCalled();
+      const args = getAdvancedPaginatedAndFilterableAssetsMock.mock
+        .calls[0]?.[0] as {
+        organizationId: string;
+        takeAll?: boolean;
+        settings?: unknown;
+        request?: unknown;
       };
-      expect(call?.orderBy).toEqual({ createdAt: "desc" });
-    });
-
-    it("A0.j.3 unknown orderBy field → falls back to default (no Prisma blow-up)", async () => {
-      // Allowlist guard: a stale URL or hostile input passing `orderBy=` to
-      // a non-existent / non-scalar field must not cause a Prisma error or
-      // attempt to order by an arbitrary string.
-      console.log("[A0.j.3] E1 — unknown field falls back to default");
-      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      await loader(
-        reqFor(
-          "https://shelf.test/assets/export/x.pdf?orderBy=evilField&orderDirection=asc"
-        ) as never
-      );
-      const call = assetFindManyMock.mock.calls[0]?.[0] as {
-        orderBy?: Record<string, string>;
-      };
-      expect(call?.orderBy).toEqual({ createdAt: "desc" });
-    });
-
-    it("A0.j.4 asset-index 'name' alias maps to Prisma 'title'", async () => {
-      // The asset-index UI calls the title column "name"; the Prisma
-      // scalar is `title`. The allowlist must translate.
-      console.log("[A0.j.4] E1 — name → title alias");
-      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      await loader(
-        reqFor(
-          "https://shelf.test/assets/export/x.pdf?orderBy=name&orderDirection=asc"
-        ) as never
-      );
-      const call = assetFindManyMock.mock.calls[0]?.[0] as {
-        orderBy?: Record<string, string>;
-      };
-      expect(call?.orderBy).toEqual({ title: "asc" });
+      expect(args.organizationId).toBe("org-A");
+      expect(args.takeAll).toBe(true);
+      // The same `settings` object loaded via getAssetIndexSettings is
+      // forwarded — so the pipeline shares column config with the loader.
+      expect(args.settings).toBeDefined();
+      // The request is forwarded so the pipeline can resolve sort /
+      // pagination params from URL.
+      expect(args.request).toBeInstanceOf(Request);
     });
   });
 
-  describe("A0.k — (E2 regression) non-renderable columns excluded from PDF", () => {
-    it("A0.k.1 'actions' column from settings does NOT render a header in the PDF", async () => {
-      // Codex P2 on 7609b8d97: settings.columns includes `actions` (UI-
-      // only) and deferred fields like `upcomingReminder` that the PDF
-      // row mapper doesn't populate. Including them produced blank
-      // trailing cells per row — misleading on first export.
-      console.log("[A0.k.1] E2 — actions column excluded");
+  describe("A0.m — (F2 regression) custom-field columns render via real customField value", () => {
+    it("A0.m.1 a visible cf_<name> column produces a cell containing the custom-field value", async () => {
+      console.log("[A0.m.1] F2 — cf_* column renders");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
+        id: "settings-A",
+        userId: "user-1",
+        organizationId: "org-A",
+        columns: [
+          { name: "name", visible: true, position: 0 },
+          {
+            name: "cf_Serial",
+            visible: true,
+            position: 1,
+            cfType: "TEXT",
+          },
+        ] as never, // Column[] shape (with cfType) — wider than the mock's inferred type.
+        freezeColumn: true,
+        showAssetImage: true,
+        mode: "ADVANCED",
+      });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // ORG_A_ASSET.customFields[0] has value.raw="DISTINCTIVE-CF-SERIAL-VALUE"
+      // with customField.name="Serial". The cf_Serial column must surface it.
+      expect(html).toContain("DISTINCTIVE-CF-SERIAL-VALUE");
+    });
+
+    it("A0.m.2 cf_AMOUNT renders via currency formatter (uses currentOrganization.currency)", async () => {
+      console.log("[A0.m.2] F2 — cf_AMOUNT formats as currency");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
+        id: "settings-A",
+        userId: "user-1",
+        organizationId: "org-A",
+        columns: [
+          {
+            name: "cf_Cost",
+            visible: true,
+            position: 0,
+            cfType: "AMOUNT",
+          },
+        ] as never, // Column[] shape (with cfType) — wider than the mock's inferred type.
+        freezeColumn: true,
+        showAssetImage: true,
+        mode: "ADVANCED",
+      });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      // ORG_A_ASSET.customFields[1].value.raw=9999, currency=USD →
+      // formatted "$9,999.00".
+      expect(html).toContain("$9,999.00");
+    });
+  });
+
+  describe("A0.n — (F2 regression) barcode columns render via real barcode value", () => {
+    it("A0.n.1 a visible barcode_<type> column produces a cell containing the barcode value", async () => {
+      console.log("[A0.n.1] F2 — barcode_* column renders");
+      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
+      getAssetIndexSettingsMock.mockResolvedValueOnce({
+        id: "settings-A",
+        userId: "user-1",
+        organizationId: "org-A",
+        columns: [
+          { name: "barcode_Code128", visible: true, position: 0 },
+          { name: "barcode_Code39", visible: true, position: 1 },
+        ],
+        freezeColumn: true,
+        showAssetImage: true,
+        mode: "ADVANCED",
+      });
+      const res = await loader(
+        reqFor("https://shelf.test/assets/export/x.pdf") as never
+      );
+      const html = await (res as Response).text();
+      expect(html).toContain("DISTINCTIVE-BC-CODE128-001");
+      expect(html).toContain("DISTINCTIVE-BC-CODE39-002");
+    });
+  });
+
+  describe("A0.o — (E2 retained) UI-only `actions` column stays filtered out", () => {
+    it("A0.o.1 settings include `actions` → does NOT render a header", async () => {
+      // The PDF_RENDERABLE_COLUMN_NAMES allowlist was dropped with F2;
+      // `actions` is the one column we still suppress, mirroring CSV.
+      console.log("[A0.o.1] actions column excluded");
       getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
       getAssetIndexSettingsMock.mockResolvedValueOnce({
         id: "settings-A",
@@ -734,15 +743,12 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         ],
         freezeColumn: true,
         showAssetImage: false,
+        mode: "SIMPLE",
       });
       const res = await loader(
         reqFor("https://shelf.test/assets/export/x.pdf") as never
       );
       const html = await (res as Response).text();
-      // `actions` derived label is "Actions" (per columnsLabelsMap). It
-      // must NOT appear as a header in the rendered table.
-      // We scope to <th>…</th> because the word "Actions" could legitimately
-      // appear elsewhere (it doesn't today, but be safe).
       // why: `<th\b` (word boundary) prevents matching `<thead>`, which
       // would otherwise greedy-capture cross-cell content up to the first
       // `</th>` and conflate it with header text.
@@ -750,45 +756,7 @@ describe("Suite A — Asset-Index PDF Export (loader)", () => {
         html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)
       ).map((m) => m[1].trim());
       expect(headers).not.toContain("Actions");
-      // "Name" must still appear (proves the allowlist didn't strip everything).
       expect(headers).toContain("Name");
-    });
-
-    it("A0.k.2 deferred columns (upcomingReminder, upcomingBookings) excluded", async () => {
-      console.log("[A0.k.2] E2 — deferred columns excluded");
-      getOrganizationTierLimitMock.mockResolvedValue({ canExportAssets: true });
-      getAssetIndexSettingsMock.mockResolvedValueOnce({
-        id: "settings-A",
-        userId: "user-1",
-        organizationId: "org-A",
-        columns: [
-          { name: "name", visible: true, position: 0 },
-          { name: "upcomingReminder", visible: true, position: 1 },
-          { name: "upcomingBookings", visible: true, position: 2 },
-          { name: "valuation", visible: true, position: 3 },
-        ],
-        freezeColumn: true,
-        showAssetImage: false,
-      });
-      const res = await loader(
-        reqFor("https://shelf.test/assets/export/x.pdf") as never
-      );
-      const html = await (res as Response).text();
-      // why: `<th\b` (word boundary) prevents matching `<thead>`, which
-      // would otherwise greedy-capture cross-cell content up to the first
-      // `</th>` and conflate it with header text.
-      const headers = Array.from(
-        html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)
-      ).map((m) => m[1].trim());
-      // The two deferred columns' derived labels (from columnsLabelsMap):
-      //   upcomingReminder → "Upcoming Reminder"
-      //   upcomingBookings → "Upcoming Bookings"
-      // Neither must appear as a PDF header.
-      expect(headers).not.toContain("Upcoming Reminder");
-      expect(headers).not.toContain("Upcoming Bookings");
-      // The renderable columns DO appear.
-      expect(headers).toContain("Name");
-      expect(headers).toContain("Value");
     });
   });
 });
