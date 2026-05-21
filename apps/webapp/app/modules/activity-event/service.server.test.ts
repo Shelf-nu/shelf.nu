@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createActivityEventInput } from "@factories";
+
 import { recordEvent, recordEvents } from "./service.server";
 
 // why: testing service logic without hitting the real database
@@ -185,24 +187,8 @@ describe("activity event service", () => {
 
     it("writes all rows in a single createMany call and caches actor snapshots by actorUserId", async () => {
       await recordEvents([
-        {
-          organizationId: "org-1",
-          actorUserId: "user-1",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
-          assetId: "asset-a",
-        },
-        {
-          organizationId: "org-1",
-          actorUserId: "user-1",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
-          assetId: "asset-b",
-        },
+        createActivityEventInput({ assetId: "asset-a" }),
+        createActivityEventInput({ assetId: "asset-b" }),
       ]);
 
       // why: bulk inserts must be a single round-trip to fit inside the
@@ -246,33 +232,18 @@ describe("activity event service", () => {
         } as any);
 
       await recordEvents([
-        {
-          organizationId: "org-1",
+        createActivityEventInput({
           actorUserId: "user-alice",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
           assetId: "asset-a",
-        },
-        {
-          organizationId: "org-1",
+        }),
+        createActivityEventInput({
           actorUserId: "user-bob",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
           assetId: "asset-b",
-        },
-        {
-          organizationId: "org-1",
+        }),
+        createActivityEventInput({
           actorUserId: "user-alice",
-          action: "BOOKING_ASSETS_ADDED",
-          entityType: "BOOKING",
-          entityId: "booking-1",
-          bookingId: "booking-1",
           assetId: "asset-c",
-        },
+        }),
       ]);
 
       // Two unique actors → two user lookups; the repeat hits the cache.
@@ -300,17 +271,7 @@ describe("activity event service", () => {
       activityEventCreateManyMock.mockRejectedValueOnce(new Error("boom"));
 
       await expect(
-        recordEvents([
-          {
-            organizationId: "org-1",
-            actorUserId: "user-1",
-            action: "BOOKING_ASSETS_ADDED",
-            entityType: "BOOKING",
-            entityId: "booking-1",
-            bookingId: "booking-1",
-            assetId: "asset-a",
-          },
-        ])
+        recordEvents([createActivityEventInput({ assetId: "asset-a" })])
       ).rejects.toMatchObject({
         label: "Activity",
         message: "Failed to record activity events.",
