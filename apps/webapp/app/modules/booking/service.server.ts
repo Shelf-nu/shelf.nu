@@ -1438,55 +1438,63 @@ export async function checkoutBooking({
       }).toJSDate();
     }
 
-    /** Keep the transaction lean (writes only) to stay within the 5s
-     * timeout. The heavy read for the return payload is done after commit.
-     * This prevents P2028 timeouts on bookings with many assets.
+    /** Keep the transaction lean (writes only) to stay within the timeout.
+     * The heavy read for the return payload is done after commit.
+     *
+     * Defense-in-depth: bump the interactive-tx timeout from the 5s default
+     * to 15s. Large bookings (262 assets in Sentry SHELF-WEBAPP-1KN) issue
+     * multi-row writes that can creep toward the default ceiling even after
+     * the `recordEvents` bulk-insert fix. `maxWait` stays at the default —
+     * we don't expect connection contention.
      *
      * Using callback-form transaction to include activity events atomically. */
-    await db.$transaction(async (tx) => {
-      // SECURITY (cross-org IDOR): scope the status mutation to the caller's
-      // organization so it can never flip the status of an asset that lives
-      // in another workspace, even if a foreign asset ID slipped into the
-      // booking's asset list.
-      await tx.asset.updateMany({
-        where: {
-          id: { in: bookingFound.assets.map((a) => a.id) },
-          organizationId,
-        },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
-
-      await tx.booking.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1265; this is the write on that same proven id
-        where: { id: bookingFound.id },
-        data: dataToUpdate,
-        select: { id: true },
-      });
-
-      if (hasKits) {
-        await tx.kit.updateMany({
-          where: { id: { in: kitIds }, organizationId },
-          data: { status: KitStatus.CHECKED_OUT },
-        });
-      }
-
-      // Activity events — one BOOKING_CHECKED_OUT per asset, inside the tx.
-      // Must be atomic with checkout for audit trail consistency.
-      if (bookingFound.assets.length > 0) {
-        await recordEvents(
-          bookingFound.assets.map((asset) => ({
+    await db.$transaction(
+      async (tx) => {
+        // SECURITY (cross-org IDOR): scope the status mutation to the caller's
+        // organization so it can never flip the status of an asset that lives
+        // in another workspace, even if a foreign asset ID slipped into the
+        // booking's asset list.
+        await tx.asset.updateMany({
+          where: {
+            id: { in: bookingFound.assets.map((a) => a.id) },
             organizationId,
-            actorUserId: userId ?? null,
-            action: "BOOKING_CHECKED_OUT",
-            entityType: "BOOKING",
-            entityId: bookingFound.id,
-            bookingId: bookingFound.id,
-            assetId: asset.id,
-          })),
-          tx
-        );
-      }
-    });
+          },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+
+        await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1265; this is the write on that same proven id
+          where: { id: bookingFound.id },
+          data: dataToUpdate,
+          select: { id: true },
+        });
+
+        if (hasKits) {
+          await tx.kit.updateMany({
+            where: { id: { in: kitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
+          });
+        }
+
+        // Activity events — one BOOKING_CHECKED_OUT per asset, inside the tx.
+        // Must be atomic with checkout for audit trail consistency.
+        if (bookingFound.assets.length > 0) {
+          await recordEvents(
+            bookingFound.assets.map((asset) => ({
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_CHECKED_OUT",
+              entityType: "BOOKING",
+              entityId: bookingFound.id,
+              bookingId: bookingFound.id,
+              assetId: asset.id,
+            })),
+            tx
+          );
+        }
+      },
+      { timeout: 15000 }
+    );
 
     /** Build an effective snapshot by merging bookingFound with any fields
      * modified by dataToUpdate (adjusted dates, status). This avoids
