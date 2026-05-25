@@ -198,6 +198,11 @@ export default function QrIdDisplayPreferenceSelector({
         <PopoverTrigger asChild>
           <button
             ref={triggerRef}
+            // type="button" required by `local-rules/require-button-type` —
+            // without it the native default is "submit", and this dropdown
+            // trigger sits inside a `fetcher.Form` (workspace edit form).
+            // Clicking to OPEN the dropdown would otherwise submit the form.
+            type="button"
             className={tw(
               "flex h-[44px] w-full items-center justify-between rounded-md border px-3 py-2",
               className
@@ -297,9 +302,15 @@ export default function QrIdDisplayPreferenceSelector({
         <span>List rows will look like:</span>
         <AssetCodeBadge
           value={selectedOption.exampleValue}
-          type={selectedPreference}
+          // Drive the preview off the RESOLVED `selectedOption.value`, not the
+          // raw `selectedPreference` state. If the saved pref is no longer in
+          // availableOptions (e.g., addon revoked while a Code128 pref
+          // remained in the DB), `selectedOption` falls back to BASE_OPTIONS[0]
+          // for the button label + hidden input; the preview chip must follow
+          // suit so all three places show the same thing.
+          type={selectedOption.value}
           isFallback={false}
-          workspacePreference={selectedPreference}
+          workspacePreference={selectedOption.value}
         />
       </div>
     </div>

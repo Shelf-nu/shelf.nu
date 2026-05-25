@@ -1490,22 +1490,33 @@ export async function updateAsset({
      *   `{ assetId, organizationId }` (also closes cross-org IDOR).
      */
     if (preferredBarcodeId !== undefined && targetPreferred !== null) {
-      let isMember = false;
+      // Org-scoped ownership check — ALWAYS run, even when `barcodes` is
+      // being submitted. The submitted-array check below proves the id will
+      // survive `updateBarcodes`'s mutation, but it does NOT prove the id
+      // actually belongs to this asset/org: a forged form could include
+      // `barcodes: [{ id: "victim-barcode-id", ... }]` to slip past the
+      // earlier check. The DB lookup closes the cross-asset / cross-org
+      // IDOR vector authoritatively.
+      const owned = await db.barcode.findFirst({
+        where: {
+          id: targetPreferred,
+          assetId: id,
+          organizationId,
+        },
+        select: { id: true },
+      });
+      let isMember = Boolean(owned);
 
-      if (barcodes !== undefined) {
+      // Additional gate when the patch is also rewriting the `barcodes`
+      // collection: the target must still be in the post-update set
+      // (i.e., not being deleted in the same save). Without this, a save
+      // that simultaneously removes the preferred barcode and keeps the
+      // override would partially-commit (barcodes deleted, then 400 on
+      // membership) — the original P1 from Codex.
+      if (isMember && barcodes !== undefined) {
         isMember = barcodes.some(
           (bc) => typeof bc.id === "string" && bc.id === targetPreferred
         );
-      } else {
-        const owned = await db.barcode.findFirst({
-          where: {
-            id: targetPreferred,
-            assetId: id,
-            organizationId,
-          },
-          select: { id: true },
-        });
-        isMember = Boolean(owned);
       }
 
       if (!isMember) {
@@ -1552,48 +1563,65 @@ export async function updateAsset({
      * the current DB set), so this block is now purely the write + audit.
      */
     if (preferredBarcodeId !== undefined) {
-      // Read the current `preferredBarcodeId` INSIDE the same transaction
-      // that performs the update + audit, so the compare is against the
-      // committed state — not against `assetBeforeUpdate`'s pre-write
-      // snapshot taken outside any tx. A concurrent edit between the
-      // snapshot and our transaction would otherwise produce a stale
-      // `fromValue` in the audit event or skip a required write.
-      const wrote = await db.$transaction(async (tx) => {
+      // The "from" value for the audit event is the value the user was
+      // acting on — i.e., the snapshot taken BEFORE `updateBarcodes` ran in
+      // this same request. Without this, the audit silently loses the
+      // change in the "user removes preferred barcode in the same save"
+      // scenario: `updateBarcodes` deletes the barcode, the FK's
+      // `onDelete: SetNull` cascades to `Asset.preferredBarcodeId = null`,
+      // and an in-tx read here sees null already — so a compare against
+      // the in-tx read would skip the audit even though the user's
+      // explicit intent (clear the override) deserves an audit row.
+      const auditFromValue = assetBeforeUpdate?.preferredBarcodeId ?? null;
+
+      // Wrap the read + update + audit inside one transaction so the
+      // *write* decision is based on the committed current state (defeats
+      // concurrent-external-write TOCTOU per round-4) while the *audit*
+      // captures the user-facing change (auditFromValue → target).
+      const wroteOrAudited = await db.$transaction(async (tx) => {
         const current = await tx.asset.findUniqueOrThrow({
           where: { id, organizationId },
           select: { preferredBarcodeId: true },
         });
-        const previousPreferred = current.preferredBarcodeId ?? null;
+        const currentPreferred = current.preferredBarcodeId ?? null;
 
-        if (previousPreferred === targetPreferred) {
-          return false;
+        // Only write when the DB state differs from the target. If a
+        // cascade-delete already nulled it and the user's target is null,
+        // no explicit write is needed.
+        if (currentPreferred !== targetPreferred) {
+          await tx.asset.update({
+            where: { id, organizationId },
+            data: { preferredBarcodeId: targetPreferred },
+          });
         }
 
-        await tx.asset.update({
-          where: { id, organizationId },
-          data: { preferredBarcodeId: targetPreferred },
-        });
+        // Audit fires whenever the user's request changed the value
+        // relative to what they were seeing — regardless of whether the
+        // explicit write was needed (the cascade may have done the work
+        // for us). Skip only when no change occurred from the user's
+        // perspective. Structured event per `.claude/rules/use-record-event.md`.
+        if (auditFromValue !== targetPreferred) {
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_PREFERRED_BARCODE_CHANGED",
+              entityType: "ASSET",
+              entityId: id,
+              assetId: id,
+              field: "preferredBarcodeId",
+              fromValue: auditFromValue,
+              toValue: targetPreferred,
+            },
+            tx
+          );
+          return true;
+        }
 
-        // Structured activity event per `.claude/rules/use-record-event.md`.
-        await recordEvent(
-          {
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_PREFERRED_BARCODE_CHANGED",
-            entityType: "ASSET",
-            entityId: id,
-            assetId: id,
-            field: "preferredBarcodeId",
-            fromValue: previousPreferred,
-            toValue: targetPreferred,
-          },
-          tx
-        );
-
-        return true;
+        return false;
       });
 
-      if (wrote) {
+      if (wroteOrAudited) {
         // Sync the in-memory `asset` object so the returned shape reflects
         // the post-update state — callers that destructure
         // `preferredBarcodeId` (e.g., to drive an immediate cache
