@@ -17,7 +17,7 @@ Working dir: `shelf-feat-barcode-ids/`
 
 ## 2. Workspace setting (settings → general)
 
-Open `/settings/general` or `/account-details/workspace/<id>/edit`, find the row labeled **"Asset identifier preference"** (was "QR Code Display").
+Open `/settings/general` or `/account-details/workspace/<id>/edit`, find the row labeled **"Preferred display code"** (was "QR Code Display").
 
 - [ ] **Addon-OFF workspace** → only `QR Code ID` and `SAM ID` options visible. Subheading explains the upgrade unlocks barcode types.
 - [ ] **Addon-ON workspace** → also shows `Code 128`, `Code 39`, `DataMatrix`, `External QR`, `EAN-13`. Subheading confirms add-on is on.

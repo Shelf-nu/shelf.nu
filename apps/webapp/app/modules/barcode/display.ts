@@ -161,10 +161,13 @@ export function resolveDisplayCode({
     workspacePreference: organization.qrIdDisplayPreference,
   });
 
-  // 1. Per-entity override always wins when present and resolvable.
-  // The barcode is referenced by id, which onDelete: SetNull keeps in sync —
-  // but we still defensively check membership in case of a query/cache race.
-  if (entity.preferredBarcodeId) {
+  // 1. Per-entity override wins when present and resolvable — but ONLY if
+  // the org still has the alternative-barcodes add-on. Barcode rows are only
+  // created with the add-on, and per-asset overrides reference them; if the
+  // add-on has been revoked, the override (like the workspace pref) should
+  // not surface stale barcode values. Falls through to the workspace branch
+  // (which also short-circuits to QR for barcode types when !barcodesEnabled).
+  if (entity.preferredBarcodeId && organization.barcodesEnabled) {
     const preferred = barcodes.find((b) => b.id === entity.preferredBarcodeId);
     if (preferred) {
       return {

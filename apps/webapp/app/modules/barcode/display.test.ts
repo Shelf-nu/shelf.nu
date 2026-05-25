@@ -304,6 +304,37 @@ describe("resolveDisplayCode — non-addon organizations", () => {
     });
   });
 
+  it("does not honor preferredBarcodeId when the org has lost the addon", () => {
+    // The override branch must also respect the addon gate — otherwise an
+    // org that drops the alternative-barcodes addon would still see Code128
+    // values via per-asset preferredBarcodeId pointing at the surviving
+    // Barcode row. Fall back to QR with isFallback=true.
+    const result = resolveDisplayCode({
+      entity: asset({
+        preferredBarcodeId: "bc-stale-override",
+        qrCodes: [{ id: "qr-after-downgrade" }],
+        barcodes: [
+          {
+            id: "bc-stale-override",
+            type: BarcodeType.Code128,
+            value: "SHOULD-NOT-SHOW",
+          },
+        ],
+      }),
+      organization: org({
+        barcodesEnabled: false,
+        qrIdDisplayPreference: "Code128",
+      }),
+    });
+
+    expect(result).toEqual({
+      value: "qr-after-downgrade",
+      type: "QR_ID",
+      isFallback: true,
+      workspacePreference: "Code128",
+    });
+  });
+
   it("does not surface stale barcodes when the org has lost the addon", () => {
     // Harder data-drift case: org HAD the addon, created Code128 barcodes,
     // set Code128 as workspace pref, then dropped the addon. The barcodes

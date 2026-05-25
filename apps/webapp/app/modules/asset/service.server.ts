@@ -1555,22 +1555,30 @@ export async function updateAsset({
       const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
 
       if (previousPreferred !== targetPreferred) {
-        await db.asset.update({
-          where: { id, organizationId },
-          data: { preferredBarcodeId: targetPreferred },
-        });
+        // Wrap the update + recordEvent atomically per
+        // `.claude/rules/use-record-event.md` — without this, a successful
+        // override write followed by a failed recordEvent would leave the
+        // preferredBarcodeId mutated without its audit trail row.
+        await db.$transaction(async (tx) => {
+          await tx.asset.update({
+            where: { id, organizationId },
+            data: { preferredBarcodeId: targetPreferred },
+          });
 
-        // Structured activity event per `.claude/rules/use-record-event.md`.
-        await recordEvent({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_PREFERRED_BARCODE_CHANGED",
-          entityType: "ASSET",
-          entityId: id,
-          assetId: id,
-          field: "preferredBarcodeId",
-          fromValue: previousPreferred,
-          toValue: targetPreferred,
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_PREFERRED_BARCODE_CHANGED",
+              entityType: "ASSET",
+              entityId: id,
+              assetId: id,
+              field: "preferredBarcodeId",
+              fromValue: previousPreferred,
+              toValue: targetPreferred,
+            },
+            tx
+          );
         });
       }
     }

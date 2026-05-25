@@ -338,26 +338,24 @@ export async function updateOrganization({
       });
     }
 
-    // Capture the previous qrIdDisplayPreference before the update so we can
-    // emit a structured event when it actually changes. We only run this
-    // lookup when the form is sending a new preference value.
-    const previousQrIdDisplayPreference =
-      qrIdDisplayPreference !== undefined
-        ? (
-            await db.organization.findUnique({
-              where: { id },
-              select: { qrIdDisplayPreference: true },
-            })
-          )?.qrIdDisplayPreference ?? null
-        : null;
-
-    // Wrap the update + activity event in one transaction per
-    // `.claude/rules/use-record-event.md` and `.claude/rules/record-event-payload-shapes.md`.
-    // Without this, a successful update followed by a failed recordEvent
-    // returns an error to the caller but leaves the qrIdDisplayPreference
-    // mutation committed — partial-success semantics. The atomic wrap means
-    // either both land or neither does.
+    // Wrap the previous-value read + update + activity event in one transaction
+    // per `.claude/rules/use-record-event.md` and
+    // `.claude/rules/record-event-payload-shapes.md`. Reading the previous
+    // value OUTSIDE the tx would leave a race window: a concurrent write
+    // between the read and the update would produce a stale `fromValue` in
+    // the audit event (and could emit a redundant event for a no-op).
+    // The atomic wrap means the read sees what the update will overwrite.
     const updated = await db.$transaction(async (tx) => {
+      const previousQrIdDisplayPreference =
+        qrIdDisplayPreference !== undefined
+          ? (
+              await tx.organization.findUnique({
+                where: { id },
+                select: { qrIdDisplayPreference: true },
+              })
+            )?.qrIdDisplayPreference ?? null
+          : null;
+
       const next = await tx.organization.update({
         where: { id },
         data: data,
