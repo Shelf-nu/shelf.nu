@@ -248,7 +248,9 @@ export async function getLocation(
                 },
               },
               // Asset-code resolution relations — see
-              // `app/modules/barcode/display.ts`.
+              // `app/modules/barcode/display.ts`. Scalar fields
+              // (sequentialId, preferredBarcodeId) are automatically included
+              // because this is an `include`, not a `select`.
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {

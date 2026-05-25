@@ -157,6 +157,21 @@ async function buildPlan(
     );
   }
 
+  // Enforce a text-like source type. Migrating a DATE/AMOUNT/BOOLEAN field
+  // would coerce values like "2026-01-01" / "100" / "true" into barcodes
+  // — semantically nonsense and likely operator error. Stay strict; the
+  // operator can re-run after converting the field upstream if they really
+  // want non-text values.
+  const TEXT_LIKE: ReadonlySet<string> = new Set(["TEXT", "MULTILINE_TEXT"]);
+  if (!TEXT_LIKE.has(String(customField.type))) {
+    throw new Error(
+      `Custom field "${customField.name}" has type "${customField.type}", ` +
+        `which is not supported by this migration. Supported types: ${[
+          ...TEXT_LIKE,
+        ].join(", ")}.`
+    );
+  }
+
   // 3) Fetch the field's values for every asset
   const values = await db.assetCustomFieldValue.findMany({
     where: {
@@ -202,7 +217,12 @@ async function buildPlan(
       plan.skippedEmpty.push({ assetId: row.assetId });
       continue;
     }
-    if (!args.allowNonAscii && !isAsciiOnly(stringValue)) {
+    // ASCII gate. Code128 spec strictly requires ASCII-128, so we never let
+    // `--allowNonAscii` bypass that — generating a non-ASCII Code128 produces
+    // a barcode that scanners reject. For other types, allow the operator's
+    // explicit override.
+    const mustBeAscii = args.barcodeType === "Code128" || !args.allowNonAscii;
+    if (mustBeAscii && !isAsciiOnly(stringValue)) {
       plan.skippedNonAscii.push({ assetId: row.assetId, value: stringValue });
       continue;
     }
@@ -238,11 +258,29 @@ async function buildPlan(
   for (const c of candidates) {
     const found = existingByValue.get(c.value);
     if (found) {
-      plan.skippedAlreadyExists.push({
-        assetId: c.assetId,
-        value: c.value,
-        existingBarcodeId: found.id,
-      });
+      if (found.assetId === c.assetId) {
+        // Genuine idempotency: the same asset already has a barcode with this
+        // value. Skip cleanly — re-runs of the migration are safe.
+        plan.skippedAlreadyExists.push({
+          assetId: c.assetId,
+          value: c.value,
+          existingBarcodeId: found.id,
+        });
+      } else {
+        // Cross-asset collision: this value already belongs to a DIFFERENT
+        // asset. Silently skipping would lose data for the current asset and
+        // mislead the operator that the migration succeeded. Throw with a
+        // pointed error so they can resolve the duplicate at source (e.g.,
+        // de-dupe the custom field, or pick a barcode type whose values
+        // aren't yet taken).
+        throw new Error(
+          `Conflict: barcode value "${c.value}" already belongs to asset ` +
+            `${found.assetId ?? "(unattached)"}, cannot migrate for asset ${
+              c.assetId
+            }. ` +
+            `De-duplicate the source custom-field values and re-run.`
+        );
+      }
     } else {
       plan.toCreate.push(c);
     }

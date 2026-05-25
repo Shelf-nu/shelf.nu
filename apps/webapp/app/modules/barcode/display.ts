@@ -200,6 +200,16 @@ export function resolveDisplayCode({
 
     // All BarcodeType-derived values: Code128, Code39, DataMatrix, ExternalQR, EAN13
     default: {
+      // Addon-entitlement gate: if the org has lost the alternative-barcodes
+      // add-on but their workspace preference is still a barcode type (from
+      // when they had it), do not surface those barcode values — fall back
+      // to QR with isFallback=true so the outlined chip flags the entitlement
+      // gap. The UI prevents non-addon orgs from saving these values, but
+      // data drift (addon revoked after a previous selection) is possible.
+      if (!organization.barcodesEnabled) {
+        return qrFallback(true);
+      }
+
       const pref = organization.qrIdDisplayPreference;
       // Deterministic ordering: pick the lexicographically smallest barcode id
       // when an entity has multiple of the preferred type and no per-entity override.

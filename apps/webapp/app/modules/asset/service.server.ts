@@ -1455,6 +1455,75 @@ export async function updateAsset({
       });
     }
 
+    // Normalize the form-submitted preferredBarcodeId early so the same
+    // value is used by the pre-flight validation below and the actual write
+    // further down. Both undefined (field absent from patch) and empty
+    // string (form sends "" for "workspace default") collapse to null —
+    // any non-null branch is then guarded by `preferredBarcodeId !== undefined`
+    // so we never mistake "field omitted from patch" for "user picked
+    // workspace default" when writing.
+    const targetPreferred: string | null =
+      preferredBarcodeId === null ||
+      preferredBarcodeId === undefined ||
+      preferredBarcodeId.length === 0
+        ? null
+        : preferredBarcodeId;
+
+    /**
+     * P1 atomicity guard (pre-flight):
+     *
+     * The preferred-barcode override must reference a barcode that will
+     * still exist on this asset AFTER `updateBarcodes` runs. Without this
+     * pre-flight, a save that simultaneously (a) removes the currently-
+     * preferred barcode from the `barcodes` array AND (b) keeps the now-
+     * stale `preferredBarcodeId` would delete the barcode first, then
+     * fail validation, returning a 400 to the user while leaving the
+     * barcodes table mutated. We surface the error before any write so
+     * the rejected save is genuinely atomic.
+     *
+     * Membership-check semantics:
+     * - If `barcodes` is being submitted, compute the post-update id-set
+     *   from the submission (only entries that already have an `id` —
+     *   freshly-created ones have no id yet and can't be referenced).
+     * - If `barcodes` is NOT being submitted, the current DB set is the
+     *   post-update set, so query the live barcodes table scoped to
+     *   `{ assetId, organizationId }` (also closes cross-org IDOR).
+     */
+    if (preferredBarcodeId !== undefined && targetPreferred !== null) {
+      let isMember = false;
+
+      if (barcodes !== undefined) {
+        isMember = barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === targetPreferred
+        );
+      } else {
+        const owned = await db.barcode.findFirst({
+          where: {
+            id: targetPreferred,
+            assetId: id,
+            organizationId,
+          },
+          select: { id: true },
+        });
+        isMember = Boolean(owned);
+      }
+
+      if (!isMember) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "The selected preferred barcode is not linked to this asset.",
+          additionalData: {
+            assetId: id,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const asset = await db.asset.update({
       where: { id, organizationId },
       data,
@@ -1478,46 +1547,11 @@ export async function updateAsset({
 
     /**
      * Per-asset preferred-barcode override.
-     * Runs AFTER `updateBarcodes` so newly-created barcodes are persisted
-     * and available to be referenced. Empty string normalizes to null.
+     * Membership of `targetPreferred` was already proven by the pre-flight
+     * guard above (either against the submitted `barcodes` array or against
+     * the current DB set), so this block is now purely the write + audit.
      */
     if (preferredBarcodeId !== undefined) {
-      // Normalize form-empty → null
-      const targetPreferred =
-        preferredBarcodeId === null ||
-        (typeof preferredBarcodeId === "string" &&
-          preferredBarcodeId.length === 0)
-          ? null
-          : preferredBarcodeId;
-
-      // Org-scoped membership check: the target barcode must belong to this
-      // asset within this organization. Prevents cross-asset / cross-org IDOR
-      // via a forged form value.
-      if (targetPreferred !== null) {
-        const owned = await db.barcode.findFirst({
-          where: {
-            id: targetPreferred,
-            assetId: id,
-            organizationId,
-          },
-          select: { id: true },
-        });
-        if (!owned) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The selected preferred barcode is not linked to this asset.",
-            additionalData: {
-              assetId: id,
-              preferredBarcodeId: targetPreferred,
-            },
-            label,
-            status: 400,
-            shouldBeCaptured: false,
-          });
-        }
-      }
-
       const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
 
       if (previousPreferred !== targetPreferred) {

@@ -351,28 +351,39 @@ export async function updateOrganization({
           )?.qrIdDisplayPreference ?? null
         : null;
 
-    const updated = await db.organization.update({
-      where: { id },
-      data: data,
-    });
-
-    if (
-      qrIdDisplayPreference !== undefined &&
-      qrIdDisplayPreference !== previousQrIdDisplayPreference
-    ) {
-      // Structured activity event per `.claude/rules/use-record-event.md` —
-      // workspace-level config change is auditable in reports.
-      await recordEvent({
-        organizationId: id,
-        actorUserId: userId,
-        action: "ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED",
-        entityType: "ORGANIZATION",
-        entityId: id,
-        field: "qrIdDisplayPreference",
-        fromValue: previousQrIdDisplayPreference,
-        toValue: qrIdDisplayPreference,
+    // Wrap the update + activity event in one transaction per
+    // `.claude/rules/use-record-event.md` and `.claude/rules/record-event-payload-shapes.md`.
+    // Without this, a successful update followed by a failed recordEvent
+    // returns an error to the caller but leaves the qrIdDisplayPreference
+    // mutation committed — partial-success semantics. The atomic wrap means
+    // either both land or neither does.
+    const updated = await db.$transaction(async (tx) => {
+      const next = await tx.organization.update({
+        where: { id },
+        data: data,
       });
-    }
+
+      if (
+        qrIdDisplayPreference !== undefined &&
+        qrIdDisplayPreference !== previousQrIdDisplayPreference
+      ) {
+        await recordEvent(
+          {
+            organizationId: id,
+            actorUserId: userId,
+            action: "ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED",
+            entityType: "ORGANIZATION",
+            entityId: id,
+            field: "qrIdDisplayPreference",
+            fromValue: previousQrIdDisplayPreference,
+            toValue: qrIdDisplayPreference,
+          },
+          tx
+        );
+      }
+
+      return next;
+    });
 
     return updated;
   } catch (cause) {

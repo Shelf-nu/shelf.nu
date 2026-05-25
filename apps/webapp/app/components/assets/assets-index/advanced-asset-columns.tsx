@@ -203,6 +203,12 @@ export function AdvancedIndexColumn({
               type="SAM_ID"
               isFallback={false}
               workspacePreference={currentOrganization.qrIdDisplayPreference}
+              // Explicit column: this chip is *the SAM ID column*, not the
+              // workspace's chosen representative. Tooltip simplifies to
+              // "SAM ID: <value>" so we don't misleadingly claim "matches
+              // workspace pref" / "per-asset override" against an org that
+              // prefers something else.
+              explicit
             />
           ) : (
             <EmptyTableValue />
@@ -242,6 +248,8 @@ export function AdvancedIndexColumn({
                     currentOrganization.qrIdDisplayPreference
                   }
                   interactive
+                  // Explicit column: see SAM_ID column comment.
+                  explicit
                   className="cursor-pointer transition-colors hover:bg-gray-200"
                 />
               </button>
@@ -608,6 +616,10 @@ function BarcodeColumn({
                 isFallback={false}
                 workspacePreference={workspacePreference}
                 interactive
+                // Explicit column: barcode column shows literal barcode values,
+                // not the workspace-preferred one. Tooltip simplifies to
+                // "<Type>: <value>".
+                explicit
                 className="cursor-pointer transition-colors hover:bg-gray-200"
               />
             </button>
@@ -646,6 +658,8 @@ function BarcodeColumn({
                   isFallback={false}
                   workspacePreference={workspacePreference}
                   interactive
+                  // Explicit column: see single-barcode case above.
+                  explicit
                   className="cursor-pointer transition-colors hover:bg-gray-200"
                 />
               </button>

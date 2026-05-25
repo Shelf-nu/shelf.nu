@@ -224,6 +224,13 @@ model Asset {
   // with the barcode add-on), this picks the specific Barcode to display in
   // list views. Null = use the workspace `qrIdDisplayPreference` default.
   // @unique enforces 1:1 so the Prisma back-relation is `Asset?`, not `Asset[]`.
+  //
+  // Ownership invariant: the referenced Barcode MUST belong to THIS asset.
+  // Today this is enforced in the only write path — `updateAsset` runs a
+  // pre-flight membership check (see `apps/webapp/app/modules/asset/service.server.ts`).
+  // A DB-level CHECK/trigger (requiring a subquery against `Barcode.assetId`)
+  // is the belt-and-suspenders follow-up; deferred to a separate change so
+  // this PR doesn't conflate schema work with the customer-facing feature.
   preferredBarcodeId String?  @unique
   preferredBarcode   Barcode? @relation("AssetPreferredBarcode", fields: [preferredBarcodeId], references: [id], onDelete: SetNull)
 

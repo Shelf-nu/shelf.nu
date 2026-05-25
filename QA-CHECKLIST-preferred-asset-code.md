@@ -74,7 +74,7 @@ URL: `/assets`
 
 - [ ] Each row shows the code subtitle below the asset name.
 - [ ] Existing column toggles (status / description / etc.) still work.
-- [ ] **Known v1.1 gap:** advanced mode (`AssetIndexMode.ADVANCED`) does NOT yet show a code column. TanStack column-def wiring deferred — see notes at the bottom.
+- [ ] **Advanced mode** (`AssetIndexMode.ADVANCED`) also renders the code chip on the QR ID column, the SAM ID column, and the barcode column — same workspace-preference + per-asset-override behavior as simple mode. Per-column chips use a column-explicit tooltip ("Type: value") rather than the workspace-relative tooltip used on the title-row subtitle.
 
 ### 4.4 Kit detail page (Surface 4)
 
@@ -172,7 +172,7 @@ Until applied, queries that read/write `Asset.preferredBarcodeId` will fail with
 - **Label printing** (`code-preview.tsx`, `bulk-download-qr-dialog.tsx`) gracefully falls back to QR id for any of the new barcode-type enum values — labels won't break, but they also don't yet print the barcode-type's value below the QR image. The asset-code-resolution helper is ready; only the label component needs to consume it.
 - **Mobile companion** out of scope by your call — owned by another team.
 
-The rule file at `.claude/rules/asset-list-surfaces-consistency.md` lists all 7+ surfaces so the next contributor handling these gaps has the inventory.
+The rule file at `.claude/rules/code-bearing-entity-list-consistency.md` lists all the asset and kit surfaces so the next contributor handling these gaps has the inventory.
 
 ---
 

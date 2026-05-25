@@ -24,7 +24,7 @@ add-on). Customer workflows that need "match physical label → row" apply to
 both — so any feature that surfaces an identifier must evaluate **both axes**
 of the surface grid:
 
-```
+```text
                     Asset                                    Kit
   ┌──────────────────────────────────────┐  ┌──────────────────────────────┐
   • /assets index (simple AND advanced)    • /kits index

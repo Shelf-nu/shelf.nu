@@ -33,6 +33,17 @@ type AssetCodeBadgeProps = ResolvedDisplayCode & {
    * can communicate clickability at rest, not just on hover. Defaults false.
    */
   interactive?: boolean;
+  /**
+   * Set true when the chip is rendered inside a column that explicitly
+   * displays one specific code type (e.g., the dedicated "SAM ID", "QR ID",
+   * or "Barcode" columns in the advanced asset table). In that mode the
+   * workspace-relative tooltip ("matches your workspace's preferred display
+   * code", "set as a per-asset override", "fallback") is misleading because
+   * the column itself selects the value — the chip is not the org's chosen
+   * representative. The tooltip simplifies to "<TypeLabel>: <value>", which
+   * still tells the user what they're looking at. Defaults false.
+   */
+  explicit?: boolean;
 };
 
 /**
@@ -56,7 +67,9 @@ function buildTooltip(
   const wsLabel = labelForPreference(workspacePreference);
 
   if (isFallback) {
-    return `${typeLabel} (fallback) — your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`;
+    // Include the actual displayed value so the tooltip is shape-consistent
+    // with the other two branches and the user knows *which* QR is showing.
+    return `${typeLabel}: ${value} (fallback) — your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`;
   }
   if (type !== workspacePreference) {
     return `${typeLabel}: ${value} — set as a per-asset override (overrides workspace's preferred ${wsLabel}).`;
@@ -85,6 +98,7 @@ export function AssetCodeBadge({
   workspacePreference,
   className,
   interactive = false,
+  explicit = false,
 }: AssetCodeBadgeProps) {
   if (!value) return null;
 
@@ -94,8 +108,13 @@ export function AssetCodeBadge({
     type === "QR_ID" || type === "SAM_ID" ? ScanQRIcon : ScanBarcodeIcon;
 
   // Build help-text tooltip that explains WHY this value is showing and
-  // points at how to change it — not just `TYPE: value`.
-  const tooltip = buildTooltip(value, type, isFallback, workspacePreference);
+  // points at how to change it. In `explicit` column mode the workspace-
+  // relative narrative is misleading (the column itself, not the workspace
+  // preference, determines what's displayed), so we collapse to a plain
+  // "<TypeLabel>: <value>" form.
+  const tooltip = explicit
+    ? `${labelForPreference(type)}: ${value}`
+    : buildTooltip(value, type, isFallback, workspacePreference);
 
   return (
     <span

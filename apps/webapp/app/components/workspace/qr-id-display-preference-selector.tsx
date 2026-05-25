@@ -210,7 +210,16 @@ export default function QrIdDisplayPreferenceSelector({
               </span>
             </span>
             <ChevronDownIcon className="inline-block size-4 text-gray-500" />
-            <input type="hidden" name={name} value={selectedPreference} />
+            {/*
+              Submit the *resolved* selectedOption.value rather than the raw
+              selectedPreference. If the saved preference is no longer in
+              availableOptions (e.g., the addon was revoked while a Code128
+              pref remained in the DB), `selectedOption` falls back to
+              BASE_OPTIONS[0] for the visible label — and this hidden input
+              must match what the user actually sees, otherwise the form
+              quietly persists the stale value.
+            */}
+            <input type="hidden" name={name} value={selectedOption.value} />
           </button>
         </PopoverTrigger>
         <PopoverPortal>

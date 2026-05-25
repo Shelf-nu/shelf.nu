@@ -23,7 +23,7 @@
 import type { ReactNode } from "react";
 import type { BarcodeType, QrIdDisplayPreference } from "@prisma/client";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
-import { BARCODE_TYPE_OPTIONS } from "~/modules/barcode/constants";
+import { labelForPreference } from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
 
 type BarcodeChoice = {
@@ -47,36 +47,11 @@ type PreferredBarcodeSelectorProps = {
   workspacePreference?: QrIdDisplayPreference;
 };
 
-/** Human-readable label for any QrIdDisplayPreference value. */
-function labelForPreference(pref: QrIdDisplayPreference): string {
-  switch (pref) {
-    case "QR_ID":
-      return "QR Code ID";
-    case "SAM_ID":
-      return "SAM ID";
-    case "Code128":
-      return "Code 128";
-    case "Code39":
-      return "Code 39";
-    case "DataMatrix":
-      return "DataMatrix";
-    case "ExternalQR":
-      return "External QR";
-    case "EAN13":
-      return "EAN-13";
-  }
-}
-
 /** True when the preference is one of the BarcodeType-derived values. */
 function isBarcodeTypePreference(
   pref: QrIdDisplayPreference
 ): pref is Extract<QrIdDisplayPreference, BarcodeType> {
   return pref !== "QR_ID" && pref !== "SAM_ID";
-}
-
-/** Look up the human-readable label for a BarcodeType (Code 128, EAN-13, …). */
-function labelForType(type: BarcodeType): string {
-  return BARCODE_TYPE_OPTIONS.find((opt) => opt.value === type)?.label ?? type;
 }
 
 /**
@@ -187,7 +162,7 @@ export function PreferredBarcodeSelector({
           value={bc.id}
           checked={selectedId === bc.id}
           primary={bc.value}
-          secondary={`${labelForType(
+          secondary={`${labelForPreference(
             bc.type
           )} — overrides the workspace default for this asset`}
           // Override rows: chip preview is unambiguous — it's literally the

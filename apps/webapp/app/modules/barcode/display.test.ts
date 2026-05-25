@@ -303,4 +303,31 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       workspacePreference: "Code128",
     });
   });
+
+  it("does not surface stale barcodes when the org has lost the addon", () => {
+    // Harder data-drift case: org HAD the addon, created Code128 barcodes,
+    // set Code128 as workspace pref, then dropped the addon. The barcodes
+    // still exist in the DB, but should NOT be rendered as the chip — fall
+    // back to QR with isFallback=true so the outlined chip flags the
+    // entitlement gap.
+    const result = resolveDisplayCode({
+      entity: asset({
+        qrCodes: [{ id: "qr-after-downgrade" }],
+        barcodes: [
+          { id: "bc-stale", type: BarcodeType.Code128, value: "OLD-VAL" },
+        ],
+      }),
+      organization: org({
+        barcodesEnabled: false,
+        qrIdDisplayPreference: "Code128",
+      }),
+    });
+
+    expect(result).toEqual({
+      value: "qr-after-downgrade",
+      type: "QR_ID",
+      isFallback: true,
+      workspacePreference: "Code128",
+    });
+  });
 });
