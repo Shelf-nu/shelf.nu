@@ -192,9 +192,8 @@ const WorkspaceGeneralEditForms = ({
               <div className="space-y-2 text-gray-600">
                 <p>
                   Pick which code is shown next to every asset and kit on list
-                  views (assets, kits, bookings, audits, locations) and on
-                  printed QR labels — so a Sony A7-III can be told apart from 19
-                  others at a glance.
+                  views (assets, kits, bookings, audits, locations) — so a Sony
+                  A7-III can be told apart from 19 others at a glance.
                 </p>
                 <p>
                   Need an exception for one asset?{" "}
@@ -208,7 +207,9 @@ const WorkspaceGeneralEditForms = ({
                     : "Barcode-type options unlock with the alternative-barcodes add-on."}{" "}
                   When an asset doesn't have your preferred type, the chip falls
                   back to its QR code (rendered with an outlined style so the
-                  missing data stays visible).
+                  missing data stays visible). Printed QR labels continue to
+                  show the QR id today regardless of this setting — barcode-type
+                  label printing is on the v1.1 roadmap.
                 </p>
               </div>
             }
