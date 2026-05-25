@@ -102,17 +102,22 @@ export function PreferredBarcodeSelector({
   workspacePreference,
 }: PreferredBarcodeSelectorProps) {
   if (barcodes.length === 0) {
-    const wsLabel = workspacePreference
-      ? labelForPreference(workspacePreference)
-      : null;
+    // Reuse the canonical workspace-default explainer so the empty state
+    // matches what the resolver actually does. The previous copy said
+    // "List views will use the workspace default (Code 128)" even when the
+    // asset has zero barcodes — which is misleading, since the resolver
+    // silently falls back to QR with isFallback=true in that case. The
+    // shared helper covers all three branches (QR_ID / SAM_ID / fallback)
+    // with one source of truth.
+    const emptyStateSecondary = buildWorkspaceDefaultSecondary(
+      workspacePreference,
+      barcodes
+    );
     return (
       <p className="text-sm text-gray-500">
         This asset has no barcodes yet, so there's nothing to override.{" "}
-        {wsLabel
-          ? `List views will use the workspace default (${wsLabel}).`
-          : "List views will use the workspace default."}{" "}
-        Add a barcode in the section above and save the asset — it will become
-        selectable here on your next edit.
+        {emptyStateSecondary} Add a barcode in the section above and save the
+        asset — it will become selectable here on your next edit.
       </p>
     );
   }
