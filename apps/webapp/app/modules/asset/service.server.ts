@@ -162,6 +162,7 @@ const label: ErrorLabel = "Assets";
 const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
+  preferredBarcodeId: true,
   category: {
     select: {
       id: true,
@@ -1257,6 +1258,7 @@ export async function updateAsset({
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
+  preferredBarcodeId,
   organizationId,
   request,
 }: UpdateAssetPayload) {
@@ -1296,7 +1298,8 @@ export async function updateAsset({
       typeof title !== "undefined" ||
         typeof description !== "undefined" ||
         typeof categoryId !== "undefined" ||
-        typeof valuation !== "undefined"
+        typeof valuation !== "undefined" ||
+        typeof preferredBarcodeId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -1471,6 +1474,71 @@ export async function updateAsset({
         organizationId,
         userId,
       });
+    }
+
+    /**
+     * Per-asset preferred-barcode override.
+     * Runs AFTER `updateBarcodes` so newly-created barcodes are persisted
+     * and available to be referenced. Empty string normalizes to null.
+     */
+    if (preferredBarcodeId !== undefined) {
+      // Normalize form-empty → null
+      const targetPreferred =
+        preferredBarcodeId === null ||
+        (typeof preferredBarcodeId === "string" &&
+          preferredBarcodeId.length === 0)
+          ? null
+          : preferredBarcodeId;
+
+      // Org-scoped membership check: the target barcode must belong to this
+      // asset within this organization. Prevents cross-asset / cross-org IDOR
+      // via a forged form value.
+      if (targetPreferred !== null) {
+        const owned = await db.barcode.findFirst({
+          where: {
+            id: targetPreferred,
+            assetId: id,
+            organizationId,
+          },
+          select: { id: true },
+        });
+        if (!owned) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "The selected preferred barcode is not linked to this asset.",
+            additionalData: {
+              assetId: id,
+              preferredBarcodeId: targetPreferred,
+            },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
+
+      if (previousPreferred !== targetPreferred) {
+        await db.asset.update({
+          where: { id, organizationId },
+          data: { preferredBarcodeId: targetPreferred },
+        });
+
+        // Structured activity event per `.claude/rules/use-record-event.md`.
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_PREFERRED_BARCODE_CHANGED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+          field: "preferredBarcodeId",
+          fromValue: previousPreferred,
+          toValue: targetPreferred,
+        });
+      }
     }
 
     /** If the location id was passed, we create a note for the move */

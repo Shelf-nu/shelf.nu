@@ -23,6 +23,7 @@ import {
 } from "~/utils/stripe.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
+import { recordEvent } from "../activity-event/service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
@@ -337,10 +338,43 @@ export async function updateOrganization({
       });
     }
 
-    return await db.organization.update({
+    // Capture the previous qrIdDisplayPreference before the update so we can
+    // emit a structured event when it actually changes. We only run this
+    // lookup when the form is sending a new preference value.
+    const previousQrIdDisplayPreference =
+      qrIdDisplayPreference !== undefined
+        ? (
+            await db.organization.findUnique({
+              where: { id },
+              select: { qrIdDisplayPreference: true },
+            })
+          )?.qrIdDisplayPreference ?? null
+        : null;
+
+    const updated = await db.organization.update({
       where: { id },
       data: data,
     });
+
+    if (
+      qrIdDisplayPreference !== undefined &&
+      qrIdDisplayPreference !== previousQrIdDisplayPreference
+    ) {
+      // Structured activity event per `.claude/rules/use-record-event.md` —
+      // workspace-level config change is auditable in reports.
+      await recordEvent({
+        organizationId: id,
+        actorUserId: userId,
+        action: "ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED",
+        entityType: "ORGANIZATION",
+        entityId: id,
+        field: "qrIdDisplayPreference",
+        fromValue: previousQrIdDisplayPreference,
+        toValue: qrIdDisplayPreference,
+      });
+    }
+
+    return updated;
   } catch (cause) {
     throw new ShelfError({
       cause,

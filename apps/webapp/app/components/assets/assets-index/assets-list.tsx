@@ -22,14 +22,17 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+import { AssetCodeBadge } from "../asset-code-badge";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
@@ -217,6 +220,10 @@ export const ListAssetContent = ({
   isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
   return (
     <>
       {/* Item */}
@@ -267,12 +274,20 @@ export const ListAssetContent = ({
                   {item.title}
                 </Button>
               </span>
-              <div>
+              {/*
+                Single metadata line: status badge first (most glanceable —
+                color + word), code chip second (identification reference).
+                Reads as paired metadata, frees a row of vertical space vs.
+                the previous three-stack layout. `flex-wrap` keeps the layout
+                safe when code/status are long on narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 <AssetStatusBadge
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { AssetStatus } from "@prisma/client";
+import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import {
@@ -61,6 +61,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { AssetCodeBadge } from "../asset-code-badge";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
@@ -186,10 +187,28 @@ export function AdvancedIndexColumn({
       );
 
     case "id":
+      // Asset CUID — internal/developer identifier. Stays plain text on purpose;
+      // not part of the "customer-facing identifier family" (qrId / sequentialId).
       return <TextColumn value={item[column]} />;
 
     case "sequentialId":
-      return <TextColumn value={item[column] || ""} />;
+      // SAM id (e.g., "SAM-0001"). Same identifier family as qrId — give it
+      // the same chip styling for visual consistency. No click affordance
+      // (SAM doesn't have a code preview, only QR does).
+      return (
+        <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
+          {item.sequentialId ? (
+            <AssetCodeBadge
+              value={item.sequentialId}
+              type="SAM_ID"
+              isFallback={false}
+              workspacePreference={currentOrganization.qrIdDisplayPreference}
+            />
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
 
     case "qrId":
       return (
@@ -203,9 +222,29 @@ export function AdvancedIndexColumn({
           }}
           trigger={
             <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-              <Button type="button" variant="link-gray">
-                {item.qrId}
-              </Button>
+              {/*
+                Visual parity with the simple-mode AssetCodeBadge: chip styling
+                via the shared component, wrapped in a native button so the
+                CodePreviewDialog still opens on click. Hover state lifts the
+                background; keyboard focus gets a visible ring. Click target
+                stays generous because the chip has padding.
+              */}
+              <button
+                type="button"
+                aria-label={`Show code preview for ${item.title}`}
+                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
+              >
+                <AssetCodeBadge
+                  value={item.qrId}
+                  type="QR_ID"
+                  isFallback={false}
+                  workspacePreference={
+                    currentOrganization.qrIdDisplayPreference
+                  }
+                  interactive
+                  className="cursor-pointer transition-colors hover:bg-gray-200"
+                />
+              </button>
             </Td>
           }
         />
@@ -314,7 +353,13 @@ export function AdvancedIndexColumn({
     case "barcode_DataMatrix":
     case "barcode_ExternalQR":
     case "barcode_EAN13":
-      return <BarcodeColumn column={column} item={item} />;
+      return (
+        <BarcodeColumn
+          column={column}
+          item={item}
+          workspacePreference={currentOrganization.qrIdDisplayPreference}
+        />
+      );
 
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
@@ -505,9 +550,11 @@ function UpcomingReminderColumn({
 function BarcodeColumn({
   column,
   item,
+  workspacePreference,
 }: {
   column: BarcodeField;
   item: AdvancedIndexAsset;
+  workspacePreference: QrIdDisplayPreference;
 }) {
   // Map column names to actual enum values
   const typeMapping: Record<string, string> = {
@@ -532,7 +579,10 @@ function BarcodeColumn({
     );
   }
 
-  // If only one barcode, show as a single clickable link
+  // If only one barcode, show as a single clickable chip — same visual
+  // language as the qrId column: AssetCodeBadge inside a button so the
+  // CodePreviewDialog still opens on click, with hover/focus affordances
+  // and the trailing "expand" glyph (`interactive`) signaling clickability.
   if (barcodes.length === 1) {
     const barcode = barcodes[0];
     return (
@@ -547,21 +597,35 @@ function BarcodeColumn({
         selectedBarcodeId={barcode.id}
         trigger={
           <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-            <Button type="button" variant="link-gray">
-              {barcode.value}
-            </Button>
+            <button
+              type="button"
+              aria-label={`Show code preview for ${item.title}`}
+              className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
+            >
+              <AssetCodeBadge
+                value={barcode.value}
+                type={barcode.type}
+                isFallback={false}
+                workspacePreference={workspacePreference}
+                interactive
+                className="cursor-pointer transition-colors hover:bg-gray-200"
+              />
+            </button>
           </Td>
         }
       />
     );
   }
 
-  // If multiple barcodes, show as comma-separated clickable links
+  // If multiple barcodes of this type, show each as its own clickable chip in
+  // a flex row. Replaces the previous comma-separated link list — chips have
+  // their own padding so commas would be redundant visual noise.
   return (
     <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-      {barcodes.map((barcode, index) => (
-        <span key={barcode.id}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {barcodes.map((barcode) => (
           <CodePreviewDialog
+            key={barcode.id}
             item={{
               id: item.id,
               title: item.title,
@@ -571,16 +635,24 @@ function BarcodeColumn({
             }}
             selectedBarcodeId={barcode.id}
             trigger={
-              <Button type="button" variant="link-gray">
-                {barcode.value}
-              </Button>
+              <button
+                type="button"
+                aria-label={`Show code preview for ${item.title} (${barcode.value})`}
+                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
+              >
+                <AssetCodeBadge
+                  value={barcode.value}
+                  type={barcode.type}
+                  isFallback={false}
+                  workspacePreference={workspacePreference}
+                  interactive
+                  className="cursor-pointer transition-colors hover:bg-gray-200"
+                />
+              </button>
             }
           />
-          {index < barcodes.length - 1 && (
-            <span className="text-gray-600">, </span>
-          )}
-        </span>
-      ))}
+        ))}
+      </div>
     </Td>
   );
 }

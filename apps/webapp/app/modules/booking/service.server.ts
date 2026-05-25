@@ -3865,10 +3865,20 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
-      assetsWhere.title = {
-        contains: search,
-        mode: "insensitive",
-      };
+      // Match the asset's title OR any of its codes (QR id, barcode value)
+      // so a field worker can find an asset in a booking by the same string
+      // that's printed on the physical label.
+      assetsWhere.OR = [
+        { title: { contains: search, mode: "insensitive" } },
+        {
+          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
+        },
+        {
+          barcodes: {
+            some: { value: { contains: search, mode: "insensitive" } },
+          },
+        },
+      ];
     }
 
     // if (status) {

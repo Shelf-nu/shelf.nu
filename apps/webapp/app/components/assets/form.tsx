@@ -8,6 +8,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type {
   AssetEditLoaderData,
   loader,
@@ -20,6 +21,7 @@ import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissio
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
+import { PreferredBarcodeSelector } from "./preferred-barcode-selector";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -60,6 +62,16 @@ export const NewAssetFormSchema = z.object({
   currentLocationId: z.string().optional(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
+  /**
+   * Per-asset override of which Barcode to display in list views. Empty
+   * string means "use workspace default" (resolver follows
+   * `Organization.qrIdDisplayPreference`). A non-empty value must match
+   * one of this asset's persisted barcode ids — enforced server-side.
+   */
+  preferredBarcodeId: z
+    .string()
+    .optional()
+    .transform((val) => (val && val.length > 0 ? val : null)),
   valuation: z
     .string()
     .optional()
@@ -86,6 +98,7 @@ type Props = Partial<
     | "locationId"
     | "description"
     | "valuation"
+    | "preferredBarcodeId"
   >
 > & {
   qrId?: Qr["id"] | null;
@@ -109,10 +122,15 @@ export const AssetForm = ({
   qrId,
   tags,
   barcodes,
+  preferredBarcodeId,
   referer,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
+  // Workspace's current code-display preference — used by PreferredBarcodeSelector
+  // to tell the user what "Workspace default" actually resolves to (and to warn
+  // about silent fallback when this asset can't satisfy the workspace preference).
+  const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
@@ -570,20 +588,55 @@ export const AssetForm = ({
         </FormRow>
 
         {canUseBarcodes ? (
-          <FormRow
-            rowLabel={"Barcodes"}
-            className="border-b-0"
-            subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
-          >
-            <BarcodesInput
-              ref={barcodesInputRef}
-              barcodes={barcodes || []}
-              typeName={(i) => `barcodes[${i}].type`}
-              valueName={(i) => `barcodes[${i}].value`}
-              idName={(i) => `barcodes[${i}].id`}
-              disabled={disabled}
-            />
-          </FormRow>
+          <>
+            <FormRow
+              rowLabel={"Barcodes"}
+              className="border-b-0"
+              subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
+            >
+              <BarcodesInput
+                ref={barcodesInputRef}
+                barcodes={barcodes || []}
+                typeName={(i) => `barcodes[${i}].type`}
+                valueName={(i) => `barcodes[${i}].value`}
+                idName={(i) => `barcodes[${i}].id`}
+                disabled={disabled}
+              />
+            </FormRow>
+
+            <FormRow
+              rowLabel={"Preferred display code for this asset"}
+              className="border-b-0"
+              subHeading={
+                <p>
+                  <strong>
+                    Only needed if you want this asset to behave differently
+                    from the workspace default.
+                  </strong>{" "}
+                  Most assets should leave this on "Workspace default" — it'll
+                  automatically use your workspace's{" "}
+                  <a
+                    href="/settings/general"
+                    className="text-primary-700 underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    preferred display code setting
+                  </a>
+                  . Pick a specific barcode below to override that for this
+                  asset (useful when an asset has multiple barcodes of the same
+                  type and you want one in particular).
+                </p>
+              }
+            >
+              <PreferredBarcodeSelector
+                name="preferredBarcodeId"
+                barcodes={barcodes || []}
+                defaultValue={preferredBarcodeId}
+                workspacePreference={currentOrganization?.qrIdDisplayPreference}
+              />
+            </FormRow>
+          </>
         ) : (
           <FormRow rowLabel={"Barcodes"} className="border-b-0">
             <UnlockBarcodesBanner />

@@ -49,6 +49,13 @@ export interface UpdateAssetPayload {
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   barcodes?: { id?: string; type: BarcodeType; value: string }[];
+  /**
+   * Per-asset override of the displayed identifier in list views.
+   * - `undefined` → leave the column unchanged
+   * - `null` or `""` → clear the override (follow workspace default)
+   * - a string → set to that specific Barcode.id (validated to belong to this asset)
+   */
+  preferredBarcodeId?: Asset["preferredBarcodeId"] | undefined;
   valuation?: Asset["valuation"];
   organizationId: Organization["id"];
   request: Request;

@@ -247,6 +247,10 @@ export async function getLocation(
                   name: true,
                 },
               },
+              // Asset-code resolution relations — see
+              // `app/modules/barcode/display.ts`.
+              qrCodes: { take: 1, select: { id: true } },
+              barcodes: { select: { id: true, type: true, value: true } },
               custody: {
                 select: {
                   custodian: {

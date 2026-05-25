@@ -52,6 +52,12 @@ export const GET_KIT_STATIC_INCLUDES = {
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assets: true } },
+  // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
+  // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so
+  // every kit-listing surface needs these included to render the chip.
+  // Kit v1 has no sequentialId / preferredBarcodeId — resolver tolerates that.
+  qrCodes: { take: 1, select: { id: true } },
+  barcodes: { select: { id: true, type: true, value: true } },
   custody: {
     select: {
       custodian: {
@@ -83,6 +89,11 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   mainImageExpiration: true,
   status: true,
   availableToBook: true,
+  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+  sequentialId: true,
+  preferredBarcodeId: true,
+  qrCodes: { take: 1, select: { id: true } },
+  barcodes: { select: { id: true, type: true, value: true } },
   category: {
     select: {
       id: true,

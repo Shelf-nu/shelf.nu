@@ -28,6 +28,7 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
@@ -53,7 +54,9 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
@@ -85,6 +88,11 @@ export type KitForBooking = Prisma.KitGetPayload<{
   include: {
     location: typeof LOCATION_WITH_HIERARCHY;
     _count: { select: { assets: true } };
+    // Code-resolution relations for the AssetCodeBadge — kits are code-bearing
+    // entities too. The runtime loader already includes these via
+    // KITS_INCLUDE_FIELDS; declaring them here lines the type up.
+    qrCodes: { take: 1; select: { id: true } };
+    barcodes: { select: { id: true; type: true; value: true } };
     assets: {
       select: {
         id: true;
@@ -681,6 +689,10 @@ export default function AddKitsToBooking() {
 function Row({ item: kit }: { item: KitForBooking }) {
   const { booking } = useLoaderData<typeof loader>();
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    : null;
 
   // For Case 1: Check if kit is checked out in current booking
   // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
@@ -738,6 +750,8 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   />
                 </When>
                 <KitAvailabilityLabel kit={kit} />
+                {/* Kit's display code chip — same identifier surface as assets. */}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>

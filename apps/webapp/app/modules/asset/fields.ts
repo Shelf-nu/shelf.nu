@@ -190,6 +190,12 @@ export const assetIndexFields = ({
       select: { id: true },
       take: 1,
     },
+    // Asset-code resolution: surfaces the linked barcodes so `resolveDisplayCode`
+    // (in `app/modules/barcode/display.ts`) can render the workspace-preferred
+    // or per-asset-override code on list views. Narrow select keeps payload small.
+    barcodes: {
+      select: { id: true, type: true, value: true },
+    },
     /**
      * Include booking custodian data for CHECKED_OUT assets inline,
      * eliminating the N+1 re-query in updateAssetsWithBookingCustodians().

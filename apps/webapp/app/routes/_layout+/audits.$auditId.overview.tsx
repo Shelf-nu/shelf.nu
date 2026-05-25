@@ -7,6 +7,7 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -30,6 +31,7 @@ import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getAuditFilterMetadata,
@@ -47,6 +49,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -619,6 +622,13 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
   const { roles } = useUserRoleHelper();
+  const currentOrganization = useCurrentOrganization();
+  // Resolve the asset's display code. Audits run on physical assets, so this
+  // is the strongest case for the badge — the field worker matches the label
+  // on their hand to a row on screen.
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
 
   // Show audit status column when "ALL" or "EXPECTED" filter is active
   const showAuditStatus =
@@ -667,6 +677,18 @@ function AssetListItem({ item }: { item: AuditAssetItem }) {
                   {item.title}
                 </Button>
               </span>
+              {/*
+                Code chip metadata row — same flex-wrap container shape as
+                every other list surface, even though this surface has no
+                companion items in the name cell (status lives in its own
+                column). Keeps composition consistent across surfaces per
+                `.claude/rules/code-bearing-entity-list-consistency.md`.
+              */}
+              {displayCode ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <AssetCodeBadge {...displayCode} />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
