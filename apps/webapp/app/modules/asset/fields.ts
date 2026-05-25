@@ -166,26 +166,12 @@ export const assetIndexFields = ({
         },
       },
     },
-    customFields: {
-      where: {
-        customField: {
-          active: true,
-          deletedAt: null,
-        },
-      },
-      include: {
-        customField: {
-          select: {
-            id: true,
-            name: true,
-            helpText: true,
-            required: true,
-            type: true,
-            categories: true,
-          },
-        },
-      },
-    },
+    // why: customFields used to be eagerly loaded here for every asset row.
+    // The simple asset index doesn't render them (only the advanced columns
+    // do), and on a 13k-asset workspace this multi-row include scaled with
+    // the number of active custom fields. Advanced mode uses
+    // advancedAssetIndexFields below; the command-palette search re-adds
+    // customFields via extraInclude.
     qrCodes: {
       select: { id: true },
       take: 1,
