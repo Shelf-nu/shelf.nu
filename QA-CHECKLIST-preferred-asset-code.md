@@ -1,17 +1,15 @@
 # QA Checklist — Preferred Asset Code on List Views
 
-Branch: `feat/preferred-asset-code-on-lists`
-Preview: <http://localhost:3040>
-Working dir: `shelf-feat-barcode-ids/`
+Branch: `feat/preferred-asset-code-on-lists` (PR #2567)
 
-> 📌 **None of this is committed yet.** `git status` shows everything in the working tree. Review at your own pace; commit when you're satisfied.
+Use the PR's deploy-preview URL — or your local `pnpm webapp:dev` URL — wherever this checklist says "the preview." All steps assume you're logged into a workspace that has the alternative-barcodes add-on; one step is explicitly for non-addon orgs.
 
 ---
 
 ## 1. Smoke (5 min)
 
-- [ ] **App loads cleanly** at http://localhost:3040. Login lands on `/home` without errors.
-- [ ] **`pnpm webapp:validate` is clean** (running in the background; check `task #15` status).
+- [ ] **App loads cleanly.** Login lands on `/home` without errors.
+- [ ] **`pnpm webapp:validate` is clean.**
 
 ---
 

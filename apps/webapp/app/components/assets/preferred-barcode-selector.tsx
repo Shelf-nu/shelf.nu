@@ -20,7 +20,7 @@
  * @see {@link file://./../../modules/barcode/display.ts}
  */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { BarcodeType, QrIdDisplayPreference } from "@prisma/client";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { labelForPreference } from "~/modules/barcode/display";
@@ -117,6 +117,21 @@ export function PreferredBarcodeSelector({
       ? defaultValue
       : "";
   const [selectedId, setSelectedId] = useState<string>(initialSelectedId);
+
+  // Resync `selectedId` when the parent re-renders with new `defaultValue` or
+  // `barcodes` props (e.g., after the asset save resolves and the loader data
+  // refreshes WITHOUT unmounting this component — the typical Remix fetcher
+  // flow). Without this effect, the radio selection would freeze on the
+  // user's last click even if the persisted preferred barcode has changed
+  // server-side (or if the barcode the user picked has been removed). Pure
+  // derive-from-props; no fetch, no race.
+  useEffect(() => {
+    const next =
+      defaultValue && barcodes.some((b) => b.id === defaultValue)
+        ? defaultValue
+        : "";
+    setSelectedId(next);
+  }, [defaultValue, barcodes]);
 
   if (barcodes.length === 0) {
     // Reuse the canonical workspace-default explainer so the empty state

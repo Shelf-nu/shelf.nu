@@ -1563,21 +1563,31 @@ export async function updateAsset({
      * the current DB set), so this block is now purely the write + audit.
      */
     if (preferredBarcodeId !== undefined) {
-      // The "from" value for the audit event is the value the user was
-      // acting on — i.e., the snapshot taken BEFORE `updateBarcodes` ran in
-      // this same request. Without this, the audit silently loses the
-      // change in the "user removes preferred barcode in the same save"
-      // scenario: `updateBarcodes` deletes the barcode, the FK's
-      // `onDelete: SetNull` cascades to `Asset.preferredBarcodeId = null`,
-      // and an in-tx read here sees null already — so a compare against
-      // the in-tx read would skip the audit even though the user's
-      // explicit intent (clear the override) deserves an audit row.
-      const auditFromValue = assetBeforeUpdate?.preferredBarcodeId ?? null;
+      const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
 
-      // Wrap the read + update + audit inside one transaction so the
-      // *write* decision is based on the committed current state (defeats
-      // concurrent-external-write TOCTOU per round-4) while the *audit*
-      // captures the user-facing change (auditFromValue → target).
+      // Did THIS request's `updateBarcodes` call delete the previously-
+      // preferred barcode? True only when (a) a previously-preferred
+      // barcode existed AND (b) the patch submitted a `barcodes` array
+      // that no longer contains it (so updateBarcodes deleted it and the
+      // FK `onDelete: SetNull` cascade nulled `preferredBarcodeId`).
+      // This is the "explicit clear-by-this-request" signal we need to
+      // distinguish "we caused the cascade" from "someone else moved
+      // preferredBarcodeId concurrently".
+      const weDeletedPreferredViaCascade =
+        previousPreferred !== null &&
+        barcodes !== undefined &&
+        !barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === previousPreferred
+        );
+
+      // Wrap the read + update + audit in one transaction so the *write*
+      // decision is based on the committed current state (defeats
+      // concurrent-external-write TOCTOU). The *audit* fires only when
+      // THIS request actually caused the change — either via the explicit
+      // write below, or via the cascade-delete branch above. We must NOT
+      // audit when the value simply differs between the pre-request
+      // snapshot and the in-tx read because of a concurrent external
+      // write — that would misattribute someone else's change to this actor.
       const wroteOrAudited = await db.$transaction(async (tx) => {
         const current = await tx.asset.findUniqueOrThrow({
           where: { id, organizationId },
@@ -1585,22 +1595,31 @@ export async function updateAsset({
         });
         const currentPreferred = current.preferredBarcodeId ?? null;
 
-        // Only write when the DB state differs from the target. If a
-        // cascade-delete already nulled it and the user's target is null,
-        // no explicit write is needed.
-        if (currentPreferred !== targetPreferred) {
+        const needsWrite = currentPreferred !== targetPreferred;
+        if (needsWrite) {
           await tx.asset.update({
             where: { id, organizationId },
             data: { preferredBarcodeId: targetPreferred },
           });
         }
 
-        // Audit fires whenever the user's request changed the value
-        // relative to what they were seeing — regardless of whether the
-        // explicit write was needed (the cascade may have done the work
-        // for us). Skip only when no change occurred from the user's
-        // perspective. Structured event per `.claude/rules/use-record-event.md`.
-        if (auditFromValue !== targetPreferred) {
+        // Audit when THIS request caused the row change. Two attribution
+        // paths:
+        //   1. We performed the explicit DB write (target differed from
+        //      the in-tx current state).
+        //   2. The cascade-delete from THIS request's `updateBarcodes`
+        //      nulled the row AND the user's target is null too (the
+        //      cascade fulfilled the user's "clear my override" intent
+        //      silently; we still want an audit row).
+        // Concurrent external writes can't satisfy either condition.
+        const auditAttributableToUs =
+          needsWrite ||
+          (weDeletedPreferredViaCascade &&
+            targetPreferred === null &&
+            currentPreferred === null);
+
+        if (auditAttributableToUs && previousPreferred !== targetPreferred) {
+          // Structured event per `.claude/rules/use-record-event.md`.
           await recordEvent(
             {
               organizationId,
@@ -1610,7 +1629,7 @@ export async function updateAsset({
               entityId: id,
               assetId: id,
               field: "preferredBarcodeId",
-              fromValue: auditFromValue,
+              fromValue: previousPreferred,
               toValue: targetPreferred,
             },
             tx

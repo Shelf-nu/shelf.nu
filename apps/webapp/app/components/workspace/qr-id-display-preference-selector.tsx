@@ -243,10 +243,21 @@ export default function QrIdDisplayPreferenceSelector({
                   setSearchQuery(event.target.value);
                 }}
                 onKeyDown={handleKeyDown}
+                // a11y: WCAG 2.1 AA requires every form input to have an
+                // accessible name. The placeholder alone is not a substitute
+                // for screen readers — `aria-label` gives the same visible
+                // text a non-visual equivalent.
+                aria-label="Search display code preferences"
               />
             </div>
             {filteredOptions.map((option, index) => {
-              const isSelected = selectedPreference === option.value;
+              // Resolve "is this the selected row?" off the *resolved*
+              // selectedOption.value (matches the trigger label, the hidden
+              // input, and the preview chip). Using the raw selectedPreference
+              // would, in the addon-revoked drift case, leave the popover
+              // with no visibly selected row even though the component is
+              // effectively on the fallback option.
+              const isSelected = selectedOption.value === option.value;
               const isHovered = selectedIndex === index;
 
               return (
