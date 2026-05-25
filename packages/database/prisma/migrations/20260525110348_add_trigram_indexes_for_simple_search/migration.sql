@@ -3,6 +3,16 @@
 -- sequential scans because leading-wildcard LIKE cannot use B-tree indexes.
 --
 -- pg_trgm is already enabled by migration 20241218134155.
+--
+-- Locking: these are plain (non-CONCURRENT) CREATE INDEX statements, which
+-- matches the existing convention in this repo (see migration
+-- 20250114124237_add_reminder_indexes_for_optimization). Each statement
+-- takes an ACCESS EXCLUSIVE lock on its table for the duration of the
+-- index build. On the largest known tenant the affected tables are small
+-- (~13k rows for Asset, Qr, Barcode; far fewer for Category, Location,
+-- Tag), so the build completes in sub-second. If a much larger workspace
+-- is onboarded later, run this migration during a low-traffic window or
+-- split it across multiple CONCURRENTLY-built migrations.
 
 -- Asset.sequentialId: hot path — customers type the numeric portion of their
 -- SAM-IDs (e.g. "21035" to find "SAM-21035"). The existing

@@ -491,16 +491,24 @@ const unavailableBookingStatuses = [
 ];
 
 /**
- * Matches the shape of an asset sequential ID. Two accepted forms:
- *   - bare numeric ("21035") — users commonly drop the prefix when scanning
- *   - prefixed ("SAM-21035", "shelf-21035") — 2–8 letters, optional dash, digits
+ * Matches the shape of an asset identifier or barcode / QR id. Two forms:
+ *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
+ *     prefix when scanning or typing an ID
+ *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
+ *     digits, matching the format produced by getNextSequentialId
  *
- * Used by getAssets to short-circuit the multi-table OR search when every
- * comma-separated term looks like an ID lookup, so the query only has to
- * touch Asset.sequentialId (covered by the gin_trgm index).
+ * Used by getAssets to route ID-shaped queries down a narrower OR clause
+ * (sequentialId / barcodes.value / qrCodes.id) instead of the full
+ * 10-branch chain. The narrower clause skips the slow paths — custodian
+ * name traversal and the unindexed customFields JSON ILIKE — while
+ * still covering every place an ID-shaped value can legitimately live.
+ *
+ * Loose terms like "lab-12" or "AS1000" fall through to the full search
+ * because they don't match canonical sequentialId format and could be
+ * substrings of asset titles, custom fields, etc.
  */
 function looksLikeAssetId(term: string): boolean {
-  return /^\d+$/.test(term) || /^[a-z]{2,8}-?\d+$/i.test(term);
+  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
 }
 
 /**
@@ -574,14 +582,29 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      // Fast path: when every term looks like an asset ID (numeric, or the
-      // prefixed form like "sam-21035"), skip the 10-branch OR + EXISTS
-      // subqueries and match only against sequentialId. Powered by the
-      // gin_trgm GIN index added in migration 20260525110348.
+      // Fast path: when every term looks like an asset identifier — either
+      // bare digits ("21035", a UPC barcode) or canonical sequentialId
+      // ("SAM-0001") — narrow the OR clause to the three columns where an
+      // ID-shaped value can legitimately live: sequentialId, barcode value,
+      // and QR id. All three are covered by trigram GIN indexes added in
+      // migration 20260525110348, so the planner stays on indexed scans.
+      // Skipping title/description/category/location/tag/custodian/customFields
+      // is intentional — they can still match via the full path below for
+      // non-ID-shaped terms.
       if (searchTerms.length > 0 && searchTerms.every(looksLikeAssetId)) {
-        where.OR = searchTerms.map((term) => ({
-          sequentialId: { contains: term, mode: "insensitive" },
-        }));
+        where.OR = searchTerms.flatMap((term) => [
+          { sequentialId: { contains: term, mode: "insensitive" } },
+          {
+            barcodes: {
+              some: { value: { contains: term, mode: "insensitive" } },
+            },
+          },
+          {
+            qrCodes: {
+              some: { id: { contains: term, mode: "insensitive" } },
+            },
+          },
+        ]);
       } else {
         where.OR = searchTerms.map((term) => ({
           OR: [

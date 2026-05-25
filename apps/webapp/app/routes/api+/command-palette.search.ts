@@ -251,9 +251,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               where: {
                 customField: { active: true, deletedAt: null },
               },
-              include: {
-                customField: { select: { id: true, name: true } },
-              },
             },
           },
         }),
