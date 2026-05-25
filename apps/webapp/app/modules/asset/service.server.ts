@@ -1490,6 +1490,37 @@ export async function updateAsset({
      *   `{ assetId, organizationId }` (also closes cross-org IDOR).
      */
     if (preferredBarcodeId !== undefined && targetPreferred !== null) {
+      // Addon entitlement gate. Non-addon (and addon-revoked) orgs must not
+      // be able to persist a non-null `preferredBarcodeId` via a tampered
+      // form post — the UI gates the override section by `canUseBarcodes`,
+      // but the server-side action must enforce the same invariant. The
+      // resolver already silently falls back to QR for addon-revoked orgs
+      // (the override branch is gated by `barcodesEnabled` in display.ts),
+      // so this check is belt-and-suspenders: it prevents the stale value
+      // from being written in the first place rather than leaving silent
+      // drift in the DB. `null` overrides are always allowed — that's the
+      // "clear my override" intent and shouldn't require the addon.
+      const orgEntitlement = await db.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { barcodesEnabled: true },
+      });
+      if (!orgEntitlement.barcodesEnabled) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Per-asset preferred-barcode overrides require the alternative-barcodes add-on. " +
+            "Enable the add-on or clear the override (leave it on workspace default).",
+          additionalData: {
+            assetId: id,
+            organizationId,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       // Org-scoped ownership check — ALWAYS run, even when `barcodes` is
       // being submitted. The submitted-array check below proves the id will
       // survive `updateBarcodes`'s mutation, but it does NOT prove the id

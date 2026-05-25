@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import type { QrIdDisplayPreference } from "@prisma/client";
@@ -132,6 +132,21 @@ export default function QrIdDisplayPreferenceSelector({
         option.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [searchQuery, availableOptions]);
+
+  // Keep `selectedIndex` aligned with the currently-resolved selection in the
+  // filtered list. Without this, the index is seeded once at mount but never
+  // updated when the user picks an option (via `handleSelect`), types in the
+  // search box (shrinking `filteredOptions`), or `availableOptions` changes
+  // mid-mount. Keyboard navigation then operates on a stale index — pressing
+  // Enter could select a different row than the one visually highlighted.
+  // Falls back to 0 when the current selection isn't in the filtered set so
+  // arrow keys always land somewhere sensible.
+  useEffect(() => {
+    const idx = filteredOptions.findIndex(
+      (option) => option.value === selectedPreference
+    );
+    setSelectedIndex(idx >= 0 ? idx : 0);
+  }, [selectedPreference, filteredOptions]);
 
   function handleSelect(preference: QrIdDisplayPreference) {
     setSelectedPreference(preference);
