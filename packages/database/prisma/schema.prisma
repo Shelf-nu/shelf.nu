@@ -231,6 +231,14 @@ model Asset {
   // A DB-level CHECK/trigger (requiring a subquery against `Barcode.assetId`)
   // is the belt-and-suspenders follow-up; deferred to a separate change so
   // this PR doesn't conflate schema work with the customer-facing feature.
+  //
+  // Residual risks until the DB-level trigger lands:
+  //   1) Direct DB writes / Prisma seed scripts can bypass the application
+  //      check entirely. Any data-fix script touching `preferredBarcodeId`
+  //      must replicate the membership check by hand.
+  //   2) Any FUTURE write path that sets `preferredBarcodeId` (e.g., a bulk
+  //      import, a barcode-merge admin tool) MUST replicate the pre-flight
+  //      check; the invariant is not enforced by the schema yet.
   preferredBarcodeId String?  @unique
   preferredBarcode   Barcode? @relation("AssetPreferredBarcode", fields: [preferredBarcodeId], references: [id], onDelete: SetNull)
 
