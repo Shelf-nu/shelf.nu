@@ -1552,38 +1552,53 @@ export async function updateAsset({
      * the current DB set), so this block is now purely the write + audit.
      */
     if (preferredBarcodeId !== undefined) {
-      const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
-
-      if (previousPreferred !== targetPreferred) {
-        // Wrap the update + recordEvent atomically per
-        // `.claude/rules/use-record-event.md` — without this, a successful
-        // override write followed by a failed recordEvent would leave the
-        // preferredBarcodeId mutated without its audit trail row.
-        await db.$transaction(async (tx) => {
-          await tx.asset.update({
-            where: { id, organizationId },
-            data: { preferredBarcodeId: targetPreferred },
-          });
-
-          await recordEvent(
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "ASSET_PREFERRED_BARCODE_CHANGED",
-              entityType: "ASSET",
-              entityId: id,
-              assetId: id,
-              field: "preferredBarcodeId",
-              fromValue: previousPreferred,
-              toValue: targetPreferred,
-            },
-            tx
-          );
+      // Read the current `preferredBarcodeId` INSIDE the same transaction
+      // that performs the update + audit, so the compare is against the
+      // committed state — not against `assetBeforeUpdate`'s pre-write
+      // snapshot taken outside any tx. A concurrent edit between the
+      // snapshot and our transaction would otherwise produce a stale
+      // `fromValue` in the audit event or skip a required write.
+      const wrote = await db.$transaction(async (tx) => {
+        const current = await tx.asset.findUniqueOrThrow({
+          where: { id, organizationId },
+          select: { preferredBarcodeId: true },
         });
-        // Sync the in-memory `asset` object so the returned shape reflects the
-        // post-update state — callers that destructure `preferredBarcodeId`
-        // (e.g., to drive an immediate cache invalidation) would otherwise
-        // see the stale value from the earlier `db.asset.update` snapshot.
+        const previousPreferred = current.preferredBarcodeId ?? null;
+
+        if (previousPreferred === targetPreferred) {
+          return false;
+        }
+
+        await tx.asset.update({
+          where: { id, organizationId },
+          data: { preferredBarcodeId: targetPreferred },
+        });
+
+        // Structured activity event per `.claude/rules/use-record-event.md`.
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_PREFERRED_BARCODE_CHANGED",
+            entityType: "ASSET",
+            entityId: id,
+            assetId: id,
+            field: "preferredBarcodeId",
+            fromValue: previousPreferred,
+            toValue: targetPreferred,
+          },
+          tx
+        );
+
+        return true;
+      });
+
+      if (wrote) {
+        // Sync the in-memory `asset` object so the returned shape reflects
+        // the post-update state — callers that destructure
+        // `preferredBarcodeId` (e.g., to drive an immediate cache
+        // invalidation) would otherwise see the stale value from the
+        // earlier `db.asset.update` snapshot.
         asset.preferredBarcodeId = targetPreferred;
       }
     }
