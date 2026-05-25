@@ -167,7 +167,6 @@ Until applied, queries that read/write `Asset.preferredBarcodeId` will fail with
 
 ## 9. Known v1.1 gaps (deliberately deferred)
 
-- **`/assets` advanced mode (TanStack)** does not yet show a code column. The schema, resolver, and badge are all ready — only the TanStack column-def needs wiring with a hoisted (or memoized) definition per `react-render-stability.md`.
 - **Audit scan drawer's live expected-assets list** (`expected-assets-list.tsx`) uses a simplified `AuditScannedItem` shape that doesn't carry barcode data. Adding it would require extending the `qr-scanner` atom + drawer rendering. Field workers can still see codes on the audit overview page (Surface 6).
 - **Label printing** (`code-preview.tsx`, `bulk-download-qr-dialog.tsx`) gracefully falls back to QR id for any of the new barcode-type enum values — labels won't break, but they also don't yet print the barcode-type's value below the QR image. The asset-code-resolution helper is ready; only the label component needs to consume it.
 - **Mobile companion** out of scope by your call — owned by another team.

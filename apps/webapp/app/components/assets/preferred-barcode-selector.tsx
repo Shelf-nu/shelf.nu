@@ -20,7 +20,7 @@
  * @see {@link file://./../../modules/barcode/display.ts}
  */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { BarcodeType, QrIdDisplayPreference } from "@prisma/client";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { labelForPreference } from "~/modules/barcode/display";
@@ -101,6 +101,23 @@ export function PreferredBarcodeSelector({
   defaultValue,
   workspacePreference,
 }: PreferredBarcodeSelectorProps) {
+  // Controlled selection: a single source of truth for both the row
+  // highlighting (the parent `<label>` className conditional) and the
+  // underlying radio inputs' `checked` state. Previously the radios used
+  // `defaultChecked` (uncontrolled) which kept submitting the user's
+  // latest click correctly, but the row highlight was computed once from
+  // `defaultValue` and never updated — so after a click the highlight
+  // could lag on the previously-selected option even though the form
+  // value had changed. `useState` + controlled `checked` keep them in
+  // sync. Treat null/undefined/missing-from-list as "workspace default".
+  // Computed BEFORE the empty-state early return so React's rules-of-hooks
+  // are honored (hook must run on every render in the same order).
+  const initialSelectedId =
+    defaultValue && barcodes.some((b) => b.id === defaultValue)
+      ? defaultValue
+      : "";
+  const [selectedId, setSelectedId] = useState<string>(initialSelectedId);
+
   if (barcodes.length === 0) {
     // Reuse the canonical workspace-default explainer so the empty state
     // matches what the resolver actually does. The previous copy said
@@ -121,12 +138,6 @@ export function PreferredBarcodeSelector({
       </p>
     );
   }
-
-  // Treat null/undefined/missing-from-list as "workspace default" selected.
-  const selectedId =
-    defaultValue && barcodes.some((b) => b.id === defaultValue)
-      ? defaultValue
-      : "";
 
   const workspaceDefaultSecondary = buildWorkspaceDefaultSecondary(
     workspacePreference,
@@ -155,6 +166,7 @@ export function PreferredBarcodeSelector({
         name={name}
         value=""
         checked={selectedId === ""}
+        onSelect={setSelectedId}
         primary="Workspace default"
         secondary={workspaceDefaultSecondary}
         preview={workspaceDefaultPreview}
@@ -166,6 +178,7 @@ export function PreferredBarcodeSelector({
           name={name}
           value={bc.id}
           checked={selectedId === bc.id}
+          onSelect={setSelectedId}
           primary={bc.value}
           secondary={`${labelForPreference(
             bc.type
@@ -227,6 +240,7 @@ function Option({
   name,
   value,
   checked,
+  onSelect,
   primary,
   secondary,
   preview,
@@ -234,6 +248,8 @@ function Option({
   name: string;
   value: string;
   checked: boolean;
+  /** Notify parent on selection so it can update `selectedId` state. */
+  onSelect: (value: string) => void;
   primary: string;
   secondary: string;
   /**
@@ -263,7 +279,13 @@ function Option({
         type="radio"
         name={name}
         value={value}
-        defaultChecked={checked}
+        // Controlled: parent's `selectedId` state is the single source of
+        // truth — both the row highlight (parent className) and the radio
+        // glyph reflect the same value, eliminating the desync where a
+        // click would update the submitted value but leave the highlight
+        // stuck on the old option.
+        checked={checked}
+        onChange={() => onSelect(value)}
         className="mt-0.5 size-4 shrink-0 accent-primary-500"
       />
       <span className="flex min-w-0 flex-1 flex-col">
