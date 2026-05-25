@@ -491,6 +491,19 @@ const unavailableBookingStatuses = [
 ];
 
 /**
+ * Matches the shape of an asset sequential ID. Two accepted forms:
+ *   - bare numeric ("21035") — users commonly drop the prefix when scanning
+ *   - prefixed ("SAM-21035", "shelf-21035") — 2–8 letters, optional dash, digits
+ *
+ * Used by getAssets to short-circuit the multi-table OR search when every
+ * comma-separated term looks like an ID lookup, so the query only has to
+ * touch Asset.sequentialId (covered by the gin_trgm index).
+ */
+function looksLikeAssetId(term: string): boolean {
+  return /^\d+$/.test(term) || /^[a-z]{2,8}-?\d+$/i.test(term);
+}
+
+/**
  * Fetches assets directly from the asset table with enhanced search capabilities
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
@@ -561,64 +574,80 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in asset fields
-          { title: { contains: term, mode: "insensitive" } },
-          // Search in asset sequential id
-          { sequentialId: { contains: term, mode: "insensitive" } },
-          // Search in asset description
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in related category
-          { category: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related location
-          { location: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian names
-          {
-            custody: {
-              custodian: {
-                OR: [
-                  { name: { contains: term, mode: "insensitive" } },
-                  {
-                    user: {
-                      OR: [
-                        { firstName: { contains: term, mode: "insensitive" } },
-                        { lastName: { contains: term, mode: "insensitive" } },
-                      ],
+      // Fast path: when every term looks like an asset ID (numeric, or the
+      // prefixed form like "sam-21035"), skip the 10-branch OR + EXISTS
+      // subqueries and match only against sequentialId. Powered by the
+      // gin_trgm GIN index added in migration 20260525110348.
+      if (searchTerms.length > 0 && searchTerms.every(looksLikeAssetId)) {
+        where.OR = searchTerms.map((term) => ({
+          sequentialId: { contains: term, mode: "insensitive" },
+        }));
+      } else {
+        where.OR = searchTerms.map((term) => ({
+          OR: [
+            // Search in asset fields
+            { title: { contains: term, mode: "insensitive" } },
+            // Search in asset sequential id
+            { sequentialId: { contains: term, mode: "insensitive" } },
+            // Search in asset description
+            { description: { contains: term, mode: "insensitive" } },
+            // Search in related category
+            { category: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related location
+            { location: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related tags
+            {
+              tags: { some: { name: { contains: term, mode: "insensitive" } } },
+            },
+            // Search in custodian names
+            {
+              custody: {
+                custodian: {
+                  OR: [
+                    { name: { contains: term, mode: "insensitive" } },
+                    {
+                      user: {
+                        OR: [
+                          {
+                            firstName: { contains: term, mode: "insensitive" },
+                          },
+                          { lastName: { contains: term, mode: "insensitive" } },
+                        ],
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
             },
-          },
-          // Search qr code id
-          {
-            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
-          },
-          // Search barcode values
-          {
-            barcodes: {
-              some: { value: { contains: term, mode: "insensitive" } },
-            },
-          },
-          // Search in custom fields
-          {
-            customFields: {
-              some: {
-                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                  value: {
-                    path: [jsonPath],
-                    string_contains: term,
-                    mode: "insensitive",
-                  },
-                })),
+            // Search qr code id
+            {
+              qrCodes: {
+                some: { id: { contains: term, mode: "insensitive" } },
               },
             },
-          },
-        ],
-      }));
+            // Search barcode values
+            {
+              barcodes: {
+                some: { value: { contains: term, mode: "insensitive" } },
+              },
+            },
+            // Search in custom fields
+            {
+              customFields: {
+                some: {
+                  OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                    value: {
+                      path: [jsonPath],
+                      string_contains: term,
+                      mode: "insensitive",
+                    },
+                  })),
+                },
+              },
+            },
+          ],
+        }));
+      }
     }
 
     if (status) {
