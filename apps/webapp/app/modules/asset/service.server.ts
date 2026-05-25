@@ -1580,6 +1580,11 @@ export async function updateAsset({
             tx
           );
         });
+        // Sync the in-memory `asset` object so the returned shape reflects the
+        // post-update state — callers that destructure `preferredBarcodeId`
+        // (e.g., to drive an immediate cache invalidation) would otherwise
+        // see the stale value from the earlier `db.asset.update` snapshot.
+        asset.preferredBarcodeId = targetPreferred;
       }
     }
 
