@@ -42,11 +42,86 @@ A workspace is included in the report if it meets all of the following at the en
 - Every aggregate must include at least **20 workspaces** in its cohort. Sub-cohort aggregates (e.g. audits-enabled subset) apply the same floor independently.
 - Quotes attributed to specific customers in the report are published with that customer's explicit permission. Quotes from the survey's open-ended questions are only published with permission.
 
+## Risk disclosures
+
+This is the section that separates a research artifact from a marketing piece. v1.2 of the report explicitly publishes the risks it manages.
+
+### 1. Feature-adoption risk
+
+Several Shelf features that produce useful operational signal have bounded adoption among Team workspaces:
+
+- **Audits add-on.** A paid feature. Not every Team workspace has it enabled, and of those that do, not every workspace runs audits in any given year.
+- **Bookings.** Not every Team workspace uses bookings — some workspaces use Shelf only for custody/QR tracking.
+
+The v1.2 published structure handles this risk explicitly:
+
+- **The headline stat (`ds_idle_asset_dollar_value_median_workspace`) is computed from universal telemetry** — `ActivityEvent` fires for every Shelf workspace, regardless of feature mix. No paid-feature dependency. The headline survives even if audit adoption is low.
+- **Audit-derived stats are published only with the qualifier "audit-enabled subset only — N% of cohort"** — never presented as platform medians.
+- **Bookings-derived stats are published only with the qualifier "among workspaces that used the bookings feature during the window"** — same discipline.
+
+The thresholds are published explicitly:
+
+| Adoption metric | Threshold | If below threshold |
+|---|---|---|
+| Audits add-on enabled | 5% of cohort | Drop the audit-subset section entirely |
+| Audit sessions run in window | 3% of cohort | Drop ghost-rate and audited-missing-rate from report |
+| Bookings activity in window | 10% of cohort | Drop the late-return stat |
+| `Asset.valuation` coverage | 30% of cohort assets | Convert dollar headlines to percentage headlines |
+
+The extraction script's `--probe` mode (see `./probe.ts`) measures each rate against its threshold before any aggregate is computed. The published report records which stats survived the probe; those that didn't are listed in this section by name, not silently omitted.
+
+### 2. `Asset.valuation` coverage
+
+The valuation field is workspace-entered and partial. Approximately **{{TODO: pct_assets_with_valuation}}%** of tracked assets in the eligible cohort carry a valuation. Dollar figures are computed only over the assets with a valuation, then median-extrapolated per workspace. **The published dollar figures are conservative lower bounds** — they exclude assets without explicit valuation entirely. If overall coverage falls below the 30% threshold, the dollar headline is replaced with the percentage equivalent.
+
+### 3. Cohort-size enforcement (k-anonymity)
+
+Every aggregate requires a cohort of at least **20 workspaces**. Sub-cohort aggregates (e.g. the audit-enabled subset) apply the same floor independently — the extraction script does not "borrow" the global cohort size to push a small sub-cohort past the floor.
+
+The extraction script returns `cohort_too_small` for any stat whose underlying cohort falls below 20. Those stats are omitted from the published report, not silently rounded down.
+
+### 4. Survey response rate
+
+The survey targeted n=200 admins. Actual responses: **{{TODO: surveyResponses}}**. If responses had fallen below n=50, the survey-derived stat would have been dropped entirely. We disclose the response rate alongside the stat itself in the report copy.
+
 ## Definitions
 
 Where a stat could be defined multiple ways, we picked the most conservative definition.
 
-### Ghost asset
+### Idle asset (THE HEADLINE DEFINITION)
+
+An `Asset` with **no `ActivityEvent` of any action — scan, custody change, booking event, location update, audit scan — in the prior 90 days at end of window**. Assets created within the 90-day idle window are excluded — brand-new assets without history are not "idle", they're just new.
+
+This is the v1.2 headline because `ActivityEvent` is universal telemetry: every Shelf workspace produces these events, regardless of feature mix. Idle-asset measurement does not depend on any paid feature.
+
+The implementation also consults `Scan.createdAt` as a fallback signal — if an asset's QR was scanned in the 90-day window but no `ActivityEvent` was recorded (a possible signal-gap case), the asset is **not** counted as idle. This is the conservative bias.
+
+### Idle-asset dollar value (THE HEADLINE)
+
+For each workspace: sum `Asset.valuation` over the workspace's idle assets where valuation is set. The published figure (`ds_idle_asset_dollar_value_median_workspace`) is the median across those per-workspace sums.
+
+Median rather than mean because the distribution is right-skewed (a small number of workspaces with very high-value fleets would dominate a mean).
+
+### Active custody
+
+An asset has a `Custody` row (current custodian) at the moment of measurement. Historical custody transfers are tracked via `ActivityEvent` rows and could be used for handover-rate calculations in future editions; the v1 report uses only the current-state measurement.
+
+### Late return
+
+A `Booking` with one of the following conditions:
+
+1. Status is `COMPLETE` or `ARCHIVED` **and** the most recent `BOOKING_CHECKED_IN` `ActivityEvent` for the booking occurred after `Booking.to`, **or**
+2. Status is `ONGOING` or `OVERDUE` **and** the current time is past `Booking.to`.
+
+Sub-cohort: workspaces that had at least one non-`DRAFT`, non-`CANCELLED` booking with `from` inside the data window. Apply k-anonymity to this sub-cohort independently.
+
+### Recovery via Found-via-Scan
+
+A `Scan` event from an anonymous scanner — identified by `Scan.userId IS NULL` — whose associated asset (via `Qr.assetId`) was previously marked Missing in an audit or Idle in the data window. The dollar total `ds_recovery_dollar_value_total` sums `Asset.valuation` over all recovered assets in the window across all workspaces — a single platform-wide number, not per-workspace.
+
+The `Scan` model does not expose an explicit "anonymous" boolean column; the signal is `userId IS NULL`. The `--probe` mode verifies this signal is present and produces a non-zero count before the recovery stat is committed to publication.
+
+### Ghost asset (audit-enabled subset definition)
 
 An `Asset` that:
 
@@ -56,39 +131,11 @@ An `Asset` that:
 
 The last clause is what makes the definition useful: an asset that moves without a location update is not a ghost (it gets scanned at the new location). A ghost is an asset that has genuinely vanished from operational reality.
 
-### Ghost-asset dollar value (THE HEADLINE)
-
-For each ghost asset, use the workspace-entered `Asset.valuation` field.
-
-**Asset.valuation coverage caveat:** the `valuation` field is workspace-entered and not universal. Approximately **{{TODO: pct_assets_with_valuation}}%** of tracked assets carry a valuation. Ghost-asset dollar figures are computed only over the assets with a valuation, then median-extrapolated per workspace. **The published dollar figure is a conservative lower bound** — it excludes ghost assets with no valuation entirely.
-
-Mechanic for `ds_ghost_asset_dollar_value_median_workspace`:
-- For each workspace: sum `Asset.valuation` over its identified ghost assets where valuation is set.
-- `published value` = median of those per-workspace sums.
-
-The median is used rather than the mean because the distribution is right-skewed (a few workspaces with very high asset values would dominate a mean).
-
-### Active custody
-
-An asset has a `Custody` row (current custodian) at the moment of measurement. Historical custody transfers are tracked via `ActivityEvent` rows and could be used for handover-rate calculations in future editions; the v1 report uses only the current-state measurement.
-
-### Idle asset
-
-An asset with no activity events (scan, custody change, booking, location update, audit scan) in the prior 90 days at end of window. Assets created within the 90-day idle window are excluded — brand-new assets without history are not "idle", they're just new.
-
-### Idle-asset dollar value
-
-Same mechanic as ghost-asset dollar value. Per-workspace sum of `Asset.valuation` over idle assets where valuation is set, then median across workspaces. Same coverage caveat applies.
-
-### Recovery via Found-via-Scan
-
-A `Scan` event whose source indicates an anonymous (non-Shelf-account) scanner, where the scanned asset was previously marked Missing in an audit within the same window. The dollar total `ds_recovery_dollar_value_total` sums `Asset.valuation` over all recovered assets across all workspaces in the window — a single platform-wide number, not per-workspace.
-
-Verify the anonymous-source flag exists on the `Scan` model before publication. If it does not, this stat is `not_implemented` until telemetry is added (or the definition is loosened, which the editorial team would have to approve).
+**v1.2 scoping note:** the ghost-asset rate (`ds_ghost_asset_rate`) is published only as an **audit-enabled subset finding** — computed across workspaces that ran at least one COMPLETED audit in the window. It is never presented as a platform median. If the probe indicates audit-run rate below 3% of cohort, the stat is dropped from the published report entirely rather than published with a thin disclaimer.
 
 ### Audit completion
 
-An `AuditSession` that reached the `COMPLETED` status within the data window. Used in `au_pct_workspaces_running_audits` (distinct organizations with at least one COMPLETED session) and `au_pct_audited_assets_missing` (sum of `missingAssetCount` / sum of `expectedAssetCount` across sessions).
+An `AuditSession` that reached the `COMPLETED` status within the data window. Used in the v1.2 audit-subset stat `au_pct_audited_assets_missing` (sum of `missingAssetCount` / sum of `expectedAssetCount` across sessions in the sub-cohort).
 
 ## Confidence levels
 
@@ -109,16 +156,17 @@ Each stat carries a confidence level. The extraction script attaches this label 
 
 ## Methodology version
 
-This methodology is published as **version 1.0**. Subsequent annual editions of this report will track methodology diffs; the 2027 edition will publish a "what changed" note alongside any version bump.
+This methodology is published as **version 1.2**. v1.1 was the trimmed-to-8 ghost-asset-headline scaffold; v1.2 pivoted the headline to idle-asset telemetry (universal `ActivityEvent` signal) and demoted ghost-asset stats to a qualified audit-enabled subset finding. Subsequent annual editions will track methodology diffs; the 2027 edition will publish a "what changed" note alongside any version bump.
 
 ## Reproducibility
 
-The extraction script that produced the telemetry aggregates is published in the open at [github.com/Shelf-nu/shelf.nu](https://github.com/Shelf-nu/shelf.nu) under `apps/webapp/scripts/state-of-em-2026/`. The script contains no customer data — only the queries and aggregation logic. Independent researchers can read the queries to verify the methodology matches the published numbers.
+The extraction script that produced the telemetry aggregates is published in the open at [github.com/Shelf-nu/shelf.nu](https://github.com/Shelf-nu/shelf.nu) under `apps/webapp/scripts/state-of-em-2026/`. The script contains no customer data — only queries and aggregation logic. The `--probe` mode (see `./probe.ts`) is a separate diagnostic that verifies feature adoption before stats are computed, so the methodology can be re-validated by anyone with database access. Independent researchers can read the queries to verify the methodology matches the published numbers.
 
 ## Limitations
 
 - **Self-hosted Shelf instances** are not included — the report reflects hosted-cloud usage only. Self-hosted patterns may differ.
-- **`Asset.valuation` coverage is partial.** Dollar figures are conservative lower bounds; they exclude assets whose workspace did not enter a valuation. The methodology section discloses the coverage percentage.
-- **"Missing" in an audit context** is what was scanned-or-not-scanned during a specific audit session, not a permanent property of the asset. We use it as input to the ghost-asset definition, which requires the additional condition of no scan activity between audits.
+- **`Asset.valuation` coverage is partial.** Dollar figures are conservative lower bounds; they exclude assets whose workspace did not enter a valuation. The methodology discloses the coverage percentage and the script's `--probe` mode flags it explicitly.
+- **"Missing" in an audit context** is what was scanned-or-not-scanned during a specific audit session, not a permanent property of the asset. We use it as input to the ghost-asset definition, which requires the additional condition of no scan activity between audits. The ghost-asset rate itself is published only as an audit-enabled subset finding, never as a platform median.
+- **Idle is per-asset-per-90-days, not permanent.** An idle asset in the data window may have been actively used in a previous window; the stat reflects the snapshot at end of window, not a permanent state of the asset.
 - **Survey N is small.** ~200 responses is adequate for medians and reportable themes; it is not sufficient to break out reliably by industry. The 2027 survey will aim for n=500.
-- **Sample skew.** The population is Shelf customers — teams that have already opted into a structured asset-management practice. Industry-wide rates of ghost assets, idle assets, and missing items are likely higher than what we observe.
+- **Sample skew.** The population is Shelf customers — teams that have already opted into a structured asset-management practice. Industry-wide rates of idle assets, late returns, and missing items are likely higher than what we observe.

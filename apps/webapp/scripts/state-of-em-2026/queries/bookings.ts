@@ -1,26 +1,26 @@
 /**
- * Bookings queries — "The booking problem" section.
+ * Bookings queries — un-deferred in v1.2 for one stat: `bk_pct_returned_late`.
  *
- * Produces (keys match website-v2 sectionStats.bookings):
+ * v1.0 of this file emitted seven booking stats. v1.1 deferred the entire
+ * file as out-of-scope for the trimmed-to-eight headline structure. v1.2
+ * brings back the late-return rate because it pairs with the new idle-asset
+ * headline: idle assets are "dead capital" and late returns are "cascade
+ * friction" — they're the two faces of the same operational problem in the
+ * report.
  *
- *   avg_bookings_per_workspace_per_month            — mean Bookings per Org per calendar month over the window
- *   bk_median_bookings_per_workspace_per_year       — median Bookings per eligible Org over the window
- *   pct_bookings_with_conflict_averted              — % of attempted-create events blocked by conflict
- *   bk_median_lead_time_days                        — median (Booking.from - createdAt) in days
- *   bk_pct_overdue                                   — % of Bookings whose actualReturnAt > to (overdue)
- *   bk_median_overdue_hours                          — median lateness on overdue bookings
- *   bk_peak_day                                      — weekday name with the most Booking.from timestamps
+ * Produces:
+ *   bk_pct_returned_late  — % of bookings whose return time exceeded `to`
+ *                           among workspaces that used bookings in window
  *
  * Cohort sub-filter: restrict to Organizations that have at least one
- * Booking in the window AND have the bookings feature in active use.
- * The website report flags this as a "workspaces with bookings enabled"
- * cohort — size it separately and apply k-anonymity to the sub-cohort.
+ * non-DRAFT Booking with `from` inside the data window. The probe at
+ * ../probe.ts measures this rate before queries run; if it drops below the
+ * `bookingsActiveMin` threshold (10%), the website MDX drops the late-
+ * return section entirely.
  *
- * Conflict-averted query NOTE: this requires either
- * (a) an ActivityEvent row recording the failed attempt, or
- * (b) telemetry instrumentation at the API layer.
- * If neither exists today, this stat is `not_implemented` until the
- * data team decides whether to add the instrumentation or drop the stat.
+ * The six other stats from v1.0 (avg bookings per month, conflict averted,
+ * lead time, overdue hours, peak day) remain deferred. Their stubs live in
+ * git history; restore in 2027 if the editorial team wants them back.
  */
 
 import type { ExtendedPrismaClient } from "@shelf/database";
@@ -32,55 +32,59 @@ export async function runBookingsQueries(
     _db: ExtendedPrismaClient,
     _ctx: ExtractorContext,
 ): Promise<QueryResult> {
-    // TODO: implement against bookings-enabled subset of eligibleOrgIds.
+    // TODO: implement.
     //
-    // Implementation guidance:
-    // - Restrict to Bookings with status IN (RESERVED, ONGOING, OVERDUE,
-    //   COMPLETE, ARCHIVED, CANCELLED) within the window (Booking.from
-    //   falls within window).
-    // - Lead time: where Booking.createdAt < Booking.from, compute the
-    //   difference. Bookings created retroactively (createdAt > from) are
-    //   excluded as data-quality outliers.
-    // - Overdue %: status = OVERDUE OR (status = COMPLETE AND actualReturnAt > to).
-    //   Schema confirmation needed — whether actualReturnAt is a column or
-    //   inferred from ActivityEvent.
-    // - Peak day: groupBy day-of-week extracted from Booking.from. Use
-    //   raw SQL (`EXTRACT(DOW FROM "from")` in Postgres) or compute in JS.
-    // - Conflict-averted: see the NOTE above. Today this likely returns
-    //   not_implemented until telemetry is in place.
+    // ---------------------------------------------------------------
+    // bk_pct_returned_late
+    // ---------------------------------------------------------------
+    // Definition (matches website MDX):
+    //   A booking is "returned late" if either:
+    //     (a) status IN ('COMPLETE', 'ARCHIVED') AND the BOOKING_CHECKED_IN
+    //         ActivityEvent for the booking has occurredAt > Booking.to, OR
+    //     (b) status IN ('ONGOING', 'OVERDUE') AND NOW() > Booking.to (still
+    //         out past the scheduled return)
+    //
+    // The Booking model itself does not carry an `actualReturnAt` column, so
+    // determining the actual check-in timestamp requires reading the
+    // ActivityEvent log. The most efficient approach is a single raw SQL
+    // query joining Booking → ActivityEvent on bookingId and action =
+    // 'BOOKING_CHECKED_IN', taking the MAX(occurredAt) per booking.
+    //
+    //   WITH window_bookings AS (
+    //     SELECT id, "organizationId", status, "to"
+    //     FROM "Booking"
+    //     WHERE "organizationId" = ANY($eligibleOrgIds)
+    //       AND "from" >= $dataWindowStart
+    //       AND "from" <= $dataWindowEnd
+    //       AND status NOT IN ('DRAFT', 'CANCELLED')
+    //   ),
+    //   checked_in AS (
+    //     SELECT "bookingId", MAX("occurredAt") AS checked_in_at
+    //     FROM "ActivityEvent"
+    //     WHERE "bookingId" IS NOT NULL
+    //       AND action = 'BOOKING_CHECKED_IN'
+    //     GROUP BY "bookingId"
+    //   )
+    //   SELECT COUNT(*) FILTER (WHERE
+    //     (wb.status IN ('COMPLETE', 'ARCHIVED') AND ci.checked_in_at > wb."to")
+    //     OR (wb.status IN ('ONGOING', 'OVERDUE') AND NOW() > wb."to")
+    //   ) AS late_count,
+    //   COUNT(*) AS total_count
+    //   FROM window_bookings wb
+    //   LEFT JOIN checked_in ci ON ci."bookingId" = wb.id;
+    //
+    // value      = late_count / total_count * 100
+    // cohortSize = distinct organization count contributing to window_bookings
+    //              (apply k-anonymity to this sub-cohort, not the global one)
+    //
+    // Wrap the result with reportable({ ... }) — do NOT build a
+    // ReportableAggregate directly.
 
     return {
-        avg_bookings_per_workspace_per_month: notImplementedAggregate({
-            key: "avg_bookings_per_workspace_per_month",
-            label: "Average bookings per workspace per month",
-        }),
-        bk_median_bookings_per_workspace_per_year: notImplementedAggregate({
-            key: "bk_median_bookings_per_workspace_per_year",
-            label: "Median bookings per workspace per year",
-        }),
-        pct_bookings_with_conflict_averted: notImplementedAggregate({
-            key: "pct_bookings_with_conflict_averted",
-            label: "Of attempted bookings were blocked by Shelf for conflict",
+        bk_pct_returned_late: notImplementedAggregate({
+            key: "bk_pct_returned_late",
+            label: "Of bookings ended after the scheduled return time (booking-using subset)",
             unit: "%",
-        }),
-        bk_median_lead_time_days: notImplementedAggregate({
-            key: "bk_median_lead_time_days",
-            label: "Median booking lead time",
-            unit: " days",
-        }),
-        bk_pct_overdue: notImplementedAggregate({
-            key: "bk_pct_overdue",
-            label: "Of bookings ended after the scheduled return time",
-            unit: "%",
-        }),
-        bk_median_overdue_hours: notImplementedAggregate({
-            key: "bk_median_overdue_hours",
-            label: "Median lateness on overdue bookings",
-            unit: " hours",
-        }),
-        bk_peak_day: notImplementedAggregate({
-            key: "bk_peak_day",
-            label: "Most-booked weekday",
         }),
     };
 }

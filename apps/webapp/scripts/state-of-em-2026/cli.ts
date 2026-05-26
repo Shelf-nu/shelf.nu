@@ -40,6 +40,13 @@ export interface ExtractorCliOptions {
     dryRun: boolean;
     /** Required to run with NODE_ENV=production. */
     iKnowWhatImDoing: boolean;
+    /**
+     * Probe-only mode. Skips aggregate queries and writes a feature-adoption
+     * probe to `<output-dir>/probe.json` so the data team can verify that
+     * the v1.2 stat structure is defensible before queries are implemented.
+     * See ./probe.ts.
+     */
+    probe: boolean;
 }
 
 export const USAGE = `
@@ -55,14 +62,21 @@ Flags:
   --internal-allowlist <path> JSON file of org IDs to exclude.
                               Default: ./allowlist/internal-orgs.json
   --dry-run                   Run the pipeline without writing output.
+  --probe                     Run only the feature-adoption probe.
+                              Writes ./output/probe.json — no aggregates.
+                              Use this FIRST to verify the v1.2 stat
+                              structure is defensible against your data.
   --i-know-what-im-doing      Required for NODE_ENV=production.
   --help                      Print this usage and exit.
 
 Examples:
-  # Dry run to verify cohort size and surface unimplemented queries:
+  # Step 1 — probe feature adoption to know which stats survive v1.2:
+  pnpm webapp:report:state-of-em-2026 -- --probe
+
+  # Step 2 — dry run to verify cohort size and surface unimplemented queries:
   pnpm webapp:report:state-of-em-2026 -- --dry-run
 
-  # Full run to local file:
+  # Step 3 — full run to local file:
   pnpm webapp:report:state-of-em-2026 -- --output ./output/aggregates.json
 
   # Production run (with explicit acknowledgement):
@@ -93,6 +107,7 @@ export function parseExtractorArgs(argv: string[]): ExtractorCliOptions {
         internalAllowlistPath: DEFAULTS.internalAllowlistPath,
         dryRun: false,
         iKnowWhatImDoing: false,
+        probe: false,
     };
 
     for (let i = 0; i < argv.length; i++) {
@@ -140,6 +155,9 @@ export function parseExtractorArgs(argv: string[]): ExtractorCliOptions {
                 break;
             case "--dry-run":
                 result.dryRun = true;
+                break;
+            case "--probe":
+                result.probe = true;
                 break;
             case "--i-know-what-im-doing":
                 result.iKnowWhatImDoing = true;

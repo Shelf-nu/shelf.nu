@@ -1,20 +1,25 @@
 /**
  * State of Equipment Management 2026 — Aggregate Extraction (orchestrator).
  *
- * Trimmed in v1.1 per editorial review: the published report is organized
- * around 8 prioritized stats and one viral headline (ghost-assets-in-
- * dollars). The orchestrator only calls the query modules that produce
- * those stats. Bookings, custody (handover history), industries, and
- * top-performer pattern queries are deferred to the 2027 edition; their
- * stubs remain in the queries/ directory for future restoration but are
- * not invoked here.
+ * Trimmed in v1.1 to 8 prioritized stats, then pivoted in v1.2 to use
+ * IDLE-asset telemetry (universal `ActivityEvent` signal) as the headline
+ * rather than ghost-asset telemetry (Audits add-on subset). The orchestrator
+ * calls three query modules — visibility, audits, disorder — plus the
+ * bookings module that was un-deferred in v1.2 for the late-return stat.
+ *
+ * v1.2 also introduces a `--probe` mode that runs FIRST. The probe checks
+ * feature-adoption rates against published thresholds (audits enabled, audits
+ * run, bookings activity, Asset.valuation coverage, anonymous-scan capability)
+ * so the data team can decide which stats survive to publication before any
+ * query is implemented. See ./state-of-em-2026/probe.ts.
  *
  * @see ./state-of-em-2026/README.md — workflow + the trimmed-scope explanation
  * @see ./state-of-em-2026/methodology.md — published methodology
+ * @see ./state-of-em-2026/probe.ts — feature-adoption probe
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 import { createDatabaseClient } from "@shelf/database";
 
@@ -31,11 +36,12 @@ import {
     type ExtractorOutput,
 } from "./state-of-em-2026/output-schema";
 import type { ExtractorContext } from "./state-of-em-2026/context";
+import { runProbe, printProbeSummary } from "./state-of-em-2026/probe";
 import { runVisibilityQueries } from "./state-of-em-2026/queries/visibility";
 import { runAuditsQueries } from "./state-of-em-2026/queries/audits";
+import { runBookingsQueries } from "./state-of-em-2026/queries/bookings";
 import { runDisorderQueries } from "./state-of-em-2026/queries/disorder";
 // DEFERRED in v1 — retained in repo for 2027 restoration:
-//   import { runBookingsQueries } from "./state-of-em-2026/queries/bookings";
 //   import { runCustodyQueries } from "./state-of-em-2026/queries/custody";
 //   import { runIndustryQueries } from "./state-of-em-2026/queries/industries";
 //   import { runTopPerformerQueries } from "./state-of-em-2026/queries/top-performers";
@@ -43,9 +49,9 @@ import { runDisorderQueries } from "./state-of-em-2026/queries/disorder";
 /** Stable identifier for this dataset — matches website frontmatter. */
 const DATASET_KEY = "soem-2026-v1";
 /** Methodology version — bump in lockstep with ./state-of-em-2026/methodology.md */
-const METHODOLOGY_VERSION = "1.0";
+const METHODOLOGY_VERSION = "1.2";
 /** Script version for output traceability. Bump on any logic change. */
-const SCRIPT_VERSION = "0.2.0";
+const SCRIPT_VERSION = "0.3.0";
 
 async function main(): Promise<void> {
     const options = parseOptionsOrExit();
@@ -97,6 +103,24 @@ async function main(): Promise<void> {
             cohortSummary: summary,
         };
 
+        // 2a. Probe mode: run only the feature-adoption probe and exit.
+        if (options.probe) {
+            console.log("\nRunning feature-adoption probe (no aggregates will be computed)…");
+            const probe = await runProbe(db, ctx);
+            printProbeSummary(probe);
+
+            if (options.dryRun) {
+                console.log("\n--dry-run + --probe: skipping probe file write.\n");
+                return;
+            }
+
+            const probePath = join(dirname(options.outputPath), "probe.json");
+            await mkdir(dirname(probePath), { recursive: true });
+            await writeFile(probePath, JSON.stringify(probe, null, 2) + "\n", "utf8");
+            console.log(`\nWrote ${probePath}\n`);
+            return;
+        }
+
         // 2. Build the output skeleton.
         const output = buildEmptyOutput({
             datasetKey: DATASET_KEY,
@@ -107,19 +131,21 @@ async function main(): Promise<void> {
             cohort: summary,
         });
 
-        // 3. Run the v1 query sections — only the three that feed the
-        //    8-stat published headline structure. Survey data (the 8th
-        //    stat) is plugged into the website data file manually after
-        //    the external survey tool collects responses; it is not
+        // 3. Run the v1.2 query sections.
+        //    The published structure is one universal-telemetry headline
+        //    (idle assets in dollars) + supporting universal stats + a
+        //    qualified audit-enabled subset section. The survey-derived
+        //    stat (the 8th) is plugged into the website data file manually
+        //    after the external survey tool collects responses; it is not
         //    produced by this script.
         await runSection("Visibility", () => runVisibilityQueries(db, ctx), output);
-        await runSection("Audits", () => runAuditsQueries(db, ctx), output);
-        await runSection("Cost of disorder (ghost-asset headline)", () => runDisorderQueries(db, ctx), output);
+        await runSection("Audits (subset stats)", () => runAuditsQueries(db, ctx), output);
+        await runSection("Bookings", () => runBookingsQueries(db, ctx), output);
+        await runSection("Cost of disorder (idle headline + ghost subset + recovery)", () => runDisorderQueries(db, ctx), output);
 
-        // DEFERRED v1.1: bookings, custody (history), industries, and
-        // top-performer patterns. The query stubs remain in the queries/
-        // directory for restoration. To re-enable, uncomment the imports
-        // above and add their runSection calls here.
+        // DEFERRED v1.2: custody (history), industries, top-performer
+        // patterns. The query stubs remain in the queries/ directory for
+        // restoration in 2027.
 
         // 4. Industry cuts — empty in v1 (deferred to 2027 when sample is large).
         output.industries = {};
@@ -219,7 +245,8 @@ function printRunHeader(options: ExtractorCliOptions): void {
             `Allowlist:       ${options.internalAllowlistPath}\n` +
             `Methodology:     v${METHODOLOGY_VERSION}\n` +
             `Script:          v${SCRIPT_VERSION}\n` +
-            `Scope:           v1 trimmed — 8 stats, ghost-asset headline\n`,
+            `Scope:           v1.2 — idle-asset headline (universal telemetry)\n` +
+            (options.probe ? `Mode:            PROBE-ONLY (no aggregates)\n` : ""),
     );
 }
 
