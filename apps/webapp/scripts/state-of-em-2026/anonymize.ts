@@ -1,19 +1,19 @@
 /**
  * Anonymization layer — k-anonymity floor + significant-figure rounding.
  *
- * The two safety controls that every aggregate must pass through before
- * landing in the output JSON. Together they ensure no individual workspace
- * is identifiable and no number leaks excessive precision.
+ * The two safety controls every aggregate passes through before landing in
+ * the output JSON. Together they ensure no individual workspace is
+ * identifiable and no number leaks excessive precision.
  *
  * @see ../methodology.md — published methodology, anonymization section
  */
 
 /**
- * Status flag attached to each aggregate in the output. `ok` means the
- * aggregate was computed and passes the cohort-size floor; `cohort_too_small`
- * means the underlying cohort was below `minCohortSize` and the value has
- * been nulled. The report's MDX should treat `cohort_too_small` aggregates
- * as "not reportable" and omit them from the published text.
+ * Status flag attached to each aggregate. `ok` means the aggregate was
+ * computed and passes the cohort-size floor; `cohort_too_small` means the
+ * underlying cohort was below `minCohortSize` and the value has been nulled.
+ * The report MDX should treat `cohort_too_small` aggregates as "not
+ * reportable" and omit them from the published text.
  */
 export type AggregateStatus =
     | "ok"
@@ -29,13 +29,19 @@ export interface ReportableAggregate {
     label: string;
     /** Rounded value, or null when cohort_too_small / not_implemented. */
     value: number | null;
-    /** The unrounded value, kept for debugging. NEVER include in published output. */
+    /**
+     * Optional: same stat from the prior year. Used by the 2027 edition
+     * to render year-over-year trends. 2026 leaves this undefined; 2027
+     * pulls the 2026 published value into this field per stat.
+     */
+    priorYearValue?: number | null;
+    /** Unrounded value, kept for debugging. NEVER include in published output. */
     rawValue?: number;
     /** Cohort size the aggregate was computed over. */
     cohortSize: number;
     /** Status flag. */
     status: AggregateStatus;
-    /** Optional unit suffix for display (e.g. "%", " days"). */
+    /** Optional unit suffix for display (e.g. "%", " days", " USD"). */
     unit?: string;
 }
 
@@ -58,11 +64,8 @@ export function roundToOneSigFig(n: number): number {
 }
 
 /**
- * Round to a specific number of significant figures. Use this if a single
- * stat genuinely benefits from extra precision (e.g. a percentage where one
- * sig fig collapses 17% and 23% into the same number).
- *
- * USE SPARINGLY. The default is one sig fig for a reason.
+ * Round to a specific number of significant figures. Use sparingly — the
+ * default is one sig fig for a reason. Document the override.
  */
 export function roundToSigFigs(n: number, sigFigs: number): number {
     if (n === 0 || !Number.isFinite(n)) return n;
@@ -92,6 +95,8 @@ export function reportable(opts: {
     unit?: string;
     /** Override the default 1-sig-fig rounding (rarely needed; document why). */
     sigFigs?: number;
+    /** Optional: prior year's value for trend rendering. */
+    priorYearValue?: number | null;
 }): ReportableAggregate {
     const meetsFloor = opts.cohortSize >= opts.minCohortSize;
     const value = meetsFloor
@@ -104,6 +109,7 @@ export function reportable(opts: {
         key: opts.key,
         label: opts.label,
         value,
+        ...(opts.priorYearValue !== undefined ? { priorYearValue: opts.priorYearValue } : {}),
         rawValue: opts.rawValue,
         cohortSize: opts.cohortSize,
         status: meetsFloor ? "ok" : "cohort_too_small",
