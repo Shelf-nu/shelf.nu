@@ -211,7 +211,7 @@ model Asset {
   custody      Custody?
   notes        Note[]
   qrCodes      Qr[]
-  barcodes     Barcode[]
+  barcodes     Barcode[]              @relation("AssetBarcodes")
   reports      ReportFound[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
@@ -219,6 +219,19 @@ model Asset {
   reminders    AssetReminder[]
   auditEntries AuditAsset[]
   auditScans   AuditScan[]
+
+  // Per-asset override: when an org has multiple linked Barcodes (only possible
+  // with the barcode add-on), this picks the specific Barcode to display in
+  // list views. Null = use the workspace `qrIdDisplayPreference` default.
+  // @unique enforces 1:1 so the Prisma back-relation is `Asset?`, not `Asset[]`.
+  //
+  // Ownership invariant: the referenced Barcode MUST belong to THIS asset and
+  // THIS organization. Enforced at the DB layer by a deferrable CONSTRAINT
+  // TRIGGER (see the `add_preferred_barcode_integrity_trigger` migration).
+  // Application code in `updateAsset` also pre-flights the same check to
+  // surface a clean 400 instead of a constraint violation at the FE.
+  preferredBarcodeId String?  @unique
+  preferredBarcode   Barcode? @relation("AssetPreferredBarcode", fields: [preferredBarcodeId], references: [id], onDelete: SetNull)
 
   // Unique constraint for organization-scoped sequential IDs
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
@@ -481,8 +494,12 @@ model Barcode {
   type BarcodeType @default(Code128)
 
   // Relationships
-  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  asset   Asset?  @relation("AssetBarcodes", fields: [assetId], references: [id], onDelete: SetNull)
   assetId String?
+
+  // Back-relation for Asset.preferredBarcode. Optional because most Barcodes
+  // are not chosen as the asset's display-preferred one.
+  preferredByAsset Asset? @relation("AssetPreferredBarcode")
 
   kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
   kitId String?
@@ -809,6 +826,13 @@ enum OrganizationType {
 enum QrIdDisplayPreference {
   QR_ID // Display the QR code ID (current default)
   SAM_ID // Display the sequential/SAM ID
+  // Barcode types (require Organization.barcodesEnabled). The asset's barcode of this
+  // type takes precedence; if none, resolver falls back to QR_ID.
+  Code128
+  Code39
+  DataMatrix
+  ExternalQR
+  EAN13
 }
 
 enum OrganizationRoles {
@@ -1809,6 +1833,7 @@ enum ActivityAction {
   ASSET_STATUS_CHANGED
   ASSET_VALUATION_CHANGED
   ASSET_CUSTOM_FIELD_CHANGED
+  ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED
   ASSET_DELETED
 
@@ -1850,4 +1875,7 @@ enum ActivityAction {
   // Kit
   KIT_CREATED
   KIT_UPDATED
+
+  // Organization (workspace-level configuration changes)
+  ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED
 }

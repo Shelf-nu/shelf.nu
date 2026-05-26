@@ -115,6 +115,16 @@ vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
 
+// why: useCurrentOrganization calls useRouteLoaderData under the hood, which
+// throws outside a router context. Mock returns a minimal org shape so the
+// AssetCodeBadge resolver receives valid inputs in component tests.
+vi.mock("~/hooks/use-current-organization", () => ({
+  useCurrentOrganization: () => ({
+    barcodesEnabled: false,
+    qrIdDisplayPreference: "QR_ID",
+  }),
+}));
+
 // why: controlling asset status logic to test returned badge vs status badge behavior
 vi.mock("~/utils/booking-assets", () => ({
   getBookingContextAssetStatus: (

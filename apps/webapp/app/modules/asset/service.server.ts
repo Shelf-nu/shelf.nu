@@ -162,6 +162,7 @@ const label: ErrorLabel = "Assets";
 const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
+  preferredBarcodeId: true,
   category: {
     select: {
       id: true,
@@ -1309,6 +1310,7 @@ export async function updateAsset({
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
+  preferredBarcodeId,
   organizationId,
   request,
 }: UpdateAssetPayload) {
@@ -1348,7 +1350,8 @@ export async function updateAsset({
       typeof title !== "undefined" ||
         typeof description !== "undefined" ||
         typeof categoryId !== "undefined" ||
-        typeof valuation !== "undefined"
+        typeof valuation !== "undefined" ||
+        typeof preferredBarcodeId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -1504,6 +1507,117 @@ export async function updateAsset({
       });
     }
 
+    // Normalize the form-submitted preferredBarcodeId early so the same
+    // value is used by the pre-flight validation below and the actual write
+    // further down. Both undefined (field absent from patch) and empty
+    // string (form sends "" for "workspace default") collapse to null —
+    // any non-null branch is then guarded by `preferredBarcodeId !== undefined`
+    // so we never mistake "field omitted from patch" for "user picked
+    // workspace default" when writing.
+    const targetPreferred: string | null =
+      preferredBarcodeId === null ||
+      preferredBarcodeId === undefined ||
+      preferredBarcodeId.length === 0
+        ? null
+        : preferredBarcodeId;
+
+    /**
+     * P1 atomicity guard (pre-flight):
+     *
+     * The preferred-barcode override must reference a barcode that will
+     * still exist on this asset AFTER `updateBarcodes` runs. Without this
+     * pre-flight, a save that simultaneously (a) removes the currently-
+     * preferred barcode from the `barcodes` array AND (b) keeps the now-
+     * stale `preferredBarcodeId` would delete the barcode first, then
+     * fail validation, returning a 400 to the user while leaving the
+     * barcodes table mutated. We surface the error before any write so
+     * the rejected save is genuinely atomic.
+     *
+     * Membership-check semantics:
+     * - If `barcodes` is being submitted, compute the post-update id-set
+     *   from the submission (only entries that already have an `id` —
+     *   freshly-created ones have no id yet and can't be referenced).
+     * - If `barcodes` is NOT being submitted, the current DB set is the
+     *   post-update set, so query the live barcodes table scoped to
+     *   `{ assetId, organizationId }` (also closes cross-org IDOR).
+     */
+    if (preferredBarcodeId !== undefined && targetPreferred !== null) {
+      // Addon entitlement gate. Non-addon (and addon-revoked) orgs must not
+      // be able to persist a non-null `preferredBarcodeId` via a tampered
+      // form post — the UI gates the override section by `canUseBarcodes`,
+      // but the server-side action must enforce the same invariant. The
+      // resolver already silently falls back to QR for addon-revoked orgs
+      // (the override branch is gated by `barcodesEnabled` in display.ts),
+      // so this check is belt-and-suspenders: it prevents the stale value
+      // from being written in the first place rather than leaving silent
+      // drift in the DB. `null` overrides are always allowed — that's the
+      // "clear my override" intent and shouldn't require the addon.
+      const orgEntitlement = await db.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { barcodesEnabled: true },
+      });
+      if (!orgEntitlement.barcodesEnabled) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Per-asset preferred-barcode overrides require the alternative-barcodes add-on. " +
+            "Enable the add-on or clear the override (leave it on workspace default).",
+          additionalData: {
+            assetId: id,
+            organizationId,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Org-scoped ownership check — ALWAYS run, even when `barcodes` is
+      // being submitted. The submitted-array check below proves the id will
+      // survive `updateBarcodes`'s mutation, but it does NOT prove the id
+      // actually belongs to this asset/org: a forged form could include
+      // `barcodes: [{ id: "victim-barcode-id", ... }]` to slip past the
+      // earlier check. The DB lookup closes the cross-asset / cross-org
+      // IDOR vector authoritatively.
+      const owned = await db.barcode.findFirst({
+        where: {
+          id: targetPreferred,
+          assetId: id,
+          organizationId,
+        },
+        select: { id: true },
+      });
+      let isMember = Boolean(owned);
+
+      // Additional gate when the patch is also rewriting the `barcodes`
+      // collection: the target must still be in the post-update set
+      // (i.e., not being deleted in the same save). Without this, a save
+      // that simultaneously removes the preferred barcode and keeps the
+      // override would partially-commit (barcodes deleted, then 400 on
+      // membership) — the original P1 from Codex.
+      if (isMember && barcodes !== undefined) {
+        isMember = barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === targetPreferred
+        );
+      }
+
+      if (!isMember) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "The selected preferred barcode is not linked to this asset.",
+          additionalData: {
+            assetId: id,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     const asset = await db.asset.update({
       where: { id, organizationId },
       data,
@@ -1523,6 +1637,100 @@ export async function updateAsset({
         organizationId,
         userId,
       });
+    }
+
+    /**
+     * Per-asset preferred-barcode override.
+     * Membership of `targetPreferred` was already proven by the pre-flight
+     * guard above (either against the submitted `barcodes` array or against
+     * the current DB set), so this block is now purely the write + audit.
+     */
+    if (preferredBarcodeId !== undefined) {
+      const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
+
+      // Did THIS request's `updateBarcodes` call delete the previously-
+      // preferred barcode? True only when (a) a previously-preferred
+      // barcode existed AND (b) the patch submitted a `barcodes` array
+      // that no longer contains it (so updateBarcodes deleted it and the
+      // FK `onDelete: SetNull` cascade nulled `preferredBarcodeId`).
+      // This is the "explicit clear-by-this-request" signal we need to
+      // distinguish "we caused the cascade" from "someone else moved
+      // preferredBarcodeId concurrently".
+      const weDeletedPreferredViaCascade =
+        previousPreferred !== null &&
+        barcodes !== undefined &&
+        !barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === previousPreferred
+        );
+
+      // Wrap the read + update + audit in one transaction so the *write*
+      // decision is based on the committed current state (defeats
+      // concurrent-external-write TOCTOU). The *audit* fires only when
+      // THIS request actually caused the change — either via the explicit
+      // write below, or via the cascade-delete branch above. We must NOT
+      // audit when the value simply differs between the pre-request
+      // snapshot and the in-tx read because of a concurrent external
+      // write — that would misattribute someone else's change to this actor.
+      const wroteOrAudited = await db.$transaction(async (tx) => {
+        const current = await tx.asset.findUniqueOrThrow({
+          where: { id, organizationId },
+          select: { preferredBarcodeId: true },
+        });
+        const currentPreferred = current.preferredBarcodeId ?? null;
+
+        const needsWrite = currentPreferred !== targetPreferred;
+        if (needsWrite) {
+          await tx.asset.update({
+            where: { id, organizationId },
+            data: { preferredBarcodeId: targetPreferred },
+          });
+        }
+
+        // Audit when THIS request caused the row change. Two attribution
+        // paths:
+        //   1. We performed the explicit DB write (target differed from
+        //      the in-tx current state).
+        //   2. The cascade-delete from THIS request's `updateBarcodes`
+        //      nulled the row AND the user's target is null too (the
+        //      cascade fulfilled the user's "clear my override" intent
+        //      silently; we still want an audit row).
+        // Concurrent external writes can't satisfy either condition.
+        const auditAttributableToUs =
+          needsWrite ||
+          (weDeletedPreferredViaCascade &&
+            targetPreferred === null &&
+            currentPreferred === null);
+
+        if (auditAttributableToUs && previousPreferred !== targetPreferred) {
+          // Structured event per `.claude/rules/use-record-event.md`.
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_PREFERRED_BARCODE_CHANGED",
+              entityType: "ASSET",
+              entityId: id,
+              assetId: id,
+              field: "preferredBarcodeId",
+              fromValue: previousPreferred,
+              toValue: targetPreferred,
+            },
+            tx
+          );
+          return true;
+        }
+
+        return false;
+      });
+
+      if (wroteOrAudited) {
+        // Sync the in-memory `asset` object so the returned shape reflects
+        // the post-update state — callers that destructure
+        // `preferredBarcodeId` (e.g., to drive an immediate cache
+        // invalidation) would otherwise see the stale value from the
+        // earlier `db.asset.update` snapshot.
+        asset.preferredBarcodeId = targetPreferred;
+      }
     }
 
     /** If the location id was passed, we create a note for the move */

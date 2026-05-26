@@ -359,6 +359,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
+          // Code-resolution relations — required for AssetCodeBadge on the
+          // booking detail page rows. Scalar fields (sequentialId,
+          // preferredBarcodeId) come in automatically via `include`; the
+          // relations must be listed explicitly. Tight selects per
+          // `~/modules/barcode/display.ts`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           bookings: {
             where: {
               ...(booking.from && booking.to
@@ -429,6 +436,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               color: true,
             },
           },
+          // Code-resolution relations — required for AssetCodeBadge on
+          // the kit row inside this booking. See `~/modules/barcode/display.ts`
+          // and `.claude/rules/code-bearing-entity-list-consistency.md`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           _count: { select: { assets: true } },
         },
       }),

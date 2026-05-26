@@ -23,6 +23,7 @@ import {
 } from "~/utils/stripe.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
+import { recordEvent } from "../activity-event/service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
@@ -337,10 +338,52 @@ export async function updateOrganization({
       });
     }
 
-    return await db.organization.update({
-      where: { id },
-      data: data,
+    // Wrap the previous-value read + update + activity event in one transaction
+    // per `.claude/rules/use-record-event.md` and
+    // `.claude/rules/record-event-payload-shapes.md`. Reading the previous
+    // value OUTSIDE the tx would leave a race window: a concurrent write
+    // between the read and the update would produce a stale `fromValue` in
+    // the audit event (and could emit a redundant event for a no-op).
+    // The atomic wrap means the read sees what the update will overwrite.
+    const updated = await db.$transaction(async (tx) => {
+      const previousQrIdDisplayPreference =
+        qrIdDisplayPreference !== undefined
+          ? (
+              await tx.organization.findUnique({
+                where: { id },
+                select: { qrIdDisplayPreference: true },
+              })
+            )?.qrIdDisplayPreference ?? null
+          : null;
+
+      const next = await tx.organization.update({
+        where: { id },
+        data: data,
+      });
+
+      if (
+        qrIdDisplayPreference !== undefined &&
+        qrIdDisplayPreference !== previousQrIdDisplayPreference
+      ) {
+        await recordEvent(
+          {
+            organizationId: id,
+            actorUserId: userId,
+            action: "ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED",
+            entityType: "ORGANIZATION",
+            entityId: id,
+            field: "qrIdDisplayPreference",
+            fromValue: previousQrIdDisplayPreference,
+            toValue: qrIdDisplayPreference,
+          },
+          tx
+        );
+      }
+
+      return next;
     });
+
+    return updated;
   } catch (cause) {
     throw new ShelfError({
       cause,

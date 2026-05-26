@@ -186,19 +186,39 @@ const WorkspaceGeneralEditForms = ({
 
         <div>
           <FormRow
-            rowLabel={"QR Code Display"}
+            rowLabel={"Preferred display code"}
             className={"border-b-0"}
             subHeading={
-              <p>
-                Choose which identifier is shown on QR code labels. You can
-                display either the QR code ID or the asset's SAM ID.
-              </p>
+              <div className="space-y-2 text-gray-600">
+                <p>
+                  Pick which code is shown next to every asset and kit on list
+                  views (assets, kits, bookings, audits, locations) — so a Sony
+                  A7-III can be told apart from 19 others at a glance.
+                </p>
+                <p>
+                  Need an exception for one asset?{" "}
+                  <strong>Override it on the asset's edit page</strong> — pick a
+                  specific barcode to display for that one item.
+                </p>
+                <p className="text-xs text-gray-500">
+                  QR ID and SAM ID are always available.{" "}
+                  {organization.barcodesEnabled
+                    ? "Barcode-type options are unlocked because your workspace has the alternative-barcodes add-on."
+                    : "Barcode-type options unlock with the alternative-barcodes add-on."}{" "}
+                  When an asset doesn't have your preferred type, the chip falls
+                  back to its QR code (rendered with an outlined style so the
+                  missing data stays visible). Printed QR labels continue to
+                  show the QR id today regardless of this setting — barcode-type
+                  label printing is on the v1.1 roadmap.
+                </p>
+              </div>
             }
           >
-            <InnerLabel hideLg>QR Code Display</InnerLabel>
+            <InnerLabel hideLg>Preferred display code</InnerLabel>
             <QrIdDisplayPreferenceSelector
               name={zo.fields.qrIdDisplayPreference()}
               defaultValue={qrIdDisplayPreference || "QR_ID"}
+              canUseBarcodes={organization.barcodesEnabled}
             />
           </FormRow>
         </div>

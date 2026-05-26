@@ -87,6 +87,13 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       status: true,
       kitId: true,
       valuation: true,
+      // Asset-code resolution fields — see `app/modules/barcode/display.ts`
+      // for the canonical select shape. Tight `take: 1` + narrow `select`
+      // keeps query weight minimal even with hundreds of booking assets.
+      sequentialId: true,
+      preferredBarcodeId: true,
+      qrCodes: { take: 1, select: { id: true } },
+      barcodes: { select: { id: true, type: true, value: true } },
       category: {
         select: {
           id: true,
