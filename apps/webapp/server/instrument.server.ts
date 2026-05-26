@@ -1,4 +1,19 @@
 /* eslint-disable no-console */
+/**
+ * Server-side Sentry init.
+ *
+ * Loaded first by `server/index.ts` (before any other module) so that the
+ * @sentry/react-router auto-instrumentations (HTTP, Prisma, undici, etc.)
+ * can patch their target modules before they are required.
+ *
+ * History — the previous version routed BOTH `beforeSend` (errors) and
+ * `beforeSendTransaction` (performance traces) through the same handler,
+ * which inspected `hint.originalException`. Transactions never carry an
+ * exception, so they were silently dropped 100% of the time. As a result
+ * Sentry collected only client-side spans and no Prisma / loader timing
+ * was visible. Errors and transactions are now handled by separate
+ * callbacks.
+ */
 import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
 
@@ -6,10 +21,32 @@ import { SENTRY_DSN } from "~/utils/env";
 import type { ShelfError } from "~/utils/error";
 import { isAbortError, isLikeShelfError } from "~/utils/error";
 
+/**
+ * Resolve the release identifier for this server process. Read from the
+ * canonical SENTRY_RELEASE env var first, then fall back to Fly's
+ * auto-injected FLY_RELEASE_VERSION so we get something even when the
+ * deploy pipeline hasn't been updated to set SENTRY_RELEASE explicitly.
+ */
+function resolveRelease(): string | undefined {
+  return (
+    process.env.SENTRY_RELEASE || process.env.FLY_RELEASE_VERSION || undefined
+  );
+}
+
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
-    // Performance Monitoring
+    release: resolveRelease(),
+    environment: process.env.NODE_ENV,
+    integrations: [
+      // Emit `span.op:db.sql.prisma` spans for every Prisma query. Requires
+      // @prisma/instrumentation (already in the workspace) and Sentry.init
+      // running before the Prisma client is imported — server/index.ts
+      // imports this file first, so that ordering is preserved.
+      Sentry.prismaIntegration(),
+    ],
+    // Performance Monitoring — 10% sampling matches the client. Tune via
+    // a tracesSampler later if specific routes need higher fidelity.
     tracesSampleRate: 0.1,
     beforeBreadcrumb(breadcrumb) {
       // Remove some noisy breadcrumbs
@@ -31,25 +68,35 @@ if (SENTRY_DSN) {
 
       return breadcrumb;
     },
-    beforeSendTransaction(event, hint) {
-      return handleBeforeSend(event, hint);
+    /**
+     * Performance transactions are passed through unchanged. Do NOT route
+     * them through the error-event filter — transactions carry no
+     * exception, and the old code returned null for any event without
+     * one, which silently dropped 100% of server traces.
+     */
+    beforeSendTransaction(event) {
+      return event;
     },
     beforeSend(event, hint) {
-      return handleBeforeSend(event, hint);
+      return handleBeforeSendError(event, hint);
     },
   });
 
-  // Sentry example
   if (process.env.NODE_ENV === "production") {
     console.log("Sentry is enabled");
-    console.log("Doing some Sentry stuff before the server starts");
   }
 }
 
 /**
- * Filter out non 5xx errors to avoid spamming and log only the necessary.
+ * Filter for ERROR events (not transactions). Drops:
+ *  - non-Error exceptions
+ *  - ShelfError instances flagged `shouldBeCaptured: false`
+ *  - client-disconnect / abort errors that bypass `makeShelfError`
+ *
+ * Also redacts the auth-session cookie and attaches our ShelfError
+ * metadata as Sentry tags / extras.
  */
-function handleBeforeSend<E extends Event>(event: E, hint: EventHint) {
+function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
   const exception = hint.originalException;
 
   if (
