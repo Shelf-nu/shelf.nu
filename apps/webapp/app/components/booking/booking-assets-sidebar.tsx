@@ -71,24 +71,53 @@ interface BookingAssetsSidebarProps {
   trigger?: ReactNode;
 }
 
-// Group assets by kits and individual assets - similar to the original pagination structure
-function groupAssets(assets: BookingWithAssets["assets"]) {
-  const itemsMap = new Map();
-  const individualAssets: any[] = [];
+/** Single asset row inferred from the Prisma payload — preserves the full
+ * shape (including `qrCodes`, `barcodes`, etc.) for downstream callers like
+ * the AssetCodeBadge resolver. */
+type BookingAsset = BookingWithAssets["assets"][number];
+
+/** The asset's `kit` sub-shape from the include above, narrowed to non-null. */
+type BookingAssetKit = NonNullable<BookingAsset["kit"]>;
+
+/** Discriminated union for the grouped paginated items. Lets the consumer
+ * narrow on `item.type` to get `kit` automatically and asset arrays typed. */
+type GroupedItem =
+  | {
+      id: string;
+      type: "kit";
+      assets: BookingAsset[];
+      kit: BookingAssetKit;
+    }
+  | {
+      id: string;
+      type: "asset";
+      assets: BookingAsset[];
+    };
+
+/**
+ * Groups booking assets by kit (kit-grouped item) or by themselves
+ * (individual asset item). Preserves the full Prisma payload on each asset
+ * so the row renderer has access to code-resolution fields.
+ */
+function groupAssets(assets: BookingWithAssets["assets"]): GroupedItem[] {
+  const itemsMap = new Map<string, GroupedItem>();
+  const individualAssets: BookingAsset[] = [];
 
   assets.forEach((asset) => {
     if (asset.kitId && asset.kit) {
       // Asset belongs to a kit
       const kitId = asset.kitId;
-      if (!itemsMap.has(kitId)) {
+      const existing = itemsMap.get(kitId);
+      if (existing && existing.type === "kit") {
+        existing.assets.push(asset);
+      } else {
         itemsMap.set(kitId, {
           id: kitId,
           type: "kit",
-          assets: [],
+          assets: [asset],
           kit: asset.kit,
         });
       }
-      itemsMap.get(kitId)!.assets.push(asset);
     } else {
       // Individual asset
       individualAssets.push(asset);
@@ -252,7 +281,7 @@ export function BookingAssetsSidebar({
 
                           {/* Kit Assets (when expanded) */}
                           {isExpanded &&
-                            item.assets.map((asset: any) => {
+                            item.assets.map((asset) => {
                               const displayCode = currentOrganization
                                 ? resolveDisplayCode({
                                     entity: asset,

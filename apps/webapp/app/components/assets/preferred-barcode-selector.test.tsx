@@ -15,10 +15,21 @@
  * @see {@link file://./preferred-barcode-selector.tsx}
  */
 
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
+import { TooltipProvider } from "~/components/shared/tooltip";
 import { PreferredBarcodeSelector } from "./preferred-barcode-selector";
+
+/**
+ * `PreferredBarcodeSelector` renders `<AssetCodeBadge>` in its override-row
+ * previews, which depends on the app-level TooltipProvider at runtime
+ * (`root.tsx`). Wrap each test render so the Radix context is present.
+ */
+function renderWithTooltip(ui: ReactNode) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
 
 describe("PreferredBarcodeSelector", () => {
   const barcodes = [
@@ -27,7 +38,7 @@ describe("PreferredBarcodeSelector", () => {
   ];
 
   it("lists each persisted barcode as a radio option in addition to workspace default", () => {
-    render(
+    renderWithTooltip(
       <PreferredBarcodeSelector
         name="preferredBarcodeId"
         barcodes={barcodes}
@@ -51,7 +62,7 @@ describe("PreferredBarcodeSelector", () => {
     // why: this is exactly the live-state bug — user removed the preferred
     // barcode in BarcodesInput; the selector must not stay selected on
     // a barcode that no longer exists in the live list.
-    render(
+    renderWithTooltip(
       <PreferredBarcodeSelector
         name="preferredBarcodeId"
         barcodes={[{ id: "bc-a", type: "Code128", value: "ALPHA" }]}
@@ -68,7 +79,7 @@ describe("PreferredBarcodeSelector", () => {
 
   it("clicking an override row updates the highlighted state", async () => {
     const user = userEvent.setup();
-    render(
+    renderWithTooltip(
       <PreferredBarcodeSelector
         name="preferredBarcodeId"
         barcodes={barcodes}
@@ -87,7 +98,7 @@ describe("PreferredBarcodeSelector", () => {
   });
 
   it("renders the empty-state copy when no barcodes are passed", () => {
-    render(
+    renderWithTooltip(
       <PreferredBarcodeSelector
         name="preferredBarcodeId"
         barcodes={[]}

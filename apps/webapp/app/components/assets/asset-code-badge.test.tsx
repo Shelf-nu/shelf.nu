@@ -12,13 +12,25 @@
  * @see {@link file://./asset-code-badge.tsx}
  */
 
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
+import { TooltipProvider } from "~/components/shared/tooltip";
 import { AssetCodeBadge } from "./asset-code-badge";
+
+/**
+ * AssetCodeBadge relies on the app-level TooltipProvider in `root.tsx` at
+ * runtime. In tests we wrap each render so the Radix Tooltip context is
+ * present — without this, `Tooltip` throws "must be used within
+ * TooltipProvider".
+ */
+function renderWithTooltip(ui: ReactNode) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
 
 describe("AssetCodeBadge", () => {
   it("renders the value text", () => {
-    render(
+    renderWithTooltip(
       <AssetCodeBadge
         value="ABC-123"
         type="Code128"
@@ -35,7 +47,7 @@ describe("AssetCodeBadge", () => {
     // testing the content via `findByRole('tooltip')` is timing-dependent.
     // The badge itself carries the same string as aria-label so screen
     // readers can read it without hover; we assert against that.
-    render(
+    renderWithTooltip(
       <AssetCodeBadge
         value="ABC-123"
         type="Code128"
@@ -52,7 +64,7 @@ describe("AssetCodeBadge", () => {
   });
 
   it("explains fallback state in the tooltip", () => {
-    render(
+    renderWithTooltip(
       <AssetCodeBadge
         value="qr-abc"
         type="QR_ID"
@@ -69,7 +81,7 @@ describe("AssetCodeBadge", () => {
   });
 
   it("collapses tooltip to type:value form when explicit=true", () => {
-    render(
+    renderWithTooltip(
       <AssetCodeBadge
         value="SAM-0001"
         type="SAM_ID"
@@ -84,7 +96,7 @@ describe("AssetCodeBadge", () => {
   });
 
   it("does not render when value is empty", () => {
-    const { container } = render(
+    const { container } = renderWithTooltip(
       <AssetCodeBadge
         value=""
         type="QR_ID"
