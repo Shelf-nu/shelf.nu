@@ -492,6 +492,27 @@ const unavailableBookingStatuses = [
 ];
 
 /**
+ * Matches the shape of an asset identifier or barcode / QR id. Two forms:
+ *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
+ *     prefix when scanning or typing an ID
+ *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
+ *     digits, matching the format produced by getNextSequentialId
+ *
+ * Used by getAssets to route ID-shaped queries down a narrower OR clause
+ * (sequentialId / barcodes.value / qrCodes.id) instead of the full
+ * 10-branch chain. The narrower clause skips the slow paths — custodian
+ * name traversal and the unindexed customFields JSON ILIKE — while
+ * still covering every place an ID-shaped value can legitimately live.
+ *
+ * Loose terms like "lab-12" or "AS1000" fall through to the full search
+ * because they don't match canonical sequentialId format and could be
+ * substrings of asset titles, custom fields, etc.
+ */
+function looksLikeAssetId(term: string): boolean {
+  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
+}
+
+/**
  * Fetches assets directly from the asset table with enhanced search capabilities
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
@@ -562,64 +583,95 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in asset fields
-          { title: { contains: term, mode: "insensitive" } },
-          // Search in asset sequential id
+      // Fast path: when every term looks like an asset identifier — either
+      // bare digits ("21035", a UPC barcode) or canonical sequentialId
+      // ("SAM-0001") — narrow the OR clause to the three columns where an
+      // ID-shaped value can legitimately live: sequentialId, barcode value,
+      // and QR id. All three are covered by trigram GIN indexes added in
+      // migration 20260525110348, so the planner stays on indexed scans.
+      // Skipping title/description/category/location/tag/custodian/customFields
+      // is intentional — they can still match via the full path below for
+      // non-ID-shaped terms.
+      if (searchTerms.length > 0 && searchTerms.every(looksLikeAssetId)) {
+        where.OR = searchTerms.flatMap((term) => [
           { sequentialId: { contains: term, mode: "insensitive" } },
-          // Search in asset description
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in related category
-          { category: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related location
-          { location: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian names
-          {
-            custody: {
-              custodian: {
-                OR: [
-                  { name: { contains: term, mode: "insensitive" } },
-                  {
-                    user: {
-                      OR: [
-                        { firstName: { contains: term, mode: "insensitive" } },
-                        { lastName: { contains: term, mode: "insensitive" } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-          // Search qr code id
-          {
-            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
-          },
-          // Search barcode values
           {
             barcodes: {
               some: { value: { contains: term, mode: "insensitive" } },
             },
           },
-          // Search in custom fields
           {
-            customFields: {
-              some: {
-                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                  value: {
-                    path: [jsonPath],
-                    string_contains: term,
-                    mode: "insensitive",
-                  },
-                })),
-              },
+            qrCodes: {
+              some: { id: { contains: term, mode: "insensitive" } },
             },
           },
-        ],
-      }));
+        ]);
+      } else {
+        where.OR = searchTerms.map((term) => ({
+          OR: [
+            // Search in asset fields
+            { title: { contains: term, mode: "insensitive" } },
+            // Search in asset sequential id
+            { sequentialId: { contains: term, mode: "insensitive" } },
+            // Search in asset description
+            { description: { contains: term, mode: "insensitive" } },
+            // Search in related category
+            { category: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related location
+            { location: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related tags
+            {
+              tags: { some: { name: { contains: term, mode: "insensitive" } } },
+            },
+            // Search in custodian names
+            {
+              custody: {
+                custodian: {
+                  OR: [
+                    { name: { contains: term, mode: "insensitive" } },
+                    {
+                      user: {
+                        OR: [
+                          {
+                            firstName: { contains: term, mode: "insensitive" },
+                          },
+                          { lastName: { contains: term, mode: "insensitive" } },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+            // Search qr code id
+            {
+              qrCodes: {
+                some: { id: { contains: term, mode: "insensitive" } },
+              },
+            },
+            // Search barcode values
+            {
+              barcodes: {
+                some: { value: { contains: term, mode: "insensitive" } },
+              },
+            },
+            // Search in custom fields
+            {
+              customFields: {
+                some: {
+                  OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                    value: {
+                      path: [jsonPath],
+                      string_contains: term,
+                      mode: "insensitive",
+                    },
+                  })),
+                },
+              },
+            },
+          ],
+        }));
+      }
     }
 
     if (status) {

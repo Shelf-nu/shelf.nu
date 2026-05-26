@@ -237,6 +237,8 @@ model Asset {
   @@unique([organizationId, sequentialId], name: "asset_org_sequential_unique")
   // Special GIN index for optimization of simple search queries
   @@index([title(ops: raw("gin_trgm_ops")), description(ops: raw("gin_trgm_ops"))], type: Gin)
+  // Trigram index for substring search on sequentialId (e.g. "21035" → "SAM-21035")
+  @@index([sequentialId(ops: raw("gin_trgm_ops"))], type: Gin, name: "Asset_sequentialId_trgm_idx")
   // Indexes for optimization of queries
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
@@ -336,6 +338,8 @@ model Category {
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Category_name_trgm_idx")
 }
 
 enum TagUseFor {
@@ -369,6 +373,8 @@ model Tag {
   // Indexes for foreign keys
   @@index([organizationId])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Tag_name_trgm_idx")
 }
 
 model Note {
@@ -473,6 +479,8 @@ model Qr {
   @@index([userId])
   @@index([organizationId])
   @@index([batchId])
+  // Trigram index for substring search of Qr ids from the asset-list search bar
+  @@index([id(ops: raw("gin_trgm_ops"))], type: Gin, name: "Qr_id_trgm_idx")
 }
 
 // Barcode model
@@ -510,6 +518,8 @@ model Barcode {
   @@index([assetId])
   @@index([kitId])
   @@index([organizationId]) // For org-level queries
+  // Trigram index for substring search of barcode values from the asset-list search bar
+  @@index([value(ops: raw("gin_trgm_ops"))], type: Gin, name: "Barcode_value_trgm_idx")
 }
 
 // Barcode types matching zxing format names exactly
@@ -637,6 +647,8 @@ model Location {
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, parentId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_name_trgm_idx")
 }
 
 // Master data for roles
