@@ -10,7 +10,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/shared/sheet";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
+import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
@@ -29,6 +32,13 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
         mainImage: true;
         thumbnailImage: true;
         mainImageExpiration: true;
+        // Code-resolution fields — mirror of getBookings' assets select.
+        // Enables the asset-code chip on every row, matching the booking
+        // overview list and other code-bearing surfaces.
+        sequentialId: true;
+        preferredBarcodeId: true;
+        qrCodes: { take: 1; select: { id: true } };
+        barcodes: { select: { id: true; type: true; value: true } };
         category: {
           select: {
             id: true;
@@ -103,6 +113,9 @@ export function BookingAssetsSidebar({
 }: BookingAssetsSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
+  // Workspace pref + addon entitlement — resolveDisplayCode short-circuits to
+  // QR when the org has lost the barcode add-on, so this read is always safe.
+  const currentOrganization = useCurrentOrganization();
 
   const paginatedItems = groupAssets(booking.assets);
 
@@ -239,67 +252,80 @@ export function BookingAssetsSidebar({
 
                           {/* Kit Assets (when expanded) */}
                           {isExpanded &&
-                            item.assets.map((asset: any) => (
-                              <tr
-                                key={`kit-asset-${asset.id}`}
-                                className="relative border-b border-gray-200"
-                              >
-                                <td className="w-full whitespace-normal p-0 md:p-0">
-                                  <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
-                                  <div className="flex justify-between gap-3 bg-gray-50/50 px-6 py-4 md:justify-normal md:pr-6">
-                                    <div className="flex items-center gap-3">
-                                      <div className="relative flex size-12 shrink-0 items-center justify-center">
-                                        <AssetImage
-                                          asset={{
-                                            id: asset.id,
-                                            mainImage: asset.mainImage,
-                                            thumbnailImage:
-                                              asset.thumbnailImage,
-                                            mainImageExpiration:
-                                              asset.mainImageExpiration,
-                                          }}
-                                          alt={`Image of ${asset.title}`}
-                                          className="size-full rounded-[4px] border border-gray-300 object-cover"
-                                          withPreview
-                                        />
-                                      </div>
-                                      <div className="min-w-[180px]">
-                                        <span className="word-break mb-1 block">
-                                          <Button
-                                            to={`/assets/${asset.id}`}
-                                            variant="link"
-                                            className="text-left font-medium text-gray-900 hover:text-gray-700"
-                                            target="_blank"
-                                            onlyNewTabIconOnHover={true}
-                                          >
-                                            {asset.title}
-                                          </Button>
-                                        </span>
-                                        <div>
-                                          <AssetStatusBadge
-                                            id={asset.id}
-                                            status={asset.status}
-                                            availableToBook={
-                                              asset.availableToBook
-                                            }
+                            item.assets.map((asset: any) => {
+                              const displayCode = currentOrganization
+                                ? resolveDisplayCode({
+                                    entity: asset,
+                                    organization: currentOrganization,
+                                  })
+                                : null;
+                              return (
+                                <tr
+                                  key={`kit-asset-${asset.id}`}
+                                  className="relative border-b border-gray-200"
+                                >
+                                  <td className="w-full whitespace-normal p-0 md:p-0">
+                                    <div className="absolute inset-y-0 left-0 h-full w-2 bg-gray-100" />
+                                    <div className="flex justify-between gap-3 bg-gray-50/50 px-6 py-4 md:justify-normal md:pr-6">
+                                      <div className="flex items-center gap-3">
+                                        <div className="relative flex size-12 shrink-0 items-center justify-center">
+                                          <AssetImage
+                                            asset={{
+                                              id: asset.id,
+                                              mainImage: asset.mainImage,
+                                              thumbnailImage:
+                                                asset.thumbnailImage,
+                                              mainImageExpiration:
+                                                asset.mainImageExpiration,
+                                            }}
+                                            alt={`Image of ${asset.title}`}
+                                            className="size-full rounded-[4px] border border-gray-300 object-cover"
+                                            withPreview
                                           />
+                                        </div>
+                                        <div className="min-w-[180px]">
+                                          <span className="word-break mb-1 block">
+                                            <Button
+                                              to={`/assets/${asset.id}`}
+                                              variant="link"
+                                              className="text-left font-medium text-gray-900 hover:text-gray-700"
+                                              target="_blank"
+                                              onlyNewTabIconOnHover={true}
+                                            >
+                                              {asset.title}
+                                            </Button>
+                                          </span>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <AssetStatusBadge
+                                              id={asset.id}
+                                              status={asset.status}
+                                              availableToBook={
+                                                asset.availableToBook
+                                              }
+                                            />
+                                            {displayCode ? (
+                                              <AssetCodeBadge
+                                                {...displayCode}
+                                              />
+                                            ) : null}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
-                                  </div>
-                                </td>
-                                <td className="bg-gray-50/50 px-6 py-4"> </td>
-                                <td className="bg-gray-50/50 px-6 py-4">
-                                  <CategoryBadge
-                                    category={asset.category}
-                                    className="whitespace-nowrap"
-                                  />
-                                </td>
-                                <td className="bg-gray-50/50 px-6 py-4 pr-4 text-right">
-                                  {" "}
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                  <td className="bg-gray-50/50 px-6 py-4"> </td>
+                                  <td className="bg-gray-50/50 px-6 py-4">
+                                    <CategoryBadge
+                                      category={asset.category}
+                                      className="whitespace-nowrap"
+                                    />
+                                  </td>
+                                  <td className="bg-gray-50/50 px-6 py-4 pr-4 text-right">
+                                    {" "}
+                                  </td>
+                                </tr>
+                              );
+                            })}
 
                           {/* Separator row after kit assets */}
                           <tr className="kit-separator h-1 bg-gray-100">
@@ -311,6 +337,12 @@ export function BookingAssetsSidebar({
 
                     // Individual asset
                     const asset = item.assets[0];
+                    const displayCode = currentOrganization
+                      ? resolveDisplayCode({
+                          entity: asset,
+                          organization: currentOrganization,
+                        })
+                      : null;
                     return (
                       <tr
                         key={`asset-${asset.id}`}
@@ -345,12 +377,15 @@ export function BookingAssetsSidebar({
                                     {asset.title}
                                   </Button>
                                 </span>
-                                <div>
+                                <div className="flex flex-wrap items-center gap-2">
                                   <AssetStatusBadge
                                     id={asset.id}
                                     status={asset.status}
                                     availableToBook={asset.availableToBook}
                                   />
+                                  {displayCode ? (
+                                    <AssetCodeBadge {...displayCode} />
+                                  ) : null}
                                 </div>
                               </div>
                             </div>

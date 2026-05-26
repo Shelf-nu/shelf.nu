@@ -53,34 +53,45 @@ type AssetCodeBadgeProps = ResolvedDisplayCode & {
 };
 
 /**
- * Build a human-helpful tooltip for the chip — replaces the previous
- * "TYPE: value" technical title with an explanation of WHY this value
- * is showing and how to change it. Three branches:
+ * Build a structured help-text tooltip for the chip — bold title (the code
+ * value + scope tag) on top, lighter explanatory body on the second row. Same
+ * pattern as `BarcodeTypeTooltip` in `~/components/forms/barcodes-input.tsx`
+ * and `InfoTooltip` body styling. Three branches:
  *
  * 1. Fallback — workspace asked for type X but the asset has none, so
- *    we're showing QR. Tooltip names both types and the fix.
+ *    we're showing QR. Body names both types and the fix.
  * 2. Override — chip's type differs from the workspace preference but
  *    isn't a fallback, so a per-asset override is in effect.
  * 3. Default — chip's type matches the workspace preference.
+ *
+ * The `body` is optional so explicit-column callers can render a title-only
+ * tooltip (no workspace-relative narrative there).
  */
-function buildTooltip(
+function buildTooltipContent(
   value: string,
   type: ResolvedDisplayCode["type"],
   isFallback: boolean,
   workspacePreference: ResolvedDisplayCode["workspacePreference"]
-): string {
+): { title: string; body?: string } {
   const typeLabel = labelForPreference(type);
   const wsLabel = labelForPreference(workspacePreference);
 
   if (isFallback) {
-    // Include the actual displayed value so the tooltip is shape-consistent
-    // with the other two branches and the user knows *which* QR is showing.
-    return `${typeLabel}: ${value} (fallback) — your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`;
+    return {
+      title: `${typeLabel}: ${value} (fallback)`,
+      body: `Your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`,
+    };
   }
   if (type !== workspacePreference) {
-    return `${typeLabel}: ${value} — set as a per-asset override (overrides workspace's preferred ${wsLabel}).`;
+    return {
+      title: `${typeLabel}: ${value}`,
+      body: `Per-asset override — overrides workspace's preferred ${wsLabel}.`,
+    };
   }
-  return `${typeLabel}: ${value} — matches your workspace's preferred display code. Change in workspace settings.`;
+  return {
+    title: `${typeLabel}: ${value}`,
+    body: "Matches your workspace's preferred display code. Change in workspace settings.",
+  };
 }
 
 /**
@@ -116,14 +127,19 @@ export function AssetCodeBadge({
   const Icon =
     type === "QR_ID" || type === "SAM_ID" ? ScanQRIcon : ScanBarcodeIcon;
 
-  // Build help-text tooltip that explains WHY this value is showing and
-  // points at how to change it. In `explicit` column mode the workspace-
+  // Structured tooltip: bold title (the code value + scope tag) + lighter body
+  // explaining why it's showing. In `explicit` column mode the workspace-
   // relative narrative is misleading (the column itself, not the workspace
-  // preference, determines what's displayed), so we collapse to a plain
-  // "<TypeLabel>: <value>" form.
-  const tooltip = explicit
-    ? `${labelForPreference(type)}: ${value}`
-    : buildTooltip(value, type, isFallback, workspacePreference);
+  // preference, determines what's displayed), so we collapse to a title-only
+  // tooltip.
+  const { title, body } = explicit
+    ? { title: `${labelForPreference(type)}: ${value}`, body: undefined }
+    : buildTooltipContent(value, type, isFallback, workspacePreference);
+
+  // aria-label concatenates title + body so screen-reader users get the full
+  // explanation even without the tooltip mounting. Single string keeps SR
+  // pronunciation predictable.
+  const ariaLabel = body ? `${title} — ${body}` : title;
 
   return (
     <TooltipProvider delayDuration={100}>
@@ -145,7 +161,7 @@ export function AssetCodeBadge({
                 : "bg-gray-100 text-gray-700",
               className
             )}
-            aria-label={tooltip}
+            aria-label={ariaLabel}
           >
             <Icon className="size-3.5 shrink-0" aria-hidden />
             <span>{value}</span>
@@ -164,11 +180,11 @@ export function AssetCodeBadge({
             ) : null}
           </span>
         </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          className="max-w-[280px] text-xs font-medium"
-        >
-          {tooltip}
+        <TooltipContent side="top" className="max-w-[280px]">
+          <h6 className="text-xs font-semibold text-gray-900">{title}</h6>
+          {body ? (
+            <p className="mt-1 text-xs font-medium text-gray-500">{body}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

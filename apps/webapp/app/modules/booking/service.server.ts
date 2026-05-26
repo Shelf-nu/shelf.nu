@@ -3486,6 +3486,14 @@ export async function getBookings(params: {
               mainImage: true,
               thumbnailImage: true,
               mainImageExpiration: true,
+              // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+              // Surfaced by the BookingAssetsSidebar so the chip matches the
+              // simple-mode booking overview list and every other code-bearing
+              // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+              sequentialId: true,
+              preferredBarcodeId: true,
+              qrCodes: { take: 1, select: { id: true } },
+              barcodes: { select: { id: true, type: true, value: true } },
               category: {
                 select: {
                   id: true,

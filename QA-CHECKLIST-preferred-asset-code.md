@@ -8,8 +8,8 @@ Use the PR's deploy-preview URL — or your local `pnpm webapp:dev` URL — wher
 
 ## 1. Smoke (5 min)
 
-- [ ] **App loads cleanly.** Login lands on `/home` without errors.
-- [ ] **`pnpm webapp:validate` is clean.**
+- [x] **App loads cleanly.** Login lands on `/home` without errors.
+- [x] **`pnpm webapp:validate` is clean.**
 
 ---
 

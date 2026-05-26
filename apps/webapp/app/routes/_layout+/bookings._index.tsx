@@ -385,6 +385,11 @@ const ListBookingsContent = ({
           mainImage: true;
           thumbnailImage: true;
           mainImageExpiration: true;
+          // Code-resolution fields — mirror of getBookings' assets select
+          sequentialId: true;
+          preferredBarcodeId: true;
+          qrCodes: { take: 1; select: { id: true } };
+          barcodes: { select: { id: true; type: true; value: true } };
           category: {
             select: {
               id: true;

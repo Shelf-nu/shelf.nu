@@ -58,11 +58,6 @@ of the surface grid:
 
 - **Audit scan-live drawer** — still uses simplified `AuditScannedItem` shape;
   needs `qrCodes`/`barcodes` plumbed through the scanner atom.
-- **Kit row inside a booking** (`kit-row.tsx`) — would require expanding
-  `BOOKING_WITH_ASSETS_INCLUDE.assets.select.kit` from `{ name: true }` to
-  include `qrCodes` + `barcodes`. Skipped in v1 because the kit row is a
-  _grouping header_ in the booking; the asset rows below already carry the
-  identification.
 - **`Kit.sequentialId`** and **`Kit.preferredBarcodeId`** schema fields — kits
   today fall back to QR when workspace pref is SAM, and have no per-kit
   override. Add these (with a migration) before promoting kits to full

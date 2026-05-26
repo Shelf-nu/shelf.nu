@@ -200,7 +200,11 @@ export default function QrIdDisplayPreferenceSelector({
     BASE_OPTIONS[0];
 
   return (
-    <div className="flex flex-col gap-2">
+    // w-full so the trigger matches the width of sibling form controls
+    // (Currency dropdown, Name input). Without it the flex-col container
+    // shrinks to its largest child's natural width, and the inner button's
+    // `w-full` only fills that shrunk column — narrower than the FormRow slot.
+    <div className="flex w-full flex-col gap-2">
       <Popover
         open={isOpen}
         onOpenChange={(v) => {
@@ -218,18 +222,25 @@ export default function QrIdDisplayPreferenceSelector({
             // trigger sits inside a `fetcher.Form` (workspace edit form).
             // Clicking to OPEN the dropdown would otherwise submit the form.
             type="button"
+            // text-left overrides the browser default of `text-align: center`
+            // on <button>; without it the multi-line label+description
+            // appears centered when text wraps. min-h-[44px] keeps visual
+            // parity with sibling form controls while allowing the two-row
+            // content to set the actual height.
             className={tw(
-              "flex h-[44px] w-full items-center justify-between rounded-md border px-3 py-2",
+              "flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left",
               className
             )}
           >
-            <span className="font-medium">
-              {selectedOption?.label}{" "}
-              <span className="text-sm font-normal text-gray-500">
-                ({selectedOption?.description})
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm font-medium text-gray-900">
+                {selectedOption?.label}
+              </span>
+              <span className="truncate text-xs text-gray-500">
+                {selectedOption?.description}
               </span>
             </span>
-            <ChevronDownIcon className="inline-block size-4 text-gray-500" />
+            <ChevronDownIcon className="size-4 shrink-0 text-gray-500" />
             {/*
               Submit the *resolved* selectedOption.value rather than the raw
               selectedPreference. If the saved preference is no longer in
@@ -279,8 +290,11 @@ export default function QrIdDisplayPreferenceSelector({
                 <div
                   id={`qr-preference-option-${index}`}
                   key={option.value}
+                  // items-start aligns the check icon to the top of the row
+                  // so it stays anchored next to the label (not floating to
+                  // the vertical center of the two-line content).
                   className={tw(
-                    "flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:cursor-pointer hover:bg-gray-50",
+                    "flex items-start justify-between gap-3 px-4 py-3 hover:cursor-pointer hover:bg-gray-50",
                     isHovered && "bg-gray-50"
                   )}
                   role="option"
@@ -293,14 +307,16 @@ export default function QrIdDisplayPreferenceSelector({
                     handleSelect(option.value)
                   )}
                 >
-                  <span className="font-medium">
-                    {option.label}{" "}
-                    <span className="text-sm font-normal text-gray-500">
-                      ({option.description})
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium text-gray-900">
+                      {option.label}
                     </span>
-                  </span>
+                    <span className="text-xs text-gray-500">
+                      {option.description}
+                    </span>
+                  </div>
                   <When truthy={isSelected}>
-                    <CheckIcon className="size-4 text-primary" />
+                    <CheckIcon className="size-4 shrink-0 text-primary" />
                   </When>
                 </div>
               );

@@ -1,8 +1,10 @@
 import React from "react";
-import type { BookingStatus, Category, Kit } from "@prisma/client";
+import type { Barcode, BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -11,6 +13,7 @@ import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
+import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import KitImage from "../kits/kit-image";
 import { KitStatusBadge } from "../kits/kit-status-badge";
@@ -26,6 +29,12 @@ type KitRowProps = {
   kit: Pick<Kit, "id" | "name" | "image" | "status"> & {
     imageExpiration: string | Date | null;
     category: Pick<Category, "name" | "id" | "color"> | null;
+    // Code-resolution relations — needed so the chip resolves on the kit row.
+    // Kits don't have sequentialId / preferredBarcodeId in v1; the resolver's
+    // optional fields tolerate that and fall back to QR when workspace pref
+    // is SAM.
+    qrCodes?: { id: string }[];
+    barcodes?: Pick<Barcode, "id" | "type" | "value">[];
   };
   isExpanded: boolean;
   bookingStatus: BookingStatus;
@@ -49,6 +58,15 @@ export default function KitRow({
   const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved, isInProgress, isFinished } =
     useBookingStatusHelpers(bookingStatus);
+  // Workspace pref + addon entitlement — resolver short-circuits to QR when
+  // the org has lost the barcode add-on, so this read is always safe.
+  const currentOrganization = useCurrentOrganization();
+  // Kits don't have sequentialId / preferredBarcodeId in v1; the resolver's
+  // optional fields tolerate that and fall back to QR when workspace pref
+  // is SAM.
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    : null;
 
   // Create booking asset IDs set for context-aware status calculation
   const bookingAssetIds = new Set(assets.map((asset) => asset.id));
@@ -98,7 +116,11 @@ export default function KitRow({
               >
                 <div className="">{kit.name}</div>
               </Button>
-              <div>
+              {/*
+                Same metadata-line composition as other code-bearing surfaces:
+                status first, code chip second. flex-wrap handles narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 {isFinished ? (
                   <ReturnedBadge />
                 ) : (
@@ -107,6 +129,7 @@ export default function KitRow({
                     availableToBook={true}
                   />
                 )}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>
