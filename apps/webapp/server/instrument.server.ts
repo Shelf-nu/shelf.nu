@@ -18,7 +18,6 @@ import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
 
 import { SENTRY_DSN } from "~/utils/env";
-import type { ShelfError } from "~/utils/error";
 import { isAbortError, isLikeShelfError } from "~/utils/error";
 
 /**
@@ -139,30 +138,34 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
 }
 
 /**
- * Make the Sentry context from our ShelfError
+ * Build a Sentry overlay (user / tags / extras) from a ShelfError.
+ *
+ * Returns `undefined` for anything that isn't a ShelfError so the caller
+ * can fall through to the scope-derived event without overlaying noisy
+ * fallback tags ("Unknown" / "?"). Plain Errors that bubble up still get
+ * captured — they just don't gain Shelf-specific tagging they can't
+ * provide meaningful values for.
  */
-function makeSentryContext(event: unknown | null | undefined) {
-  if (!event) {
+function makeSentryContext(exception: unknown) {
+  if (!isLikeShelfError(exception)) {
     return;
   }
 
-  const maybeShelfError = event as Partial<ShelfError>;
-
   return {
     user: {
-      id: (maybeShelfError.additionalData?.userId as string) || "?",
+      id: (exception.additionalData?.userId as string) || "?",
     },
     tags: {
-      label: maybeShelfError.label || "Unknown",
-      shelf_trace_id: maybeShelfError.traceId || "Unknown",
+      label: exception.label || "Unknown",
+      shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...(maybeShelfError.additionalData || {}),
-      traceId: maybeShelfError.traceId,
-      message: maybeShelfError.message,
+      ...(exception.additionalData || {}),
+      traceId: exception.traceId,
+      message: exception.message,
       cause: {
-        message: (maybeShelfError.cause as Error | null)?.message,
-        raw: JSON.stringify(maybeShelfError.cause),
+        message: (exception.cause as Error | null)?.message,
+        raw: JSON.stringify(exception.cause),
       },
     },
   };
