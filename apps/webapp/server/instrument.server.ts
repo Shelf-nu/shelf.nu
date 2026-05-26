@@ -117,9 +117,24 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
     event.request.cookies["__authSession"] = "hidden";
   }
 
+  const context = makeSentryContext(exception);
+  if (!context) {
+    return event;
+  }
+
   return {
     ...event,
-    ...makeSentryContext(exception),
+    ...context,
+    // Merge tags so scope-set values (e.g. organizationId from
+    // requirePermission) survive the ShelfError-derived overlay.
+    // Without this merge the spread above would clobber event.tags
+    // with only { label, shelf_trace_id } and we'd lose org filtering
+    // on error events. Same applies to extras.
+    tags: { ...(event.tags ?? {}), ...context.tags },
+    extra: { ...(event.extra ?? {}), ...context.extra },
+    // Prefer the explicit user we set in requirePermission; only fall
+    // back to the ShelfError-extracted id if the scope didn't have one.
+    user: event.user ?? context.user,
   };
 }
 
