@@ -30,17 +30,17 @@ Behind the scenes — every save fires `ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CH
 
 Open any asset's edit page (`/assets/:id/edit`). Scroll to the **Barcodes** section.
 
-- [ ] **No barcodes yet** → below the Barcodes input, you see an explanatory message: *"Add a barcode above to make it selectable as the preferred display identifier…"*. List views follow the workspace default.
+- [ ] **No barcodes yet** → below the Barcodes input, you see an explanatory message: _"Add a barcode above to make it selectable as the preferred display identifier…"_. List views follow the workspace default.
 - [ ] **With one or more barcodes** → a "Preferred display code" section appears with a radio group:
-   - `Workspace default` (selected by default)
-   - One row per barcode showing its value + type label
+  - `Workspace default` (selected by default)
+  - One row per barcode showing its value + type label
 - [ ] Selecting a specific barcode and saving → after reload, the radio reflects the saved selection.
 - [ ] Reverting to `Workspace default` → after save, the override is cleared.
 - [ ] **Addon-OFF** → the Barcodes section is replaced by the existing `UnlockBarcodesBanner`. No override UI appears.
 
 Behind the scenes — every preferred-barcode change fires `ASSET_PREFERRED_BARCODE_CHANGED`.
 
-**Server-side validation** — try forcing a `preferredBarcodeId` to a Barcode belonging to a different asset (via curl or devtools form replay). The action should return a 400 with *"The selected preferred barcode is not linked to this asset."*
+**Server-side validation** — try forcing a `preferredBarcodeId` to a Barcode belonging to a different asset (via curl or devtools form replay). The action should return a 400 with _"The selected preferred barcode is not linked to this asset."_
 
 ---
 
@@ -92,7 +92,7 @@ URL: `/locations/:id/assets`
 
 URL: `/audits/:id/overview`
 
-- [ ] Asset rows in the audit's expected/found/missing tables show the badge prominently. This is *the* surface where Christine's "match physical label to row" job lives.
+- [ ] Asset rows in the audit's expected/found/missing tables show the badge prominently. This is _the_ surface where Christine's "match physical label to row" job lives.
 - [ ] **Search by barcode value** now finds matching audit assets (new in this PR).
 
 ---

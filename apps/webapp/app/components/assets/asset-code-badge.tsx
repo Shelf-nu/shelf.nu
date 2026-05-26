@@ -21,6 +21,12 @@
 
 import { Maximize2Icon, ScanBarcodeIcon } from "lucide-react";
 import { ScanQRIcon } from "~/components/icons/library";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
 import { labelForPreference } from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
@@ -85,8 +91,11 @@ function buildTooltip(
  * - Fallback dimming: when `isFallback === true` (the workspace-preferred
  *   type was unavailable on this asset and we fell back to QR), the badge
  *   renders with an outlined chip as a silent data-hygiene signal.
- * - `title` attribute carries explanatory help-text built from the resolved
- *   state plus workspace preference (see `buildTooltip`).
+ * - Tooltip content is rendered via the shared Radix `TooltipContent` so it
+ *   reveals on hover AND keyboard focus (the native `title` attribute is
+ *   unreliable on touch and announced inconsistently by screen readers).
+ *   `aria-label` mirrors the tooltip string on the chip so screen-reader
+ *   users get the explanation without needing the tooltip to open.
  *
  * @param props The resolved code plus optional className for layout control
  * @returns The badge element, or `null` if there's no value to display
@@ -117,37 +126,51 @@ export function AssetCodeBadge({
     : buildTooltip(value, type, isFallback, workspacePreference);
 
   return (
-    <span
-      className={tw(
-        // Layout: inline pill, tight padding, rounded corners.
-        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs",
-        // Two visual states distinguish "is this the workspace-preferred code, or a fallback?":
-        //   - canonical: filled gray chip — reads as confident metadata.
-        //   - fallback (asset is missing its workspace-preferred code; we're
-        //     showing the universal QR): outlined chip with white fill —
-        //     visually less prominent, clearly says "this isn't your preferred
-        //     type." Uses `ring-1 ring-inset` so the outline doesn't shift the
-        //     pill's outer dimensions vs. the filled variant on the same row.
-        isFallback
-          ? "bg-white text-gray-500 ring-1 ring-inset ring-gray-200"
-          : "bg-gray-100 text-gray-700",
-        className
-      )}
-      title={tooltip}
-      aria-label={tooltip}
-    >
-      <Icon className="size-3.5 shrink-0" aria-hidden />
-      <span>{value}</span>
-      {/*
-        Interactive affordance: a small "expand" glyph signals the chip is a
-        click target (typically opens a code-preview dialog). Rendered with
-        reduced opacity so it sits as a hint rather than a competing element,
-        and is `aria-hidden` because the wrapping interactive element should
-        already have an accessible label/role.
-      */}
-      {interactive ? (
-        <Maximize2Icon className="size-3 shrink-0 opacity-50" aria-hidden />
-      ) : null}
-    </span>
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={tw(
+              // Layout: inline pill, tight padding, rounded corners.
+              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs",
+              // Two visual states distinguish "is this the workspace-preferred code, or a fallback?":
+              //   - canonical: filled gray chip — reads as confident metadata.
+              //   - fallback (asset is missing its workspace-preferred code; we're
+              //     showing the universal QR): outlined chip with white fill —
+              //     visually less prominent, clearly says "this isn't your preferred
+              //     type." Uses `ring-1 ring-inset` so the outline doesn't shift the
+              //     pill's outer dimensions vs. the filled variant on the same row.
+              isFallback
+                ? "bg-white text-gray-500 ring-1 ring-inset ring-gray-200"
+                : "bg-gray-100 text-gray-700",
+              className
+            )}
+            aria-label={tooltip}
+          >
+            <Icon className="size-3.5 shrink-0" aria-hidden />
+            <span>{value}</span>
+            {/*
+              Interactive affordance: a small "expand" glyph signals the chip is a
+              click target (typically opens a code-preview dialog). Rendered with
+              reduced opacity so it sits as a hint rather than a competing element,
+              and is `aria-hidden` because the wrapping interactive element should
+              already have an accessible label/role.
+            */}
+            {interactive ? (
+              <Maximize2Icon
+                className="size-3 shrink-0 opacity-50"
+                aria-hidden
+              />
+            ) : null}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="max-w-[280px] text-xs font-medium"
+        >
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

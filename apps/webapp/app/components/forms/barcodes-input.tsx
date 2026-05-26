@@ -59,6 +59,13 @@ type BarcodesInputProps = {
   valueName: (index: number) => string;
   idName?: (index: number) => string; // Optional ID field name generator
   barcodes: BarcodeInput[];
+  /**
+   * Called with the current barcodes list whenever it changes (add/remove/edit).
+   * Used by `AssetForm` to feed live state into `PreferredBarcodeSelector` so
+   * the override picker reflects in-progress edits — not just the loader's
+   * snapshot. Optional; components that don't need a live mirror omit it.
+   */
+  onBarcodesChange?: (barcodes: BarcodeInput[]) => void;
 };
 
 export type BarcodesInputRef = {
@@ -105,6 +112,7 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
       valueName,
       idName,
       barcodes: incomingBarcodes,
+      onBarcodesChange,
     },
     ref
   ) {
@@ -162,6 +170,17 @@ const BarcodesInput = forwardRef<BarcodesInputRef, BarcodesInputProps>(
 
       return errors;
     }, [barcodes]);
+
+    // why: mirror live barcode state up to AssetForm so the
+    // PreferredBarcodeSelector can filter to barcodes that still exist.
+    // Strips internal `clientKey` from the BarcodeInputWithKey shape — the
+    // selector only cares about persisted id/type/value.
+    useEffect(() => {
+      if (!onBarcodesChange) return;
+      onBarcodesChange(
+        barcodes.map(({ id, type, value }) => ({ id, type, value }))
+      );
+    }, [barcodes, onBarcodesChange]);
 
     // Expose validation state to parent
     useImperativeHandle(

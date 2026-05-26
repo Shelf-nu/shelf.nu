@@ -225,20 +225,11 @@ model Asset {
   // list views. Null = use the workspace `qrIdDisplayPreference` default.
   // @unique enforces 1:1 so the Prisma back-relation is `Asset?`, not `Asset[]`.
   //
-  // Ownership invariant: the referenced Barcode MUST belong to THIS asset.
-  // Today this is enforced in the only write path — `updateAsset` runs a
-  // pre-flight membership check (see `apps/webapp/app/modules/asset/service.server.ts`).
-  // A DB-level CHECK/trigger (requiring a subquery against `Barcode.assetId`)
-  // is the belt-and-suspenders follow-up; deferred to a separate change so
-  // this PR doesn't conflate schema work with the customer-facing feature.
-  //
-  // Residual risks until the DB-level trigger lands:
-  //   1) Direct DB writes / Prisma seed scripts can bypass the application
-  //      check entirely. Any data-fix script touching `preferredBarcodeId`
-  //      must replicate the membership check by hand.
-  //   2) Any FUTURE write path that sets `preferredBarcodeId` (e.g., a bulk
-  //      import, a barcode-merge admin tool) MUST replicate the pre-flight
-  //      check; the invariant is not enforced by the schema yet.
+  // Ownership invariant: the referenced Barcode MUST belong to THIS asset and
+  // THIS organization. Enforced at the DB layer by a deferrable CONSTRAINT
+  // TRIGGER (see the `add_preferred_barcode_integrity_trigger` migration).
+  // Application code in `updateAsset` also pre-flights the same check to
+  // surface a clean 400 instead of a constraint violation at the FE.
   preferredBarcodeId String?  @unique
   preferredBarcode   Barcode? @relation("AssetPreferredBarcode", fields: [preferredBarcodeId], references: [id], onDelete: SetNull)
 

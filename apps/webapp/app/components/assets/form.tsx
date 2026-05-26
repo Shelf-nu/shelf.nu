@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -21,7 +21,7 @@ import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissio
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
-import { PreferredBarcodeSelector } from "./preferred-barcode-selector";
+import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -132,6 +132,16 @@ export const AssetForm = ({
   // about silent fallback when this asset can't satisfy the workspace preference).
   const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
+  // removing a barcode in the section above immediately removes the matching
+  // override option. Initial value seeded from the loader; BarcodesInput
+  // notifies us via `onBarcodesChange`. `id` is optional because rows newly
+  // added in this edit session have no persisted id yet — the call-site
+  // filter strips them before handing to PreferredBarcodeSelector.
+  const [liveBarcodes, setLiveBarcodes] = useState<
+    { id?: string; type: Barcode["type"]; value: string }[]
+  >(barcodes ?? []);
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
     (cf) =>
@@ -601,41 +611,23 @@ export const AssetForm = ({
                 valueName={(i) => `barcodes[${i}].value`}
                 idName={(i) => `barcodes[${i}].id`}
                 disabled={disabled}
+                onBarcodesChange={setLiveBarcodes}
               />
             </FormRow>
 
-            <FormRow
-              rowLabel={"Preferred display code for this asset"}
-              className="border-b-0"
-              subHeading={
-                <p>
-                  <strong>
-                    Only needed if you want this asset to behave differently
-                    from the workspace default.
-                  </strong>{" "}
-                  Most assets should leave this on "Workspace default" — it'll
-                  automatically use your workspace's{" "}
-                  <a
-                    href="/settings/general"
-                    className="text-primary-700 underline"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    preferred display code setting
-                  </a>
-                  . Pick a specific barcode below to override that for this
-                  asset (useful when an asset has multiple barcodes of the same
-                  type and you want one in particular).
-                </p>
-              }
-            >
-              <PreferredBarcodeSelector
-                name="preferredBarcodeId"
-                barcodes={barcodes || []}
-                defaultValue={preferredBarcodeId}
-                workspacePreference={currentOrganization?.qrIdDisplayPreference}
-              />
-            </FormRow>
+            {/* why: newly-added barcodes in this edit session have no id yet
+                and cannot be referenced server-side until the asset is
+                saved. Filtering keeps the selector in sync with persisted
+                ids only; the selector's empty-state copy already explains
+                this gap to the user. */}
+            <PreferredBarcodeFormRow
+              barcodes={liveBarcodes.filter(
+                (b): b is typeof b & { id: string } =>
+                  typeof b.id === "string" && b.id.length > 0
+              )}
+              defaultValue={preferredBarcodeId}
+              workspacePreference={currentOrganization?.qrIdDisplayPreference}
+            />
           </>
         ) : (
           <FormRow rowLabel={"Barcodes"} className="border-b-0">

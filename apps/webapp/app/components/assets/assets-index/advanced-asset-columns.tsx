@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus, QrIdDisplayPreference } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -28,7 +28,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { Td as BaseTd } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column";
@@ -62,6 +61,9 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetCodeBadge } from "../asset-code-badge";
+import { QrIdCell } from "./advanced-columns/qr-id-cell";
+import { SamIdCell } from "./advanced-columns/sam-id-cell";
+import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
@@ -192,69 +194,18 @@ export function AdvancedIndexColumn({
       return <TextColumn value={item[column]} />;
 
     case "sequentialId":
-      // SAM id (e.g., "SAM-0001"). Same identifier family as qrId — give it
-      // the same chip styling for visual consistency. No click affordance
-      // (SAM doesn't have a code preview, only QR does).
       return (
-        <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-          {item.sequentialId ? (
-            <AssetCodeBadge
-              value={item.sequentialId}
-              type="SAM_ID"
-              isFallback={false}
-              workspacePreference={currentOrganization.qrIdDisplayPreference}
-              // Explicit column: this chip is *the SAM ID column*, not the
-              // workspace's chosen representative. Tooltip simplifies to
-              // "SAM ID: <value>" so we don't misleadingly claim "matches
-              // workspace pref" / "per-asset override" against an org that
-              // prefers something else.
-              explicit
-            />
-          ) : (
-            <EmptyTableValue />
-          )}
-        </Td>
+        <SamIdCell
+          item={item}
+          workspacePreference={currentOrganization.qrIdDisplayPreference}
+        />
       );
 
     case "qrId":
       return (
-        <CodePreviewDialog
-          item={{
-            id: item.id,
-            title: item.title,
-            qrId: item.qrId,
-            type: "asset",
-            sequentialId: item.sequentialId,
-          }}
-          trigger={
-            <Td className="w-full max-w-none !overflow-visible whitespace-nowrap">
-              {/*
-                Visual parity with the simple-mode AssetCodeBadge: chip styling
-                via the shared component, wrapped in a native button so the
-                CodePreviewDialog still opens on click. Hover state lifts the
-                background; keyboard focus gets a visible ring. Click target
-                stays generous because the chip has padding.
-              */}
-              <button
-                type="button"
-                aria-label={`Show code preview for ${item.title}`}
-                className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              >
-                <AssetCodeBadge
-                  value={item.qrId}
-                  type="QR_ID"
-                  isFallback={false}
-                  workspacePreference={
-                    currentOrganization.qrIdDisplayPreference
-                  }
-                  interactive
-                  // Explicit column: see SAM_ID column comment.
-                  explicit
-                  className="cursor-pointer transition-colors hover:bg-gray-200"
-                />
-              </button>
-            </Td>
-          }
+        <QrIdCell
+          item={item}
+          workspacePreference={currentOrganization.qrIdDisplayPreference}
         />
       );
 
@@ -520,10 +471,6 @@ function CustodyColumn({
       </Td>
     </When>
   );
-}
-
-function Td({ className, ...rest }: ComponentProps<typeof BaseTd>) {
-  return <BaseTd className={tw("p-[2px]", className)} {...rest} />;
 }
 
 function UpcomingReminderColumn({
