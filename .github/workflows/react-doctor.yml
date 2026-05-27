@@ -96,8 +96,10 @@ jobs:
         if: always()
         env:
           DIAG_PATH: ${{ steps.doctor.outputs.diag_path }}
+          EXIT_CODE: ${{ steps.doctor.outputs.exit_code }}
         run: |
-          node .github/scripts/react-doctor-pr-comment.mjs "$DIAG_PATH" \
+          node .github/scripts/react-doctor-pr-comment.mjs \
+            "$DIAG_PATH" "$EXIT_CODE" \
             > "$RUNNER_TEMP/comment.md"
           echo "--- comment preview ---"
           cat "$RUNNER_TEMP/comment.md"
