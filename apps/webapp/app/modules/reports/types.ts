@@ -585,6 +585,13 @@ export interface CompliancePdfMeta extends ReportPdfMetaBase {
     periodLabel: string;
   };
   custodianPerformance: Array<{
+    /**
+     * TeamMember id when available — used as the row key in PDF tables.
+     * Falls back to `custodianName` only for legacy rows where the id is
+     * missing; names are NOT unique in the schema and shouldn't be the
+     * primary key.
+     */
+    custodianId: string | null;
     custodianName: string;
     rate: number;
     onTime: number;

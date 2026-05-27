@@ -158,9 +158,9 @@ export function AreaChart({
             return (
               <div className="rounded border border-gray-200 bg-white px-3 py-2 shadow-lg">
                 <p className="text-xs font-medium text-gray-900">{label}</p>
-                {payload.map((entry, index) => (
+                {payload.map((entry) => (
                   <p
-                    key={index}
+                    key={String(entry.dataKey ?? entry.name)}
                     className="mt-1 text-sm text-gray-600"
                     style={{ color: entry.color }}
                   >

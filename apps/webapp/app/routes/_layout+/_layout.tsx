@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
@@ -13,12 +13,12 @@ import {
   Link,
   NavLink,
   Outlet,
+  useFetchers,
   useLoaderData,
 } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
@@ -44,6 +44,7 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -277,7 +278,12 @@ export default function App() {
     needsSequentialIdMigration,
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
-  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
+  const fetchers = useFetchers();
+  const workspaceSwitching = fetchers.some(
+    (f) =>
+      f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
+      (f.state === "submitting" || f.state === "loading")
+  );
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );
