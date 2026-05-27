@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { View, Text, FlatList } from "react-native";
+import { View, Text, FlatList, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -11,29 +11,56 @@ const keyExtractor = (item: ScannedItem) => item.assetId;
 
 type ScannedItemsListProps = {
   items: ScannedItem[];
+  /** Called when a scanned item is tapped to open evidence modal */
+  onItemPress?: (item: ScannedItem) => void;
 };
 
-export function ScannedItemsList({ items }: ScannedItemsListProps) {
+export function ScannedItemsList({
+  items,
+  onItemPress,
+}: ScannedItemsListProps) {
   const { colors } = useTheme();
   const styles = useStyles();
 
   const renderItem = useCallback(
-    ({ item }: { item: ScannedItem }) => (
-      <View style={styles.scannedItem}>
-        <Ionicons
-          name={item.isExpected ? "checkmark-circle" : "alert-circle"}
-          size={18}
-          color={item.isExpected ? colors.success : colors.warning}
-        />
-        <Text style={styles.scannedItemName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.scannedItemBadge}>
-          {item.isExpected ? "Found" : "Unexpected"}
-        </Text>
-      </View>
-    ),
-    [colors, styles]
+    ({ item }: { item: ScannedItem }) => {
+      const evidenceCount = (item.notesCount ?? 0) + (item.imagesCount ?? 0);
+      const hasEvidence = evidenceCount > 0;
+
+      return (
+        <TouchableOpacity
+          style={styles.scannedItem}
+          onPress={() => onItemPress?.(item)}
+          activeOpacity={0.7}
+          accessibilityLabel={`${item.name}, ${
+            item.isExpected ? "found" : "unexpected"
+          }${
+            hasEvidence ? `, ${evidenceCount} evidence items` : ""
+          }. Tap to add notes or photos.`}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name={item.isExpected ? "checkmark-circle" : "alert-circle"}
+            size={18}
+            color={item.isExpected ? colors.success : colors.warning}
+          />
+          <Text style={styles.scannedItemName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          {hasEvidence && (
+            <View style={styles.evidenceBadge}>
+              <Ionicons name="attach" size={12} color={colors.primary} />
+              <Text style={styles.evidenceCount}>{evidenceCount}</Text>
+            </View>
+          )}
+          <Text style={styles.scannedItemBadge}>
+            {item.isExpected ? "Found" : "Unexpected"}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.muted} />
+        </TouchableOpacity>
+      );
+    },
+    [colors, styles, onItemPress]
   );
 
   const getItemLayout = useCallback(
@@ -107,5 +134,19 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.xs,
     fontWeight: "500",
     color: colors.muted,
+  },
+  evidenceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.1)",
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  evidenceCount: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.primary,
   },
 }));

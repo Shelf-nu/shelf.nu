@@ -56,6 +56,9 @@ export const assetMutationsApi = {
    * with `required: true`, every required field MUST be present in the
    * `customFields` payload — otherwise the server returns 400 with the
    * missing field names. Mirrors the webapp create form contract.
+   *
+   * @param payload.qrId Optional QR ID to link to the newly created asset.
+   *   Used when creating an asset from a scanned but unlinked QR code.
    */
   createAsset: (
     orgId: string,
@@ -66,6 +69,7 @@ export const assetMutationsApi = {
       locationId?: string;
       valuation?: number;
       customFields?: { id: string; value: CustomFieldValue }[];
+      qrId?: string;
     }
   ) =>
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {

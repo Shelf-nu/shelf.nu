@@ -390,10 +390,53 @@ function ScannerContent() {
         if (!asset) {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+          // For Shelf QR codes, offer a path to link the QR to a new asset:
+          // - If claimed to current org → navigate to in-app asset creation
+          // - If unclaimed → bridge to web for the claim+link flow
+          // Barcodes don't have an external link flow, so no action for those
+          let unlinkedQrAction:
+            | {
+                label: string;
+                icon: string;
+                onPress: () => void;
+              }
+            | undefined;
+
+          if (qrId && codeOrgId === currentOrg?.id) {
+            // QR is claimed to current org — create asset in-app with QR link
+            unlinkedQrAction = {
+              label: "Create Asset",
+              icon: "add-circle-outline",
+              onPress: () => {
+                pushIntoTab("/(tabs)/assets", {
+                  pathname: "/(tabs)/assets/new",
+                  params: { qrId },
+                });
+                dismissResult();
+              },
+            };
+          } else if (qrId) {
+            // QR is unclaimed — bridge to web for claim flow
+            unlinkedQrAction = {
+              label: "Link in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+          }
+
           setScanResult({
             type: "not_found",
             title: "No Asset Linked",
-            message: "This code exists but is not linked to any asset.",
+            message: qrId
+              ? codeOrgId === currentOrg?.id
+                ? "This QR code is not linked to any asset. Create one now."
+                : "This QR code is not linked to any asset. Open the web app to link it."
+              : "This code exists but is not linked to any asset.",
+            action: unlinkedQrAction,
           });
           finalizeScan();
           return;

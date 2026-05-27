@@ -39,9 +39,23 @@ export function useScanQueue({
     while (scanQueueRef.current.length > 0) {
       const entry = scanQueueRef.current[0];
       try {
-        await api.recordAuditScan(orgId, entry);
+        const { data } = await api.recordAuditScan(orgId, entry);
         // Success — remove from queue and persist immediately
         scanQueueRef.current.shift();
+
+        // Capture auditAssetId from response so notes/photos can be attached
+        if (data?.auditAssetId) {
+          const itemIndex = scannedItemsRef.current.findIndex(
+            (item) => item.assetId === entry.assetId
+          );
+          if (itemIndex !== -1) {
+            scannedItemsRef.current[itemIndex] = {
+              ...scannedItemsRef.current[itemIndex],
+              auditAssetId: data.auditAssetId,
+            };
+          }
+        }
+
         saveAuditScanState(
           entry.auditSessionId,
           scannedItemsRef.current,

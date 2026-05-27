@@ -419,6 +419,43 @@ export type CompleteAuditResponse = {
   success: boolean;
 };
 
+// ── Audit Notes & Images Types ────────────────────────────
+
+export type AuditNoteUser = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  email: string;
+  profilePicture: string | null;
+};
+
+export type AuditNote = {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: AuditNoteUser | null;
+};
+
+export type CreateAuditNoteResponse = {
+  note: AuditNote;
+};
+
+export type AuditImage = {
+  id: string;
+  imageUrl: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  auditSessionId: string;
+  auditAssetId: string | null;
+  uploadedById: string | null;
+  createdAt: string;
+};
+
+export type UploadAuditImageResponse = {
+  image: AuditImage;
+};
+
 export type DashboardAudit = {
   id: string;
   name: string;

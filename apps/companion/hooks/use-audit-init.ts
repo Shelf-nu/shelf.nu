@@ -15,6 +15,12 @@ export type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /** The audit-asset record ID, needed for adding notes/photos. Set after server confirms scan. */
+  auditAssetId?: string;
+  /** Local count of notes added during this session (optimistic). */
+  notesCount?: number;
+  /** Local count of photos added during this session (optimistic). */
+  imagesCount?: number;
 };
 
 export type ScanQueueEntry = {
