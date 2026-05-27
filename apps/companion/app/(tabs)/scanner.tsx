@@ -403,8 +403,14 @@ function ScannerContent() {
               }
             | undefined;
 
-          if (qrId && codeOrgId === currentOrg?.id) {
-            // QR is claimed to current org — create asset in-app with QR link
+          const canCreateAsset = userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "create",
+          });
+
+          if (qrId && codeOrgId === currentOrg?.id && canCreateAsset) {
+            // QR is claimed to current org and user can create assets — create in-app
             unlinkedQrAction = {
               label: "Create Asset",
               icon: "add-circle-outline",
@@ -432,7 +438,7 @@ function ScannerContent() {
             type: "not_found",
             title: "No Asset Linked",
             message: qrId
-              ? codeOrgId === currentOrg?.id
+              ? codeOrgId === currentOrg?.id && canCreateAsset
                 ? "This QR code is not linked to any asset. Create one now."
                 : "This QR code is not linked to any asset. Open the web app to link it."
               : "This code exists but is not linked to any asset.",

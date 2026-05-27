@@ -140,13 +140,23 @@ function AuditScannerContent() {
     React.SetStateAction<ScannedItem[]>
   > | null>(null);
 
+  // Ref to hold setSelectedItem - used by handleScanSynced
+  const setSelectedItemRef = useRef<React.Dispatch<
+    React.SetStateAction<ScannedItem | null>
+  > | null>(null);
+
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
     (assetId: string, auditAssetId: string) => {
+      // Update the scanned items list
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
           item.assetId === assetId ? { ...item, auditAssetId } : item
         )
+      );
+      // Also update selectedItem if evidence modal is open for this asset
+      setSelectedItemRef.current?.((prev) =>
+        prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
       );
     },
     []
@@ -209,6 +219,8 @@ function AuditScannerContent() {
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
+  // Wire up setSelectedItem for the scan sync callback
+  setSelectedItemRef.current = setSelectedItem;
 
   const handleItemPress = useCallback((item: ScannedItem) => {
     setSelectedItem(item);
