@@ -394,7 +394,10 @@ function CompliancePreview({ pdfMeta }: { pdfMeta: CompliancePdfMeta }) {
             </thead>
             <tbody>
               {pdfMeta.custodianPerformance.map((c) => (
-                <tr key={c.custodianName} className="border-b border-gray-100">
+                <tr
+                  key={c.custodianId ?? c.custodianName}
+                  className="border-b border-gray-100"
+                >
                   <td className="py-1.5">{c.custodianName}</td>
                   <td className="py-1.5 text-right">{c.rate}%</td>
                   <td className="py-1.5 text-right">{c.onTime}</td>

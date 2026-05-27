@@ -282,7 +282,7 @@ function ComplianceReportPreview({
               <tbody>
                 {pdfMeta.custodianPerformance.map((c) => (
                   <tr
-                    key={c.custodianName}
+                    key={c.custodianId ?? c.custodianName}
                     className="border-b border-gray-100"
                   >
                     <td className="py-1.5">{c.custodianName}</td>

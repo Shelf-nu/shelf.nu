@@ -44,6 +44,7 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -280,7 +281,7 @@ export default function App() {
   const fetchers = useFetchers();
   const workspaceSwitching = fetchers.some(
     (f) =>
-      f.formAction === "/api/user/change-current-organization" &&
+      f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
       (f.state === "submitting" || f.state === "loading")
   );
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(

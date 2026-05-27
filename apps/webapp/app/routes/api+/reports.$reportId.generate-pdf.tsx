@@ -203,6 +203,7 @@ export const loader = async ({
             .filter((c) => c.total >= 2)
             .slice(0, 10)
             .map((c) => ({
+              custodianId: c.custodianId,
               custodianName: c.custodianName,
               rate: c.rate,
               onTime: c.onTime,

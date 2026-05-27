@@ -13,6 +13,7 @@ import {
 import { Image } from "~/components/shared/image";
 import ProfilePicture from "~/components/user/profile-picture";
 import When from "~/components/when/when";
+import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import type { loader } from "~/routes/_layout+/_layout";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -48,7 +49,7 @@ export default function OrganizationSelector() {
 
     void fetcher.submit(formData, {
       method: "POST",
-      action: "/api/user/change-current-organization",
+      action: CHANGE_CURRENT_ORGANIZATION_ACTION,
     });
   }
 
