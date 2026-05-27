@@ -296,7 +296,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           status: true,
           bookingAssets: {
-            select: { asset: { select: { id: true } } },
+            // `assetKitId` is needed by the kit-add logic below — it
+            // checks "is this kit's AssetKit already represented in this
+            // booking" (per-row test) rather than "is this asset already
+            // in the booking" (which is wrong now that the same asset
+            // can appear standalone AND kit-driven in the same booking).
+            select: {
+              assetKitId: true,
+              asset: { select: { id: true } },
+            },
           },
         },
       })
@@ -347,7 +355,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: true,
         status: true,
         assetKits: {
-          select: { asset: { select: { id: true, status: true } } },
+          // `id` + `quantity` so the kit-driven BookingAsset rows created
+          // below get the matching `AssetKit.id` recorded on `assetKitId`
+          // and inherit the kit's slice quantity for QUANTITY_TRACKED
+          // assets (otherwise rows would default to qty=1, leaving the
+          // kit's "10 boxes of Pencils" looking like 1 box in the booking).
+          select: {
+            id: true,
+            quantity: true,
+            asset: { select: { id: true, status: true } },
+          },
         },
       },
     });
@@ -356,24 +373,60 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       k.assetKits.map((ak) => ak.asset.id)
     );
 
-    // Get existing asset IDs from the booking
-    const existingAssetIds = booking.bookingAssets.map((ba) => ba.asset.id);
-
-    // Filter out existing assets to get only newly added ones
-    const newAssetIds = allSelectedAssetIds.filter(
-      (assetId) => !existingAssetIds.includes(assetId)
+    // Existing kit-driven AssetKit ids in this booking — we use these to
+    // detect "this kit is already added" rather than "this asset is
+    // already added" (which was the old, wrong test before BookingAsset
+    // grew multi-row support). A qty-tracked asset can now be in a
+    // booking as standalone AND kit-driven simultaneously; the standalone
+    // entry must NOT block the kit-driven row from being created.
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((ba) => ba.assetKitId)
+        .filter((v): v is string => v != null)
     );
 
-    // Only validate kits that are actually adding NEW assets to the booking
+    // Build the (asset, slice, AssetKit id) tuples for every kit-driven
+    // row we'd want to insert. Skip tuples whose AssetKit is already
+    // represented in the booking — the user already added that kit.
+    //
+    // Same asset appearing in multiple selected kits is fine: each kit's
+    // AssetKit is a distinct row in the kit-driven bucket (partial
+    // unique is on `assetKitId`, not `assetId`). For the
+    // `updateBookingAssets` call we only need the (asset → AssetKit id)
+    // and (asset → slice qty) maps; if two kits both contain Gloves with
+    // different slice qties we can only pass ONE entry per asset via the
+    // current `updateBookingAssets` signature — pick the first kit
+    // deterministically. (Multi-kit-per-asset add in one submission is
+    // an edge case; see the deferred note below.)
+    const assetKitIdByAsset: Record<string, string> = {};
+    const sliceQuantities: Record<string, number> = {};
+    const newAssetIdsSet = new Set<string>();
+    for (const kit of selectedKits) {
+      for (const ak of kit.assetKits) {
+        if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
+        newAssetIdsSet.add(ak.asset.id);
+        if (assetKitIdByAsset[ak.asset.id]) continue; // first-wins on multi-kit
+        assetKitIdByAsset[ak.asset.id] = ak.id;
+        sliceQuantities[ak.asset.id] = ak.quantity;
+      }
+    }
+    const newAssetIds = Array.from(newAssetIdsSet);
+
+    // Only validate kits that are actually adding NEW slices to the
+    // booking (i.e. at least one of the kit's AssetKits isn't already
+    // represented). Kits whose AssetKits are all already present in the
+    // booking are no-ops here.
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assetKits.some((ak) => newAssetIds.includes(ak.asset.id))
+      kit.assetKits.some((ak) => !existingAssetKitIds.has(ak.id))
     );
 
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =
       await getDetailedPartialCheckinData(bookingId);
 
-    const bookingAssetIds = new Set(existingAssetIds);
+    const bookingAssetIds = new Set<string>(
+      booking.bookingAssets.map((ba) => ba.asset.id)
+    );
 
     // Filter kits that are truly unavailable (using centralized helper for consistency)
     const checkedOutKits = newlyAddedKits.filter((kit) => {
@@ -413,6 +466,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
+      // Filter the slice + attribution maps down to only the newly-added
+      // ids — `updateBookingAssets` should ignore entries for assets that
+      // are already in the booking (those keep their existing rows).
+      const newAssetQuantities: Record<string, number> = {};
+      const newAssetKitIdByAsset: Record<string, string> = {};
+      for (const assetId of newAssetIds) {
+        if (sliceQuantities[assetId] != null) {
+          newAssetQuantities[assetId] = sliceQuantities[assetId];
+        }
+        if (assetKitIdByAsset[assetId]) {
+          newAssetKitIdByAsset[assetId] = assetKitIdByAsset[assetId];
+        }
+      }
+
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
@@ -420,6 +487,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: newAssetIds, // Only the newly added assets from kits
         kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
         userId,
+        quantities: newAssetQuantities,
+        assetKitIdByAsset: newAssetKitIdByAsset,
       });
 
       /** We create notes for the newly added kits instead of individual assets */

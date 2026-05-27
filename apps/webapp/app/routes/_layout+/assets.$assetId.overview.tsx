@@ -38,6 +38,12 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
@@ -198,7 +204,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * Operator-only custody — sum of `Custody.quantity` where
        * `kitCustodyId IS NULL`. Kit-allocated custody rows mirror
        * `AssetKit.quantity` and are already counted via `inKits`;
-       * including them here would double-count post-Polish-2.
+       * including them here would double-count.
        */
       inCustody: number;
       /**
@@ -209,6 +215,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * units don't masquerade as free stock.
        */
       inKits: number;
+      /**
+       * Sum of `AssetLocation.quantity` across every location this
+       * asset is placed at. Surfaced on the sidebar Quantity Overview
+       * so users see the placed / unplaced split at a glance. Does NOT
+       * subtract from `available` — placements are orthogonal to
+       * custody / bookings (per the PRD design principle and the
+       * orthogonal-MAX formula in `getLocationPickerMeta`).
+       */
+      inLocations: number;
       reserved: number;
       checkedOut: number;
       /**
@@ -254,6 +269,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         (sum: number, ak) => sum + (ak.quantity ?? 0),
         0
       );
+      // Sum each location's slice — the asset's pool that has a
+      // physical placement. The remainder (`total − inLocations`) is
+      // the "unplaced" pool: units the org owns but haven't been put
+      // anywhere yet (in transit, just received, etc.).
+      const inLocations = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) => sum + (al.quantity ?? 0),
+        0
+      );
       // Operator-only custody (see field comment above).
       const operatorCustody = (asset.custody ?? []).reduce(
         (sum: number, c) =>
@@ -265,6 +288,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         total,
         inCustody: operatorCustody,
         inKits,
+        inLocations,
         reserved,
         checkedOut,
         // Strict-available pool: kits + operator + reserved + checked-out
@@ -696,38 +720,139 @@ export default function AssetOverview() {
                 )}
               />
 
-              <InlineEditableField
-                fieldName="location"
-                label="Location"
-                canEdit={canEditAsset}
-                isEmpty={!location}
-                renderDisplay={() =>
-                  location ? (
-                    <div className="-ml-2">
-                      <LocationBadge
-                        location={{
-                          id: location.id,
-                          name: location.name,
-                          parentId: location.parentId,
-                          childCount: location._count?.children ?? 0,
-                        }}
-                      />
+              {isQuantityTracked(asset) ? (
+                /*
+                 * QUANTITY_TRACKED variant: render every placement with
+                 * its per-location qty, and route the pencil edit
+                 * button to the multi-row "Manage placements" modal
+                 * instead of the inline single-location editor. Same
+                 * shell as `InlineEditableField` so the row visually
+                 * matches the rest of the detail list. INDIVIDUAL
+                 * assets keep the original inline editor below (one
+                 * pivot row max, the inline `LocationSelect` is fine).
+                 */
+                <li className="group/field w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Location
+                  </span>
+                  <div className="relative mt-1 flex items-start gap-2 md:mt-0 md:w-3/5">
+                    <div className="min-w-0 flex-1">
+                      {asset.assetLocations.length > 0 ? (
+                        <ul className="-ml-2 flex flex-col gap-1">
+                          {asset.assetLocations.map((al) => {
+                            const viaKit = al.assetKit?.kit ?? null;
+                            return (
+                              <li
+                                key={`${al.location.id}-${
+                                  al.assetKitId ?? "manual"
+                                }`}
+                                className="flex items-center gap-2"
+                              >
+                                <LocationBadge
+                                  location={{
+                                    id: al.location.id,
+                                    name: al.location.name,
+                                    parentId: al.location.parentId,
+                                    childCount:
+                                      al.location._count?.children ?? 0,
+                                  }}
+                                />
+                                {viaKit ? (
+                                  <TooltipProvider delayDuration={150}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          to={`/kits/${viaKit.id}`}
+                                          role="link"
+                                          variant="link"
+                                          target="_blank"
+                                          className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 no-underline hover:bg-blue-100 hover:text-blue-800"
+                                        >
+                                          via kit
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent
+                                        side="top"
+                                        className="max-w-xs"
+                                      >
+                                        <p className="text-xs font-semibold text-gray-700">
+                                          {viaKit.name}
+                                        </p>
+                                        <p className="mt-1 text-xs text-gray-500">
+                                          These units are at this location
+                                          because the asset is in this kit.
+                                          Change the kit&apos;s location to move
+                                          them.
+                                        </p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                ) : null}
+                                <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                                  {al.quantity} {asset.unitOfMeasure || "units"}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <span className="text-gray-600">
+                          No locations · {asset.quantity ?? 0}{" "}
+                          {asset.unitOfMeasure || "units"} unplaced
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <span className="text-gray-600">No location</span>
-                  )
-                }
-                renderEditor={() => (
-                  <LocationSelect
-                    isBulk={false}
-                    locationId={location?.id ?? undefined}
-                    fieldName="newLocationId"
-                    defaultValue={location?.id ?? undefined}
-                    hideClearButton={false}
-                    hideCurrentLocationInput={false}
-                  />
-                )}
-              />
+                    {canEditAsset ? (
+                      <Button
+                        // Relative to the current overview route
+                        // (`/assets/<id>/overview/`) — the dropdown
+                        // version uses `overview/manage-placements`
+                        // because it's mounted from the parent route.
+                        to="manage-placements"
+                        variant="link"
+                        aria-label="Manage placements"
+                        title="Manage placements"
+                        className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
+                      >
+                        <Icon icon="pen" />
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              ) : (
+                <InlineEditableField
+                  fieldName="location"
+                  label="Location"
+                  canEdit={canEditAsset}
+                  isEmpty={!location}
+                  renderDisplay={() =>
+                    location ? (
+                      <div className="-ml-2">
+                        <LocationBadge
+                          location={{
+                            id: location.id,
+                            name: location.name,
+                            parentId: location.parentId,
+                            childCount: location._count?.children ?? 0,
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-gray-600">No location</span>
+                    )
+                  }
+                  renderEditor={() => (
+                    <LocationSelect
+                      isBulk={false}
+                      locationId={location?.id ?? undefined}
+                      fieldName="newLocationId"
+                      defaultValue={location?.id ?? undefined}
+                      hideClearButton={false}
+                      hideCurrentLocationInput={false}
+                    />
+                  )}
+                />
+              )}
 
               <InlineEditableField
                 fieldName="description"
@@ -1198,6 +1323,138 @@ export default function AssetOverview() {
             );
           })()}
 
+          {(() => {
+            /**
+             * "Placed at locations" sidebar card — mirrors the
+             * "Included in kits" card above. A QUANTITY_TRACKED asset
+             * can sit at multiple locations at distinct per-location
+             * slices; an INDIVIDUAL asset sits at exactly one. Render
+             * one row per placement with the per-location quantity
+             * badge for qty-tracked rows; the per-location qty is
+             * irrelevant for INDIVIDUAL (always 1, no signal). Hide
+             * the card entirely when there are zero placements so the
+             * sidebar doesn't grow an empty section for unplaced
+             * assets. The detailed multi-placement editor opens from
+             * the "Edit placements" button on this card.
+             */
+            type Placement = {
+              quantity: number;
+              location: {
+                id: string;
+                name: string;
+                parentId: string | null;
+                _count?: { children?: number };
+              } | null;
+              assetKitId: string | null;
+              assetKit: {
+                id: string;
+                kit: { id: string; name: string };
+              } | null;
+            };
+            const placements = ((asset.assetLocations ?? []) as Placement[])
+              .filter((al) => al.location?.id && al.location?.name)
+              .map((al) => ({
+                locationId: al.location!.id,
+                locationName: al.location!.name,
+                parentId: al.location!.parentId,
+                childCount: al.location!._count?.children ?? 0,
+                quantity: al.quantity ?? 0,
+                // Kit-driven rows render a "via {kit}" badge and are
+                // NOT editable from the manage-placements dialog. The
+                // kit info comes from the nested AssetKit → Kit
+                // relation pulled by `getAssetOverviewFields`.
+                viaKit: al.assetKit?.kit ?? null,
+              }));
+            if (placements.length === 0) return null;
+            const isQty = isQuantityTracked(asset);
+            const unit = asset.unitOfMeasure || "units";
+            return (
+              <Card className="my-3 py-3 md:border">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                      <Icon icon="location" />
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">
+                        {placements.length > 1
+                          ? "Placed at locations"
+                          : "Placed at location"}
+                      </h3>
+                      {isQty && canEditAsset ? (
+                        <Button
+                          to="manage-placements"
+                          variant="link"
+                          className="shrink-0 text-xs font-normal text-gray-500 underline hover:text-gray-700"
+                        >
+                          Edit placements
+                        </Button>
+                      ) : null}
+                    </div>
+                    <ul className="space-y-1">
+                      {placements.map((p) => (
+                        <li
+                          key={`${p.locationId}-${p.viaKit?.id ?? "manual"}`}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Button
+                              to={`/locations/${p.locationId}`}
+                              role="link"
+                              variant="link"
+                              className="min-w-0 justify-start truncate text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                              target="_blank"
+                            >
+                              <span className="truncate">{p.locationName}</span>
+                            </Button>
+                            {p.viaKit ? (
+                              <TooltipProvider delayDuration={150}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      to={`/kits/${p.viaKit.id}`}
+                                      role="link"
+                                      variant="link"
+                                      target="_blank"
+                                      className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 no-underline hover:bg-blue-100 hover:text-blue-800"
+                                    >
+                                      via kit
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    side="top"
+                                    className="max-w-xs"
+                                  >
+                                    <p className="text-xs font-semibold text-gray-700">
+                                      {p.viaKit.name}
+                                    </p>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      These units are at this location because
+                                      the asset is in this kit. Change the
+                                      kit&apos;s location to move them.
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : null}
+                          </div>
+                          {isQty ? (
+                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                              {p.quantity} {unit}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+
           {!isQuantityTracked(asset) ? (
             <CustodyCard
               booking={booking}
@@ -1223,6 +1480,7 @@ export default function AssetOverview() {
               custodyAvailableQuantity={quantityData?.custodyAvailable}
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}
+              inLocationsQuantity={quantityData?.inLocations}
               reservedQuantity={quantityData?.reserved}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

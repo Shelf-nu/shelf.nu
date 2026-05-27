@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
@@ -23,11 +24,20 @@ import { createAvailabilityLabels } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const addScannedAssetsOrKitsToLocationSchema = z.object({
   assetIds: z.array(z.string()).optional().default([]),
   kitIds: z.array(z.string()).optional().default([]),
+  /**
+   * JSON-encoded `Record<assetId, quantity>` mirroring the location
+   * picker's wire format. Empty / missing entries fall back to the
+   * full-pool default inside `updateLocationAssets` (legacy behaviour).
+   * Validation lives server-side — the route parses this with the
+   * shared `AssetQuantitiesSchema`.
+   */
+  assetQuantities: z.string().optional().default("{}"),
 });
 
 /**
@@ -81,6 +91,19 @@ export default function AddAssetsKitsToLocationDrawer({
   // List of asset IDs for the form
   const assetIdsForLocation = Array.from(new Set([...assetIds]));
   const kitIdsForLocation = Array.from(new Set([...kits.map((k) => k.id)]));
+
+  // Per-asset qty for QUANTITY_TRACKED scans. Stringify into the
+  // hidden `assetQuantities` field so the route action can parse it
+  // with the same schema the manage-assets picker uses. Entries for
+  // unknown / removed assets are silently ignored server-side.
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  const assetQuantitiesJson = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(assetQuantities).filter(([assetId]) =>
+        assetIdsForLocation.includes(assetId)
+      )
+    )
+  );
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
@@ -194,6 +217,16 @@ export default function AddAssetsKitsToLocationDrawer({
           },
         },
       }}
+      // Tell the API which destination this drawer is feeding so it
+      // can compute the strict-available pool and attach
+      // `pickerMeta.maxAllowed` to the asset response — matches the
+      // manage-assets picker's "· X available" UX.
+      searchParams={{
+        pickerContext: JSON.stringify({
+          type: "location",
+          id: location.id,
+        }),
+      }}
     />
   );
 
@@ -203,7 +236,11 @@ export default function AddAssetsKitsToLocationDrawer({
       /**
        * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
        * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
-      formData={{ assetIds: assetIdsForLocation, kitIds: kitIdsForLocation }}
+      formData={{
+        assetIds: assetIdsForLocation,
+        kitIds: kitIdsForLocation,
+        assetQuantities: assetQuantitiesJson,
+      }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -282,29 +319,55 @@ export function AssetRow({
     { maxLabels: 5 }
   );
 
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-        {isQuantityTracked(asset) && asset.quantity != null ? (
-          <span className="ml-2 text-xs font-normal text-gray-500">
-            · {asset.quantity} {asset.unitOfMeasure || "units"}
-          </span>
-        ) : null}
-      </p>
+  const qtyTracked = isQuantityTracked(asset) && asset.quantity != null;
+  // `pickerMeta` is attached server-side when the drawer passes
+  // `pickerContext` to the scanner API. Fall back to the asset's
+  // total quantity when missing (e.g. a barcode scan against an
+  // older asset payload).
+  const pickerMeta = qtyTracked ? asset.pickerMeta ?? null : null;
+  const totalQty = qtyTracked ? (asset.quantity as number) : 0;
+  const maxAllowed = pickerMeta?.maxAllowed ?? totalQty;
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+  return (
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+          {qtyTracked ? (
+            <span className="ml-2 text-xs font-normal text-gray-500">
+              · {totalQty} {asset.unitOfMeasure || "units"}
+              {/* Surface the strict-available pool when smaller than
+                  the total — mirrors the manage-assets picker. */}
+              {pickerMeta && pickerMeta.maxAllowed < totalQty ? (
+                <span className="ml-1 text-warning-700">
+                  · {pickerMeta.maxAllowed} available
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </p>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
+
+      {qtyTracked && maxAllowed > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={maxAllowed}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }

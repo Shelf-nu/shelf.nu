@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   scannedItemIdsAtom,
   removeScannedItemsByAssetIdAtom,
@@ -28,10 +29,19 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToKitSchema = z.object({
   assetIds: z.array(z.string()).min(1),
+  /**
+   * JSON-encoded `Record<assetId, quantity>` mirroring the kit
+   * picker's wire format. Missing entries fall back to "full pool"
+   * inside `updateKitAssets` (legacy default); existing-in-kit assets
+   * whose id is absent keep their current `AssetKit.quantity`
+   * unchanged (so the scanner only sets qty for *newly-scanned* rows).
+   */
+  assetQuantities: z.string().optional().default("{}"),
 });
 
 /** Extend the type so we can use it. This is based on the extra asset includes passed to the row */
@@ -79,6 +89,20 @@ export default function AddAssetsToKitDrawer({
 
   // List of asset IDs for the form
   const assetIdsForKit = Array.from(new Set([...assetIds]));
+
+  // Per-asset qty for QUANTITY_TRACKED scans. The kit's existing
+  // assets are sent too (so updateKitAssets doesn't treat them as
+  // removed), but we DON'T include them in `assetQuantities` — that
+  // keeps their current `AssetKit.quantity` intact. Only newly-scanned
+  // ids are emitted.
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  const assetQuantitiesJson = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(assetQuantities).filter(([assetId]) =>
+        assetIdsForKit.includes(assetId)
+      )
+    )
+  );
 
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
@@ -217,6 +241,12 @@ export default function AddAssetsToKitDrawer({
           },
         },
       }}
+      // Kit context so the API attaches `pickerMeta` with the
+      // strict-available pool (matches the kit manage-assets picker's
+      // MAX formula).
+      searchParams={{
+        pickerContext: JSON.stringify({ type: "kit", id: kit.id }),
+      }}
     />
   );
 
@@ -226,7 +256,10 @@ export default function AddAssetsToKitDrawer({
       /**
        * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
        * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
-      formData={{ assetIds: [...kitAssetsIds, ...assetIdsForKit] }}
+      formData={{
+        assetIds: [...kitAssetsIds, ...assetIdsForKit],
+        assetQuantities: assetQuantitiesJson,
+      }}
       items={items}
       onClearItems={clearList}
       title="Items scanned"
@@ -309,29 +342,58 @@ export function AssetRow({
     { maxLabels: 5 }
   );
 
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-        {isQuantityTracked(asset) && asset.quantity != null ? (
-          <span className="ml-2 text-xs font-normal text-gray-500">
-            · {asset.quantity} {asset.unitOfMeasure || "units"}
-          </span>
-        ) : null}
-      </p>
+  const qtyTracked = isQuantityTracked(asset) && asset.quantity != null;
+  // Hide the qty input when the asset is already in this kit — the
+  // kit picker holds its current `AssetKit.quantity`, and the scanner
+  // submit deliberately omits this asset's id from `assetQuantities`
+  // to avoid clobbering that value. Showing an input would be
+  // misleading.
+  const alreadyInKit = kit.assetKits.some((ak) => ak.asset.id === asset.id);
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+  // `pickerMeta` carries the kit picker's strict-available pool so
+  // the row + qty input match `kits/$kitId/assets/manage-assets`.
+  const pickerMeta = qtyTracked ? asset.pickerMeta ?? null : null;
+  const totalQty = qtyTracked ? (asset.quantity as number) : 0;
+  const maxAllowed = pickerMeta?.maxAllowed ?? totalQty;
+
+  return (
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+          {qtyTracked ? (
+            <span className="ml-2 text-xs font-normal text-gray-500">
+              · {totalQty} {asset.unitOfMeasure || "units"}
+              {pickerMeta && pickerMeta.maxAllowed < totalQty ? (
+                <span className="ml-1 text-warning-700">
+                  · {pickerMeta.maxAllowed} available
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </p>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
+
+      {qtyTracked && !alreadyInKit && maxAllowed > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={maxAllowed}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }

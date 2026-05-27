@@ -812,9 +812,9 @@ Available pool for new claims is the same Phase 2 formula: `Asset.quantity − s
 
 - Location detail page (assets at this location → reads `AssetLocation`).
 - Kit detail page assets list (reads `AssetKit`, with the kit-aware qty display already in place).
-- Asset list location/kit columns (reads pivot, displays primary placement inline + `+N more` chip for multi-placement — mirror the multi-custodian column pattern from Phase 3d-Polish-2).
+- Asset list location/kit columns (reads pivot, displays primary placement inline + `+N more` chip for multi-placement — mirror the multi-custodian column pattern from Phase 3d-Polish-2). **Status:** initial 4b commit (`b43a3ae56`) shipped with primary-only rendering — the `+N more` aggregate half was missed and surfaced during manual testing on 2026-05-20. Recovered as **Phase 4b-Polish-1**: parallel `kits_agg` / `locations_agg` LATERAL aggregates feed new `KitColumn` / `LocationColumn` components (mirror of `CustodyColumn`). Validation file: `TESTING-PHASE-4B.md` §1a. Tracked in `CLAUDE-CONTEXT.md` under the Phase 4b-Polish-1 subsection.
 - Filter `?location=X` and `?kit=Y` rewritten against pivot.
-- Pickers (kit manage-assets, location manage-assets, scan drawers) source from pivot.
+- Pickers (kit manage-assets, location manage-assets, scan drawers) source from pivot. **Status:** kit picker shipped with per-row qty input in 4a-Polish-2; the matching location picker + asset-overview "Update location" dialog were missed by 4b's typecheck-driven sweep and shipped without qty UX (hardcoded `quantity: Asset.quantity` full-pool on every new pivot row). Recovered as **Phase 4b-Polish-2** on 2026-05-21: new `getLocationPickerMeta` helper with the orthogonal MAX, `updateLocationAssets` accepts `assetQuantities` + per-row qty-edit branch + strict-available re-validator, `updateAsset` accepts `newLocationQuantity` + validation, location manage-assets RowComponent renders the qty input (mirror of kit picker), asset-overview dialog grows a qty input + multi-placement warning. Scan drawer + bulk dialog + mobile API kept on the full-pool default (multi-placement is a separate UX call deferred to post-4c). Validation file: `TESTING-PHASE-4B.md` §3a + §6a. Tracked in `CLAUDE-CONTEXT.md` under the Phase 4b-Polish-2 subsection.
 
 **Mobile API**
 

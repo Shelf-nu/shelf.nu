@@ -604,10 +604,10 @@ describe("checkOutQuantity — availability accounting", () => {
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {
-    // Regression guard for the Phase 3c fix: availability must subtract
-    // BOTH direct custody AND units tied to ONGOING/OVERDUE bookings.
-    // Pre-fix math was `100 - 0 = 100` and this checkout would have
-    // silently succeeded even though only 20 units are physically free.
+    // Regression guard: availability must subtract BOTH direct custody
+    // AND units tied to ONGOING/OVERDUE bookings. Without the booking
+    // term, the math is `100 - 0 = 100` and this checkout would
+    // silently succeed even though only 20 units are physically free.
     mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
     mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 80 } });
 
@@ -1137,6 +1137,53 @@ describe("updateAsset cross-org guards", () => {
       where: { id: "location-from-org-B", organizationId: "org-A" },
       select: { id: true },
     });
+  });
+});
+
+describe("updateAsset newLocationQuantity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `clearAllMocks` only resets call history, not queued `*Once`
+    // values. Reset the findUnique mock so any leftover queue from a
+    // prior test can't bleed into the validation path here.
+    vi.mocked(db.asset.findUnique).mockReset();
+  });
+
+  it("rejects with 400 when submitted qty exceeds Asset.quantity", async () => {
+    // Kit-guard fetch returns the asset without a kit, type + total
+    // attached so the new validator can read them. The dialog collapses
+    // any existing multi-placement to a single row at the target, so
+    // MAX = Asset.quantity (no orthogonal subtraction).
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      {
+        type: "QUANTITY_TRACKED",
+        quantity: 80,
+        assetKits: [],
+      }
+    );
+
+    // Org-scope check passes so the validator gets a chance to run.
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-1",
+    });
+
+    await expect(
+      updateAsset({
+        id: "pens",
+        userId: "user-1",
+        organizationId: "org-A",
+        newLocationId: "loc-1",
+        currentLocationId: "loc-2",
+        // 100 > 80 — should throw before the transaction runs.
+        newLocationQuantity: 100,
+      } as any)
+    ).rejects.toMatchObject({
+      status: 400,
+      title: "Quantity exceeds available pool",
+    });
+
+    // Validation fires before db.asset.update, so the update never runs.
+    expect(db.asset.update).not.toHaveBeenCalled();
   });
 });
 

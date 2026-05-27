@@ -158,7 +158,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         tags: filterTags,
         extraInclude: {
           tags: TAG_WITH_COLOR_SELECT,
-          // Phase 3d: include outstanding model-level reservations so the
+          // Include outstanding model-level reservations so the
           // assets-sidebar drawer can render the "Unassigned model
           // reservations (N)" section — and so the drawer trigger opens
           // for pure book-by-model bookings (0 concrete assets, N
@@ -212,11 +212,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     /**
-     * Phase 3c: compute a per-booking map of `assetId → dispositionedQty`
-     * (sum of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
-     * every qty-tracked asset currently visible on this page. Feeds the
-     * `BookingAssetsSidebar` so it can render the same qty progress
-     * indicator and "Partially checked in" badge the overview page uses.
+     * Compute a per-booking map of `assetId → dispositionedQty` (sum
+     * of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
+     * every qty-tracked asset currently visible on this page. Feeds
+     * the `BookingAssetsSidebar` so it can render the same qty
+     * progress indicator and "Partially checked in" badge the
+     * overview page uses.
      *
      * Strategy: one aggregate query scoped to the bookingIds on this
      * page (at most `perPage` bookings, so bounded). Then we bucket the
@@ -471,6 +472,10 @@ const ListBookingsContent = ({
         select: {
           id: true;
           quantity: true;
+          // Surfaces the kit-source discriminator the sidebar groups
+          // by. Without this field on the index loader's type, the
+          // sidebar's `BookingWithAssets` type check rejects the data.
+          assetKitId: true;
           asset: {
             select: {
               id: true;
@@ -524,9 +529,8 @@ const ListBookingsContent = ({
       custodianUser: true;
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
-      // Phase 3d: included via `extraInclude` in the loader above so
-      // the assets-sidebar drawer can show outstanding model
-      // reservations.
+      // Included via `extraInclude` in the loader above so the
+      // assets-sidebar drawer can show outstanding model reservations.
       modelRequests: {
         include: {
           assetModel: {

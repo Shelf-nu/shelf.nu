@@ -47,6 +47,15 @@ export interface UpdateAssetPayload {
   // through the update flow.
   newLocationId?: string | null;
   currentLocationId?: string | null;
+  /**
+   * Per-asset single-location qty for QUANTITY_TRACKED placements via
+   * the asset-overview update-location dialog. When provided alongside
+   * `newLocationId`, the new pivot row uses this value (subject to the
+   * orthogonal-MAX re-validation in `updateAsset`). Falls back to
+   * `Asset.quantity` (full pool) when omitted — preserves back-compat
+   * for paths that don't expose a qty input yet (bulk + scan + mobile).
+   */
+  newLocationQuantity?: number;
   mainImage?: Asset["mainImage"];
   thumbnailImage?: string | null;
   mainImageExpiration?: Asset["mainImageExpiration"];
@@ -159,15 +168,32 @@ export type AdvancedIndexAsset = Pick<
   qrId: string; // QR code will always be available
   assetModelId?: string | null;
   assetModelName?: string | null;
+  /** Primary kit (oldest pivot row) — mirrors the LATERAL primary-pick
+   * used by ORDER BY and filters. Kept alongside `kits` for back-compat
+   * with consumers that only need the primary. */
   kit: Pick<Kit, "id" | "name"> | null;
+  /** Full kit membership for the asset, ordered by `AssetKit.createdAt`.
+   * A multi-kit QUANTITY_TRACKED asset surfaces all kits here so the
+   * asset-index "Kit" column can render the primary plus a "+N more"
+   * affordance (mirror of `custody`). Always an array, never null. */
+  kits: Array<Pick<Kit, "id" | "name" | "status">>;
   category: Pick<Category, "id" | "name" | "color"> | null;
   tags: Pick<Tag, "id" | "name" | "color">[];
+  /** Primary placement (oldest pivot row) — see `kit` above. */
   location:
     | (Pick<Location, "id" | "name"> & {
         parentId?: Location["parentId"];
         childCount?: number;
       })
     | null;
+  /** Full placement list for the asset, ordered by
+   * `AssetLocation.createdAt`. Mirror of `kits`. Always an array. */
+  locations: Array<
+    Pick<Location, "id" | "name"> & {
+      parentId?: Location["parentId"];
+      childCount?: number;
+    }
+  >;
   custody:
     | {
         /** Custodian display name; mirrored at the top level so callers

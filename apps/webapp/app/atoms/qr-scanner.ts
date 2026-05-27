@@ -31,6 +31,39 @@ export type ScanListItem =
 export const scannedItemsAtom = atom<ScanListItems>({});
 
 /**
+ * Per-asset quantity for QUANTITY_TRACKED scans. Keyed by `assetId` (not
+ * qrId — multiple QR codes can map to the same asset). Drawers default
+ * the displayed value to 1 when an entry is missing, so missing keys
+ * are safe; clear paths still drop the map to keep memory tidy.
+ *
+ * @see {@link scannedItemsAtom} — kept in sync via the remove/clear
+ *   atoms below so removing an item also drops its qty entry.
+ */
+export const scannedAssetQuantitiesAtom = atom<Record<string, number>>({});
+
+/**
+ * Writer atom that updates a single asset's scanned quantity. Drawer
+ * qty inputs dispatch this on every change. Pass `qty = undefined` (or
+ * the asset's id only) to drop the entry entirely; missing entries
+ * fall back to the drawer's default (1).
+ */
+export const setScannedAssetQuantityAtom = atom(
+  null,
+  (get, set, payload: { assetId: string; quantity: number | undefined }) => {
+    const current = get(scannedAssetQuantitiesAtom);
+    if (payload.quantity == null) {
+      const { [payload.assetId]: _, ...rest } = current;
+      set(scannedAssetQuantitiesAtom, rest);
+      return;
+    }
+    set(scannedAssetQuantitiesAtom, {
+      ...current,
+      [payload.assetId]: payload.quantity,
+    });
+  }
+);
+
+/**
  * A derived atom that extracts asset and kit IDs from the scanned items
  * This avoids repeatedly filtering the items in different components
  *
@@ -159,8 +192,16 @@ export const updateScannedItemAtom = atom(
 // Remove item based on key
 export const removeScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  const { [qrId]: _, ...rest } = currentItems; // Removes the key
+  // Drop the matching scanned-item entry plus any qty entry for the
+  // removed asset (qty map is keyed by assetId, not qrId).
+  const removedAssetId = currentItems[qrId]?.data?.id;
+  const { [qrId]: _, ...rest } = currentItems;
   set(scannedItemsAtom, rest);
+  if (removedAssetId) {
+    const currentQty = get(scannedAssetQuantitiesAtom);
+    const { [removedAssetId]: __, ...qtyRest } = currentQty;
+    set(scannedAssetQuantitiesAtom, qtyRest);
+  }
 });
 
 // Remove multiple items based on key array
@@ -169,10 +210,21 @@ export const removeMultipleScannedItemsAtom = atom(
   (get, set, qrIds: string[]) => {
     const currentItems = get(scannedItemsAtom);
     const updatedItems = { ...currentItems };
+    const removedAssetIds: string[] = [];
     qrIds.forEach((qrId) => {
+      const id = currentItems[qrId]?.data?.id;
+      if (id) removedAssetIds.push(id);
       delete updatedItems[qrId];
     });
     set(scannedItemsAtom, updatedItems);
+    if (removedAssetIds.length > 0) {
+      const currentQty = get(scannedAssetQuantitiesAtom);
+      const qtyRest = { ...currentQty };
+      removedAssetIds.forEach((id) => {
+        delete qtyRest[id];
+      });
+      set(scannedAssetQuantitiesAtom, qtyRest);
+    }
   }
 );
 
@@ -188,12 +240,19 @@ export const removeScannedItemsByAssetIdAtom = atom(
       }
     });
     set(scannedItemsAtom, updatedItems);
+    const currentQty = get(scannedAssetQuantitiesAtom);
+    const qtyRest = { ...currentQty };
+    ids.forEach((id) => {
+      delete qtyRest[id];
+    });
+    set(scannedAssetQuantitiesAtom, qtyRest);
   }
 );
 
 // Clear all items
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object
+  set(scannedAssetQuantitiesAtom, {}); // Drop any qty entries too.
 });
 
 /*******************************/
@@ -514,14 +573,14 @@ export const quickCheckinQtyAssetAtom = atom(
 /* BOOKING FULFIL-AND-CHECKOUT ATOMS */
 
 /**
- * Phase 3d-Polish "Fulfil reservations & check out" flow atoms.
+ * "Fulfil reservations & check out" flow atoms.
  *
  * These sit alongside the booking check-in session atoms above. The
  * check-in flow reconciles BookingAsset rows that already exist on a
  * booking; this flow resolves outstanding `BookingModelRequest`s (the
- * "N × AssetModel" reservations introduced in Phase 3d) by scanning
- * concrete assets to materialize them, then transitions RESERVED →
- * ONGOING in a single atomic submit.
+ * "N × AssetModel" Book-by-Model reservations) by scanning concrete
+ * assets to materialize them, then transitions RESERVED → ONGOING in
+ * a single atomic submit.
  *
  * Why a separate parallel atom family (instead of generalising
  * `bookingCheckinSessionAtom`)? The two sessions have divergent data

@@ -92,14 +92,30 @@ describe("manage-kits route validation", () => {
     updatedAt: new Date(),
   } as any;
 
-  // Phase 3a renamed the implicit M2M to the explicit BookingAsset pivot;
-  // the action reads `booking.bookingAssets` now, so the mock shape follows.
+  // The action reads `booking.bookingAssets` with each row's
+  // `assetKitId` discriminator — the manage-kits add filter now scopes
+  // "already in booking" per kit-driven AssetKit row, not per asset id,
+  // so a qty-tracked asset can be standalone (assetKitId=null) AND have
+  // separate kit-driven slices for different kits in the same booking.
+  // The default mock booking holds two standalone slices.
   const mockBooking = {
     id: "booking123",
     status: BookingStatus.ONGOING,
     bookingAssets: [
-      { asset: { id: "asset1" }, assetId: "asset1", quantity: 1, id: "ba1" },
-      { asset: { id: "asset2" }, assetId: "asset2", quantity: 1, id: "ba2" },
+      {
+        asset: { id: "asset1" },
+        assetId: "asset1",
+        quantity: 1,
+        id: "ba1",
+        assetKitId: null,
+      },
+      {
+        asset: { id: "asset2" },
+        assetId: "asset2",
+        quantity: 1,
+        id: "ba2",
+        assetKitId: null,
+      },
     ],
     from: new Date(),
     to: new Date(),
@@ -145,15 +161,23 @@ describe("manage-kits route validation", () => {
   });
 
   describe("validation scope - only newly added kits", () => {
-    it("should only validate kits that add NEW assets to the booking", async () => {
+    it("should only validate kits whose AssetKits aren't already in the booking", async () => {
+      // Default mockBooking has TWO standalone slices (assetKitId=null)
+      // for asset1+asset2. Kit1's AssetKits are brand new → adds slices
+      // → must be validated. Kit2's AssetKits map to asset1+asset2 but
+      // those are STANDALONE slices in the booking, NOT kit-driven
+      // ones — adding kit2 still creates new kit-driven rows, so it
+      // also needs validation (the prior "filter by asset id" semantics
+      // are wrong now that the same asset can have both kinds of
+      // slices simultaneously).
       const mockKits = [
         {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
           assetKits: [
-            { asset: { id: "asset1" } },
-            { asset: { id: "asset3" } }, // asset1 exists, asset3 is new
+            { id: "ak-kit1-asset1", quantity: 1, asset: { id: "asset1" } },
+            { id: "ak-kit1-asset3", quantity: 1, asset: { id: "asset3" } },
           ],
           organizationId: "org123",
           createdAt: new Date(),
@@ -164,8 +188,8 @@ describe("manage-kits route validation", () => {
           name: "Kit 2",
           status: KitStatus.CHECKED_OUT,
           assetKits: [
-            { asset: { id: "asset1" } },
-            { asset: { id: "asset2" } }, // all existing assets
+            { id: "ak-kit2-asset1", quantity: 1, asset: { id: "asset1" } },
+            { id: "ak-kit2-asset2", quantity: 1, asset: { id: "asset2" } },
           ],
           organizationId: "org123",
           createdAt: new Date(),
@@ -194,25 +218,41 @@ describe("manage-kits route validation", () => {
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
 
-      // Should only validate kit1 (adds new asset3), not kit2 (only existing assets)
-      expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(1);
-      expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
-        mockKits[0],
-        {},
-        new Set(["asset1", "asset2"]),
-        BookingStatus.ONGOING
-      );
+      // Both kits' AssetKits are brand new to the booking — both validated.
+      expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(2);
     });
 
-    it("should not validate kits that only contain existing booking assets", async () => {
+    it("should not validate kits whose AssetKit ids are already kit-driven in the booking", async () => {
+      // Override the default mockBooking with one that already holds
+      // kit1's kit-driven slices.
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        bookingAssets: [
+          {
+            asset: { id: "asset1" },
+            assetId: "asset1",
+            quantity: 1,
+            id: "ba1",
+            assetKitId: "ak-kit1-asset1",
+          },
+          {
+            asset: { id: "asset2" },
+            assetId: "asset2",
+            quantity: 1,
+            id: "ba2",
+            assetKitId: "ak-kit1-asset2",
+          },
+        ],
+      } as any);
+
       const mockKits = [
         {
           id: "kit1",
           name: "Kit 1",
           status: KitStatus.CHECKED_OUT,
           assetKits: [
-            { asset: { id: "asset1" } },
-            { asset: { id: "asset2" } }, // all existing
+            { id: "ak-kit1-asset1", quantity: 1, asset: { id: "asset1" } },
+            { id: "ak-kit1-asset2", quantity: 1, asset: { id: "asset2" } },
           ],
           organizationId: "org123",
           createdAt: new Date(),
@@ -232,7 +272,7 @@ describe("manage-kits route validation", () => {
         "./bookings.$bookingId.overview.manage-kits"
       );
 
-      // Should succeed without validation since no new assets
+      // Should succeed without validation since no new AssetKits
       await expect(
         actionFunction(
           createActionArgs({

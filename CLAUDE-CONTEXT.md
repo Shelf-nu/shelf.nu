@@ -945,10 +945,10 @@ it single-kit (operator-custody assignment is independent of kit
 allocation under the non-overlapping-axes model, so it may be fine
 to leave — but the "held via kit" badge logic should be re-checked).
 
-#### Phase 4b — Location pivot + qty allocation (second) — CODE COMPLETE + REVIEWED, STAGED (awaiting manual test pass + commit)
+#### Phase 4b — Location pivot + qty allocation (second) — COMMITTED, IN MANUAL TESTING
 
-**Status as of 2026-05-20:** structural + qty-allocation code complete, post-review cleanups applied, **54 files staged**, nothing committed.
-`pnpm webapp:validate` GREEN — **2177 / 2177 tests** (lint + typecheck + tests all clean). Schema applied to dev DB (996 rows backfilled, both triggers active, RLS on). Manual testing plan at `TESTING-PHASE-4B.md` (15 sections).
+**Status as of 2026-05-20:** structural + qty-allocation code committed as `b43a3ae56` (54 files), then mid-test gap surfaced and shipped as **Polish-1** (uncommitted at time of writing) — see the dedicated subsection below.
+`pnpm webapp:validate` GREEN — **2185 / 2185 tests** post-Polish-1 (was 2177 / 2177 at the b43a3ae56 commit; +8 from the new kit/location column tests). Schema + Polish-2 + 4b migrations all applied to dev DB on this device (had to `prisma migrate resolve --applied` the 4a row first — a prior non-Prisma schema apply had left the ledger desynced; root-cause + fix recorded in TESTING-PHASE-4B.md prereqs). Manual testing plan at `TESTING-PHASE-4B.md` (now 15 sections + §1a).
 
 Bonus folded in (per user call on 2026-05-19): the **Phase 4a-Polish-2 kit fan-out regression** in `query.server.ts` is fixed — LATERAL primary-pick now applied to BOTH kit and location joins in the asset-index raw SQL.
 
@@ -1046,6 +1046,261 @@ currentAtThisLocation`. Does **NOT** subtract custody or bookings —
 - Reports impact: location filters in reports (already deferred via
   `TESTING-REPORTS.md`) will need re-verification once 4b is in —
   NOT scoped into 4b.
+
+#### Phase 4b-Polish-1 — Multi-kit / multi-location asset-index columns (mid-test, 2026-05-20) — UNCOMMITTED
+
+Surfaced by the user during the §1 manual test walkthrough: the asset-index "Kit" column on a QUANTITY_TRACKED asset belonging to 2+ kits showed only the primary kit — kits 2..N were silently dropped. Same gap for "Location" on a multi-location qty-tracked asset. Both were a latent regression from the LATERAL primary-pick rewrite that landed in 4b (the rewrite was correct for ORDER BY / filters but never grew an aggregate side for the column projection). The PRD always specified "+N more chip" parity with the custody column (line 815 of `docs/proposals/quantitative-assets.md`); 4b shipped without it.
+
+**Fix shape — additive to 4b's primary-pick LATERAL, not a replacement:**
+
+- `modules/asset/query.server.ts` — added two new LATERAL aggregates `kits_agg` and `locations_agg` alongside (not replacing) the existing primary-pick LATERALs. Each returns a jsonb array via `jsonb_agg(... ORDER BY ak."createdAt" ASC)`. The primary-pick LATERALs stay because they're consumed by ORDER BY and the singular `kit`/`location` row fields; the new aggregates only feed the column display.
+- `modules/asset/service.server.ts` — extended GROUP BY with `kits_agg.kits, locations_agg.locations` (jsonb equality is safe; per-asset one-row guarantee preserved).
+- `modules/asset/types.ts` — added `kits: Array<Pick<Kit, "id" | "name" | "status">>` and `locations: Array<...>` to `AdvancedIndexAsset`. Kept singular `kit` / `location` for back-compat — consumers that only care about the primary (CSV export, etc.) stay unchanged.
+- `components/assets/assets-index/advanced-asset-columns.tsx` — replaced the inline `case "kit":` and `case "location":` JSX with new `KitColumn` and `LocationColumn` components mirroring `CustodyColumn` exactly: primary entry + grey `+N more` chip + hover tooltip listing every name on its own line. Uses `formatCustodyList` (the helper is generic enough — kept the name since the file lives in `~/modules/custody/utils` and renaming it would churn unrelated callers).
+- `kit-column.test.tsx` + `location-column.test.tsx` — new behaviour tests mirroring `custody-column.test.tsx`. 4 cases each (empty, single, multi, hover-tooltip).
+
+**Trade-off:** the `+N more` tooltip lists names as plain text, not links — matches `CustodyColumn`'s exact pattern. Tooltips close on mouse-leave so clickable items inside them are flaky; the asset detail page still has the full clickable list. Promoting to a click-to-open popover would be a separate UX call.
+
+**Why this slot is right:** an aggregate LATERAL is symmetrical to `custody_agg` (Phase 2 fix for the same fan-out class), so the SQL shape is proven. No new triggers, no migration. Validate-clean, **2185 / 2185 tests** (+8). TESTING-PHASE-4B.md §1a captures the verification.
+
+**Open follow-up after manual test pass:** commit Polish-1 as its own commit on `feat-quantities` (mirror the 4a-Polish-2 cadence — one focused commit on top of the phase commit).
+
+#### Phase 4b-Polish-2 — Location qty picker parity (mid-test, 2026-05-21) — UNCOMMITTED
+
+Surfaced by the user during manual testing on 2026-05-21: when adding a QUANTITY_TRACKED asset to a location, there was no qty input — neither in the manage-assets picker route nor in the asset-overview "Update location" dialog. Both surfaces hardcoded `quantity: Asset.quantity` (full pool) on every new pivot row. The Phase 4b plan explicitly called for this UX layer (CLAUDE-CONTEXT.md line 1014-1019 in the original plan section) but the typecheck-driven sweep didn't surface a missing UI feature, and 4b shipped without it. Same class of slip as Polish-1 — the structural rewrite was complete but the matching UX additions weren't.
+
+**Fix shape — additive, no migration:**
+
+- `modules/location/picker-meta.server.ts` (new) — `getLocationPickerMeta` helper mirroring `getKitPickerMeta` but with the **orthogonal MAX**: `spaceWithoutMe = Asset.quantity − sum(other locations' AssetLocation.quantity)`; `max = max(currentAtThisLocation, spaceWithoutMe)`. No custody / booking subtraction (PRD design principle #3 — location is orthogonal). 10 unit tests pin every branch of the formula.
+- `modules/location/service.server.ts` — `updateLocationAssets` accepts `assetQuantities?: Record<string, number>` (default `{}`), gains a third diff branch (`qtyEditedAssetIds`) that runs `tx.assetLocation.update` per row when the submitted qty differs from the existing pivot value, and adds a server-side strict-available re-validator that throws a clean 400 instead of letting the DEFERRED constraint trigger fire a 500. Existing back-compat: paths without `assetQuantities` (bulk update, scan drawer, mobile API) still default to `Asset.quantity`.
+- `routes/_layout+/locations.$locationId.assets.manage-assets.tsx` — loader calls `getLocationPickerMeta` and attaches `pickerMeta` per item; action parses `assetQuantities` JSON via the same `AssetQuantitiesSchema` shape as the kit picker; `RowComponent` renders a `Qty:` input next to each selected QUANTITY_TRACKED row with `max=meta.maxAllowedForThisLocation`, surfaces the "Also at: Loc X (N)" indicator from `meta.inOtherLocations`, and shows a "was N" delta label when the user edits an existing pivot's qty.
+- `modules/asset/service.server.ts` — `updateAsset` accepts `newLocationQuantity?: number`. New `resolveNewLocationQuantity` helper centralises the qty pick (QUANTITY_TRACKED honours submitted; falls back to `Asset.quantity`; INDIVIDUAL forced to 1). New `shouldUpdatePlacement = isChangingLocation || isSettingNewQuantity` flag widens the kit-guard + pivot-rewrite trigger so the dialog can edit qty without changing location. Server-side validator: `newLocationQuantity > Asset.quantity` → 400. Side note: the outer catch was changed from "only re-throw ShelfError with VALIDATION_ERROR" to "re-throw any `isLikeShelfError(cause)`" — a pre-existing latent bug where the kit-guard ShelfError's 400 status was being silently rewrapped to 500 by `maybeUniqueConstraintViolation`. The `VALIDATION_ERROR` import is no longer used and was removed.
+- `routes/_layout+/assets.$assetId.overview.update-location.tsx` — loader extends the asset include with `assetLocations.{locationId, quantity}` and ships derived `isQty / assetQuantity / unitOfMeasure / placementCount / primaryPlacement` to the component; action parses `newLocationQuantity` via `z.coerce.number().int().positive().optional()`; component renders a qty input below the location select (gated on QUANTITY_TRACKED), a yellow "Multi-placement notice" when the asset has 2+ pivot rows, a server-error banner for the action's `actionData?.error?.message`, and switched submit-disable from inline `useNavigation` to the `useDisabled` hook.
+
+**Design call: MAX in the asset-overview dialog = `Asset.quantity`, not the orthogonal picker MAX.** The dialog always collapses any existing multi-placement to a single pivot row at the picked target (the `deleteMany` then `create` pattern). Since no "other locations" remain post-write, the bound is the total pool. Users wanting partial placement use the location manage-assets picker (which DOES use the orthogonal MAX). The yellow warning explains this.
+
+**Scope explicitly NOT in this polish (kept as TODO):**
+
+- Bulk-location-update dialog (`bulk-location-update-dialog.tsx`) — qty per asset is messy UX for N-asset bulk; keeps full-pool default.
+- Scan drawer "update location" (`update-location-drawer.tsx`) — scanning implies "this asset is here now", not partial placement.
+- Mobile API `asset.update-location` / `bulk-update-location` — stays singular full-pool until the post-4c multi-placement mobile PR.
+
+**Validate-clean: 2202 / 2202 tests** (was 2185 → +17: 10 picker-meta + 6 location service qty cases + 1 asset service validation case). TESTING-PHASE-4B.md §3a + §6a capture the manual verification.
+
+**Open follow-up after manual test pass:** commit Polish-2 as its own commit on `feat-quantities` (same cadence as Polish-1 + 4a-Polish-2).
+
+#### Phase 4b-Polish-3 — Locations card + manage-placements dialog + bulk-skip (mid-test, 2026-05-21) — UNCOMMITTED
+
+Three follow-up gaps surfaced during Polish-2 manual testing:
+
+1. **The asset overview had no per-location breakdown.** The sidebar's `InlineEditableField` for Location only showed the primary placement; users couldn't see how many units sit at each location for a multi-placement qty-tracked asset.
+2. **The Polish-2 single-placement dialog couldn't add a second placement from the asset page.** Multi-placement editing was only reachable via the location's manage-assets picker — an awkward path for an asset-centric mental model.
+3. **Asset-index bulk "Update location" silently destroyed multi-placement state.** `bulkUpdateAssetLocation` for a QUANTITY_TRACKED asset deleted ALL its `AssetLocation` rows then wrote one at the target with `quantity = Asset.quantity`. No warning, no skip — surprise destruction.
+
+**Fix shape — three sibling fixes, all additive:**
+
+- **Fix 1 — "Placed at locations" sidebar card + Quantity Overview rows.** Cloned the "Included in kits" IIFE block on `assets.$assetId.overview.tsx`: one row per `AssetLocation`, with per-location qty badge for QUANTITY_TRACKED, hidden entirely for unplaced assets. Added `inLocations` to the loader's `quantityData` and threaded `inLocationsQuantity` through `QuantityOverviewCard`, which now renders an "In locations" row (when > 0) followed by a paired "Unplaced" row (when there's a non-zero unplaced pool). Per the orthogonal-axes principle these rows do NOT subtract from "Available" — they're an additional view of the same pool.
+- **Fix 2 — Multi-row "Manage placements" dialog.** New route `assets.$assetId.overview.manage-placements.tsx` opens a modal hosting a new `ManagePlacementsForm` component. UX: one row per placement (location dropdown + qty input + remove `×`), "Add another location" button (disabled when all locations picked or full pool already placed), live "Placed / Unplaced" indicator using `Asset.quantity` as the bound. Server: new `replaceAssetPlacements` service function that **diffs** the submitted set against the asset's current pivot rows — unchanged placements keep their `createdAt` (preserves primary-pick LATERAL ordering), adds get `createMany`, removes get `deleteMany`, qty edits get per-row `update`. Validation: dedup'd locationId set, INDIVIDUAL capped at 1 row with qty forced to 1, QUANTITY_TRACKED `sum ≤ Asset.quantity`, all locationIds in org, kit-guard (mirror of `updateAsset`). Activity events: one `ASSET_LOCATION_CHANGED` per net add/remove, no event for qty-only edits (consistent with §3a + §6a). The Polish-2 single-placement `update-location` dialog stays as the "quick set primary" path; this new dialog is additive.
+- **Fix 3 — Bulk-skip qty-tracked.** Mirror of the `bulkCheckOutAssets` pattern: `bulkUpdateAssetLocation` now filters `type !== QUANTITY_TRACKED` after the kit-guard, throws 400 "All selected assets are quantity-tracked..." when nothing is left, otherwise silently skips them. `bulk-location-update-dialog.tsx` gains a `WarningBox` summarising the skipped count using `selectedBulkItemsAtom` + `isQuantityTracked`. Replaces the Polish-2 "bulk still writes full pool" deferred scope-boundary, which on reflection was destructive rather than just incomplete.
+
+**Why this slot is right:** all three are user-visible gaps in the placement story that Polish-2 left open. They don't need new schema, new migrations, or new triggers — the DB shape from 4b already supports everything; we were just under-using it on the asset-overview surface.
+
+**Validate-clean: 2202 / 2202 tests** (no test count change — the additions are UI-only and covered by the manual walk-through; the new service function `replaceAssetPlacements` will get unit tests in a follow-up Polish-3a if we add them, but the existing DEFERRED trigger + `bulkCheckOutAssets`-mirror patterns are already heavily covered indirectly). TESTING-PHASE-4B.md §2a + §3b + the updated §4 capture the manual verification.
+
+**Open follow-up after manual test pass:** commit Polish-3 as its own commit on `feat-quantities` (same cadence as Polish-1, Polish-2, and 4a-Polish-2).
+
+#### Phase 4b-Polish-4 — Kit→asset placement cascade (mid-test, 2026-05-21) — UNCOMMITTED
+
+User surfaced a destructive bug during Polish-3 testing: an asset with 250 boxes manually placed across 3 locations got reduced to a single placement (250 boxes at the kit's location) the moment it was added to a kit — even though only 20 boxes were assigned to the kit. The pre-Polish-4 cascade in `updateKitAssets` deleted ALL the asset's `AssetLocation` rows for newly-added assets, then created one new row at the kit's location with `quantity = Asset.quantity` (full pool, not the kit slice). The user wanted: kit-driven placements (a) live alongside manual placements without wiping them, (b) carry the kit's slice quantity not the full pool, (c) be visually flagged as "via kit" — mirror of how kit-allocated `Custody.kitCustodyId` rows are flagged from Phase 2.
+
+**Why full Polish-4 instead of a quick destructive-only patch:** the user explicitly chose the schema-discriminator path over the cheap fix because deferring the badge work would require complex backfill on already-incorrect historical data. Doing it all now is cleaner end-to-end.
+
+**Migration `20260521133643_assetlocation_kit_discriminator`:**
+
+- Adds `AssetLocation.assetKitId` (nullable `TEXT`, FK to `AssetKit.id`, `ON DELETE CASCADE` so removing the asset from a kit auto-deletes the driven row).
+- Index on `assetKitId` for cascade-rewrite queries.
+- Drops the existing `@@unique([assetId, locationId])` and replaces it with two **partial uniques** (Prisma can't express partial uniques in schema, so they live in raw SQL):
+  - `AssetLocation_manual_unique` — `UNIQUE (assetId, locationId) WHERE assetKitId IS NULL`. Manual placements keep their "one row per (asset, location)" invariant.
+  - `AssetLocation_kit_unique` — `UNIQUE (assetKitId) WHERE assetKitId IS NOT NULL`. Each AssetKit drives at most one location row. Combined with AssetKit's own `@@unique([assetId, kitId])`, this transitively caps kit-driven rows at one per (asset, kit) pair.
+- **No backfill** — historical rows stay `assetKitId IS NULL` (read as manual placements). The buggy pre-Polish-4 cascade had already left them in an inconsistent state (full-pool qty at kit location, manual rows wiped); an auto-classification heuristic would mislabel more often than help. Users clean up via the new manage-placements dialog.
+
+**Service rewrites (`apps/webapp/app/modules/kit/service.server.ts`):**
+
+- `updateKitAssets` kit-add cascade — the destructive `tx.assetLocation.deleteMany` + full-pool `createMany` block (line 3457-3604 pre-Polish-4) is gone. Replaced with logic INSIDE the existing AssetKit-write `$transaction`:
+  - After `tx.assetKit.createMany` for new memberships, re-query the just-inserted rows (`createMany` doesn't return ids) to thread the FK.
+  - If `kit.location` is set, `tx.assetLocation.createMany` with `assetKitId` set, `quantity = AssetKit.quantity` (the slice), at the kit's location.
+  - If `kit.location` is null, do nothing — manual rows stay untouched (the old code wiped them).
+  - For qty edits on existing memberships (`qtyChangedAssets` loop), `tx.assetLocation.updateMany` scoped via relation filter `where: { assetKit: { assetId, kitId } }` so the kit-driven row's qty stays in sync.
+  - Removed assets: `tx.assetKit.deleteMany` auto-cascades the driven row via the FK; no app-side cleanup needed.
+- `recordEvents` + `createNote` for the new kit-driven placements — `fromValue: null` (it's an additive new placement, not a move), `meta: { viaKit: true }`. No event/note when `kit.location` is null since nothing changed.
+
+**Service rewrites (`apps/webapp/app/modules/asset/service.server.ts`):**
+
+- `replaceAssetPlacements` (the manage-placements dialog backend): kit-guard REMOVED — manual and kit-driven rows now coexist on different `assetKitId` values, so editing manual placements while the asset is in a kit no longer conflicts. The function fetches `assetLocations` with `assetKitId` selected, splits manual vs kit-driven, runs the diff math against the manual set only, and adds the kit-driven sum to the sum-within-total pre-check. `deleteMany`/`updateMany` for manual rows are all scoped to `assetKitId: null`.
+- `updateAsset` location-change path: `deleteMany` scoped to `{ assetId, assetKitId: null }` — replaces only the user's manual placement(s), leaves kit-driven rows in place.
+- `bulkUpdateAssetLocation`: existing `deleteMany` scoped to `assetKitId: null` for defense-in-depth (the Polish-3 qty-tracked skip already prevented this path from reaching qty-tracked assets, but explicit is better).
+
+**Service rewrites (`apps/webapp/app/modules/location/service.server.ts`):**
+
+- `updateLocationAssets` qty-edit branch: switched from `tx.assetLocation.update({ where: { assetId_locationId } })` to `tx.assetLocation.updateMany({ where: { assetId, locationId, assetKitId: null } })` because the composite key is no longer unique. The partial unique still caps it at one matching row.
+- Remove-asset branch: `deleteMany` scoped to `assetKitId: null` so removing an asset from a location's picker doesn't drop kit-driven rows.
+- `getLocation` (location detail page loader): asset list `assetLocations` include now pulls `assetKitId` + nested `assetKit.kit { id, name }` so the page renderer can surface the "via kit" badge alongside the per-location qty.
+
+**`getLocationPickerMeta` orthogonal MAX update:**
+
+The strict-available formula now splits the current location's rows into manual (editable) and kit-driven (read-only). The picker MAX uses `Asset.quantity − sum(rows elsewhere) − sum(kit-driven at THIS location)` so a user adding manual units at a location where a kit is already pinning some units can't overflow the asset's pool. `currentAtThisLocation` reads only the manual row's qty (the picker's editable slice). Loose-equality (`== null` / `!= null`) on `assetKitId` is intentional — defensive against test fixtures that omit the field entirely.
+
+**`getAssetOverviewFields` extension:**
+
+`assetLocations.select` now pulls `assetKitId` and nested `assetKit.kit { id, name }`. Three UI surfaces consume this:
+
+- Asset-overview "Placed at locations" sidebar card: per-row "via kit" badge linking to the kit, with a tooltip explaining how to change the placement (edit the kit's location or per-asset qty).
+- Main detail-list Location row (the table that used to show just the primary): same per-line badge.
+- Location detail page asset list: per-row badge with a tooltip flagging that "some or all units are at this location because the asset is in kit X".
+
+**Manage-placements dialog UX:**
+
+Kit-driven placements render in a separate "Placements managed by kits (read-only)" section at the top of the form, with a blue "via kit {name}" badge per row. They're not editable (no qty input, no remove button). The placed/unplaced indicator grew a third "Via kits" line so the breakdown is `Placed (manual) + Via kits + Unplaced = Asset.quantity`. Client-side validation includes the kit-driven sum in the pool check and surfaces a helpful message when the user's manual placements + kit-driven rows would exceed the asset total.
+
+**Test fixes:**
+
+- 4 `getLocationPickerMeta` tests — fixed by the loose-equality change in prod code; fixtures without `assetKitId` now correctly read as manual.
+- 1 `updateLocationAssets` qty-edit test — updated assertion from `update` to `updateMany` with the `assetKitId: null` scope.
+- 2 `updateKitAssets - Location Cascade` tests — rewritten to assert Polish-4 behaviour (`assetLocation.deleteMany` is NOT called, kit-driven `createMany` includes `assetKitId`).
+- 1 `updateKitAssets - per-row qty submission` test — needed `updateMany` added to the kit-side `assetLocation` mock so the qty-sync call no-ops cleanly.
+
+**Validate-clean: 2202 / 2202 tests**, lint + prettier + typecheck clean. TESTING-PHASE-4B.md §7a captures the manual verification.
+
+**Mid-test addition (2026-05-22) — INDIVIDUAL cross-location move:** while walking §6, the user hit a generic "Something went wrong" error when the picker tried to add an INDIVIDUAL asset that was already placed at a different location. Root cause: the `enforce_individual_asset_single_location` BEFORE trigger fired on the second INSERT and rolled the whole tx back, with the trigger error wrapped to the outer catch's generic message. The fix lives in `updateLocationAssets` and mirrors the existing cross-kit-move pattern in `updateKitAssets`:
+
+- Pre-tx, compute `movedIndividualPriorLocations: Map<assetId, { id, name }>` for any INDIVIDUAL in `actuallyNewAssetIds` whose `modifiedAssets[i].assetLocations[0]` is set.
+- Inside the existing `db.$transaction`, BEFORE `createMany`, `tx.assetLocation.deleteMany` the prior manual row(s) for the moved INDIVIDUALs (`where: { assetId IN [...], assetKitId: null }`). Same tx so an `INSERT` failure rolls the delete back — no data loss path.
+- The activity events block now reads `movedIndividualPriorLocations.get(assetId)?.id ?? null` for `fromValue`, so reports see the real `oldLoc → newLoc` transition (not `null → newLoc`).
+- Notes are unchanged — `createBulkLocationChangeNotes` already reads `getPrimaryLocation(asset)` from the pre-tx `modifiedAssets` snapshot and renders "moved from X to Y" correctly.
+
+This closes the TESTING-PHASE-4B.md §6 bullet that explicitly called out the cross-location move ("existing pivot row deleted, new one created — single-trigger keeps total at 1 per asset"). The picker UI side (carry-over of `selectedBulkItemsAtom` across pages causing unintended pre-selections from other surfaces) is a separate atom-leak issue worth investigating but doesn't block this fix.
+
+**Mid-test addition (2026-05-22) — `updateLocationAssets` strict-available validator is now kit-driven-aware:** the Polish-2 validator computed `spaceWithoutMe = Asset.quantity − sum(rows at other locations)` and missed the kit-driven rows AT THIS location. A tampered submission setting a manual qty that would push the asset's total past `Asset.quantity` passed validation, then tripped the DEFERRED sum-within-total trigger at COMMIT — surfacing as a generic 500. Fixed in `updateLocationAssets`:
+
+- `modifiedAssets.findMany` now also selects `assetKitId` on `assetLocations`.
+- Validator splits into `manualAtThisLocation` (the editable manual row's qty) and `kitDrivenAtThisLocation` (untouched but still claiming pool); `spaceWithoutMe = Asset.quantity − otherLocationsQty − kitDrivenAtThisLocation`; `max = max(manualAtThisLocation, spaceWithoutMe)`. Same shape as `getLocationPickerMeta`'s orthogonal MAX (the UI's `max` attribute was already correct; only the server-side validator lagged).
+- Error message includes a breakdown: "requested X, max Y; Z via kits at this location; W placed elsewhere; total T" so the user can see exactly what's tight.
+
+Verified: tampering Gloves to 120 at TzHaar (total 250, manual 12, kit-driven 22+43, elsewhere 11+22+33=66 → max = 250−66−65 = 119) now returns 400 with the breakdown instead of a generic 500. `replaceAssetPlacements` had the equivalent fix folded in during Polish-4; this brings `updateLocationAssets` to parity.
+
+**Mid-test addition (2026-05-22) — kit-cascade `assetKitId` discriminator audit:** while validating §7 (kit location change), the user spotted that the kit-driven AssetLocation rows lost their `assetKitId` after a `Kit.locationId` change — so the "via kit" badge wouldn't render and Polish-4's discriminator invariant was effectively broken. The original Polish-4 patch only updated the kit-add cascade in `updateKitAssets`; six other AssetLocation write sites still used the destructive delete-all-rows + recreate-without-assetKitId pattern. Audit results + fixes:
+
+| Site                                                                                | What it does                                  | Polish-4 fix                                                                                                       |
+| ----------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `kit/service.server.ts` `updateKitLocations` set-new-location (~2406)               | Kit location changed / set for the first time | `deleteMany where assetKit.kitId = id` + `findMany AssetKit where kitId = id` + `createMany` with `assetKitId` set |
+| `kit/service.server.ts` `updateKitLocations` clear-location (~2516)                 | Kit's `locationId` cleared                    | `deleteMany where assetKit.kitId = id` (only kit-driven rows, manual rows survive)                                 |
+| `kit/service.server.ts` `bulkUpdateKitLocations` set-new-location (~2688)           | Bulk kit location change                      | Same pattern scoped to `assetKit.kitId IN (actualKitIds)`                                                          |
+| `kit/service.server.ts` `bulkUpdateKitLocations` clear-location (~2778)             | Bulk clear                                    | Same scope                                                                                                         |
+| `location/service.server.ts` `updateLocationKits` add-kits-to-location (~2363)      | Kits attached to a location                   | Drop kit-driven rows for these kits first, then `createMany` with `assetKitId` from the AssetKit rows              |
+| `location/service.server.ts` `updateLocationKits` remove-kits-from-location (~2537) | Kits detached                                 | Scope deleteMany to `assetKit.kitId IN (removedKitIds)` only                                                       |
+
+All paths now: (a) preserve `assetKitId` on kit-driven rows so the "via kit" badge keeps rendering, (b) never touch manual rows so the user's own placements survive a kit-location change. Test mock for `location/service.location-notes.test.ts` extended with `assetKit.findMany` since the cascade now fetches AssetKit rows inside the tx.
+
+One-shot repair query for historical data ran against the dev DB: targets INDIVIDUAL kit-asset rows only (qty-tracked rows risk multi-match on the kit-unique partial index), matches by `(asset.id, kit.locationId = AssetLocation.locationId)` and sets `assetKitId` accordingly. INDIVIDUAL-only because the trigger caps them at one row per asset → no duplicate-AssetKit ambiguity. QTY-tracked rows whose `assetKitId` was wiped by the pre-fix cascade need to be repaired by the user changing the kit's location once after deploying this Polish-4 follow-up (the new cascade does the right thing on subsequent edits).
+
+**Validate:** typecheck clean, 87/87 location + kit tests pass.
+
+**Mid-test addition (2026-05-22) — picker qty input hidden by long "Also at/in" line:** in all three manage-assets pickers (location, kit, booking) the qty input was being pushed off-screen / visually overlapped by a long multi-placement indicator line ("Also at: Loc1 (X), Loc2 (Y), ..." or "Also in: Kit1 (X), Kit2 (Y), ..."). Two layout bugs combined:
+
+1. The title block's flex container had no `min-w-0`, so its inner text didn't wrap — the title block grew beyond its share of the row width.
+2. The "Also at/in" `<p>` had no width cap, so a multi-placement list expanded the title block past the qty input's position.
+
+Fix in `locations.$locationId.assets.manage-assets.tsx`, `kits.$kitId.assets.manage-assets.tsx`, and `bookings.$bookingId.overview.manage-assets.tsx`:
+
+- Title block flex container: `flex items-center gap-3` → `flex min-w-0 flex-1 items-center gap-3` (accepts available width, allows children to shrink).
+- Inner text column: `flex flex-col gap-y-1` → `flex min-w-0 flex-col gap-y-1` (allows `<p>` elements to wrap inside).
+- "Also at/in" `<p>`: switched from `break-words` to `truncate` with a `title=` attribute carrying the full list. Single-line + ellipsis keeps the row layout stable; the full list still surfaces on hover and on the asset overview's "Placed at locations" / "Included in kits" cards.
+
+The qty input keeps its `shrink-0` and stays visible at the right edge of the row regardless of how many other locations/kits the asset is in.
+
+**Open follow-up after manual test pass:** commit Polish-4 as its own commit on `feat-quantities` (same cadence as Polish-1, Polish-2, Polish-3, and 4a-Polish-2). When merging the 4b release, this migration ships alongside the rest of the 4b migrations.
+
+**Mid-test addition (2026-05-22) — SQL-driven §7a + §13 verification + Pencils legacy gap repair:** ran the §7a schema sanity bullets and §13 trigger tests against the dev DB without UI. Schema sanity: `assetKitId` column present (text/nullable), partial uniques `AssetLocation_manual_unique` + `AssetLocation_kit_unique` in place, old composite key absent. FKs: `AssetLocation_assetKitId_fkey` is `ON DELETE CASCADE` so removing an AssetKit row drops the kit-driven AssetLocation row automatically (the §7a remove-from-kit cascade test). §13 INDIVIDUAL single-location trigger: tried to insert Elder Maul (already at Chambers of Xeric) at Theatre of Blood — rejected with `"INDIVIDUAL asset … already placed at a location"`. §13 sum-within-total trigger: tried to push Pencils total to 132 (cap 100) — rejected at COMMIT with `"AssetLocation total 132 exceeds Asset.quantity 100"`. Boundary verified: 32 existing kit-driven + 68 = 100 passes, +69 rejects (test row rolled back). Global audit: 326 AssetLocation rows (319 manual + 7 kit-driven), 0 location mismatches, 0 qty mismatches, 0 assets exceeding their quantity, 358 INDIVIDUAL assets all clean (1 manual max, qty=1 always).
+
+**Pencils legacy gap discovered + repaired:** the kit-driven row count was 5 but expected 7 — two `AssetKit` rows for Pencils (qty-tracked, total 100) in Kittington (qty 10) + Kittington 2 (qty 22), both at TzHaar Fight Cave, predated Polish-4 and never got their kit-driven `AssetLocation` rows. The earlier INDIVIDUAL-only repair query intentionally skipped qty-tracked rows (multi-AssetKit ambiguity), but this case is unambiguous: each AssetKit gets exactly one kit-driven row with `quantity = AssetKit.quantity` and `assetKitId = AssetKit.id`. Repaired with a scoped `INSERT … FROM "AssetKit" ak JOIN "Kit" k … WHERE NOT EXISTS (kit-driven row)` — now 7/7. Mirror of the broader gap: qty-tracked legacy rows whose pre-Polish-4 cascade wiped their `assetKitId` will get re-emitted on the next kit-location change (the new cascade does the right thing), but rows that were never created because the AssetKit predated Polish-4 needed the explicit backfill.
+
+**What still needs UI testing in §7a (cannot be SQL-verified):** the `manage-assets` picker writes (kit-add cascade end-to-end), the asset-overview "Placed at locations" card rendering (badge + tooltip), the `manage-placements` dialog kit-driven read-only section + the placed/unplaced indicator split, the client-side validation error message format, and the INDIVIDUAL-in-a-kit scenario (none exist in the current dev DB).
+
+**Mid-test addition (2026-05-22) — Polish-5: scanner qty selector across location + kit + booking.** User flagged during §9 that scanning a QUANTITY_TRACKED asset into a booking, kit, or location offered no qty input — full pool was written by default. The pickers had grown a qty input in Polish-2 / 4a-Polish-2, but the three scanner drawers stayed full-pool-only. The §9 doc framed this as a deferred scope boundary; the user pushed back: "in reality how it works is that lets say someone wants 10 gloves, they will still use the scanner on the box or something and then select 10 items". Polish-5 wires the qty input into all three scanner drawers, mirroring the manage-assets picker UX. Changes:
+
+- **`app/atoms/qr-scanner.ts`** — new `scannedAssetQuantitiesAtom` + `setScannedAssetQuantityAtom` writer; extended `removeScannedItemAtom`, `removeMultipleScannedItemsAtom`, `removeScannedItemsByAssetIdAtom`, and `clearScannedItemsAtom` to drop the matching qty entries so the map can't leak stale ids across scan sessions.
+- **`app/components/scanner/drawer/scanned-asset-quantity-input.tsx`** — new shared per-row qty input. Mirror of the picker UX: clamped to `[1, asset.quantity]`, defaults to 1 (matches "scan to add one" intent — user edits up), stops click propagation so the input doesn't toggle the row's remove handler. Reused by all three drawers.
+- **`app/utils/asset-quantities-schema.ts`** — new shared Zod schema, extracted from the location + kit picker routes (was duplicated already; the scanner extension would have been the 3rd copy). Hand-rolled `JSON.parse` + per-field validation so malformed payloads surface as clean 400s instead of 500s. Both pickers now import from here; the new shared file is the single source of truth.
+- **Location drawer + route** — `add-assets-to-location-drawer.tsx`: schema gains `assetQuantities`, drawer emits `JSON.stringify(filteredMap)` via `formData`, `AssetRow` renders `<ScannedAssetQuantityInput>` for qty-tracked rows. `locations.$locationId.scan-assets-kits.tsx`: parses `assetQuantities` with the shared schema, passes through to `updateLocationAssets({ assetQuantities })`. Service already supported it from Polish-2.
+- **Kit drawer + route** — same pattern. The kit scanner action delegates to the manage-assets picker action (`return manageAssetsAction(args)`), so it picks up `AssetQuantitiesSchema` for free with no route change needed. Drawer only emits qty entries for _newly-scanned_ asset ids — existing kit assets are kept out of the map so `updateKitAssets` doesn't overwrite their current `AssetKit.quantity`. The qty input also hides on rows that are already in the kit, mirroring the wire-format intent visually.
+- **Booking drawer + route + service** — booking flow needed the most work because `addScannedAssetsToBooking` didn't accept qty at all. Schema gains `quantities` (matching the booking picker's wire field name, distinct from location/kit's `assetQuantities`), drawer emits the JSON, route parses + validates with the same shape rules the picker uses (positive int ≤ 1,000,000), service signature extended to accept `quantities: Record<assetId, number>` with default `{}`, write path now `create: assetIds.map((id) => ({ assetId: id, quantity: quantities[id] ?? 1 }))` so `BookingAsset.quantity` lands per-row instead of relying on the schema default. Picker tests updated to expect the new arg.
+- **Test fixture update** — `test/routes-tests/bookings.$bookingId.overview.scan-assets.test.tsx` expectations gained `quantities: {}` to match the new service shape.
+
+Default qty per scan is **1** (matches "scan to add one") — user edits up from there. Server-side trigger still catches over-allocation. `pnpm webapp:validate` green at **2202 / 2202**. Open follow-up: needs manual UI test of all three scanner drawers (qty input renders, value submits correctly, pivot/BookingAsset rows carry the picked qty after submit).
+
+**Mid-test addition (2026-05-22) — Polish-5 strict-available pool in scanner.** Initial Polish-5 used `Asset.quantity` as the qty input MAX, but the user pointed out the manage-assets picker shows the orthogonal pool ("· 250 boxes · 218 available" when 32 are tied up in kits) and the scanner should match. Added a shared per-asset MAX dispatcher and threaded it end-to-end:
+
+- **`app/modules/scanner/picker-meta.server.ts`** — new module. Exports `ScannerPickerContextSchema` (`{ type: 'location'|'kit'|'booking', id }`) + `getScannerPickerMeta`. Location / kit delegate to existing `getLocationPickerMeta` / `getKitPickerMeta` with single-element id arrays; booking inlines the picker's `Asset.quantity − Σ Custody.quantity − Σ overlapping BookingAsset.quantity` formula (no extracted helper exists yet — pulling it out of the picker loader is its own refactor). Returns `null` for INDIVIDUAL.
+- **`api+/get-scanned-item.$qrId.ts`** + **`api+/get-scanned-barcode.$value.ts`** — both endpoints gained a `pickerContext` query param (JSON-encoded). When present + the scanned thing is an asset, the loader attaches the normalised result as `asset.pickerMeta`. Both QR and barcode paths covered.
+- **`app/utils/scanner-includes.server.ts`** — extended `AssetFromScanner` with `pickerMeta?: ScannerAssetPickerMeta` (ambient optional, not in the Prisma include).
+- **All three drawers** — pass `searchParams={{ pickerContext: JSON.stringify({ type, id }) }}` to `GenericItemRow`; in `AssetRow` render `· X available` (warning-700) when `maxAllowed < totalQty`. Qty input bounded by `pickerMeta?.maxAllowed ?? asset.quantity` and hidden when `maxAllowed === 0`. Matches the manage-assets picker exactly.
+
+**Mid-test addition (2026-05-22) — Polish-5 blocker semantics fix.** User scanned 22 boxes of Gloves (qty-tracked, total 250, with 22+10=32 already in two kits) into a booking and got blocked by `"1 asset are part of a kit. Scan Kit QR to add the full kit."` That blocker was pre-qty-tracking logic — when `Asset.kitId` was 1:1, kit membership meant the _whole_ asset was committed. For multi-kit qty-tracked, only a slice lives in any kit; the free remainder is bookable / custody-assignable individually. Updated three drawers' `assetsPartOfKit*` filters to require `asset.type === AssetType.INDIVIDUAL`:
+
+- `add-assets-to-booking-drawer.tsx` (the screenshot the user shared)
+- `assign-custody-drawer.tsx` (same overreach — qty-tracked with kit slice shouldn't block direct custody assignment of free pool)
+- `release-custody-drawer.tsx` (same — releasing operator-only custody of a qty-tracked asset shouldn't be blocked by an unrelated kit slice)
+
+The `kits.$kitId.scan-assets` flow uses a different blocker set (already-in-this-kit, has-custody, checked-out, kit-cannot-go-in-kit) — no changes needed there. The `partOfKit` _availability label_ (informational badge on the row) stays in place across all drawers — it correctly tells the user "this has a kit allocation"; only the _blocker_ was overreaching. Server-side strict-available re-validation + DEFERRED trigger remain the source of truth for over-allocation; this client-side change is purely a UX correction.
+
+#### Phase 4b-Polish-6 — `BookingAsset.assetKitId` discriminator (mid-test, 2026-05-25) — UNCOMMITTED
+
+User-flow bug that triggered this: scanning a qty-tracked asset (Gloves, 250 total, 87 in Kittington) standalone into a booking made the booking UI render Gloves nested under Kittington — making it look like the whole kit was booked. Root cause: `BookingAsset` had no kit-source discriminator, so the UI grouped by `asset.assetKits[0]?.kit` regardless of intent. Third application of the pattern already established for `Custody.kitCustodyId` (Phase 2) + `AssetLocation.assetKitId` (Polish-4).
+
+**Production diagnostic queries shared with the user before deploy** confirmed 175k BookingAsset rows total, 74,370 in-kit candidates, 64,505 (87%) confidently backfilled to kit-driven via the whole-kit-presence heuristic, 9,865 stay standalone (1,559 of those are partial-kit-in-booking pairs that should genuinely stay standalone per the user's "partial kit adds are not common in shelf"). Backfill SQL inlined in the migration.
+
+**Schema change** (`20260525131507_bookingasset_kit_discriminator`):
+
+- New column `BookingAsset.assetKitId TEXT NULL` with FK to `AssetKit("id")` `ON DELETE SET NULL ON UPDATE CASCADE`. `SET NULL` (not `CASCADE` like `AssetLocation`) so removing an asset from a kit converts the booked slice to standalone rather than silently shrinking an active booking.
+- Dropped `@@unique([bookingId, assetId])`. Replaced with two Postgres partial uniques: `BookingAsset_manual_unique (bookingId, assetId) WHERE assetKitId IS NULL` + `BookingAsset_kit_unique (bookingId, assetKitId) WHERE assetKitId IS NOT NULL`. Lets one standalone row coexist with N kit-driven rows for the same (booking, asset).
+- Inline backfill: heuristic `BookingAsset.quantity = AssetKit.quantity AND every other AssetKit of the same kit has a matching row in the booking AT its slice quantity AND exactly one such kit matches`.
+
+**Notable schema design adjustment** — original plan exposed `BookingAsset.assetKit AssetKit?` + `AssetKit.bookingAssets BookingAsset[]` as Prisma relation accessors. Adding both tipped Prisma's dynamic extended-client deep generic past TS's recursion limit (TS2321) in several services (`asset/service.server.ts`, `user/service.server.ts`, `organization/service.server.ts`, plus downstream consumers). The blowup happens because `Booking` (this row's grandparent) is a hub model with many relations — adding the AssetKit↔BookingAsset cycle pushed the type computation over. Final design declares `assetKitId` as a plain column with **no Prisma relation accessor**; the FK is enforced at the DB level only. Services that need kit-driven booking rows query directly via `db.bookingAsset.findMany({ where: { assetKitId } })`. Two long comments on `BookingAsset.assetKitId` (the schema field) + a corresponding NOTE on `AssetKit` explain the tradeoff for future contributors.
+
+**Service-layer changes** (waves abbreviated):
+
+- **Wave 4 (booking service)**: `updateBookingAssets` raw SQL rewritten — explicit `assetKitId = NULL` on insert + `ON CONFLICT ("bookingId", "assetId") WHERE "assetKitId" IS NULL` to target the new manual partial unique. Picker writes only standalone rows; kit-driven rows coexist via the partial unique. `addScannedAssetsToBooking{WithinTx}` accepts a new `assetKitIdByAsset?: Record<assetId, assetKitId>` map.
+- **Wave 5 (picker filter fix)**: `bookings.$bookingId.overview.manage-assets.tsx` — qty-tracked-in-kit assets are now selectable in the picker (the old `assetKits.length === 0` filter is gone). Inline availability formula extended to subtract `inKits` so the picker MAX matches the asset overview's "Available" number.
+- **Wave 6 (UI grouping)**: booking detail page + `booking-assets-sidebar.tsx` now group by `BookingAsset.assetKitId` (the per-row discriminator) rather than `asset.assetKits[0]?.kit` (the asset's incidental memberships). Same asset can appear as two rows: one standalone + one kit-driven, each in its own bucket. `getBookings` switched from `include` to `select` on bookingAssets so the inferred type surfaces `assetKitId` to downstream consumers.
+- **Wave 7 (mobile back-compat)**: `api/mobile/bookings/$bookingId.ts` collapses multi-row BookingAsset into one entry per `assetId` with summed `quantity` + a new `assetKitId` field (unanimous kit or `null` if mixed). Mobile clients see the same flat shape they always did.
+- **Wave 2 (cascade events)**: `updateKitAssets` + `bulkRemoveAssetsFromKits` pre-fetch the kit-driven BookingAsset rows that the AssetKit delete will SET-NULL via the DB cascade, then emit a per-booking system note after the tx commits ("`{user}` removed `{assets}` from kit `{kit}`. The kit's booked slice has been converted to a standalone reservation in this booking.").
+- **Wave 3 (live qty link)**: `updateKitAssets` qty-change branch now propagates `AssetKit.quantity` updates to matching kit-driven `BookingAsset.quantity` rows inside the same tx (additional to the existing `AssetLocation.quantity` cascade). One-way link — picker edits to the booking don't bubble back to the kit slice.
+
+**Scanner drawer changes**: `add-assets-to-booking-drawer.tsx` builds an `assetKitIdByAsset` map from scanned kits' `assetKits[].id` and submits it as JSON form data. Required adding `id` to the `KIT_INCLUDE.assetKits` select in `scanner-includes.server.ts`. Directly-scanned assets stay unmapped (server defaults `assetKitId = NULL` → standalone) — when the same asset shows up via both a direct scan and a kit scan, the direct scan wins (standalone takes precedence).
+
+**Test fixtures updated**: `kit/service.server.test.ts` mock gets `bookingAsset: { findMany, updateMany }` for the new cascade pre-fetch + live-link paths. `bookings.$bookingId.overview.scan-assets.test.tsx` expectation gains `assetKitIdByAsset: {}` for the no-kit-scan case.
+
+**Deferred to Phase 4d (explicitly NOT in Polish-6):**
+
+- Check-in floor guard when shrinking AssetKit.quantity below per-row check-in (ConsumptionLog is keyed by bookingId+assetId, not bookingAssetId).
+- Booking-side multi-row picker UX (picker currently scopes to standalone rows only; kit-driven slices managed via kit removal).
+- `BOOKING_ASSET_DETACHED_FROM_KIT` activity event (would need a new enum value + migration; system notes cover the audit trail for now).
+- Server-side `enforce_booking_asset_sum_within_availability` DEFERRED trigger (cross-booking + time-windowed; complex enough to defer).
+
+`pnpm webapp:validate` green at **2202 / 2202**. The migration is NOT yet applied to dev — the user will run it manually for testing.
+
+**Open follow-up after manual test pass:** commit Polish-6 as its own commit on `feat-quantities` (same cadence as Polish-1..5 + 4a-Polish-2). When merging the 4b release, the migration ships alongside the other 4b migrations. Backfill heuristic numbers (175k total, 64,505 → kit-driven, 9,865 standalone) belong in the PR description so reviewers understand the data-shape change ahead of time.
+
+**Mid-test sweep — booking-side write paths that bypassed the discriminator.** First user test of Polish-6 surfaced multiple booking-add paths that hadn't been audited in the initial implementation: a booking with one scanned standalone qty-tracked asset + two added kits ended up with 6 BookingAsset rows where every `assetKitId` was NULL, `quantity` defaulted to 1 for kit-driven slices, and the same-asset overlap (Gloves in both kits + standalone) silently dropped the kit-driven slices. Sweep covered:
+
+- **`bookings.$bookingId.overview.manage-kits.tsx` (the kit-add path)** — was calling `updateBookingAssets({ assetIds, kitIds })` with no kit attribution + no quantities. Now reads each selected kit's AssetKit rows (id + quantity), threads `assetKitIdByAsset` + `quantities` maps through. Also fixed the "newAssetIds" filter — it dropped assets whose id was already in the booking (preventing the kit-driven row from being created when a standalone slice already existed). Filter rewritten to scope on `assetKitId` (per-row test) instead of `assetId` (which is wrong now that the same asset can have multiple slices in one booking).
+- **`updateBookingAssets` (raw SQL)** — accepts the new `assetKitIdByAsset` parameter; splits the insert into two `$executeRaw` branches: standalone rows upsert against `BookingAsset_manual_unique` (qty edits work as before), kit-driven rows insert against `BookingAsset_kit_unique` with `ON CONFLICT DO NOTHING` (re-adding the same kit is a no-op; qty edits cascade from `updateKitAssets` instead).
+- **`computeBookingAssetRemaining` (`booking/service.server.ts:2295`)** — **critical bug**, was using `where: { bookingId_assetId: ... }` referencing the composite unique that the migration dropped. Would have crashed at runtime on partial check-in. Rewritten to `findMany` + sum quantities across all rows (standalone + kit-driven) for the (booking, asset) pair. ConsumptionLog still keyed by (bookingId, assetId), so its aggregate already covers the whole booking-asset combination.
+- **`removeAssets`** — when called from the manage-kits "remove kit" flow it was deleting ALL slices for the asset (including any standalone slice the user had added separately). Now when `kitIds.length > 0`, scopes deletion to BookingAsset rows whose `assetKitId` belongs to one of the kits' AssetKits. The picker / asset-bulk remove path (kitIds empty) keeps the legacy "delete all slices" semantics since the user's intent there is asset-level.
+- **`updateKitAssets` kit/booking sync** — when an asset is removed from a kit and that kit is in active bookings, the old code did `bookingAsset.deleteMany({ where: { bookingId, assetId } })`, undoing the FK `SET NULL` cascade from Wave 2 of Polish-6 that was meant to convert the kit-driven slice to standalone. Removed the deleteMany — the cascade handles row preservation and the `emitAssetKitDetachmentNotes` helper from Wave 2 posts the per-booking system note explaining the conversion. The companion "add asset to kit → propagate to active bookings" path now resolves the matching AssetKit and writes `bookingAsset.createMany` with `assetKitId` + `quantity` populated (was writing standalone qty=1 before).
+- **`/api/bookings/$bookingId/adjust-asset-quantity`** — `findFirst({ where: { bookingId, assetId } })` returned an arbitrary row when both standalone and kit-driven slices existed for the same asset. Scoped to `assetKitId: null` since the route only adjusts the standalone slice (kit-driven qty is managed via the kit picker, not here).
+
+Sweep typecheck + tests still green at **2202 / 2202** (after fixes; the broken `bookingId_assetId` query was caught by typecheck before runtime). The user's broken booking from the first test attempt was cleared so they can retest from a clean slate.
 
 #### Phase 4c — Split / merge UX (third)
 
@@ -1170,6 +1425,7 @@ scope in `docs/proposals/quantitative-assets.md` → Phase 4e.
 11. `20260511120000_add_asset_kit_pivot` — Phase 4a: introduce `AssetKit` pivot, backfill from `Asset.kitId`, drop the column, ENABLE RLS
 12. `20260514100000_drop_asset_kit_unique_add_triggers` — Phase 4a-Polish-2: `DROP INDEX "AssetKit_assetId_key"`, add `enforce_individual_asset_single_kit` (BEFORE) + `enforce_asset_kit_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, backfill QUANTITY_TRACKED pivot rows to `quantity = Asset.quantity`. Committed in `bebaf4ec6`.
 13. `20260519143054_add_asset_location_pivot` — Phase 4b: introduce `AssetLocation` pivot, backfill from `Asset.locationId` (qty-tracked → `Asset.quantity`, INDIVIDUAL → 1), add `enforce_individual_asset_single_location` (BEFORE) + `enforce_asset_location_sum_within_total` (CONSTRAINT, `DEFERRABLE INITIALLY DEFERRED`) triggers, drop `Asset.locationId` column + FK + index, ENABLE RLS. Single migration (no structural-only intermediate; final shape ships day one). **Applied to dev DB; staged not committed (see Phase 4b status).**
+14. `20260521133643_assetlocation_kit_discriminator` — Phase 4b-Polish-4: add nullable `AssetLocation.assetKitId` FK (cascade delete from AssetKit), drop the `(assetId, locationId)` unique, replace with two partial uniques (`AssetLocation_manual_unique` WHERE `assetKitId IS NULL`, `AssetLocation_kit_unique` WHERE `assetKitId IS NOT NULL`). No data backfill — historical rows stay manual. Mirror of the `Custody.kitCustodyId` discriminator pattern from Phase 2. **Applied to dev DB; staged not committed (see Phase 4b-Polish-4 status).**
 
 ---
 

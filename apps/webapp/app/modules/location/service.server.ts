@@ -279,10 +279,11 @@ export async function getLocation(
       }),
 
       /**
-       * Paginated assets placed at this location (Phase 4b).
-       * Returned alongside the location so consumers can keep using the
-       * existing `{ location, assets, totalAssetsWithinLocation }`
-       * contract without depending on a `Location.assets` relation.
+       * Paginated assets placed at this location. Returned alongside
+       * the location so consumers can keep using the existing
+       * `{ location, assets, totalAssetsWithinLocation }` contract
+       * without depending on a `Location.assets` relation (which no
+       * longer exists — placement lives on the `AssetLocation` pivot).
        */
       include
         ? Promise.resolve([] as Awaited<ReturnType<typeof db.asset.findMany>>)
@@ -303,6 +304,29 @@ export async function getLocation(
                 select: {
                   id: true,
                   name: true,
+                },
+              },
+              /**
+               * Pull the pivot rows for THIS location only. An asset
+               * can have both a manual row AND one or more kit-driven
+               * rows at the same location (`(assetId, locationId)` is
+               * not unique), so the renderer aggregates `quantity`
+               * across rows and reads `assetKitId` / `assetKit.kit`
+               * to surface the "via kit" badge when any row at this
+               * location is kit-driven.
+               */
+              assetLocations: {
+                where: { locationId: id },
+                select: {
+                  locationId: true,
+                  quantity: true,
+                  assetKitId: true,
+                  assetKit: {
+                    select: {
+                      id: true,
+                      kit: { select: { id: true, name: true } },
+                    },
+                  },
                 },
               },
               custody: {
@@ -359,13 +383,12 @@ export async function getLocation(
     }
 
     /**
-     * Phase 4b contract change: `assets` is now a sibling of `location`
-     * on the return value (synthesized from a separate
-     * `db.asset.findMany` filtered by the `AssetLocation` pivot).
-     * Previously consumers read `location.assets` — that relation no
-     * longer exists. Route consumers (e.g.
-     * `app/routes/_layout+/locations.$locationId.assets.tsx`) must read
-     * `assets` from this wrapper, not from `location.assets`.
+     * Contract: `assets` is a sibling of `location` on the return
+     * value (synthesized from a separate `db.asset.findMany` filtered
+     * by the `AssetLocation` pivot). The `location.assets` relation
+     * does not exist — placement lives on the pivot. Route consumers
+     * (e.g. `app/routes/_layout+/locations.$locationId.assets.tsx`)
+     * must read `assets` from this wrapper, not from `location.assets`.
      */
     return { location, totalAssetsWithinLocation, assets };
   } catch (cause) {
@@ -1650,6 +1673,30 @@ async function createBulkLocationChangeNotes({
   }
 }
 
+/**
+ * Updates the assets placed at a given location, with optional per-asset
+ * quantity for QUANTITY_TRACKED rows.
+ *
+ * Three diff branches are handled in a single transaction:
+ *
+ *  - **Add** (asset id in `assetIds` but not yet in the location's pivot
+ *    rows): `tx.assetLocation.createMany` with `quantity =
+ *    assetQuantities[assetId] ?? Asset.quantity ?? 1`.
+ *  - **Remove** (asset id in `removedAssetIds`): `tx.assetLocation.deleteMany`.
+ *  - **Qty edit** (asset id in `assetIds` AND already at this location AND
+ *    submitted qty differs from the existing pivot row): per-row
+ *    `tx.assetLocation.update` to set the new qty.
+ *
+ * Server-side strict-available re-validation runs BEFORE the transaction
+ * using the **orthogonal MAX formula** (no custody / booking subtraction —
+ * see `getLocationPickerMeta` for the rationale). The DEFERRED constraint
+ * trigger `enforce_asset_location_sum_within_total` is the underlying
+ * safety net at COMMIT; this re-validation just surfaces a clean 400
+ * instead of a trigger-fired 500.
+ *
+ * @see {@link file://./picker-meta.server.ts} — `getLocationPickerMeta` uses the same formula
+ * @see {@link file://./../../routes/_layout+/locations.$locationId.assets.manage-assets.tsx}
+ */
 export async function updateLocationAssets({
   assetIds,
   organizationId,
@@ -1657,6 +1704,7 @@ export async function updateLocationAssets({
   userId,
   request,
   removedAssetIds,
+  assetQuantities = {},
 }: {
   assetIds: Asset["id"][];
   organizationId: Location["organizationId"];
@@ -1664,11 +1712,20 @@ export async function updateLocationAssets({
   userId: User["id"];
   request: Request;
   removedAssetIds: Asset["id"][];
+  /**
+   * JSON map of QUANTITY_TRACKED asset id → submitted quantity from the
+   * location manage-assets picker. INDIVIDUAL rows are absent; missing
+   * entries fall back to `Asset.quantity` (full pool) for back-compat
+   * with paths that don't expose the qty input yet (bulk + scan +
+   * mobile API still call this helper without `assetQuantities`).
+   */
+  assetQuantities?: Record<string, number>;
 }) {
   try {
     // Load the location alongside the assets currently placed at it via
     // the `AssetLocation` pivot. We need the assets list for ALL_SELECTED
-    // expansion and to skip no-op connects below.
+    // expansion, to skip no-op connects below, and to detect qty edits
+    // against the existing pivot rows.
     const location = await db.location
       .findUniqueOrThrow({
         where: {
@@ -1677,7 +1734,7 @@ export async function updateLocationAssets({
         },
         include: {
           assetLocations: {
-            select: { assetId: true },
+            select: { assetId: true, quantity: true },
           },
         },
       })
@@ -1747,27 +1804,50 @@ export async function updateLocationAssets({
      * since no actual change is happening for them. Existing placements
      * come from the pivot rows we loaded above (`location.assetLocations`).
      */
-    const existingAssetIds = new Set(
-      location.assetLocations.map((al) => al.assetId)
+    const existingAssetIdQtyMap = new Map(
+      location.assetLocations.map((al) => [al.assetId, al.quantity])
     );
+    const existingAssetIds = new Set(existingAssetIdQtyMap.keys());
     const actuallyNewAssetIds = assetIds.filter(
       (id) => !existingAssetIds.has(id)
     );
 
     /**
+     * Qty-edit set: assets already at this location whose submitted
+     * quantity differs from the existing pivot row. The picker pre-fills
+     * the qty input from `AssetLocation.quantity`, so a "no-op confirm"
+     * surfaces here as an empty set — only genuine changes hit the DB.
+     */
+    const alreadyAtLocationIds = assetIds.filter((id) =>
+      existingAssetIds.has(id)
+    );
+    const qtyEditedAssetIds = alreadyAtLocationIds.filter((id) => {
+      const submitted = assetQuantities[id];
+      if (submitted == null) return false;
+      return existingAssetIdQtyMap.get(id) !== submitted;
+    });
+
+    /**
      * We need to query all the modified assets so we know their
      * location before the change so we can later create notes for all
-     * the location changes.
+     * the location changes, AND so we can run strict-available
+     * re-validation for any qty-tracked submission.
      *
      * Select `type` + `quantity` (needed to compute the pivot row's
-     * `quantity` on create) and read the previous placement via the
-     * `AssetLocation` pivot. `getPrimaryLocation` reads the first pivot row.
+     * `quantity` on create) and the FULL `assetLocations` (locationId +
+     * quantity, plus the nested `location.name/id` for the note text)
+     * so the orthogonal-MAX formula can sum "other locations'" qty
+     * without a second fetch.
      */
     const modifiedAssets = await db.asset
       .findMany({
         where: {
           id: {
-            in: [...actuallyNewAssetIds, ...removedAssetIds],
+            in: [
+              ...actuallyNewAssetIds,
+              ...removedAssetIds,
+              ...qtyEditedAssetIds,
+            ],
           },
           organizationId,
         },
@@ -1778,6 +1858,14 @@ export async function updateLocationAssets({
           quantity: true,
           assetLocations: {
             select: {
+              locationId: true,
+              quantity: true,
+              // Discriminate manual vs kit-driven so the sum-within-total
+              // validator below can treat them correctly. Manual rows
+              // at THIS location are editable; kit-driven rows at THIS
+              // location aren't, but their qty still counts against
+              // the asset's pool.
+              assetKitId: true,
               location: {
                 select: {
                   name: true,
@@ -1806,8 +1894,171 @@ export async function updateLocationAssets({
         });
       });
 
+    /**
+     * Strict-available re-validation for every qty-tracked submission.
+     * Uses the orthogonal MAX formula:
+     *
+     *     spaceWithoutMe = Asset.quantity
+     *                    − sum(rows at OTHER locations)
+     *                    − sum(kit-driven rows at THIS location)
+     *     max            = max(manualAtThisLocation, spaceWithoutMe)
+     *
+     * Kit-driven rows AT this location aren't being edited by the
+     * picker (they're owned by the kit's flow) but their qty still
+     * eats into the asset's total pool. They must be subtracted from
+     * the picker's MAX explicitly — lumping them into "other
+     * locations" overshoots reality and would surface as a generic
+     * 500 from the DEFERRED sum-within-total trigger at COMMIT
+     * instead of a clean 400 here.
+     *
+     * Why "max(manual, spaceWithoutMe)": if the asset is already
+     * over-committed across locations, the picker shouldn't lock the
+     * user out of submitting the existing manual slice — the DEFERRED
+     * trigger is the ultimate guard. See {@link getLocationPickerMeta}
+     * for the same formula.
+     *
+     * The submission set covers both new placements and qty edits;
+     * INDIVIDUAL rows are skipped (their qty is always 1, no input).
+     */
+    const oversubscribed: Array<{
+      assetId: string;
+      title: string;
+      submitted: number;
+      max: number;
+      breakdown: {
+        total: number;
+        otherLocations: number;
+        kitDrivenAtThisLocation: number;
+      };
+    }> = [];
+    const validateIds = new Set([...actuallyNewAssetIds, ...qtyEditedAssetIds]);
+    for (const asset of modifiedAssets) {
+      if (!validateIds.has(asset.id)) continue;
+      if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
+      const submitted = assetQuantities[asset.id];
+      if (submitted == null) continue;
+
+      const totalQty = asset.quantity ?? 0;
+      const otherLocationsQty = asset.assetLocations
+        .filter((al) => al.locationId !== locationId)
+        .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
+      // Kit-driven rows at this location (untouched by the picker but
+      // still claiming part of the asset's pool). `== null` covers
+      // both null and undefined so fixtures without `assetKitId` read
+      // as manual.
+      const kitDrivenAtThisLocation = asset.assetLocations
+        .filter((al) => al.locationId === locationId && al.assetKitId != null)
+        .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
+      // The manual row at this location is what the picker edits.
+      const manualAtThisLocation =
+        asset.assetLocations.find(
+          (al) => al.locationId === locationId && al.assetKitId == null
+        )?.quantity ?? 0;
+      const spaceWithoutMe = Math.max(
+        0,
+        totalQty - otherLocationsQty - kitDrivenAtThisLocation
+      );
+      const max = Math.max(manualAtThisLocation, spaceWithoutMe);
+
+      if (submitted > max) {
+        oversubscribed.push({
+          assetId: asset.id,
+          title: asset.title,
+          submitted,
+          max,
+          breakdown: {
+            total: totalQty,
+            otherLocations: otherLocationsQty,
+            kitDrivenAtThisLocation,
+          },
+        });
+      }
+    }
+    if (oversubscribed.length > 0) {
+      const detail = oversubscribed
+        .map((o) => {
+          const parts: string[] = [];
+          parts.push(`requested ${o.submitted}, max ${o.max}`);
+          if (o.breakdown.kitDrivenAtThisLocation > 0) {
+            parts.push(
+              `${o.breakdown.kitDrivenAtThisLocation} via kits at this location`
+            );
+          }
+          if (o.breakdown.otherLocations > 0) {
+            parts.push(`${o.breakdown.otherLocations} placed elsewhere`);
+          }
+          parts.push(`total ${o.breakdown.total}`);
+          return `${o.title} (${parts.join("; ")})`;
+        })
+        .join(". ");
+      throw new ShelfError({
+        cause: null,
+        title: "Quantity exceeds available pool",
+        message: `Submitted quantity exceeds the strict-available pool for: ${detail}.`,
+        additionalData: {
+          locationId,
+          userId,
+          organizationId,
+          oversubscribed,
+        },
+        status: 400,
+        label: "Location",
+        shouldBeCaptured: false,
+      });
+    }
+
     // Use transaction to ensure all location updates and activity events are atomic
+    /**
+     * Cross-location MOVE for INDIVIDUAL assets — collected here so
+     * the activity events below can carry the proper `fromValue`
+     * (old location) instead of `null`. Computed pre-tx from the
+     * `modifiedAssets` fetch which already includes each asset's
+     * current `assetLocations`.
+     *
+     * An INDIVIDUAL asset is capped at one `AssetLocation` row by the
+     * `enforce_individual_asset_single_location` BEFORE trigger. If
+     * the user selects an INDIVIDUAL that's already at another
+     * location, a naked `createMany` would trip the trigger and roll
+     * back the whole tx with a generic check_violation. Instead, we
+     * delete the asset's existing manual row inside the same tx so
+     * the new row at this location passes the trigger. Mirror of the
+     * cross-kit move at `updateKitAssets`.
+     */
+    const movedIndividualPriorLocations = new Map<
+      string,
+      { id: string; name: string }
+    >();
+    for (const asset of modifiedAssets) {
+      if (!actuallyNewAssetIds.includes(asset.id)) continue;
+      if (asset.type !== AssetType.INDIVIDUAL) continue;
+      const priorRow = asset.assetLocations[0];
+      if (!priorRow) continue;
+      movedIndividualPriorLocations.set(asset.id, {
+        id: priorRow.location.id,
+        name: priorRow.location.name,
+      });
+    }
+    const crossLocationMovedIds = Array.from(
+      movedIndividualPriorLocations.keys()
+    );
+
     await db.$transaction(async (tx) => {
+      // Drop the prior manual row for each INDIVIDUAL being moved
+      // across locations — done BEFORE the createMany below so the
+      // INDIVIDUAL single-row trigger sees zero rows for these
+      // assets when the new INSERT runs. Scoped to `assetKitId: null`
+      // because INDIVIDUAL assets can't have kit-driven rows (the
+      // trigger caps them at one row period). Defensive belt-and-
+      // braces.
+      if (crossLocationMovedIds.length > 0) {
+        await tx.assetLocation.deleteMany({
+          where: {
+            assetId: { in: crossLocationMovedIds },
+            assetKitId: null,
+          },
+        });
+      }
+
       if (assetIds.length > 0) {
         /**
          * Connect-by-pivot. Build `AssetLocation` rows for every asset
@@ -1816,9 +2067,9 @@ export async function updateLocationAssets({
          * `updateAssetsWithNewLocation` pattern in
          * `asset/service.server.ts`).
          *
-         * Only insert pivots for assets not already placed here — the
-         * `@@unique([assetId, locationId])` composite would otherwise
-         * conflict on no-op connects.
+         * INDIVIDUALs that were moved across locations have already
+         * had their prior row dropped above, so the new row at this
+         * location passes the single-row trigger.
          */
         if (actuallyNewAssetIds.length > 0) {
           const newPivotRows = modifiedAssets
@@ -1828,8 +2079,8 @@ export async function updateLocationAssets({
               locationId,
               organizationId,
               quantity:
-                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
-                  ? asset.quantity
+                asset.type === AssetType.QUANTITY_TRACKED
+                  ? assetQuantities[asset.id] ?? asset.quantity ?? 1
                   : 1,
             }));
           if (newPivotRows.length > 0) {
@@ -1841,14 +2092,39 @@ export async function updateLocationAssets({
         }
       }
 
+      /**
+       * Qty edits on already-placed pivot rows. One `update` per
+       * affected (assetId, locationId) — bulk `updateMany` is no good
+       * because each row gets its own qty. Mirrors the kit-side
+       * `updateKitAssets` pattern.
+       */
+      if (qtyEditedAssetIds.length > 0) {
+        for (const assetId of qtyEditedAssetIds) {
+          const submitted = assetQuantities[assetId];
+          if (submitted == null) continue;
+          // Manual-row only. The (assetId, locationId) composite isn't
+          // unique on its own (a manual + kit-driven row can coexist
+          // at the same location), so we use `updateMany` scoped to
+          // `assetKitId IS NULL`. The partial unique
+          // `AssetLocation_manual_unique` ensures at most one matching
+          // row per (assetId, locationId).
+          await tx.assetLocation.updateMany({
+            where: { assetId, locationId, assetKitId: null },
+            data: { quantity: submitted },
+          });
+        }
+      }
+
       /** If some assets were removed, we also need to handle those */
       if (removedAssetIds.length > 0) {
-        // Disconnect-by-pivot. Drop the `AssetLocation` rows tying these
-        // assets to this location (scoped to organizationId for
-        // defense-in-depth, even though the location lookup above
-        // already confirmed org ownership).
+        // Disconnect-by-pivot. Drop the MANUAL `AssetLocation` rows
+        // tying these assets to this location (kit-driven rows must
+        // be managed through the kit's flow — they're untouched
+        // here). Org scope is defense-in-depth; the location lookup
+        // above already confirmed org ownership.
         await tx.assetLocation.deleteMany({
           where: {
+            assetKitId: null,
             assetId: { in: removedAssetIds },
             locationId,
             organizationId,
@@ -1856,20 +2132,26 @@ export async function updateLocationAssets({
         });
       }
 
-      // Activity events — one ASSET_LOCATION_CHANGED per affected asset, inside tx.
+      // Activity events — one ASSET_LOCATION_CHANGED per affected
+      // asset, inside tx. For cross-location-moved INDIVIDUALs the
+      // `fromValue` is the prior location id (not null) so reports
+      // can render the move correctly.
       const locEvents: Parameters<typeof recordEvents>[0] = [
-        ...actuallyNewAssetIds.map((assetId) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_LOCATION_CHANGED" as const,
-          entityType: "ASSET" as const,
-          entityId: assetId,
-          assetId,
-          locationId,
-          field: "locationId",
-          fromValue: null,
-          toValue: locationId,
-        })),
+        ...actuallyNewAssetIds.map((assetId) => {
+          const movedFrom = movedIndividualPriorLocations.get(assetId);
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            locationId,
+            field: "locationId",
+            fromValue: movedFrom?.id ?? null,
+            toValue: locationId,
+          };
+        }),
         ...removedAssetIds.map((assetId) => ({
           organizationId,
           actorUserId: userId,
@@ -2076,18 +2358,32 @@ export async function updateLocationKits({
           });
 
           if (flattenedKitAssets.length > 0) {
-            await tx.assetLocation.createMany({
-              data: flattenedKitAssets.map(({ asset }) => ({
-                assetId: asset.id,
-                locationId,
-                organizationId,
-                quantity:
-                  asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
-                    ? asset.quantity
-                    : 1,
-              })),
-              skipDuplicates: true,
+            // A kit being attached to this location should drive
+            // kit-driven AssetLocation rows (`assetKitId` set) rather
+            // than manual ones, so the "via kit" badge and the
+            // kit-cascade flow downstream still work. Drop any
+            // pre-existing kit-driven rows for these AssetKits (the
+            // kit might be moving in from another location), then
+            // create fresh kit-driven rows here.
+            const newKitIds = kitsToAdd.map((k) => k.id);
+            await tx.assetLocation.deleteMany({
+              where: { assetKit: { kitId: { in: newKitIds } } },
             });
+            const assetKitsForKits = await tx.assetKit.findMany({
+              where: { kitId: { in: newKitIds } },
+              select: { id: true, assetId: true, quantity: true },
+            });
+            if (assetKitsForKits.length > 0) {
+              await tx.assetLocation.createMany({
+                data: assetKitsForKits.map((ak) => ({
+                  assetId: ak.assetId,
+                  locationId,
+                  organizationId,
+                  quantity: ak.quantity,
+                  assetKitId: ak.id,
+                })),
+              });
+            }
           }
         })
         .catch((cause) => {
@@ -2250,9 +2546,12 @@ export async function updateLocationKits({
           });
 
           if (removedAssetIds.length > 0) {
+            // Only drop the kit-driven rows for the kits being
+            // detached from this location. Manual rows the user
+            // created at this location for the same assets survive.
             await tx.assetLocation.deleteMany({
               where: {
-                assetId: { in: removedAssetIds },
+                assetKit: { kitId: { in: removedKitIds } },
                 locationId,
                 organizationId,
               },

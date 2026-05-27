@@ -38,9 +38,9 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
  * (via the BookingAsset pivot) for displaying booked items in the email.
  * Only used in reserveBooking(), NOT in other email flows.
  *
- * Phase 3d (Book-by-Model): also pulls `modelRequests` with the related
- * `assetModel` so the reservation email can render a "Requested models"
- * section alongside the booked items list.
+ * Also pulls `modelRequests` (Book-by-Model intent rows) with the
+ * related `assetModel` so the reservation email can render a
+ * "Requested models" section alongside the booked items list.
  */
 export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
   ...BOOKING_INCLUDE_FOR_EMAIL,
@@ -88,9 +88,9 @@ export type ReservationEmailAsset =
 
 /**
  * Type for a single outstanding `BookingModelRequest` row as returned
- * in reservation emails (Phase 3d — Book-by-Model). Inferred from the
- * Prisma include so the email renderer can rely on `assetModel.name`
- * without restating the shape.
+ * in reservation emails (Book-by-Model). Inferred from the Prisma
+ * include so the email renderer can rely on `assetModel.name` without
+ * restating the shape.
  */
 export type ReservationEmailModelRequest =
   BookingForReservationEmail["modelRequests"][number];
@@ -108,6 +108,13 @@ export const BOOKING_COMMON_INCLUDE = {
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
   bookingAssets: {
+    // `assetKitId` is the per-row discriminator (`null` = standalone
+    // slice, non-null = kit-driven slice). Booking UI grouping reads
+    // this instead of `asset.assetKits[0]?.kit` so a standalone scan
+    // of a qty-tracked asset doesn't get rendered under a kit it
+    // doesn't belong to in this booking. The id is the FK to
+    // `AssetKit`; the corresponding kit's name/id are resolved via
+    // the asset's `assetKits` array below (same source data).
     include: {
       asset: {
         select: {
@@ -141,6 +148,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // because no downstream consumer needed the rest.
           assetKits: {
             select: {
+              // `id` lets the booking grouping logic match
+              // `BookingAsset.assetKitId` against the asset's set of
+              // AssetKit memberships so we can resolve the specific
+              // kit a row was booked under (qty-tracked assets can be
+              // in multiple kits).
+              id: true,
               kitId: true,
               kit: {
                 select: {
@@ -159,12 +172,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       { asset: { createdAt: "asc" } }, // Then by creation order as fallback
     ],
   },
-  // Phase 3d (Book-by-Model): surface any outstanding `BookingModelRequest`
-  // rows alongside concrete `bookingAssets` so every loader reusing this
-  // include can render the "unassigned model reservations" section and the
-  // checkout guard can enforce fulfilment. Intentionally kept cheap —
-  // `assetModel` selects just enough for UI/error messaging; no deep
-  // graph traversal required.
+  // Surface any outstanding `BookingModelRequest` rows (Book-by-Model
+  // intent rows) alongside concrete `bookingAssets` so every loader
+  // reusing this include can render the "unassigned model reservations"
+  // section and the checkout guard can enforce fulfilment. Intentionally
+  // kept cheap — `assetModel` selects just enough for UI/error
+  // messaging; no deep graph traversal required.
   modelRequests: {
     include: {
       assetModel: true,

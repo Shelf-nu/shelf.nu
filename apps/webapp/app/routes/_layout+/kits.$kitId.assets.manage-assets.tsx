@@ -59,6 +59,7 @@ import type { PickerAssetMeta } from "~/modules/kit/picker-meta.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -87,78 +88,6 @@ const ASSET_KIT_FILTERS = [
  * additionalData on `getParams` stays consistent.
  */
 const KitParamsSchema = z.object({ kitId: z.string() });
-
-/**
- * Parses the JSON blob the picker submits under `assetQuantities`.
- *
- * Wire format: a JSON-encoded `Record<assetId, quantity>` written into a
- * single hidden form field. The picker writes one entry per selected
- * QUANTITY_TRACKED row. INDIVIDUAL rows are absent — `updateKitAssets`
- * treats missing entries as "use quantity = 1".
- *
- * Why a `transform` instead of `z.record(z.coerce.number())`:
- *
- *   - We need a single, well-shaped 400 when the field is missing,
- *     non-JSON, an array, a primitive, or contains a non-integer / NaN
- *     / negative value. Hand-rolling lets us surface a `Invalid
- *     quantities payload: <reason>` line per failure mode.
- *
- *   - The `unknown` cast is intentional. JSON.parse returns `any`,
- *     which silently swallows shape bugs further down. Narrowing to
- *     `unknown` and re-checking `typeof === "object"` (also excluding
- *     `null` and arrays — both of which would pass `typeof "object"`)
- *     forces the type system to keep us honest.
- *
- *   - Each entry's value gets coerced through `Number(v)` so a string
- *     "5" still parses (browsers sometimes serialise differently across
- *     form-encoders), but the result must be an integer ≥ 1. The
- *     strict-available cap is enforced downstream in
- *     `updateKitAssets`'s server-side re-validation — this schema only
- *     guards the *shape* of the payload, not the *semantic* ceiling.
- *
- * Default empty-object input keeps the action working for pure-INDIVIDUAL
- * submissions where the picker has nothing to write.
- */
-const AssetQuantitiesSchema = z
-  .string()
-  .optional()
-  .default("{}")
-  .transform((raw, ctx): Record<string, number> => {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      // Must be a plain object — `null` and arrays both register as
-      // `typeof "object"` in JS, so they need explicit exclusion.
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        Array.isArray(parsed)
-      ) {
-        throw new Error("expected object");
-      }
-      const result: Record<string, number> = {};
-      for (const [assetId, rawValue] of Object.entries(
-        parsed as Record<string, unknown>
-      )) {
-        // Coerce strings through Number() — different form encoders
-        // sometimes round-trip integers as strings.
-        const value =
-          typeof rawValue === "number" ? rawValue : Number(rawValue);
-        if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
-          throw new Error(`invalid quantity for ${assetId}`);
-        }
-        result[assetId] = value;
-      }
-      return result;
-    } catch (e) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid quantities payload: ${
-          e instanceof Error ? e.message : "parse error"
-        }`,
-      });
-      return z.NEVER;
-    }
-  });
 
 /**
  * Zod schema for the action's form body.
@@ -773,7 +702,11 @@ const RowComponent = ({
       {/* Name */}
       <Td className={tw("w-full min-w-[330px] p-0 md:p-0", allowCursor)}>
         <div className="flex items-center justify-between gap-3 p-4 md:pr-6">
-          <div className="flex items-center gap-3">
+          {/* `min-w-0 flex-1` on the title block so its long text
+              (multi-kit "Also in: ..." line, long titles) wraps
+              cleanly instead of pushing the qty input off-screen.
+              The qty input keeps `shrink-0` and stays visible. */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="flex size-14 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
@@ -786,7 +719,7 @@ const RowComponent = ({
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col gap-y-1">
+            <div className="flex min-w-0 flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
                 {isQuantityTracked(item) && item.quantity != null ? (
@@ -811,7 +744,17 @@ const RowComponent = ({
                   capped by allocations elsewhere. Only renders when
                   the asset is in another kit. */}
               {otherKits.length > 0 && (
-                <p className="text-xs text-gray-500">
+                // Single-line + ellipsis so a multi-kit list doesn't
+                // overflow the Td and visually collide with the qty
+                // input on the right. The full list is available via
+                // the tooltip below and on the asset overview's
+                // "Included in kits" card.
+                <p
+                  className="truncate text-xs text-gray-500"
+                  title={otherKits
+                    .map((k) => `${k.kitName} (${k.quantity})`)
+                    .join(", ")}
+                >
                   Also in:{" "}
                   {otherKits
                     .map((k) => `${k.kitName} (${k.quantity})`)

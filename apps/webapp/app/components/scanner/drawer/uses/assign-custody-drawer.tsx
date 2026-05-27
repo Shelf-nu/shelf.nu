@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -30,6 +30,7 @@ import {
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
 import type {
@@ -113,9 +114,18 @@ export default function AssignCustodyDrawer({
     .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
     .map((asset) => asset.id);
 
-  // Asset is part of a kit
+  // Asset is part of a kit. Only INDIVIDUAL assets get blocked here —
+  // a qty-tracked asset can be partially in a kit and still have a
+  // free pool that's eligible for direct custody assignment. The
+  // server-side strict-available re-validation catches over-allocation.
   const assetsArePartOfKit = assets
-    .filter((asset) => !!asset && asset.assetKits.length > 0 && asset.id)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.assetKits.length > 0 &&
+        asset.id
+    )
     .map((asset) => asset.id);
 
   // Kit blockers
@@ -517,7 +527,10 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
     assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
-    assetLabelPresets.partOfKit(asset.assetKits.length > 0),
+    assetLabelPresets.partOfKit(
+      asset.assetKits.length > 0,
+      isQuantityTracked(asset)
+    ),
   ];
 
   // Create the availability labels component with max 2 labels

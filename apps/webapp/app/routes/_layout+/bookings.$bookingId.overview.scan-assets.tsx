@@ -114,10 +114,90 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, kitIds } = parseData(
-      formData,
-      addScannedAssetsToBookingSchema
-    );
+    const {
+      assetIds,
+      kitIds,
+      quantities: rawQuantities,
+      assetKitIdByAsset: rawAssetKitIdByAsset,
+    } = parseData(formData, addScannedAssetsToBookingSchema);
+
+    // Parse the JSON-encoded `quantities` blob into a
+    // Record<assetId, qty>. Shape-only validation here (positive int,
+    // sane upper bound); availability re-validation lives in
+    // `addScannedAssetsToBooking` / the booking trigger downstream.
+    let quantities: Record<string, number> = {};
+    if (rawQuantities && rawQuantities !== "{}") {
+      try {
+        const parsed = JSON.parse(rawQuantities);
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed)
+        ) {
+          throw new Error("expected object");
+        }
+        for (const [assetId, rawValue] of Object.entries(
+          parsed as Record<string, unknown>
+        )) {
+          const value =
+            typeof rawValue === "number" ? rawValue : Number(rawValue);
+          if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 1 ||
+            value > 1_000_000
+          ) {
+            throw new Error(`invalid quantity for ${assetId}`);
+          }
+          quantities[assetId] = value;
+        }
+      } catch (e) {
+        throw new ShelfError({
+          cause: e,
+          message: `Invalid quantities payload: ${
+            e instanceof Error ? e.message : "parse error"
+          }`,
+          status: 400,
+          label: "Booking",
+          additionalData: { userId, bookingId },
+        });
+      }
+    }
+
+    // Parse the kit-source map the drawer sends. Shape-only validation
+    // here; the service trusts the IDs and will fail at the FK level
+    // if a stale assetKitId is submitted.
+    const assetKitIdByAsset: Record<string, string> = {};
+    if (rawAssetKitIdByAsset && rawAssetKitIdByAsset !== "{}") {
+      try {
+        const parsed = JSON.parse(rawAssetKitIdByAsset);
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed)
+        ) {
+          throw new Error("expected object");
+        }
+        for (const [assetId, rawValue] of Object.entries(
+          parsed as Record<string, unknown>
+        )) {
+          if (typeof rawValue !== "string" || rawValue.length === 0) {
+            throw new Error(`invalid assetKitId for ${assetId}`);
+          }
+          assetKitIdByAsset[assetId] = rawValue;
+        }
+      } catch (e) {
+        throw new ShelfError({
+          cause: e,
+          message: `Invalid assetKitIdByAsset payload: ${
+            e instanceof Error ? e.message : "parse error"
+          }`,
+          status: 400,
+          label: "Booking",
+          additionalData: { userId, bookingId },
+        });
+      }
+    }
 
     await addScannedAssetsToBooking({
       bookingId,
@@ -125,6 +205,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitIds,
       organizationId,
       userId,
+      quantities,
+      assetKitIdByAsset,
     });
 
     sendNotification({

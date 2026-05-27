@@ -74,10 +74,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * booking reference in activity notes, plus `creatorId`/`custodianUserId`
      * for the SELF_SERVICE/BASE ownership check below.
      */
+    // Scope to the STANDALONE slice (`assetKitId IS NULL`). A qty-tracked
+    // asset booked via the kit picker has a separate kit-driven row whose
+    // quantity is managed by the kit (live link from `updateKitAssets`);
+    // adjusting it from this surface would silently desync the kit. Users
+    // adjust the standalone slice here; kit slice edits go through the
+    // kit picker.
     const bookingAsset = await db.bookingAsset.findFirst({
       where: {
         bookingId,
         assetId,
+        assetKitId: null,
         booking: { organizationId },
       },
       include: {

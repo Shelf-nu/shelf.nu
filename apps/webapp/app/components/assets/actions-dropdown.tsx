@@ -242,8 +242,21 @@ const ConditionalActionsDropdown = () => {
                   className="px-0 py-1 md:p-0"
                   aria-disabled={assetIsCheckedOut}
                 >
+                  {/*
+                    QUANTITY_TRACKED assets route to the multi-row
+                    "Manage placements" dialog instead of the single-
+                    location quick-set dialog — placements are the
+                    asset's primary location concept once multiple
+                    slices are possible. INDIVIDUAL assets keep the
+                    original single-location dialog since they're
+                    capped at one placement by the BEFORE trigger.
+                  */}
                   <Button
-                    to="overview/update-location"
+                    to={
+                      isQtyTracked
+                        ? "overview/manage-placements"
+                        : "overview/update-location"
+                    }
                     role="link"
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
@@ -267,7 +280,8 @@ const ConditionalActionsDropdown = () => {
                     } // to show tooltip only when disabled
                   >
                     <span className="flex items-center gap-2">
-                      <Icon icon="location" /> Update location
+                      <Icon icon="location" />{" "}
+                      {isQtyTracked ? "Manage placements" : "Update location"}
                     </span>
                   </Button>
                 </div>

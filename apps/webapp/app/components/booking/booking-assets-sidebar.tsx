@@ -5,13 +5,12 @@
  * booking (kits + individual assets) along with qty-progress indicators
  * for partial check-ins.
  *
- * Phase 3d (Book-by-Model) adds an "Unassigned model reservations"
- * section that renders above the asset list whenever the booking has
- * outstanding `BookingModelRequest` rows (quantity > 0). The new prop
- * `booking.modelRequests` is optional so existing callers using the
- * narrower inline Prisma shape (see `_layout+/bookings._index.tsx`)
- * keep working — the section just renders nothing when the field is
- * absent.
+ * Renders an "Unassigned model reservations" section (Book-by-Model)
+ * above the asset list whenever the booking has outstanding
+ * `BookingModelRequest` rows (quantity > 0). The `booking.modelRequests`
+ * prop is optional so existing callers using the narrower inline
+ * Prisma shape (see `_layout+/bookings._index.tsx`) keep working — the
+ * section just renders nothing when the field is absent.
  *
  * @see {@link file://./../../modules/booking/constants.ts} BOOKING_WITH_ASSETS_INCLUDE
  * @see {@link file://./../../modules/booking-model-request/service.server.ts}
@@ -50,6 +49,10 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
       select: {
         id: true;
         quantity: true;
+        // Per-row kit-source discriminator so the sidebar can group
+        // rows accurately rather than using `asset.assetKits[0]` as
+        // a fallback.
+        assetKitId: true;
         asset: {
           select: {
             id: true;
@@ -71,6 +74,12 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             };
             assetKits: {
               select: {
+                // `id` lets the sidebar match BookingAsset's
+                // `assetKitId` against the asset's set of memberships
+                // so multi-kit qty-tracked assets surface under the
+                // right kit (or stay standalone when assetKitId IS NULL).
+                id: true;
+                kitId: true;
                 kit: {
                   select: {
                     id: true;
@@ -189,12 +198,19 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
   const individualAssets: SidebarAsset[] = [];
 
   bookingAssets.forEach((ba) => {
-    const pivotKit = ba.asset.assetKits[0]?.kit ?? null;
+    // Pick the kit by matching `BookingAsset.assetKitId` against the
+    // asset's `assetKits` set (mirror of the same logic in the booking
+    // detail loader). Standalone slices have `ba.assetKitId == null`
+    // and render in the individual bucket regardless of whether the
+    // asset happens to be in any kit.
+    const sourceKit = ba.assetKitId
+      ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
+      : null;
     const asset: SidebarAsset = {
       ...ba.asset,
       bookedQuantity: ba.quantity,
-      kit: pivotKit,
-      kitId: pivotKit?.id ?? null,
+      kit: sourceKit,
+      kitId: sourceKit?.id ?? null,
     };
     if (asset.kitId && asset.kit) {
       const kitId = asset.kitId;
@@ -515,8 +531,8 @@ export function BookingAssetsSidebar({
 
   // The drawer is worth opening whenever the booking contains anything
   // worth showing — concrete assets OR outstanding model-level
-  // reservations (Phase 3d). Pure book-by-model bookings legitimately
-  // have `bookingAssets.length === 0` but still carry content.
+  // reservations. Pure book-by-model bookings legitimately have
+  // `bookingAssets.length === 0` but still carry content.
   const outstandingModelRequestCount = (booking.modelRequests ?? []).filter(
     (req) => req.fulfilledAt === null
   ).length;

@@ -194,17 +194,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * For QUANTITY_TRACKED assets, compute available quantity factoring in
-     * both custody AND booking reservations. Exclude the current booking
-     * so its own reservation doesn't reduce the displayed availability.
+     * For QUANTITY_TRACKED assets, compute available quantity factoring
+     * in kit allocations, custody, AND overlapping booking reservations.
+     * Exclude the current booking so its own reservation doesn't reduce
+     * the displayed availability.
+     *
+     * Kits MUST be in the formula — qty-tracked-in-kit assets are
+     * selectable in the picker for their free pool, so the picker's
+     * MAX has to subtract the slices committed to any kit. Matches the
+     * asset-overview "Available" formula in `quantity-overview-card.tsx`
+     * so the two surfaces agree.
      */
     const qtyAssetIds = assets
       .filter((a) => a.type === "QUANTITY_TRACKED")
       .map((a) => a.id);
 
-    const [custodySums, bookingSums] =
+    const [assetKitSums, custodySums, bookingSums] =
       qtyAssetIds.length > 0
         ? await Promise.all([
+            db.assetKit.groupBy({
+              by: ["assetId"],
+              where: { assetId: { in: qtyAssetIds }, organizationId },
+              _sum: { quantity: true },
+            }),
             db.custody.groupBy({
               by: ["assetId"],
               where: { assetId: { in: qtyAssetIds } },
@@ -246,8 +258,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               _sum: { quantity: true },
             }),
           ])
-        : [[], []];
+        : [[], [], []];
 
+    const inKitsByAsset = new Map(
+      assetKitSums.map((k) => [k.assetId, k._sum.quantity ?? 0])
+    );
     const custodyByAsset = new Map(
       custodySums.map((c) => [c.assetId, c._sum.quantity ?? 0])
     );
@@ -259,9 +274,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const assetsWithAvailability = assets
       .map((a) => {
         if (a.type !== "QUANTITY_TRACKED") return a;
+        const inKits = inKitsByAsset.get(a.id) ?? 0;
         const inCustody = custodyByAsset.get(a.id) ?? 0;
         const reserved = reservedByAsset.get(a.id) ?? 0;
-        const availableQuantity = (a.quantity ?? 0) - inCustody - reserved;
+        const availableQuantity =
+          (a.quantity ?? 0) - inKits - inCustody - reserved;
         return { ...a, availableQuantity };
       })
       .filter((a) => {
@@ -311,7 +328,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     /**
-     * Phase 3d (Book-by-Model) — Models tab payload.
+     * Book-by-Model — Models tab payload.
      *
      * We always count the org's AssetModels so the UI knows whether to
      * render the "Models" tab at all (hidden when the org has none).
@@ -321,8 +338,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * for large orgs; if an org has more models we paginate by just
      * showing the first batch sorted by name.
      *
-     * TODO(3d): add a paginated "search models" API once an org actually
-     * bumps into the MODEL_PICKER_LIMIT cap. Not blocking shipping.
+     * TODO: add a paginated "search models" API once an org actually
+     * bumps into the MODEL_PICKER_LIMIT cap.
      */
     const MODEL_PICKER_LIMIT = 50;
     const assetModelsCount = await db.assetModel.count({
@@ -394,7 +411,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }));
 
     /**
-     * Phase 3d — shape for {@link DynamicSelect}. The picker reads
+     * Shape for {@link DynamicSelect}. The picker reads
      * `initialAssetModels` as its seed list and `totalAssetModels`
      * to decide whether to offer the "show all / search" affordance.
      * Availability goes on `metadata` so the renderItem can show
@@ -615,6 +632,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
            * quantity for \"Screwdriver\" to 5").
            */
           bookingAssets: {
+            // The picker manages STANDALONE booking slices
+            // (`assetKitId IS NULL`). Kit-driven slices coexist for the
+            // same asset under partial unique `BookingAsset_kit_unique`
+            // and are managed by removing the kit from the booking,
+            // not by editing the qty here.
+            where: { assetKitId: null },
             select: {
               assetId: true,
               quantity: true,
@@ -833,10 +856,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /**
-     * Phase 3c guardrail: for any qty-tracked asset whose quantity is
-     * being reduced, make sure the new value isn't lower than the sum of
-     * what's already been dispositioned via ConsumptionLog (RETURN /
-     * CONSUME / LOSS / DAMAGE) for this booking.
+     * Quantity-shrink guardrail: for any qty-tracked asset whose
+     * quantity is being reduced, make sure the new value isn't lower
+     * than the sum of what's already been dispositioned via
+     * ConsumptionLog (RETURN / CONSUME / LOSS / DAMAGE) for this
+     * booking.
      *
      * Without this check, remaining = BookingAsset.quantity − Σ(logs)
      * could go negative and the check-in math would break.
@@ -1047,8 +1071,13 @@ export default function AddAssetsToNewBooking() {
    */
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
+    // Loader scopes `bookingAssets` to standalone rows
+    // (`assetKitId IS NULL`), so the kit-membership exclusion that used
+    // to live here is redundant. Qty-tracked-in-kit assets can have an
+    // editable standalone slice alongside their kit-driven slice
+    // (managed separately via kit removal).
     for (const ba of booking.bookingAssets) {
-      if (isQuantityTracked(ba.asset) && ba.asset.assetKits.length === 0) {
+      if (isQuantityTracked(ba.asset)) {
         initial[ba.asset.id] = ba.quantity;
       }
     }
@@ -1085,12 +1114,14 @@ export default function AddAssetsToNewBooking() {
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
-  /** Assets with kits has to be handled from manage-kits */
+  /**
+   * Picker's view of the booking — standalone slices only. The loader
+   * scopes its `bookingAssets` query to `assetKitId IS NULL` so
+   * kit-driven rows (managed by removing the kit from the booking
+   * directly) don't surface here.
+   */
   const bookingAssets = useMemo(
-    () =>
-      booking.bookingAssets
-        .filter((ba) => ba.asset.assetKits.length === 0)
-        .map((ba) => ba.asset),
+    () => booking.bookingAssets.map((ba) => ba.asset),
     [booking.bookingAssets]
   );
 
@@ -1112,7 +1143,9 @@ export default function AddAssetsToNewBooking() {
   const initialQuantities = useMemo(() => {
     const m: Record<string, number> = {};
     for (const ba of booking.bookingAssets) {
-      if (isQuantityTracked(ba.asset) && ba.asset.assetKits.length === 0) {
+      // Loader scopes to standalone rows; see comment on the
+      // `quantities` state initializer above.
+      if (isQuantityTracked(ba.asset)) {
         m[ba.asset.id] = ba.quantity;
       }
     }

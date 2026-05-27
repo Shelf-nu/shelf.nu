@@ -22,7 +22,7 @@ import {
   updateLocationKits,
 } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-
+import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -108,13 +108,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { kitIds, assetIds } = parseData(
-      formData,
-      addScannedAssetsOrKitsToLocationSchema,
-      {
-        additionalData: { userId, organizationId, locationId },
-      }
-    );
+    const {
+      kitIds,
+      assetIds,
+      assetQuantities: rawAssetQuantities,
+    } = parseData(formData, addScannedAssetsOrKitsToLocationSchema, {
+      additionalData: { userId, organizationId, locationId },
+    });
+
+    // Parse the JSON-encoded `assetQuantities` blob with the same
+    // schema the manage-assets picker uses. Missing entries fall back
+    // to full-pool inside `updateLocationAssets` — INDIVIDUAL rows
+    // never appear here.
+    const assetQuantities = AssetQuantitiesSchema.parse(rawAssetQuantities);
 
     if (assetIds.length) {
       await updateLocationAssets({
@@ -124,6 +130,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         userId,
         request,
         removedAssetIds: [],
+        assetQuantities,
       });
     }
 

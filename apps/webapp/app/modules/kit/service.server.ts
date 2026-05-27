@@ -67,6 +67,7 @@ import {
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import { createSystemBookingNote } from "../booking-note/service.server";
 import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
@@ -140,6 +141,150 @@ type KitCustodyInheritTxClient = {
   };
 };
 
+/**
+ * Pre-fetches the kit-driven `BookingAsset` rows that will
+ * be converted to standalone (via the DB-level `SET NULL` cascade) when
+ * the given `AssetKit` rows are deleted. Call this BEFORE the
+ * `tx.assetKit.deleteMany(...)` inside the same transaction; pair the
+ * returned array with {@link emitAssetKitDetachmentNotes} after the
+ * delete completes to log a per-booking system note.
+ *
+ * Scope filter: only DRAFT / RESERVED / ONGOING / OVERDUE bookings get
+ * notes — already-completed / cancelled / archived bookings are
+ * historical and don't need notification of the cascade.
+ *
+ * @param tx Prisma transaction client (extended `any` per project pattern)
+ * @param assetKitIds AssetKit rows about to be deleted in the same tx
+ * @returns Array of `{ bookingAssetId, bookingId, bookingName, assetTitle, kitName }`
+ *   capturing the affected pre-delete state so the post-delete note can
+ *   reference the kit by name (which would otherwise be unrecoverable).
+ */
+async function fetchAssetKitDetachmentImpact(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  assetKitIds: string[]
+): Promise<
+  Array<{
+    bookingAssetId: string;
+    bookingId: string;
+    bookingName: string;
+    assetId: string;
+    assetTitle: string;
+    kitId: string;
+    kitName: string;
+  }>
+> {
+  if (assetKitIds.length === 0) return [];
+  const rows = await tx.bookingAsset.findMany({
+    where: {
+      assetKitId: { in: assetKitIds },
+      booking: {
+        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+      },
+    },
+    select: {
+      id: true,
+      bookingId: true,
+      booking: { select: { name: true } },
+      asset: { select: { id: true, title: true } },
+      assetKit: { select: { kitId: true, kit: { select: { name: true } } } },
+    },
+  });
+  return rows.map(
+    (r: {
+      id: string;
+      bookingId: string;
+      booking: { name: string };
+      asset: { id: string; title: string };
+      assetKit: { kitId: string; kit: { name: string } } | null;
+    }) => ({
+      bookingAssetId: r.id,
+      bookingId: r.bookingId,
+      bookingName: r.booking.name,
+      assetId: r.asset.id,
+      assetTitle: r.asset.title,
+      // `assetKit` is non-null at the moment of the pre-fetch (we filter
+      // on `assetKitId IN (...)` upstream), but TS doesn't know that —
+      // the empty-string fallback should never fire in practice.
+      kitId: r.assetKit?.kitId ?? "",
+      kitName: r.assetKit?.kit?.name ?? "",
+    })
+  );
+}
+
+/**
+ * Companion to {@link fetchAssetKitDetachmentImpact}. Writes a system
+ * note on each affected booking explaining that the kit's booked slice
+ * has been converted to a standalone reservation. The kit-driven
+ * BookingAsset row itself stays in the booking — the DB-level
+ * `ON DELETE SET NULL` cascade just clears its `assetKitId` so the
+ * booking UI groups it as standalone going forward.
+ *
+ * No activity-event emission yet — that would require a new enum value
+ * (e.g. `BOOKING_ASSET_DETACHED_FROM_KIT`) and a migration. Deferred;
+ * the system notes alone cover the user-visible audit trail.
+ */
+async function emitAssetKitDetachmentNotes({
+  impact,
+  actorUserId,
+  actorFirstName,
+  actorLastName,
+  organizationId,
+}: {
+  impact: Awaited<ReturnType<typeof fetchAssetKitDetachmentImpact>>;
+  actorUserId: string;
+  actorFirstName: string | null;
+  actorLastName: string | null;
+  organizationId: string;
+}) {
+  if (impact.length === 0) return;
+  const actorLink = wrapUserLinkForNote({
+    id: actorUserId,
+    firstName: actorFirstName,
+    lastName: actorLastName,
+  });
+  // One note per (booking, kit) pair. Multiple assets removed from the
+  // same kit in the same delete are collapsed to a single note per
+  // booking so we don't spam the booking activity feed.
+  type Group = {
+    bookingId: string;
+    kitName: string;
+    assetTitles: string[];
+  };
+  const groups = new Map<string, Group>();
+  for (const row of impact) {
+    const key = `${row.bookingId}::${row.kitId}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.assetTitles.push(row.assetTitle);
+    } else {
+      groups.set(key, {
+        bookingId: row.bookingId,
+        kitName: row.kitName,
+        assetTitles: [row.assetTitle],
+      });
+    }
+  }
+  for (const group of groups.values()) {
+    const subjects =
+      group.assetTitles.length === 1
+        ? `**${group.assetTitles[0]}**`
+        : `**${group.assetTitles.length} assets** (${group.assetTitles
+            .map((t) => `*${t}*`)
+            .join(", ")})`;
+    // `createSystemBookingNote` doesn't accept a tx (matches the other
+    // booking-note call sites). The note creates outside the kit-delete
+    // tx; in the unlikely event the tx rolls back, the note is
+    // orphaned. Acceptable per the existing pattern in
+    // `apps/webapp/app/modules/booking/service.server.ts`.
+    await createSystemBookingNote({
+      bookingId: group.bookingId,
+      organizationId,
+      content: `${actorLink} removed ${subjects} from kit **${group.kitName}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
+    });
+  }
+}
+
 export async function buildKitCustodyInheritData({
   tx,
   kitId,
@@ -149,7 +294,7 @@ export async function buildKitCustodyInheritData({
 }: {
   tx: KitCustodyInheritTxClient;
   /** The Kit whose custody is being assigned. Used to find each asset's
-   * per-kit AssetKit.quantity (Phase 4a-Polish-2). */
+   * per-kit AssetKit.quantity. */
   kitId: string;
   kitCustodyId: string;
   teamMemberId: string;
@@ -166,10 +311,10 @@ export async function buildKitCustodyInheritData({
       // Pre-existing Custody rows (operator-allocated + any kit-allocated
       // from previously-assigned kits) — needed for the strict cap below.
       custody: { select: { quantity: true } },
-      // The kit's allocated slice. Phase 4a-Polish-2 makes this the
-      // primary source of truth; defensive `?.[0]` handles the case where
-      // the row is missing (shouldn't happen — caller passes assetIds
-      // that belong to this kit — but we'd rather skip than crash).
+      // The kit's allocated slice is the primary source of truth;
+      // defensive `?.[0]` handles the case where the row is missing
+      // (shouldn't happen — caller passes assetIds that belong to this
+      // kit — but we'd rather skip than crash).
       assetKits: {
         where: { kitId },
         select: { quantity: true },
@@ -1725,11 +1870,11 @@ export async function bulkAssignKitCustody({
     );
 
     // INDIVIDUAL assets block the assign; QUANTITY_TRACKED don't.
-    // Phase 3d-Polish-2's `buildKitCustodyInheritData` (Option B) writes
-    // the *remaining* pool per asset, so a qty-tracked asset whose
-    // row-level status is IN_CUSTODY (some units operator-held) still
-    // assigns the leftover quantity, and fully-allocated assets are
-    // silently skipped — neither needs to block here.
+    // `buildKitCustodyInheritData` writes the *remaining* pool per asset,
+    // so a qty-tracked asset whose row-level status is IN_CUSTODY (some
+    // units operator-held) still assigns the leftover quantity, and
+    // fully-allocated assets are silently skipped — neither needs to
+    // block here.
     const someAssetsUnavailable = allAssetsOfAllKits.some(
       (asset) =>
         asset.type !== "QUANTITY_TRACKED" && asset.status !== "AVAILABLE"
@@ -2400,7 +2545,7 @@ export async function updateKitLocation({
       );
 
       // Connect kit to the new location AND cascade per-asset placement via
-      // the AssetLocation pivot (Phase 4b), atomically with the per-asset
+      // the AssetLocation pivot, atomically with the per-asset
       // ASSET_LOCATION_CHANGED events. The DEFERRED
       // `enforce_asset_location_sum_within_total` trigger re-checks at COMMIT.
       await db.$transaction(async (tx) => {
@@ -2414,24 +2559,29 @@ export async function updateKitLocation({
         });
 
         if (assetIds.length > 0) {
-          // Per-asset pivot replace: drop any existing AssetLocation rows
-          // for these assets, then create one fresh row each at the new
-          // location with type-aware quantity.
+          // Only touch kit-driven rows (the ones whose `assetKit.kitId`
+          // matches this kit). Manual placements belong to the user and
+          // survive a kit-location change. Drop existing kit-driven rows
+          // for this kit, then re-create them at the new location with
+          // `assetKitId` set so the discriminator survives.
           await tx.assetLocation.deleteMany({
-            where: { assetId: { in: assetIds } },
+            where: { assetKit: { kitId: id } },
           });
-          await tx.assetLocation.createMany({
-            data: kit.assets.map((asset) => ({
-              assetId: asset.id,
-              locationId: newLocationId,
-              organizationId,
-              quantity:
-                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
-                  ? asset.quantity
-                  : 1,
-            })),
-            skipDuplicates: true,
+          const assetKitsForKit = await tx.assetKit.findMany({
+            where: { kitId: id },
+            select: { id: true, assetId: true, quantity: true },
           });
+          if (assetKitsForKit.length > 0) {
+            await tx.assetLocation.createMany({
+              data: assetKitsForKit.map((ak) => ({
+                assetId: ak.assetId,
+                locationId: newLocationId,
+                organizationId,
+                quantity: ak.quantity,
+                assetKitId: ak.id,
+              })),
+            });
+          }
         }
 
         if (userId && assetsWithLocationChange.length > 0) {
@@ -2496,8 +2646,8 @@ export async function updateKitLocation({
       );
 
       // Disconnect kit from the old location AND drop per-asset placement
-      // via the AssetLocation pivot (Phase 4b), atomically with the
-      // per-asset ASSET_LOCATION_CHANGED events.
+      // via the AssetLocation pivot, atomically with the per-asset
+      // ASSET_LOCATION_CHANGED events.
       await db.$transaction(async (tx) => {
         await tx.location.update({
           where: { id: currentLocationId },
@@ -2509,15 +2659,11 @@ export async function updateKitLocation({
         });
 
         if (assetIds.length > 0) {
-          // Drop pivot rows that pinned these assets to the old location.
-          // Scoped by `locationId` so we don't accidentally wipe other
-          // placements an asset might still have (defensive — pre-pivot
-          // assets are at most one location).
+          // Only delete kit-driven rows for THIS kit. Manual rows
+          // survive (the user's own placements aren't unset just
+          // because the kit lost its location).
           await tx.assetLocation.deleteMany({
-            where: {
-              assetId: { in: assetIds },
-              locationId: currentLocationId,
-            },
+            where: { assetKit: { kitId: id } },
           });
         }
 
@@ -2668,7 +2814,7 @@ export async function bulkUpdateKitLocation({
       );
 
       // Connect kits to the new location AND cascade per-asset placement via
-      // the AssetLocation pivot (Phase 4b), atomically with the per-asset
+      // the AssetLocation pivot, atomically with the per-asset
       // ASSET_LOCATION_CHANGED events. The DEFERRED
       // `enforce_asset_location_sum_within_total` trigger re-checks at COMMIT.
       await db.$transaction(async (tx) => {
@@ -2682,24 +2828,28 @@ export async function bulkUpdateKitLocation({
         });
 
         if (allAssets.length > 0) {
-          const allAssetIds = allAssets.map((asset) => asset.id);
-          // Per-asset pivot replace: drop existing rows, then create one
-          // fresh row each at the new location with type-aware quantity.
+          // Only touch kit-driven rows whose `assetKit.kitId` is in
+          // the bulk set. Manual placements survive. Drop existing
+          // kit-driven rows then re-create at the new location with
+          // `assetKitId` set.
           await tx.assetLocation.deleteMany({
-            where: { assetId: { in: allAssetIds } },
+            where: { assetKit: { kitId: { in: actualKitIds } } },
           });
-          await tx.assetLocation.createMany({
-            data: allAssets.map((asset) => ({
-              assetId: asset.id,
-              locationId: newLocationId,
-              organizationId,
-              quantity:
-                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
-                  ? asset.quantity
-                  : 1,
-            })),
-            skipDuplicates: true,
+          const assetKitsForKits = await tx.assetKit.findMany({
+            where: { kitId: { in: actualKitIds } },
+            select: { id: true, assetId: true, quantity: true },
           });
+          if (assetKitsForKits.length > 0) {
+            await tx.assetLocation.createMany({
+              data: assetKitsForKits.map((ak) => ({
+                assetId: ak.assetId,
+                locationId: newLocationId,
+                organizationId,
+                quantity: ak.quantity,
+                assetKitId: ak.id,
+              })),
+            });
+          }
         }
 
         if (assetsWithLocationChange.length > 0) {
@@ -2772,11 +2922,11 @@ export async function bulkUpdateKitLocation({
         });
 
         if (allAssets.length > 0) {
-          // Drop all pivot rows for these assets — pre-pivot semantics had
-          // each asset at exactly one location, so a full delete cleanly
-          // matches the old `locationId = null` behaviour.
+          // Only drop kit-driven rows for THIS batch of kits. Manual
+          // rows survive — clearing the kits' location doesn't undo
+          // the user's own placements.
           await tx.assetLocation.deleteMany({
-            where: { assetId: { in: allAssets.map((asset) => asset.id) } },
+            where: { assetKit: { kitId: { in: actualKitIds } } },
           });
         }
 
@@ -3196,12 +3346,11 @@ export async function updateKitAssets({
     );
 
     /**
-     * Phase 4a-Polish-2 server-side strict-available validation. The
-     * picker enforces this client-side and the DEFERRED constraint
-     * trigger catches over-allocation at COMMIT, but a tampered request
-     * would otherwise surface as a generic 500. Re-check the
-     * strict-available pool here for any qty-tracked submission and
-     * return a clean 400.
+     * Server-side strict-available validation. The picker enforces this
+     * client-side and the DEFERRED constraint trigger catches
+     * over-allocation at COMMIT, but a tampered request would otherwise
+     * surface as a generic 500. Re-check the strict-available pool here
+     * for any qty-tracked submission and return a clean 400.
      *
      * Strict-available formula (matches the picker loader):
      *   spaceWithoutMe = Asset.quantity
@@ -3312,10 +3461,33 @@ export async function updateKitAssets({
     // The old kit.update({ data: { assets: { connect, disconnect } } })
     // block becomes direct pivot writes inside a single $transaction so
     // remove + add + qty-edit are atomic.
+    // Collect AssetKit ids being deleted across both disconnect branches
+    // so we can pre-fetch the kit-driven BookingAsset rows that will be
+    // SET-NULL'd before the delete fires. The corresponding
+    // `emitAssetKitDetachmentNotes` call runs at the end of the tx body
+    // so bookings get a system note explaining the
+    // conversion-to-standalone for their kit-driven slices.
+    let detachmentImpact: Awaited<
+      ReturnType<typeof fetchAssetKitDetachmentImpact>
+    > = [];
+
     await db.$transaction(async (tx) => {
       // Disconnect: drop the pivot rows for removed assets (only when not
       // in addOnly mode).
       if (!addOnly && removedAssets.length > 0) {
+        const aksToDelete = await tx.assetKit.findMany({
+          where: {
+            kitId: kit.id,
+            assetId: { in: removedAssets.map(({ id }) => id) },
+          },
+          select: { id: true },
+        });
+        detachmentImpact = detachmentImpact.concat(
+          await fetchAssetKitDetachmentImpact(
+            tx,
+            aksToDelete.map((ak: { id: string }) => ak.id)
+          )
+        );
         await tx.assetKit.deleteMany({
           where: {
             kitId: kit.id,
@@ -3331,10 +3503,9 @@ export async function updateKitAssets({
       // `enforce_individual_asset_single_kit` trigger would otherwise
       // reject the insert with check_violation).
       //
-      // QUANTITY_TRACKED assets can co-exist in multiple kits as of
-      // Phase 4a-Polish-2 — their pivot rows in OTHER kits stay intact,
-      // and the picker will have set this kit's quantity in
-      // `assetQuantities[id]`.
+      // QUANTITY_TRACKED assets can co-exist in multiple kits — their
+      // pivot rows in OTHER kits stay intact, and the picker will have
+      // set this kit's quantity in `assetQuantities[id]`.
       const movedFromOtherKitIds = newlyAddedAssets
         .filter(
           (asset) =>
@@ -3343,6 +3514,19 @@ export async function updateKitAssets({
         )
         .map((asset) => asset.id);
       if (movedFromOtherKitIds.length > 0) {
+        // Same pre-fetch as above so cross-kit-move INDIVIDUALS get the
+        // detachment notes for any active booking that held the asset
+        // via the OTHER kit. (Edge case but worth covering.)
+        const aksToDelete = await tx.assetKit.findMany({
+          where: { assetId: { in: movedFromOtherKitIds } },
+          select: { id: true },
+        });
+        detachmentImpact = detachmentImpact.concat(
+          await fetchAssetKitDetachmentImpact(
+            tx,
+            aksToDelete.map((ak: { id: string }) => ak.id)
+          )
+        );
         await tx.assetKit.deleteMany({
           where: { assetId: { in: movedFromOtherKitIds } },
         });
@@ -3352,8 +3536,8 @@ export async function updateKitAssets({
       // comes from the submitted `assetQuantities` map for QTY_TRACKED;
       // INDIVIDUAL is always 1. Missing map entries (today's behaviour
       // before the picker UI ships in T5) default QTY_TRACKED to the
-      // asset's full pool — matches the Phase 4a-Polish-2 backfill so
-      // there's no observable change until the picker is wired up.
+      // asset's full pool — matches the backfill so there's no
+      // observable change until the picker is wired up.
       if (newlyAddedAssets.length > 0) {
         await tx.assetKit.createMany({
           data: newlyAddedAssets.map((asset) => {
@@ -3385,6 +3569,118 @@ export async function updateKitAssets({
           });
         }
       }
+
+      /**
+       * Kit-driven AssetLocation cascade — atomic with the AssetKit
+       * writes above so a kit-add either fully takes effect (membership
+       * + driven placement) or rolls back. The cascade is additive: it
+       * only creates/updates kit-driven rows (`assetKitId` set) and
+       * never touches manual user placements, and it places only the
+       * `AssetKit.quantity` slice (not the asset's full pool).
+       *
+       *   - Newly added (when kit.location is set): create one
+       *     `AssetLocation` row per new AssetKit with `assetKitId` set,
+       *     `quantity = AssetKit.quantity`, at the kit's location.
+       *     Manual rows for the same asset stay untouched. The DEFERRED
+       *     sum-within-total trigger re-checks at COMMIT.
+       *   - Qty edits: bump the matching kit-driven row's quantity if
+       *     one exists (kit may have no location → no row to update).
+       *   - Removed assets / cross-kit moves: handled by the FK
+       *     `onDelete: Cascade` on `AssetLocation.assetKitId` — the
+       *     AssetKit deletions above auto-drop their driven rows.
+       *
+       * `createMany` doesn't return ids, so we re-query the just-
+       * inserted AssetKit rows to thread the FK. One round-trip per
+       * `updateKitAssets` call — fine.
+       */
+      if (kit.location && newlyAddedAssets.length > 0) {
+        const newlyAddedAssetIds = newlyAddedAssets.map((a) => a.id);
+        const newAssetKits = await tx.assetKit.findMany({
+          where: {
+            kitId: kit.id,
+            assetId: { in: newlyAddedAssetIds },
+          },
+          select: { id: true, assetId: true, quantity: true },
+        });
+        if (newAssetKits.length > 0) {
+          await tx.assetLocation.createMany({
+            data: newAssetKits.map((ak) => ({
+              assetId: ak.assetId,
+              locationId: kit.location!.id,
+              organizationId,
+              quantity: ak.quantity,
+              assetKitId: ak.id,
+            })),
+          });
+        }
+      }
+
+      if (qtyChangedAssets.length > 0) {
+        // Live link: every kit-driven BookingAsset row pointing at the
+        // updated AssetKit gets its quantity synced. The reverse path
+        // (BookingAsset → kit slice update) is *not* live; users edit
+        // the booking through its own picker. This is one-way: the kit
+        // is the source of truth for its slice.
+        //
+        // `BookingAsset` has no Prisma relation accessor on `assetKit`
+        // (intentional — see the schema comment); resolve the AssetKit
+        // id first, then update BookingAsset rows by `assetKitId`.
+        //
+        // Deferred follow-up: check-in floor guard — refuse to shrink
+        // AssetKit.quantity below per-row check-in already recorded for
+        // the kit-driven BookingAsset row. The ConsumptionLog model is
+        // keyed by (bookingId, assetId), not by bookingAssetId, so the
+        // per-row check-in floor can't be computed without attributing
+        // logs to a row first. For now the silent live-link can shrink
+        // a kit-driven slice below an active partial check-in; the
+        // booking's check-in flow would catch the inconsistency.
+        const aksToSync = await tx.assetKit.findMany({
+          where: {
+            kitId: kit.id,
+            assetId: { in: qtyChangedAssets.map((c) => c.id) },
+          },
+          select: { id: true, assetId: true, quantity: true },
+        });
+        const newQtyByAk = new Map(
+          aksToSync.map((ak: { id: string; assetId: string }) => {
+            const change = qtyChangedAssets.find((c) => c.id === ak.assetId);
+            return [ak.id, change?.newQuantity ?? null] as const;
+          })
+        );
+        for (const [akId, newQty] of newQtyByAk) {
+          if (newQty == null) continue;
+          await tx.bookingAsset.updateMany({
+            where: { assetKitId: akId },
+            data: { quantity: newQty },
+          });
+        }
+
+        for (const change of qtyChangedAssets) {
+          // Relation-filter update — finds the AssetLocation row whose
+          // assetKit matches (assetId, kitId). `updateMany` because the
+          // composite unique on AssetKit guarantees at most one match,
+          // but Prisma's `update({ where: relation })` shorthand needs
+          // a scalar key.
+          await tx.assetLocation.updateMany({
+            where: {
+              assetKit: { assetId: change.id, kitId: kit.id },
+            },
+            data: { quantity: change.newQuantity },
+          });
+        }
+      }
+    });
+
+    // Notify each affected booking that its kit-driven BookingAsset
+    // slice has been converted to standalone (via the DB-level
+    // `SET NULL` cascade that ran inside the tx above). Outside the tx
+    // so the notes only land if the cascade actually committed.
+    await emitAssetKitDetachmentNotes({
+      impact: detachmentImpact,
+      actorUserId: userId,
+      actorFirstName: user?.firstName ?? null,
+      actorLastName: user?.lastName ?? null,
+      organizationId,
     });
 
     // We synthesise the `{ kit }` field the note helper consumes from
@@ -3443,7 +3739,6 @@ export async function updateKitAssets({
         assetId: asset.id,
         // The removal is still "about" this kit — populate the cross-ref so
         // "all activity for kit X" report queries see both adds and removes.
-        // Flagged but deferred on PR #2495; picked up during Phase 4a testing.
         kitId: kit.id,
         field: "kitId",
         fromValue: kit.id,
@@ -3454,153 +3749,67 @@ export async function updateKitAssets({
       await recordEvents(kitChangeEvents);
     }
 
-    // Handle location cascade for newly added assets (after kit assignment notes)
-    if (newlyAddedAssets.length > 0) {
-      if (kit.location) {
-        // Kit has a location, update all newly added assets to that location.
-        // Only assets whose location actually changes get an event.
-        const assetsWithLocationChange = newlyAddedAssets.filter(
-          (asset) => getPrimaryLocation(asset)?.id !== kit.location!.id
-        );
+    /**
+     * Post-tx side effects for the kit-driven AssetLocation rows
+     * created above:
+     *
+     *   - Activity events (one `ASSET_LOCATION_CHANGED` per new kit-
+     *     driven placement). `fromValue: null` — the kit-driven row is
+     *     an ADDITION, not a replacement; manual placements survive
+     *     untouched.
+     *   - System notes describing the kit-driven placement.
+     *
+     * Only runs when `kit.location` is set. With no kit location, no
+     * kit-driven row exists, so no event / note is needed — and
+     * crucially, the user's manual placements are NOT touched.
+     */
+    if (kit.location && newlyAddedAssets.length > 0) {
+      const kitLocationId = kit.location.id;
+      await recordEvents(
+        newlyAddedAssets.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          kitId: kit.id,
+          locationId: kitLocationId,
+          field: "locationId",
+          fromValue: null,
+          toValue: kitLocationId,
+          meta: { viaKit: true },
+        }))
+      );
 
-        // Cascade per-asset placement via the AssetLocation pivot,
-        // atomically with the per-asset ASSET_LOCATION_CHANGED events.
-        // The DEFERRED sum-within-total trigger re-checks at COMMIT.
-        await db.$transaction(async (tx) => {
-          const newLocId = kit.location!.id;
-          const newlyAddedAssetIds = newlyAddedAssets.map((asset) => asset.id);
-
-          // Per-asset pivot replace: drop existing rows, then create one
-          // fresh row each at the kit's location with type-aware quantity.
-          await tx.assetLocation.deleteMany({
-            where: { assetId: { in: newlyAddedAssetIds } },
-          });
-          await tx.assetLocation.createMany({
-            data: newlyAddedAssets.map((asset) => ({
-              assetId: asset.id,
-              locationId: newLocId,
-              organizationId,
-              quantity:
-                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
-                  ? asset.quantity
-                  : 1,
-            })),
-            skipDuplicates: true,
-          });
-
-          // Activity events — one ASSET_LOCATION_CHANGED per asset whose
-          // location was changed by the kit-join cascade.
-          if (assetsWithLocationChange.length > 0) {
-            await recordEvents(
-              assetsWithLocationChange.map((asset) => ({
-                organizationId,
-                actorUserId: userId,
-                action: "ASSET_LOCATION_CHANGED" as const,
-                entityType: "ASSET" as const,
-                entityId: asset.id,
-                assetId: asset.id,
-                kitId: kit.id,
-                locationId: newLocId,
-                field: "locationId",
-                fromValue: getPrimaryLocation(asset)?.id ?? null,
-                toValue: newLocId,
-                meta: { viaKit: true },
-              })),
-              tx
-            );
-          }
-        });
-
-        // Create notes for assets that had their location changed
-        const user = await getUserByID(userId, {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-          } satisfies Prisma.UserSelect,
-        });
-        await Promise.all(
-          newlyAddedAssets.map((asset) =>
-            createNote({
-              content: getKitLocationUpdateNoteContent({
-                currentLocation: getPrimaryLocation(asset),
-                newLocation: kit.location,
-                userId,
-                firstName: user?.firstName ?? "",
-                lastName: user?.lastName ?? "",
-                isRemoving: false,
-              }),
-              type: "UPDATE",
+      // Create notes describing the new kit-driven placement. The
+      // existing helper renders as "moved to {kit.location}"; with
+      // `currentLocation: null` it reads as a fresh placement.
+      const noteUser = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      await Promise.all(
+        newlyAddedAssets.map((asset) =>
+          createNote({
+            content: getKitLocationUpdateNoteContent({
+              currentLocation: null,
+              newLocation: kit.location,
               userId,
-              assetId: asset.id,
-            })
-          )
-        );
-      } else {
-        // Kit has no location, remove location from newly added assets
-        const assetsWithLocation = newlyAddedAssets.filter(
-          (asset) => getPrimaryLocation(asset) !== null
-        );
-
-        if (assetsWithLocation.length > 0) {
-          await db.$transaction(async (tx) => {
-            // Clear placement by dropping AssetLocation rows for these
-            // assets.
-            await tx.assetLocation.deleteMany({
-              where: {
-                assetId: { in: assetsWithLocation.map((asset) => asset.id) },
-              },
-            });
-
-            // Activity events — one ASSET_LOCATION_CHANGED per asset whose
-            // location was cleared by the kit-join cascade (kit has no location).
-            await recordEvents(
-              assetsWithLocation.map((asset) => ({
-                organizationId,
-                actorUserId: userId,
-                action: "ASSET_LOCATION_CHANGED" as const,
-                entityType: "ASSET" as const,
-                entityId: asset.id,
-                assetId: asset.id,
-                kitId: kit.id,
-                field: "locationId",
-                fromValue: getPrimaryLocation(asset)!.id,
-                toValue: null,
-                meta: { viaKit: true },
-              })),
-              tx
-            );
-          });
-
-          // Create notes for assets that had their location removed
-          const user = await getUserByID(userId, {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-            } satisfies Prisma.UserSelect,
-          });
-          await Promise.all(
-            assetsWithLocation.map((asset) =>
-              createNote({
-                content: getKitLocationUpdateNoteContent({
-                  currentLocation: getPrimaryLocation(asset),
-                  newLocation: null,
-                  userId,
-                  firstName: user?.firstName ?? "",
-                  lastName: user?.lastName ?? "",
-                  isRemoving: true,
-                }),
-                type: "UPDATE",
-                userId,
-                assetId: asset.id,
-              })
-            )
-          );
-        }
-      }
+              firstName: noteUser?.firstName ?? "",
+              lastName: noteUser?.lastName ?? "",
+              isRemoving: false,
+            }),
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          })
+        )
+      );
     }
 
     /**
@@ -3616,14 +3825,13 @@ export async function updateKitAssets({
       kit.custody.custodian.id &&
       assetsToInheritStatus.length > 0
     ) {
-      // Phase 3d-Polish-2 logic kept — uses `buildKitCustodyInheritData`
-      // below to write child Custody rows with `kitCustodyId` set and the
-      // *remaining* tracked quantity per asset (Option B). Main's PR #2535
-      // version regressed to a per-asset `Asset.update` with a default
-      // `quantity: 1` and no `kitCustodyId`; that would orphan
-      // operator-assigned custody on qty-tracked assets and break the
-      // Phase 3d-Polish-2 invariants. The CUSTODY_ASSIGNED events main
-      // emits inline are emitted further below alongside the inheritData.
+      // Uses `buildKitCustodyInheritData` below to write child Custody
+      // rows with `kitCustodyId` set and the *remaining* tracked
+      // quantity per asset. A regressed shape that does per-asset
+      // `Asset.update` with default `quantity: 1` and no `kitCustodyId`
+      // would orphan operator-assigned custody on qty-tracked assets
+      // and break the partial-custody invariants. The CUSTODY_ASSIGNED
+      // events are emitted further below alongside the inheritData.
       const kitCustodyId = kit.custody.id;
       const teamMemberId = kit.custody.custodian.id;
 
@@ -3778,11 +3986,11 @@ export async function updateKitAssets({
     ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
       const assetIds = removedAssets.map((a) => a.id);
-      // Phase 3d-Polish-2: filter the kit-custody delete by `kitCustodyId`
-      // so only the kit-allocated rows are removed; operator-assigned
-      // per-unit custody on the same asset stays. Main's PR #2535
-      // emitted events using only the kit's primary custodian id —
-      // that would mis-attribute multi-custodian qty-tracked rows.
+      // Filter the kit-custody delete by `kitCustodyId` so only the
+      // kit-allocated rows are removed; operator-assigned per-unit
+      // custody on the same asset stays. Emitting events keyed only
+      // on the kit's primary custodian id would mis-attribute
+      // multi-custodian qty-tracked rows.
       const kitCustodyId = kit.custody.id;
 
       // Use transaction for atomicity - prevents orphaned custody records.
@@ -3818,14 +4026,13 @@ export async function updateKitAssets({
           where: { assetId: { in: assetIds }, kitCustodyId },
         });
 
-        // Phase 3d-Polish-2: only flip the asset to AVAILABLE when no
-        // remaining Custody rows exist after deleting the kit-allocated
-        // ones (operator-assigned per-unit custody keeps it IN_CUSTODY).
-        // Main's PR #2535 added a CUSTODY_RELEASED emission *after* the
-        // delete that mis-attributed every removed asset to the kit's
-        // primary custodian — we already emit those events above keyed
-        // on each Custody row's `teamMemberId`, so main's version is
-        // dropped here.
+        // Only flip the asset to AVAILABLE when no remaining Custody
+        // rows exist after deleting the kit-allocated ones (operator-
+        // assigned per-unit custody keeps it IN_CUSTODY). CUSTODY_RELEASED
+        // events are already emitted above keyed on each Custody row's
+        // `teamMemberId`, so a post-delete blanket emission keyed only
+        // on the kit's primary custodian would mis-attribute multi-
+        // custodian rows.
         const stillCustodied = await tx.custody.findMany({
           where: { assetId: { in: assetIds } },
           select: { assetId: true },
@@ -3864,30 +4071,56 @@ export async function updateKitAssets({
     );
 
     if (bookingsToUpdate?.length) {
+      // When the kit picks up a new asset and the kit is already part of
+      // a draft/active booking, the booking carries the kit as a unit —
+      // so the new asset must be added to that booking as a kit-driven
+      // row. Resolve the AssetKit ids the picker just created so we can
+      // populate `assetKitId` (groups the row under the kit in the
+      // booking UI) and `quantity` (inherits the kit's slice qty rather
+      // than defaulting to 1, which would silently mis-count
+      // QUANTITY_TRACKED assets in the booking).
+      const newAssetIds = newlyAddedAssets.map((a) => a.id);
+      const newAssetKits =
+        newAssetIds.length > 0
+          ? await db.assetKit.findMany({
+              where: { kitId: kit.id, assetId: { in: newAssetIds } },
+              select: { id: true, assetId: true, quantity: true },
+            })
+          : [];
+      const akByAssetId = new Map(newAssetKits.map((ak) => [ak.assetId, ak]));
+
       await Promise.all(
         bookingsToUpdate.flatMap((booking) => {
           const ops = [];
           if (newlyAddedAssets.length > 0) {
             ops.push(
               db.bookingAsset.createMany({
-                data: newlyAddedAssets.map((a) => ({
-                  bookingId: booking.id,
-                  assetId: a.id,
-                })),
+                data: newlyAddedAssets.map((a) => {
+                  const ak = akByAssetId.get(a.id);
+                  return {
+                    bookingId: booking.id,
+                    assetId: a.id,
+                    quantity: ak?.quantity ?? 1,
+                    assetKitId: ak?.id ?? null,
+                  };
+                }),
                 skipDuplicates: true,
               })
             );
           }
-          if (removedAssets.length > 0) {
-            ops.push(
-              db.bookingAsset.deleteMany({
-                where: {
-                  bookingId: booking.id,
-                  assetId: { in: removedAssets.map((a) => a.id) },
-                },
-              })
-            );
-          }
+          // why: removing an asset from a kit no longer deletes its
+          // BookingAsset rows from active bookings. The DB-level
+          // `BookingAsset.assetKitId` FK fires `ON DELETE SET NULL` when
+          // the AssetKit row is dropped (the actual delete happens in
+          // the outer tx above), converting the kit-driven booking slice
+          // into a standalone reservation. A per-booking system note
+          // emitted by `emitAssetKitDetachmentNotes` explains the
+          // conversion to the user. Deleting the row here would undo
+          // the SET NULL and silently shrink the booking — the opposite
+          // of the documented behaviour.
+          //
+          // Asset-bulk-remove (asset-side flow) is unaffected; it still
+          // goes through `removeAssets` which deletes the rows explicitly.
           return ops;
         })
       );
@@ -4007,6 +4240,14 @@ export async function bulkRemoveAssetsFromKits({
       kit: asset.assetKits?.[0]?.kit ?? null,
     }));
 
+    // Collect AssetKit ids being deleted across the bulk removal
+    // branches so the post-tx emitter can write per-booking notes for
+    // kit-driven slices that get SET-NULL'd by the DB cascade. See
+    // {@link fetchAssetKitDetachmentImpact}.
+    let bulkDetachmentImpact: Awaited<
+      ReturnType<typeof fetchAssetKitDetachmentImpact>
+    > = [];
+
     await db.$transaction(async (tx) => {
       /**
        * If there are assets whose kits were in custody, then we have to remove
@@ -4079,6 +4320,25 @@ export async function bulkRemoveAssetsFromKits({
       const stillCustodiedIds = new Set(stillCustodied.map((c) => c.assetId));
       const assetsToFlipAvailable = allRemovedAssetIds.filter(
         (id) => !stillCustodiedIds.has(id)
+      );
+
+      // Pre-fetch the kit-driven BookingAsset rows that the AssetKit
+      // delete will SET-NULL via the DB cascade. We capture ids + kit
+      // metadata BEFORE the delete (otherwise the join would lose its
+      // target) so the post-tx note emitter can craft per-booking
+      // system notes referencing the kit by name.
+      const aksToDelete = await tx.assetKit.findMany({
+        where: {
+          assetId: { in: allRemovedAssetIds },
+          organizationId,
+        },
+        select: { id: true },
+      });
+      bulkDetachmentImpact = bulkDetachmentImpact.concat(
+        await fetchAssetKitDetachmentImpact(
+          tx,
+          aksToDelete.map((ak: { id: string }) => ak.id)
+        )
       );
 
       // Detach all from the kit regardless of remaining custody.
@@ -4180,6 +4440,16 @@ export async function bulkRemoveAssetsFromKits({
           tx
         );
       }
+    });
+
+    // Notify each affected booking that its kit-driven BookingAsset
+    // slice has been converted to standalone.
+    await emitAssetKitDetachmentNotes({
+      impact: bulkDetachmentImpact,
+      actorUserId: userId,
+      actorFirstName: user?.firstName ?? null,
+      actorLastName: user?.lastName ?? null,
+      organizationId,
     });
 
     return true;

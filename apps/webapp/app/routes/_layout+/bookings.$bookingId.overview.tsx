@@ -234,20 +234,43 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // We need to check both AVAILABLE assets (already partially checked in) AND
     // ONGOING/OVERDUE bookings (could have partial check-ins)
     /**
-     * Flatten bookingAssets pivot to a plain assets array for downstream use.
-     * Preserves `bookedQuantity` from the pivot so quantity-tracked assets
-     * can display how many units were booked.
+     * Flatten bookingAssets pivot to a plain assets array for downstream
+     * use. Preserves `bookedQuantity` from the pivot so quantity-tracked
+     * assets display how many units were booked.
+     *
+     * Kit attribution reads `BookingAsset.assetKitId` (per-row
+     * discriminator) rather than `asset.assetKits[0]?.kitId` (asset's
+     * incidental kit memberships). A qty-tracked asset can have both
+     * a standalone slice (`assetKitId IS NULL`) and a kit-driven
+     * slice in the same booking; each appears as its own row.
+     *
+     * The row's `kitId`/`kit` keep their old field names so the
+     * downstream grouping helper (`groupAndSortAssetsByKit`) and the
+     * pagination logic below need no changes — but their *meaning*
+     * shifts: now it's "the kit this row was booked under", not "any
+     * kit this asset happens to belong to".
+     *
+     * A `bookingAssetId` field is added so the UI can render two rows
+     * for the same asset (standalone + kit-driven) without key
+     * collisions in React.
      */
-    // fields so downstream helpers and grouping logic (which still expect
-    // the 1:1 shape) keep working. There is at most one assetKits row
-    // today.
     const bookingAssets = booking.bookingAssets.map((ba) => {
-      const firstAssetKit = ba.asset.assetKits[0];
+      // Match the BookingAsset's `assetKitId` against the asset's set of
+      // AssetKit memberships to resolve which specific kit this row
+      // was booked under. Multi-kit qty-tracked assets can have several
+      // memberships; only the one whose `id` matches contributes here.
+      const sourceKit = ba.assetKitId
+        ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId) ?? null
+        : null;
       return {
         ...ba.asset,
+        bookingAssetId: ba.id,
         bookedQuantity: ba.quantity,
-        kitId: firstAssetKit?.kitId ?? null,
-        kit: firstAssetKit?.kit ?? null,
+        // Null when standalone — UI groups these as individual items
+        // outside of any kit. Non-null surfaces the kit's name in the
+        // detail list and groups other slices of the same kit together.
+        kitId: sourceKit?.kitId ?? null,
+        kit: sourceKit?.kit ?? null,
       };
     });
 
@@ -425,9 +448,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getBookingFlags({
         id: booking.id,
         assetIds: bookingAssets.map((a) => a.id),
-        // Phase 3d: an "empty" booking with only model-level reservations
-        // must still be reservable. Passing the count lets the flags
-        // helper surface `hasModelRequests` for the Reserve disable check.
+        // An "empty" booking with only model-level reservations must
+        // still be reservable. Passing the count lets the flags helper
+        // surface `hasModelRequests` for the Reserve disable check.
         modelRequestCount: booking.modelRequests?.length ?? 0,
         from: booking.from,
         to: booking.to,
@@ -467,8 +490,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     /**
-     * Phase 3c: sum already-dispositioned units per qty-tracked asset for
-     * this booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
+     * Sum already-dispositioned units per qty-tracked asset for this
+     * booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
      * Attached to each enriched item below so the row UI can:
      *   - show "Partially checked in" when `dispositioned > 0 && remaining > 0`
      *   - render `remaining / booked` in the Qty column for partials

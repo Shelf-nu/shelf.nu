@@ -64,6 +64,15 @@ export interface QuantityOverviewCardProps {
    * are earmarked for kit use — these are not free stock.
    */
   inKitsQuantity?: number;
+  /**
+   * Sum of `AssetLocation.quantity` across every location this asset is
+   * placed at. Surfaced on its own "In locations" row when > 0; the
+   * remainder (`quantity − inLocationsQuantity`) is the "unplaced" pool.
+   * Does NOT subtract from `available` — placements are orthogonal to
+   * custody / bookings, so a unit can be at Location X AND in custody
+   * simultaneously without double-counting.
+   */
+  inLocationsQuantity?: number;
   /** Quantity reserved in upcoming bookings (RESERVED status) */
   reservedQuantity?: number;
   /** Quantity checked out via active bookings (ONGOING/OVERDUE status) */
@@ -146,6 +155,7 @@ export function QuantityOverviewCard({
   custodyAvailableQuantity,
   inCustodyQuantity,
   inKitsQuantity,
+  inLocationsQuantity,
   reservedQuantity,
   checkedOutQuantity,
   canUpdate = false,
@@ -156,6 +166,8 @@ export function QuantityOverviewCard({
   const reserved = reservedQuantity ?? 0;
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
+  const inLocations = inLocationsQuantity ?? 0;
+  const unplaced = Math.max(0, qty - inLocations);
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
   const available =
@@ -209,6 +221,20 @@ export function QuantityOverviewCard({
           "Included in kits" card. */}
       {inKits > 0 ? (
         <OverviewRow label="In kits" value={formatWithUnit(inKits, unit)} />
+      ) : null}
+      {/* "In locations" mirrors "In kits": only renders when > 0 so
+          assets with no placements stay uncluttered. Always sits next
+          to "Unplaced" for the at-a-glance placed/unplaced split.
+          Detailed per-location breakdown lives in the dedicated
+          "Placed at locations" card. */}
+      {inLocations > 0 ? (
+        <OverviewRow
+          label="In locations"
+          value={formatWithUnit(inLocations, unit)}
+        />
+      ) : null}
+      {inLocations > 0 && unplaced > 0 ? (
+        <OverviewRow label="Unplaced" value={formatWithUnit(unplaced, unit)} />
       ) : null}
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
       {reserved > 0 ? (

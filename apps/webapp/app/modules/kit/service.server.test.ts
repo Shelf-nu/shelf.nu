@@ -63,11 +63,15 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
     },
     // Location mutations go through this delegate instead of asset.updateMany,
-    // since placement lives on the AssetLocation pivot.
+    // since placement lives on the AssetLocation pivot. Includes
+    // `updateMany` for kit-driven qty sync — the cascade also calls
+    // `findMany` to re-read the just-inserted AssetKit ids before
+    // creating the kit-driven AssetLocation rows.
     assetLocation: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     location: {
       update: vitest.fn().mockResolvedValue({}),
@@ -91,6 +95,14 @@ vitest.mock("~/database/db.server", () => ({
     },
     note: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // `updateKitAssets` / `bulkRemoveAssetsFromKits` pre-fetch kit-driven
+    // BookingAsset rows that will be SET-NULL'd by the DB cascade, and
+    // the live-link path runs `bookingAsset.updateMany` to sync kit
+    // slice qty edits.
+    bookingAsset: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
   },
 }));
@@ -990,10 +1002,10 @@ describe("bulkRemoveAssetsFromKits", () => {
   it("should emit CUSTODY_RELEASED for assets whose kit-inherited custody was cleaned up", async () => {
     expect.assertions(1);
 
-    // Translated from main's PR #2535 to our pivot + Phase 3d-Polish-2 shape:
+    // Fixture shape:
     //   - `kit` sourced via `assetKits.kit` pivot relation.
     //   - `custody` is Custody[] with the kit-inherited row keyed on
-    //     `kitCustodyId` (Phase 3d-Polish-2 discriminator). The service
+    //     `kitCustodyId` (kit-vs-operator discriminator). The service
     //     filters by that key to avoid blowing away operator-assigned rows.
     const assets = [
       {
@@ -1541,8 +1553,8 @@ describe("updateKitAssets - Location Cascade", () => {
     vitest.clearAllMocks();
   });
 
-  it("should call asset updateMany when kit has location and assets are added", async () => {
-    expect.assertions(3);
+  it("creates a kit-driven AssetLocation row with assetKitId set when kit has a location", async () => {
+    expect.assertions(4);
 
     const mockKit = {
       id: "kit-1",
@@ -1551,15 +1563,18 @@ describe("updateKitAssets - Location Cascade", () => {
       custody: null,
     };
 
-    // Assets carry placement via the `assetLocations` pivot, not a singular
-    // `location` relation — empty array means not placed anywhere.
+    // Asset is currently placed at "manual-location-1" by the user.
+    // The cascade must NOT wipe this manual row — it must additively
+    // create a kit-driven row at the kit's location.
     const mockNewAssets = [
       {
         id: "asset-1",
         title: "Asset 1",
         assetKits: [],
         custody: null,
-        assetLocations: [],
+        assetLocations: [
+          { location: { id: "manual-location-1", name: "Office A" } },
+        ],
       },
     ];
 
@@ -1567,6 +1582,12 @@ describe("updateKitAssets - Location Cascade", () => {
     db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue(mockNewAssets);
+    // Stub the re-fetch of just-created AssetKit rows that the cascade
+    // does inside the tx to thread the FK on the kit-driven
+    // AssetLocation rows.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "assetkit-1", assetId: "asset-1", quantity: 1 },
+    ]);
 
     const { updateKitAssets } = await import("./service.server");
 
@@ -1578,11 +1599,8 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // onto direct pivot inserts via `assetKit.createMany`.
+    // AssetKit row is created for the new membership.
     expect(db.assetKit.createMany).toHaveBeenCalledWith({
-      // `createMany` always writes `quantity`. The mock asset has no `type`
-      // so it falls through the QUANTITY_TRACKED branch, defaulting to
-      // `Math.max(1, asset.quantity ?? 1)` = 1.
       data: [
         {
           assetId: "asset-1",
@@ -1593,12 +1611,20 @@ describe("updateKitAssets - Location Cascade", () => {
       ],
     });
 
-    // Kit-join location cascade is a pivot replace — drop existing
-    // AssetLocation rows, then create one at the kit's location with
-    // type-aware quantity (1 for an asset with no type set).
-    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: { in: ["asset-1"] } },
+    // Invariant: the destructive `deleteMany` on manual AssetLocation
+    // rows is GONE — manual placements survive the kit-join cascade.
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+
+    // The cascade re-queries the just-inserted AssetKit ids so it can
+    // wire them onto the new AssetLocation rows.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith({
+      where: { kitId: "kit-1", assetId: { in: ["asset-1"] } },
+      select: { id: true, assetId: true, quantity: true },
     });
+
+    // The kit-driven AssetLocation row is created with the AssetKit FK
+    // set and `quantity = AssetKit.quantity` (the slice, not the full
+    // pool).
     expect(db.assetLocation.createMany).toHaveBeenCalledWith({
       data: [
         {
@@ -1606,14 +1632,14 @@ describe("updateKitAssets - Location Cascade", () => {
           locationId: "location-1",
           organizationId: "org-1",
           quantity: 1,
+          assetKitId: "assetkit-1",
         },
       ],
-      skipDuplicates: true,
     });
   });
 
-  it("should set asset location to null when kit has no location", async () => {
-    expect.assertions(2);
+  it("does NOT touch manual AssetLocation rows when kit has no location", async () => {
+    expect.assertions(3);
 
     const mockKit = {
       id: "kit-1",
@@ -1622,8 +1648,9 @@ describe("updateKitAssets - Location Cascade", () => {
       custody: null,
     };
 
-    // Fixture: the asset is currently placed at "location-1" via the
-    // AssetLocation pivot.
+    // Fixture: the asset is currently placed at "manual-location-1"
+    // by the user. Without a kit location there's nothing to cascade,
+    // and the cascade explicitly does NOT clear the manual row.
     const mockNewAssets = [
       {
         id: "asset-1",
@@ -1631,7 +1658,7 @@ describe("updateKitAssets - Location Cascade", () => {
         assetKits: [],
         custody: null,
         assetLocations: [
-          { location: { id: "location-1", name: "Current Location" } },
+          { location: { id: "manual-location-1", name: "Office A" } },
         ],
       },
     ];
@@ -1651,11 +1678,9 @@ describe("updateKitAssets - Location Cascade", () => {
       request: new Request("http://test.com"),
     });
 
-    // onto direct pivot inserts via `assetKit.createMany`.
+    // AssetKit row still gets created — membership is independent of
+    // whether the kit has a location.
     expect(db.assetKit.createMany).toHaveBeenCalledWith({
-      // `createMany` always writes `quantity`. The mock asset has no `type`
-      // so it falls through the QUANTITY_TRACKED branch, defaulting to
-      // `Math.max(1, asset.quantity ?? 1)` = 1.
       data: [
         {
           assetId: "asset-1",
@@ -1666,12 +1691,9 @@ describe("updateKitAssets - Location Cascade", () => {
       ],
     });
 
-    // Clearing placement = deleting AssetLocation rows for the affected
-    // assets. There is no follow-up `createMany` when the kit has no
-    // location of its own.
-    expect(db.assetLocation.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: { in: ["asset-1"] } },
-    });
+    // No AssetLocation writes at all when kit has no location.
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.createMany).not.toHaveBeenCalled();
   });
 });
 
@@ -1948,9 +1970,9 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
       { id: "kc-new", kitId: "kit-1" },
     ]);
     // why: helper now does its own asset.findMany inside the tx and reads
-    // the kit's slice from `assetKits[].quantity` (Phase 4a-Polish-2).
-    // Pre-populate that with the asset's full pool to mirror the
-    // post-migration backfill state (kit owns the whole asset).
+    // the kit's slice from `assetKits[].quantity`. Pre-populate that
+    // with the asset's full pool to mirror the post-migration backfill
+    // state (kit owns the whole asset).
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
       {
@@ -2390,10 +2412,10 @@ describe("releaseCustody (single kit) - emit-before-cascade", () => {
 });
 
 /**
- * Phase 4a-Polish-2 — picker contract.
+ * Kit manage-assets picker contract.
  *
- * These describes lock in the contract between the kit manage-assets
- * picker action and `updateKitAssets`:
+ * These describes lock in the contract between the picker action and
+ * `updateKitAssets`:
  *  - The action passes `assetQuantities` through to the service.
  *  - The service writes per-asset quantity into `AssetKit.quantity` on
  *    create AND on update of an existing pivot row.

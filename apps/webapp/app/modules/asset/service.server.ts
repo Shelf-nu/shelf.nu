@@ -88,7 +88,6 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
-  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -994,11 +993,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
-        -- Note: custody_agg.custody must be in GROUP BY because the
-        -- SELECT references it. It is the per-asset aggregated jsonb
-        -- array from the lateral subquery; jsonb supports equality so
-        -- this is safe and produces one group per asset row.
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        -- Note: custody_agg.custody / kits_agg.kits / locations_agg.locations
+        -- must be in GROUP BY because the SELECT references them. They are
+        -- per-asset aggregated jsonb arrays from lateral subqueries; jsonb
+        -- supports equality so this is safe and produces one group per
+        -- asset row.
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query
@@ -1405,6 +1405,25 @@ export async function createAsset({
   });
 }
 
+/**
+ * Resolves the `AssetLocation.quantity` to write when the asset-overview
+ * "Update location" dialog rewrites the asset's single primary placement.
+ *
+ * QUANTITY_TRACKED honours the submitted dialog value (already validated
+ * against `Asset.quantity` upstream). When the dialog omitted the input
+ * (legacy callers — bulk update, scan drawer, mobile API), falls back to
+ * the asset's full pool. INDIVIDUAL ignores the input entirely — that
+ * type's pivot row is always 1 unit per the BEFORE trigger.
+ */
+function resolveNewLocationQuantity(
+  asset: { type: AssetType; quantity: number | null },
+  submitted?: number
+): number {
+  if (asset.type !== AssetType.QUANTITY_TRACKED) return 1;
+  if (typeof submitted === "number") return submitted;
+  return asset.quantity ?? 1;
+}
+
 export async function updateAsset({
   title,
   description,
@@ -1417,6 +1436,7 @@ export async function updateAsset({
   id,
   newLocationId,
   currentLocationId,
+  newLocationQuantity,
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
@@ -1430,14 +1450,32 @@ export async function updateAsset({
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
+    /**
+     * The asset-overview "Update location" dialog surfaces a per-asset
+     * qty input for QUANTITY_TRACKED rows. Setting a new qty (with or
+     * without changing the target location) is also a placement edit
+     * — both branches share the kit-guard and the pivot rewrite.
+     * INDIVIDUAL submissions ignore the qty entirely (forced to 1 at
+     * write time).
+     */
+    const isSettingNewQuantity = newLocationQuantity != null;
+    const shouldUpdatePlacement = isChangingLocation || isSettingNewQuantity;
 
     // Check if asset belongs to a kit and prevent location updates.
     // the parent kit (today: ≤1 pivot row per asset) through
     // `assetKits.kit` and read it as `assetWithKit?.assetKits[0]?.kit`.
-    if (isChangingLocation) {
+    // Also pull `type` + `quantity` so the qty validator below has the
+    // asset's total without a second round-trip.
+    let assetForValidation: {
+      type: AssetType;
+      quantity: number | null;
+    } | null = null;
+    if (shouldUpdatePlacement) {
       const assetWithKit = await db.asset.findUnique({
         where: { id, organizationId },
         select: {
+          type: true,
+          quantity: true,
           assetKits: {
             select: { kit: { select: { id: true, name: true } } },
           },
@@ -1455,6 +1493,43 @@ export async function updateAsset({
             assetId: id,
             kitId: parentKit.id,
             kitName: parentKit.name,
+          },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      assetForValidation = assetWithKit
+        ? { type: assetWithKit.type, quantity: assetWithKit.quantity }
+        : null;
+    }
+
+    /**
+     * Validate the submitted qty against the asset's pool. The dialog
+     * collapses any existing multi-placement back to one row at this
+     * location, so the bound is simply `Asset.quantity`. No "other
+     * locations" subtraction (those rows get cleared in the transaction
+     * below). INDIVIDUAL submissions ignore the qty — write path forces
+     * it to 1.
+     */
+    if (
+      isSettingNewQuantity &&
+      newLocationId &&
+      assetForValidation?.type === AssetType.QUANTITY_TRACKED
+    ) {
+      const totalQty = assetForValidation.quantity ?? 0;
+      if (
+        typeof newLocationQuantity === "number" &&
+        newLocationQuantity > totalQty
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Quantity exceeds available pool",
+          message: `Requested ${newLocationQuantity} but the asset has only ${totalQty} units total.`,
+          additionalData: {
+            assetId: id,
+            newLocationQuantity,
+            totalQty,
           },
           label: "Assets",
           status: 400,
@@ -1660,30 +1735,35 @@ export async function updateAsset({
         },
       });
 
-      if (isChangingLocation) {
-        // Always clear any existing primary placement first. INDIVIDUAL
-        // is capped at 1 by trigger; for QUANTITY_TRACKED this also
-        // collapses any multi-placement back to the new primary —
-        // multi-placement edits go through the location picker route
-        // instead of this single-location asset edit form.
-        await tx.assetLocation.deleteMany({ where: { assetId: id } });
+      if (shouldUpdatePlacement) {
+        // Clear existing MANUAL primary placement(s) first. Kit-driven
+        // rows (`assetKitId IS NOT NULL`) are owned by the kit's flow
+        // and stay untouched — the user editing the asset-overview
+        // single-location dialog can replace their manual placement
+        // without nuking the kit-driven row. INDIVIDUAL is capped at
+        // 1 manual row by trigger; QUANTITY_TRACKED multi-placement
+        // edits go through the manage-placements dialog or the
+        // location picker.
+        await tx.assetLocation.deleteMany({
+          where: { assetId: id, assetKitId: null },
+        });
         if (newLocationId) {
           await tx.assetLocation.create({
             data: {
               assetId: id,
               locationId: newLocationId,
               organizationId,
-              quantity:
-                updated.type === AssetType.QUANTITY_TRACKED && updated.quantity
-                  ? updated.quantity
-                  : 1,
+              quantity: resolveNewLocationQuantity(
+                updated,
+                newLocationQuantity
+              ),
             },
           });
         }
       }
 
       // Re-read so the returned `assetLocations` reflects the pivot ops.
-      return isChangingLocation
+      return shouldUpdatePlacement
         ? tx.asset.findUniqueOrThrow({
             where: { id, organizationId },
             include: {
@@ -2028,11 +2108,12 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
-    // If it's already a ShelfError with validation errors, re-throw as is
-    if (
-      cause instanceof ShelfError &&
-      cause.additionalData?.[VALIDATION_ERROR]
-    ) {
+    // If it's already a ShelfError (kit guard, qty validator, org-scope
+    // guard, etc.), re-throw as-is so the upstream status / title /
+    // message survive. `isLikeShelfError` includes a duck-type fallback
+    // so re-mocked / re-imported error classes still match. Only unknown
+    // errors get wrapped as a 500-ish unique-constraint guess.
+    if (isLikeShelfError(cause)) {
       throw cause;
     }
 
@@ -2087,6 +2168,307 @@ export async function deleteAsset({
       message: "Something went wrong while deleting asset",
       additionalData: { id, organizationId },
       label,
+    });
+  }
+}
+
+/**
+ * Replaces an asset's full set of placements atomically.
+ *
+ * Called by the asset-overview "Manage placements" dialog. Diff'd
+ * against current pivot rows so unchanged placements keep their
+ * `createdAt` (preserves the primary-pick LATERAL ordering used by
+ * the asset-index column rendering). New placements are created;
+ * removed placements are deleted; qty edits update the existing row
+ * in place.
+ *
+ * **Validation invariants** (all enforced before the transaction so a
+ * bad submission returns a clean 400 instead of a trigger-fired 500):
+ *
+ *  - INDIVIDUAL assets cap at exactly one placement with `quantity = 1`
+ *    — submitted qty is ignored, count > 1 is rejected.
+ *  - QUANTITY_TRACKED: `sum(placements[].quantity) <= Asset.quantity`
+ *    (the DEFERRED `enforce_asset_location_sum_within_total` trigger
+ *    is the underlying guard; the explicit check here gives a
+ *    user-friendly message).
+ *  - Each `locationId` must belong to the caller's org.
+ *  - No duplicate `locationId` entries in the submitted list.
+ *  - Assets that belong to a kit can't have placements edited from the
+ *    asset side — the kit-location cascade owns it. Mirrors the
+ *    kit-guard in `updateAsset`.
+ *
+ * @see {@link file://./../../routes/_layout+/assets.$assetId.overview.manage-placements.tsx}
+ */
+export async function replaceAssetPlacements({
+  assetId,
+  organizationId,
+  userId,
+  placements,
+}: {
+  assetId: string;
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+  /**
+   * Full desired placement set. Empty array means "unplace this asset"
+   * (all pivot rows removed). The service deduplicates / validates
+   * before any DB write.
+   */
+  placements: Array<{ locationId: string; quantity: number }>;
+}) {
+  try {
+    // 1. Fetch the asset's current state — total qty, type, manual
+    //    placements only (kit-driven rows are owned by the kit's flow
+    //    and stay read-only from this dialog), and the kit-driven
+    //    placements separately so the sum-within-total math accounts
+    //    for them. Manual placements coexist with kit-driven rows on
+    //    different `assetKitId` values — the manage-placements dialog
+    //    edits manual rows only, kit-driven rows are owned by the
+    //    kit's flow.
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { id: assetId, organizationId },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        quantity: true,
+        assetLocations: {
+          select: {
+            locationId: true,
+            quantity: true,
+            assetKitId: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    // Split manual vs kit-driven. The diff math below operates only on
+    // manual rows; the kit-driven sum is added to the sum-within-total
+    // pre-check so a submitted set that "fits" against manual rows
+    // alone but exceeds Asset.quantity once kit rows are counted gets
+    // rejected up-front instead of failing at the DEFERRED trigger.
+    const manualPlacements = asset.assetLocations.filter(
+      (al) => al.assetKitId === null
+    );
+    const kitDrivenSum = asset.assetLocations
+      .filter((al) => al.assetKitId !== null)
+      .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
+
+    // 3. Shape validation — duplicate ids + per-row qty bounds.
+    const seenLocationIds = new Set<string>();
+    for (const p of placements) {
+      if (!p.locationId || typeof p.locationId !== "string") {
+        throw new ShelfError({
+          cause: null,
+          message: "Each placement must reference a location.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      if (!Number.isInteger(p.quantity) || p.quantity < 1) {
+        throw new ShelfError({
+          cause: null,
+          message: `Each placement quantity must be a positive integer (got ${p.quantity} for ${p.locationId}).`,
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      if (seenLocationIds.has(p.locationId)) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Duplicate location in the submitted placements — each location can appear at most once per asset.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      seenLocationIds.add(p.locationId);
+    }
+
+    // 4. INDIVIDUAL constraint — at most one row, qty forced to 1.
+    if (asset.type !== AssetType.QUANTITY_TRACKED) {
+      if (placements.length > 1) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "INDIVIDUAL assets can only be placed at one location. Remove the extra rows or change the asset type.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId },
+          shouldBeCaptured: false,
+        });
+      }
+      // Force qty to 1 — the picker UI shouldn't render a qty input
+      // for INDIVIDUAL, but a tampered submission still gets corrected.
+      placements = placements.map((p) => ({ ...p, quantity: 1 }));
+    }
+
+    // 5. Sum-within-total — explicit pre-check so the user gets a
+    //    nice message; the DEFERRED trigger is the ultimate guard.
+    //    Includes the kit-driven sum because those rows survive this
+    //    update — the submitted manual set plus the unchanged kit-
+    //    driven rows must together fit within `Asset.quantity`.
+    if (asset.type === AssetType.QUANTITY_TRACKED) {
+      const total = asset.quantity ?? 0;
+      const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
+      const projectedSum = submittedSum + kitDrivenSum;
+      if (projectedSum > total) {
+        throw new ShelfError({
+          cause: null,
+          title: "Quantity exceeds available pool",
+          message:
+            kitDrivenSum > 0
+              ? `Submitted manual placements (${submittedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum} but the asset has only ${total} units total.`
+              : `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
+          status: 400,
+          label: "Assets",
+          additionalData: {
+            assetId,
+            submittedSum,
+            kitDrivenSum,
+            projectedSum,
+            total,
+          },
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    // 6. Cross-org guard — every locationId must belong to this org.
+    //    A single COUNT scoped by org is enough; we don't need to
+    //    know which one is foreign (the dialog only offers org-scoped
+    //    locations, so tampering is the only way to reach this path).
+    if (placements.length > 0) {
+      const inOrgCount = await db.location.count({
+        where: {
+          id: { in: placements.map((p) => p.locationId) },
+          organizationId,
+        },
+      });
+      if (inOrgCount !== placements.length) {
+        throw new ShelfError({
+          cause: null,
+          message: "One or more locations don't belong to your organization.",
+          status: 403,
+          label: "Assets",
+          additionalData: { assetId, organizationId },
+          shouldBeCaptured: true,
+        });
+      }
+    }
+
+    // 7. Compute diff against current MANUAL pivot rows only. Kit-
+    //    driven rows aren't editable from this dialog; they're indexed
+    //    by `assetKitId` and survive untouched. A submitted entry at
+    //    the same location as a kit-driven row creates a SECOND row
+    //    (manual, `assetKitId = null`) — the two coexist.
+    const currentByLocation = new Map(
+      manualPlacements.map((al) => [al.locationId, al])
+    );
+    const submittedByLocation = new Map(
+      placements.map((p) => [p.locationId, p])
+    );
+
+    const toCreate = placements.filter(
+      (p) => !currentByLocation.has(p.locationId)
+    );
+    const toDelete = manualPlacements.filter(
+      (al) => !submittedByLocation.has(al.locationId)
+    );
+    const toUpdate = placements.filter((p) => {
+      const existing = currentByLocation.get(p.locationId);
+      return existing != null && existing.quantity !== p.quantity;
+    });
+
+    // 8. Apply the diff in one tx. The DEFERRED sum-within-total
+    //    trigger re-checks at COMMIT — covers any race where another
+    //    request modified `Asset.quantity` between our validation and
+    //    the write.
+    await db.$transaction(async (tx) => {
+      if (toDelete.length > 0) {
+        // Manual-row only delete. Kit-driven rows at the same
+        // (assetId, locationId) aren't on the diff set (we never
+        // included them) — `assetKitId: null` scopes this to manual
+        // rows alongside the `IN locationId` filter.
+        await tx.assetLocation.deleteMany({
+          where: {
+            assetId,
+            assetKitId: null,
+            locationId: { in: toDelete.map((al) => al.locationId) },
+          },
+        });
+      }
+      // Manual-row only updates. The (assetId, locationId) composite
+      // isn't unique on its own (a manual + kit-driven row can coexist
+      // at the same location), so we use `updateMany` scoped to
+      // `assetKitId IS NULL`. The partial unique
+      // `AssetLocation_manual_unique` guarantees at most one matching
+      // row per (assetId, locationId) for manual placements.
+      for (const u of toUpdate) {
+        await tx.assetLocation.updateMany({
+          where: { assetId, locationId: u.locationId, assetKitId: null },
+          data: { quantity: u.quantity },
+        });
+      }
+      if (toCreate.length > 0) {
+        await tx.assetLocation.createMany({
+          data: toCreate.map((p) => ({
+            assetId,
+            locationId: p.locationId,
+            organizationId,
+            quantity: p.quantity,
+          })),
+        });
+      }
+
+      // Activity events — one ASSET_LOCATION_CHANGED per net add /
+      // remove. Qty-only edits don't emit an event today (deliberate
+      // gap; Phase 4e will add quantity-aware notes). Mirrors the
+      // `updateLocationAssets` event pattern.
+      const events: Parameters<typeof recordEvents>[0] = [
+        ...toCreate.map((p) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          locationId: p.locationId,
+          field: "locationId",
+          fromValue: null,
+          toValue: p.locationId,
+        })),
+        ...toDelete.map((al) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          field: "locationId",
+          fromValue: al.locationId,
+          toValue: null,
+        })),
+      ];
+      if (events.length > 0) {
+        await recordEvents(events, tx);
+      }
+    });
+
+    return { ok: true as const };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating asset placements.",
+      additionalData: { assetId, userId, organizationId },
+      label: "Assets",
     });
   }
 }
@@ -4379,8 +4761,45 @@ export async function bulkUpdateAssetLocation({
       }),
     ]);
 
-    // Check if any assets belong to kits and prevent bulk location updates
-    const assetsInKits = assets.filter((asset) => asset.assetKits?.[0]?.kit);
+    /**
+     * Filter out QUANTITY_TRACKED assets FIRST — they always skip the
+     * bulk path (no per-asset qty input here), so they shouldn't be
+     * counted against the kit-guard below. A qty-tracked asset that
+     * happens to be in a kit would otherwise trip the kit-guard error
+     * even though it would have been skipped anyway. Mirror of the
+     * bulk-custody pattern (`bulkCheckOutAssets` line ~4099-4113):
+     * silently skip qty-tracked rows, throw early when the whole
+     * selection is qty-tracked. The dialog shows a `WarningBox`
+     * summarising the skip so users know what happened.
+     */
+    const nonQtyTracked = assets.filter(
+      (a) => a.type !== AssetType.QUANTITY_TRACKED
+    );
+    const skippedQuantityTracked = assets.length - nonQtyTracked.length;
+    if (nonQtyTracked.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must have their placements managed individually with a per-location quantity.",
+        additionalData: {
+          userId,
+          organizationId,
+          skippedQuantityTracked,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Kit-guard applies only to INDIVIDUAL assets that survive the
+    // qty-tracked filter above. INDIVIDUAL in a kit really IS a
+    // conflict — the kit owns its location and the BEFORE trigger
+    // caps an INDIVIDUAL at one AssetLocation row, so we can't
+    // additively place it elsewhere via this bulk path.
+    const assetsInKits = nonQtyTracked.filter(
+      (asset) => asset.assetKits?.[0]?.kit
+    );
     if (assetsInKits.length > 0) {
       const kitNames = Array.from(
         new Set(assetsInKits.map((asset) => asset.assetKits?.[0]?.kit?.name))
@@ -4406,18 +4825,25 @@ export async function bulkUpdateAssetLocation({
         })
       : null;
 
-    // Filter out assets already at the target location
-    const assetsToUpdate = assets.filter(
+    // Filter out assets already at the target location (qty-tracked
+    // already filtered above; only INDIVIDUAL reach this point).
+    const assetsToUpdate = nonQtyTracked.filter(
       (a) => getPrimaryLocation(a)?.id !== newLocation?.id
     );
 
     await db.$transaction(async (tx) => {
       if (assetsToUpdate.length > 0) {
-        // Per-asset pivot replace: drop any existing AssetLocation rows
-        // for the asset, then create the new one (skipped when clearing).
-        // The DEFERRED sum-within-total trigger re-checks at COMMIT.
+        // Per-asset MANUAL pivot replace. Drop the asset's existing
+        // manual rows (kit-driven rows survive — they're owned by the
+        // kit's flow), then create the new one (skipped when
+        // clearing). The DEFERRED sum-within-total trigger re-checks
+        // at COMMIT. INDIVIDUAL-only at this point — qty-tracked were
+        // filtered out above.
         await tx.assetLocation.deleteMany({
-          where: { assetId: { in: assetsToUpdate.map((a) => a.id) } },
+          where: {
+            assetId: { in: assetsToUpdate.map((a) => a.id) },
+            assetKitId: null,
+          },
         });
         if (newLocation) {
           await tx.assetLocation.createMany({

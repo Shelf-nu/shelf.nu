@@ -57,11 +57,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             name: true,
           },
         },
-        // Phase 3a: walk the BookingAsset pivot to reach assets. The select
-        // shape below mirrors what main's mobile contract expected on the
-        // implicit M2M, but each row is now `{ asset: {...} }`.
+        // Walk the BookingAsset pivot to reach assets. `quantity` +
+        // `assetKitId` per row let the loader below collapse multi-row
+        // entries (standalone + kit-driven slices of the same asset)
+        // into one mobile-shape entry per asset.
         bookingAssets: {
           select: {
+            id: true,
+            quantity: true,
+            assetKitId: true,
             asset: {
               select: {
                 id: true,
@@ -71,14 +75,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 category: {
                   select: { id: true, name: true, color: true },
                 },
-                // Pull the asset's kit through the `AssetKit` pivot.
-                // `@@unique([assetId])` keeps the link 1:1, so the first
-                // pivot row (oldest by createdAt) is a lossless "primary
-                // kit" for mobile clients that expect a singular shape.
+                // Pull the asset's kit memberships through the `AssetKit`
+                // pivot. `id` so we can match the BookingAsset's
+                // `assetKitId` against the right membership when collapsing.
                 assetKits: {
-                  select: { kit: { select: { id: true, name: true } } },
+                  select: {
+                    id: true,
+                    kit: { select: { id: true, name: true } },
+                  },
                   orderBy: { createdAt: "asc" },
-                  take: 1,
                 },
               },
             },
@@ -104,17 +109,56 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
     }
 
-    // Synthesise singular `kit` / `kitId` keys from the `AssetKit` pivot
-    // so the mobile JSON contract stays flat — clients consume a single
-    // kit per asset, not the pivot array. We also strip the raw
-    // `assetKits` field from the response.
-    const assets = booking.bookingAssets.map((ba) => {
-      const { assetKits, ...rest } = ba.asset;
+    // Collapse multi-row BookingAsset entries to one mobile shape per
+    // `assetId`. Sum the quantities; expose `assetKitId` only when
+    // every row for the asset agrees on the same kit (otherwise `null`
+    // = mixed standalone + kit-driven). Mobile clients that don't know
+    // about `assetKitId` see the same flat shape they always did.
+    //
+    // `kit`/`kitId` keep their legacy synthesis (the first AssetKit
+    // pointer the asset has at booking time) for older clients that
+    // still rely on those — but the `assetKitId` field is the accurate
+    // per-booking-slice signal when mobile is ready to adopt it.
+    type CollapsedRow = {
+      assetId: string;
+      first: (typeof booking.bookingAssets)[number];
+      totalQuantity: number;
+      assetKitIds: Set<string | null>;
+    };
+    const byAssetId = new Map<string, CollapsedRow>();
+    for (const ba of booking.bookingAssets) {
+      const existing = byAssetId.get(ba.asset.id);
+      if (existing) {
+        existing.totalQuantity += ba.quantity;
+        existing.assetKitIds.add(ba.assetKitId);
+      } else {
+        byAssetId.set(ba.asset.id, {
+          assetId: ba.asset.id,
+          first: ba,
+          totalQuantity: ba.quantity,
+          assetKitIds: new Set([ba.assetKitId]),
+        });
+      }
+    }
+
+    const assets = Array.from(byAssetId.values()).map((row) => {
+      const { assetKits, ...rest } = row.first.asset;
       const primaryKit = assetKits[0]?.kit ?? null;
+      // Unanimous-kit rule: every collapsed row for this asset points at
+      // the same `assetKitId`. Mixed → `null` so clients don't
+      // mis-attribute the slice to one of multiple sources.
+      const unanimousAssetKitId =
+        row.assetKitIds.size === 1 ? Array.from(row.assetKitIds)[0] : null;
       return {
         ...rest,
         kit: primaryKit,
         kitId: primaryKit?.id ?? null,
+        // Per-booking quantity (sum of all slices for this asset in
+        // this booking).
+        quantity: row.totalQuantity,
+        // Per-row kit-source discriminator — `null` for standalone or
+        // mixed (assets with both standalone and kit-driven slices).
+        assetKitId: unanimousAssetKitId,
       };
     });
 

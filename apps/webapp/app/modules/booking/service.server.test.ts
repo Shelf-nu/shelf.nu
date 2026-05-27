@@ -4309,8 +4309,11 @@ describe("computeBookingAssetRemaining", () => {
     expect.assertions(1);
 
     // why: pivot row exists for this (booking, asset) pair with 10 booked.
+    // why: `computeBookingAssetRemaining` switched from `findUnique` to
+    // `findMany` once BookingAsset gained multi-row support — the helper
+    // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
     // why: aggregate of RETURN+CONSUME+LOSS+DAMAGE logs totals 3 units.
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
@@ -4328,7 +4331,7 @@ describe("computeBookingAssetRemaining", () => {
     expect.assertions(1);
 
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 5 });
+    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 5 }]);
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 8 } });
 
@@ -4344,8 +4347,11 @@ describe("computeBookingAssetRemaining", () => {
   it("returns booked quantity when no disposition logs exist", async () => {
     expect.assertions(1);
 
+    // why: `computeBookingAssetRemaining` switched from `findUnique` to
+    // `findMany` once BookingAsset gained multi-row support — the helper
+    // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
     // why: Prisma _sum returns null when the aggregated set is empty.
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: null } });
@@ -4364,7 +4370,7 @@ describe("computeBookingAssetRemaining", () => {
 
     // why: defends against asset removed from booking between read+write.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue(null);
+    db.bookingAsset.findMany.mockResolvedValue([]);
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
 
@@ -4386,30 +4392,31 @@ describe("isBookingFullyCheckedIn", () => {
   it("returns true when individuals are reconciled and qty-tracked remaining is zero", async () => {
     expect.assertions(1);
 
-    // why: mixed booking with one INDIVIDUAL (asset-1) and one
-    // QUANTITY_TRACKED (asset-2) asset.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([
-      {
-        assetId: "asset-1",
-        quantity: 1,
-        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
-      },
-      {
-        assetId: "asset-2",
-        quantity: 10,
-        asset: { id: "asset-2", type: AssetType.QUANTITY_TRACKED },
-      },
-    ]);
+    // why: both `isBookingFullyCheckedIn` AND the
+    // `computeBookingAssetRemaining` helper it delegates to read
+    // `bookingAsset.findMany`. Sequence the responses so the first
+    // call returns the booking's asset list and the second returns the
+    // (booking, qty-asset) row(s) the helper aggregates over.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-1",
+          quantity: 1,
+          asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+        },
+        {
+          assetId: "asset-2",
+          quantity: 10,
+          asset: { id: "asset-2", type: AssetType.QUANTITY_TRACKED },
+        },
+      ])
+      .mockResolvedValueOnce([{ quantity: 10 }]);
     // why: asset-1 is in a session → individual-side reconciled.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
       { assetIds: ["asset-1"] },
     ]);
-    // why: computeBookingAssetRemaining reads findUnique + aggregate.
     // Booked 10 − logged 10 → remaining 0 for asset-2.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 10 } });
 
@@ -4448,19 +4455,20 @@ describe("isBookingFullyCheckedIn", () => {
   it("returns false when a qty-tracked asset still has remaining units", async () => {
     expect.assertions(1);
 
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([
-      {
-        assetId: "asset-qty",
-        quantity: 10,
-        asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
-      },
-    ]);
+    // why: both calls (isBookingFullyCheckedIn + computeBookingAssetRemaining)
+    // hit `bookingAsset.findMany` — sequence the responses.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-qty",
+          quantity: 10,
+          asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
+        },
+      ])
+      .mockResolvedValueOnce([{ quantity: 10 }]);
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([]);
     // why: booked 10 − logged 3 → 7 still outstanding.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
 
@@ -4582,9 +4590,26 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(makeQtyBooking());
 
-    // why: booked 10 units on this booking.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    // why: `computeBookingAssetRemaining` (multi-row aware) queries
+    // `bookingAsset.findMany({ where: { bookingId, assetId } })` and
+    // sums quantities. `isBookingFullyCheckedIn` ALSO queries
+    // `bookingAsset.findMany` but only by `bookingId`. We branch by the
+    // shape of the where clause:
+    //   - `assetId` set → compute helper → return the booked qty
+    //   - `assetId` absent → isBookingFullyCheckedIn → return empty so
+    //     the "nothing to check in → complete" short-circuit fires
+    //     (mirrors the pre-multi-row mock behaviour where the helper
+    //     wasn't called from compute and the default empty mock won).
+    //     Individual tests that need the helper to see the full asset
+    //     list and walk it can override with `mockResolvedValueOnce`.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args: { where: { assetId?: string } }) => {
+        if (args.where?.assetId) {
+          return Promise.resolve([{ quantity: 10 }]);
+        }
+        return Promise.resolve([]);
+      });
 
     // why: logged-so-far aggregate controls `remaining = 10 − logged`.
     //@ts-expect-error missing vitest type
@@ -4884,8 +4909,11 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     });
 
     // why: booked 10 units, zero logged so remaining = 10.
+    // why: `computeBookingAssetRemaining` switched from `findUnique` to
+    // `findMany` once BookingAsset gained multi-row support — the helper
+    // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
+    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
 

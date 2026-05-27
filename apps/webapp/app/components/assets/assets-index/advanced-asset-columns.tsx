@@ -260,51 +260,10 @@ export function AdvancedIndexColumn({
       return <TagsColumn tags={item.tags} />;
 
     case "location":
-      return (
-        <TextColumn
-          value={
-            item.location ? (
-              <Button
-                to={`/locations/${item.location.id}`}
-                variant="inherit"
-                className={"hover:no-underline"}
-              >
-                <LocationBadge
-                  location={{
-                    id: item.location.id,
-                    name: item.location.name,
-                    parentId: item.location.parentId ?? undefined,
-                    childCount: item.location.childCount ?? 0,
-                  }}
-                />
-              </Button>
-            ) : (
-              <EmptyTableValue />
-            )
-          }
-        />
-      );
+      return <LocationColumn locations={item.locations} />;
 
     case "kit":
-      return (
-        <TextColumn
-          value={
-            item?.kit?.name ? (
-              <Link
-                // the advanced index row (assembled from the AssetKit pivot
-                // by the raw SQL loader).
-                to={`/kits/${item.kit.id}`}
-                className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
-                title={item.kit.name}
-              >
-                {item.kit.name}
-              </Link>
-            ) : (
-              <EmptyTableValue />
-            )
-          }
-        />
-      );
+      return <KitColumn kits={item.kits} />;
 
     case "custody":
       return <CustodyColumn custody={item.custody} />;
@@ -579,7 +538,7 @@ function CustodyColumnContent({
   }
 
   return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
       {primaryBadge}
       <TooltipProvider>
         <Tooltip>
@@ -606,6 +565,164 @@ function CustodyColumnContent({
                   </li>
                 );
               })}
+            </ul>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
+  );
+}
+
+/**
+ * Renders the kit column for the advanced asset index.
+ *
+ * Single kit: renders the primary kit name as a link to the kit page.
+ * Multiple kits (qty-tracked split across kits): renders the primary
+ * kit link plus a "+N more" chip; hovering the chip reveals a tooltip
+ * listing every kit name on its own line. Mirrors `CustodyColumn` so
+ * the asset-index never silently hides kit membership 2..N.
+ */
+export function KitColumn({ kits }: { kits: AdvancedIndexAsset["kits"] }) {
+  const { primary, others } = formatCustodyList(kits);
+
+  return (
+    <Td>
+      {!primary ? (
+        <EmptyTableValue />
+      ) : (
+        <KitColumnContent primary={primary} others={others} />
+      )}
+    </Td>
+  );
+}
+
+function KitColumnContent({
+  primary,
+  others,
+}: {
+  primary: AdvancedIndexAsset["kits"][number];
+  others: AdvancedIndexAsset["kits"][number][];
+}) {
+  const hasOthers = others.length > 0;
+
+  const primaryLink = (
+    <Link
+      to={`/kits/${primary.id}`}
+      className="block max-w-[220px] truncate font-medium underline hover:text-gray-600"
+      title={primary.name}
+    >
+      {primary.name}
+    </Link>
+  );
+
+  if (!hasOthers) {
+    return primaryLink;
+  }
+
+  return (
+    <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
+      {primaryLink}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+              data-testid="kit-more-chip"
+            >
+              +{others.length} more
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs" data-testid="kit-more-tooltip">
+            <ul className="flex flex-col gap-1 text-sm">
+              {[primary, ...others].map((entry) => (
+                <li key={entry.id}>{entry.name}</li>
+              ))}
+            </ul>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
+  );
+}
+
+/**
+ * Renders the location column for the advanced asset index.
+ *
+ * Single location: renders the primary placement as a LocationBadge
+ * wrapped in a link to the location page.
+ * Multiple locations (qty-tracked split across locations): renders the
+ * primary location plus a "+N more" chip with a hover tooltip listing
+ * every location. Mirror of `KitColumn` / `CustodyColumn`.
+ */
+export function LocationColumn({
+  locations,
+}: {
+  locations: AdvancedIndexAsset["locations"];
+}) {
+  const { primary, others } = formatCustodyList(locations);
+
+  return (
+    <Td>
+      {!primary ? (
+        <EmptyTableValue />
+      ) : (
+        <LocationColumnContent primary={primary} others={others} />
+      )}
+    </Td>
+  );
+}
+
+function LocationColumnContent({
+  primary,
+  others,
+}: {
+  primary: AdvancedIndexAsset["locations"][number];
+  others: AdvancedIndexAsset["locations"][number][];
+}) {
+  const hasOthers = others.length > 0;
+
+  const primaryButton = (
+    <Button
+      to={`/locations/${primary.id}`}
+      variant="inherit"
+      className="hover:no-underline"
+    >
+      <LocationBadge
+        location={{
+          id: primary.id,
+          name: primary.name,
+          parentId: primary.parentId ?? undefined,
+          childCount: primary.childCount ?? 0,
+        }}
+      />
+    </Button>
+  );
+
+  if (!hasOthers) {
+    return primaryButton;
+  }
+
+  return (
+    <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
+      {primaryButton}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+              data-testid="location-more-chip"
+            >
+              +{others.length} more
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            className="max-w-xs"
+            data-testid="location-more-tooltip"
+          >
+            <ul className="flex flex-col gap-1 text-sm">
+              {[primary, ...others].map((entry) => (
+                <li key={entry.id}>{entry.name}</li>
+              ))}
             </ul>
           </TooltipContent>
         </Tooltip>

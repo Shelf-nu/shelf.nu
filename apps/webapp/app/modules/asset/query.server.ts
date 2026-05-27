@@ -1909,6 +1909,8 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
       END AS "locationName",
+      kits_agg.kits AS kits,
+      locations_agg.locations AS locations,
       COALESCE(
         jsonb_agg(
           DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'color', t.color)
@@ -1999,12 +2001,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
-  -- Kit membership goes through the AssetKit pivot. Phase 4a-Polish-2
-  -- dropped AssetKit.@@unique([assetId]) (multi-kit qty-tracked), so a
-  -- plain LEFT JOIN AssetKit would fan out and duplicate the asset in
-  -- the index. Use a LATERAL primary-pick (oldest pivot row) to keep
-  -- exactly one kit row per asset — the asset index shows a single
-  -- "primary kit"; the full membership list lives on the asset page.
+  -- Kit membership goes through the AssetKit pivot. AssetKit has no
+  -- @@unique([assetId]) (qty-tracked assets can belong to multiple
+  -- kits), so a plain LEFT JOIN AssetKit would fan out and duplicate
+  -- the asset in the index. Use a LATERAL primary-pick (oldest pivot
+  -- row) to keep exactly one kit row per asset — used for ORDER BY
+  -- (by primary kit name) and for the singular kit field on the row
+  -- projection.
   LEFT JOIN LATERAL (
     SELECT k.id, k.name, k.status
     FROM public."AssetKit" ak
@@ -2013,6 +2016,23 @@ export const assetQueryJoins = Prisma.sql`
     ORDER BY ak."createdAt" ASC
     LIMIT 1
   ) k ON TRUE
+  -- Full kit membership aggregated as a jsonb array, so the asset-index
+  -- "Kit" column can render primary + "+N more" for multi-kit qty-
+  -- tracked assets (mirror of custody_agg below). Always returns an
+  -- array (COALESCE → '[]'::jsonb) so the column code never branches
+  -- on null.
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object('id', k2.id, 'name', k2.name, 'status', k2.status)
+        ORDER BY ak2."createdAt" ASC
+      ),
+      '[]'::jsonb
+    ) AS kits
+    FROM public."AssetKit" ak2
+    JOIN public."Kit" k2 ON ak2."kitId" = k2.id
+    WHERE ak2."assetId" = a.id
+  ) kits_agg ON TRUE
   LEFT JOIN public."Category" c ON a."categoryId" = c.id
   LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
   -- Placement goes through the AssetLocation pivot. Same fan-out concern
@@ -2026,6 +2046,31 @@ export const assetQueryJoins = Prisma.sql`
     ORDER BY al."createdAt" ASC
     LIMIT 1
   ) l ON TRUE
+  -- Full placement list aggregated as a jsonb array, mirror of
+  -- kits_agg above. Drives the asset-index "Location" column's
+  -- primary + "+N more" rendering for qty-tracked assets placed at
+  -- multiple locations.
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', l2.id,
+          'name', l2.name,
+          'parentId', l2."parentId",
+          'childCount', (
+            SELECT COUNT(*)::integer
+            FROM public."Location" lc2
+            WHERE lc2."parentId" = l2.id
+          )
+        )
+        ORDER BY al2."createdAt" ASC
+      ),
+      '[]'::jsonb
+    ) AS locations
+    FROM public."AssetLocation" al2
+    JOIN public."Location" l2 ON al2."locationId" = l2.id
+    WHERE al2."assetId" = a.id
+  ) locations_agg ON TRUE
   LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
   LEFT JOIN public."Tag" t ON att."B" = t.id
   LEFT JOIN LATERAL (
@@ -2118,9 +2163,10 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'availableToBook', aq."assetAvailableToBook",
           'kitId', aq."assetKitId",
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
+          'kits', COALESCE(aq.kits, '[]'::jsonb),
           'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
           'tags', aq.tags,
-          'location', CASE 
+          'location', CASE
             WHEN aq."assetLocationId" IS NOT NULL THEN jsonb_build_object(
               'id', aq."assetLocationId",
               'name', aq."locationName",
@@ -2129,6 +2175,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
             )
             ELSE NULL
           END,
+          'locations', COALESCE(aq.locations, '[]'::jsonb),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}

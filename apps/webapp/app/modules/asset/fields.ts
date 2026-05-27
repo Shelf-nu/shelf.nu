@@ -45,8 +45,21 @@ export const getAssetOverviewFields = (
     tags: true,
     // `quantity` is pulled so loaders can show per-location slices and
     // derive the "placed / unplaced" split for qty-tracked assets.
+    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
+    // driven placements so the UI can render the "via kit" badge
+    // alongside the kit-driven rows.
     assetLocations: {
-      select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+      select: {
+        quantity: true,
+        assetKitId: true,
+        location: LOCATION_WITH_HIERARCHY,
+        assetKit: {
+          select: {
+            id: true,
+            kit: { select: { id: true, name: true } },
+          },
+        },
+      },
     },
     custody: {
       select: {
@@ -178,8 +191,21 @@ export const assetIndexFields = ({
     tags: true,
     // `quantity` is pulled so loaders can show per-location slices and
     // derive the "placed / unplaced" split for qty-tracked assets.
+    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
+    // driven placements so the UI can render the "via kit" badge
+    // alongside the kit-driven rows.
     assetLocations: {
-      select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+      select: {
+        quantity: true,
+        assetKitId: true,
+        location: LOCATION_WITH_HIERARCHY,
+        assetKit: {
+          select: {
+            id: true,
+            kit: { select: { id: true, name: true } },
+          },
+        },
+      },
     },
     custody: {
       select: {
