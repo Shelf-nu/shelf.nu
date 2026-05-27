@@ -42,7 +42,11 @@ export function useScanQueue({
     while (scanQueueRef.current.length > 0) {
       const entry = scanQueueRef.current[0];
       try {
-        const { data } = await api.recordAuditScan(orgId, entry);
+        const { data, error } = await api.recordAuditScan(orgId, entry);
+        // Treat envelope errors as failures — keep item in queue for retry
+        if (error || !data) {
+          throw new Error(error ?? "Failed to sync audit scan");
+        }
         // Success — remove from queue and persist immediately
         scanQueueRef.current.shift();
 
