@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
@@ -13,12 +13,12 @@ import {
   Link,
   NavLink,
   Outlet,
+  useFetchers,
   useLoaderData,
 } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
@@ -277,7 +277,12 @@ export default function App() {
     needsSequentialIdMigration,
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
-  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
+  const fetchers = useFetchers();
+  const workspaceSwitching = fetchers.some(
+    (f) =>
+      f.formAction === "/api/user/change-current-organization" &&
+      (f.state === "submitting" || f.state === "loading")
+  );
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );

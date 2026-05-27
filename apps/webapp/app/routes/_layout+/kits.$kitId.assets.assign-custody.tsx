@@ -237,7 +237,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Use transaction to ensure kit custody assignment and activity events are atomic
+    // why: awaits inside this $transaction MUST run sequentially. tx.kit.update
+    // returns updatedKit.assets which the next two steps consume; Prisma also
+    // serializes queries within a transaction, so Promise.all here would
+    // provide no benefit and could fragment failure semantics.
     const kit = await db.$transaction(async (tx) => {
       const updatedKit = await tx.kit.update({
         where: { id: kitId, organizationId },

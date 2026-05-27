@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useSetAtom } from "jotai";
 import { useFetcher, useLoaderData } from "react-router";
 import invariant from "tiny-invariant";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { Button } from "~/components/shared/button";
 import {
   DropdownMenu,
@@ -36,8 +34,6 @@ export default function OrganizationSelector() {
   const fetcher = useFetcher();
   const isSwitchingOrg = isFormProcessing(fetcher.state);
 
-  const setWorkspaceSwitching = useSetAtom(switchingWorkspaceAtom);
-
   const currentOrganization = organizations.find(
     (org) => org.id === currentOrganizationId
   );
@@ -59,13 +55,6 @@ export default function OrganizationSelector() {
   function closeDropdown() {
     setIsDropdownOpen(false);
   }
-
-  useEffect(
-    function setSwitchingWorkspaceAfterFetch() {
-      setWorkspaceSwitching(isSwitchingOrg);
-    },
-    [isSwitchingOrg, setWorkspaceSwitching]
-  );
 
   return (
     <SidebarMenu>
