@@ -305,11 +305,33 @@ function ScannerContent() {
           if (error || !qrData) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            setScanResult({
-              type: "error",
-              title: "Lookup Failed",
-              message: error || "Could not look up this QR code.",
-            });
+
+            // Detect unclaimed QR codes — offer browser link instead of generic error
+            const isUnclaimed =
+              error === "This QR code is not linked to any organization";
+
+            if (isUnclaimed) {
+              setScanResult({
+                type: "not_found",
+                title: "No Asset Linked",
+                message:
+                  "This QR code is not linked to any asset. Open the web app to link it.",
+                action: {
+                  label: "Link in Browser",
+                  icon: "open-outline",
+                  onPress: () => {
+                    Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                    dismissResult();
+                  },
+                },
+              });
+            } else {
+              setScanResult({
+                type: "error",
+                title: "Lookup Failed",
+                message: error || "Could not look up this QR code.",
+              });
+            }
             finalizeScan();
             return;
           }
