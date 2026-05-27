@@ -185,6 +185,10 @@ export function EvidenceModal({
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onEvidenceAdded(item.assetId, "image");
+      // Server also creates a note when text accompanies the image
+      if (noteText.trim()) {
+        onEvidenceAdded(item.assetId, "note");
+      }
       setSelectedImageUri(null);
       setNoteText("");
     } catch {
