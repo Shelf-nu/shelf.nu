@@ -13,6 +13,8 @@ const RETRY_DELAYS = [2_000, 5_000, 15_000];
 type UseScanQueueParams = {
   orgId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
+  /** Called when a scan is confirmed and auditAssetId is received from server */
+  onScanSynced?: (assetId: string, auditAssetId: string) => void;
 };
 
 export type ScanQueueResult = {
@@ -25,6 +27,7 @@ export type ScanQueueResult = {
 export function useScanQueue({
   orgId,
   scannedItemsRef,
+  onScanSynced,
 }: UseScanQueueParams): ScanQueueResult {
   const scanQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
@@ -54,6 +57,8 @@ export function useScanQueue({
               auditAssetId: data.auditAssetId,
             };
           }
+          // Notify caller to update React state for re-render
+          onScanSynced?.(entry.assetId, data.auditAssetId);
         }
 
         saveAuditScanState(
@@ -91,7 +96,7 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef]);
+  }, [orgId, scannedItemsRef, onScanSynced]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {

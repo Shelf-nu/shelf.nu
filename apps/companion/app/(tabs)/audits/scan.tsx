@@ -135,10 +135,28 @@ function AuditScannerContent() {
     { assetId: string; name: string; isExpected: boolean; scannedAt: string }[]
   >([]);
 
+  // Ref to hold setScannedItems - populated after useAuditInit
+  const setScannedItemsRef = useRef<React.Dispatch<
+    React.SetStateAction<ScannedItem[]>
+  > | null>(null);
+
+  // Callback for when scan is synced - updates React state with auditAssetId
+  const handleScanSynced = useCallback(
+    (assetId: string, auditAssetId: string) => {
+      setScannedItemsRef.current?.((prev) =>
+        prev.map((item) =>
+          item.assetId === assetId ? { ...item, auditAssetId } : item
+        )
+      );
+    },
+    []
+  );
+
   const { scanQueueRef, enqueueScan, processQueue, retryTimerRef } =
     useScanQueue({
       orgId: currentOrg?.id,
       scannedItemsRef: stableScannedItemsRef,
+      onScanSynced: handleScanSynced,
     });
 
   // ── Audit init (extracted hook) ─────────────────────
@@ -170,6 +188,8 @@ function AuditScannerContent() {
 
   // Keep the stable ref in sync with the audit init ref
   stableScannedItemsRef.current = scannedItemsRef.current;
+  // Wire up setScannedItems for the scan sync callback
+  setScannedItemsRef.current = setScannedItems;
 
   // Track expectedTotal in a ref for animateProgress
   const expectedTotalRef = useRef(expectedTotal);
