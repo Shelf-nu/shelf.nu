@@ -17,6 +17,7 @@ import {
   useLoaderData,
 } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
+import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
 import { ErrorContent } from "~/components/errors";
@@ -279,11 +280,25 @@ export default function App() {
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
   const fetchers = useFetchers();
-  const workspaceSwitching = fetchers.some(
-    (f) =>
-      f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
-      (f.state === "submitting" || f.state === "loading")
-  );
+  const isHydrated = useHydrated();
+  // Several authenticated routes (assets._index, kits._index, locations.*, …)
+  // call `userHasPermission` from `permission.validator.client` during their
+  // component render. That module is `.client.ts`, so RR7's vite plugin
+  // stubs every export to `undefined` in the server bundle — calling them
+  // during SSR throws `TypeError: userHasPermission is not a function`.
+  // Until those call sites are lifted into loaders (or wrapped in
+  // ClientOnly), we suppress route SSR rendering by showing the workspace
+  // spinner until the client has hydrated. This matches the prior status
+  // quo, when `switchingWorkspaceAtom` defaulted to `true` and produced the
+  // same one-frame spinner on every full reload.
+  // TODO: lift `userHasPermission` checks into route loaders so SSR works.
+  const workspaceSwitching =
+    !isHydrated ||
+    fetchers.some(
+      (f) =>
+        f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
+        (f.state === "submitting" || f.state === "loading")
+    );
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );
