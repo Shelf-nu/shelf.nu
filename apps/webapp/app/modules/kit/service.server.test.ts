@@ -104,6 +104,11 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    // Polish-7b check-in floor guard sums per-slice check-ins before
+    // shrinking a kit-driven slice's quantity.
+    consumptionLog: {
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
   },
 }));
 
@@ -2577,6 +2582,115 @@ describe("updateKitAssets - per-row qty submission", () => {
           quantity: 1,
         },
       ],
+    });
+  });
+});
+
+describe("updateKitAssets - check-in floor guard (Polish-7b)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Sets up an existing-in-kit qty-tracked asset (Pens, AssetKit qty 60)
+   * with one kit-driven BookingAsset slice that has `checkedIn` units
+   * already reconciled against it. The test then submits a new kit
+   * quantity to exercise the floor guard.
+   */
+  function setupFloorGuard(checkedIn: number) {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [
+        {
+          kitId: "kit-1",
+          asset: {
+            id: "pens",
+            title: "Pens",
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [],
+          },
+        },
+      ],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [{ kitId: "kit-1", quantity: 60 }],
+        custody: [],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+    // aksToSync — the AssetKit row whose quantity is being changed.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-pens", assetId: "pens", quantity: 60 },
+    ]);
+    // One kit-driven BookingAsset slice for this AssetKit.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetKitId: "ak-pens",
+        asset: { title: "Pens" },
+        booking: { name: "Spring Shoot" },
+      },
+    ]);
+    // `checkedIn` units already reconciled against that slice.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.groupBy.mockResolvedValue([
+      { bookingAssetId: "ba-1", _sum: { quantity: checkedIn } },
+    ]);
+  }
+
+  it("blocks shrinking a kit slice below units already checked in", async () => {
+    expect.assertions(2);
+
+    setupFloorGuard(40); // 40 already checked in on the slice
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["pens"],
+        assetQuantities: { pens: 30 }, // 30 < 40 → must block
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toThrow(/already checked in/i);
+
+    // The live-link qty sync must NOT run when the guard trips.
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows shrinking down to (not below) the checked-in floor", async () => {
+    expect.assertions(1);
+
+    setupFloorGuard(40);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["pens"],
+      assetQuantities: { pens: 40 }, // 40 == floor → allowed
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: { assetKitId: "ak-pens" },
+      data: { quantity: 40 },
     });
   });
 });

@@ -109,9 +109,13 @@ const useRouteLoaderDataMock = vi.mocked(useRouteLoaderData);
 function individual(
   overrides: Partial<Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }>> = {}
 ): Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }> {
+  // Default bookingAssetId derived from the overridden id so different
+  // fixtures in the same suite don't accidentally share a key.
+  const id = overrides.id ?? "asset-ind";
   return {
     kind: "INDIVIDUAL",
-    id: "asset-ind",
+    id,
+    bookingAssetId: `ba-${id}`,
     title: "Camera",
     mainImage: null,
     thumbnailImage: null,
@@ -127,9 +131,11 @@ function qty(
     Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }>
   > = {}
 ): Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }> {
+  const id = overrides.id ?? "asset-qty";
   return {
     kind: "QUANTITY_TRACKED",
-    id: "asset-qty",
+    id,
+    bookingAssetId: `ba-${id}`,
     title: "Battery pack",
     mainImage: null,
     thumbnailImage: null,
@@ -138,6 +144,7 @@ function qty(
     booked: 20,
     logged: 0,
     remaining: 20,
+    breakdown: { returned: 0, consumed: 0, lost: 0, damaged: 0 },
     consumptionType: "TWO_WAY",
     ...overrides,
   };
@@ -151,7 +158,7 @@ function qty(
 function makeLoaderData(
   expectedAssets: BookingExpectedAsset[],
   overrides: {
-    qtyRemainingByAssetId?: Record<
+    qtyRemainingByBookingAssetId?: Record<
       string,
       {
         booked: number;
@@ -180,10 +187,10 @@ function makeLoaderData(
     },
   }));
 
-  // Derive a default qtyRemainingByAssetId from expectedAssets unless
-  // the caller supplied an override.
-  const qtyRemainingByAssetId =
-    overrides.qtyRemainingByAssetId ??
+  // Derive a default qtyRemainingByBookingAssetId from expectedAssets
+  // (keyed by the slice — Polish-7b) unless the caller overrides.
+  const qtyRemainingByBookingAssetId =
+    overrides.qtyRemainingByBookingAssetId ??
     expectedAssets.reduce<
       Record<
         string,
@@ -196,7 +203,7 @@ function makeLoaderData(
       >
     >((acc, a) => {
       if (a.kind === "QUANTITY_TRACKED") {
-        acc[a.id] = {
+        acc[a.bookingAssetId] = {
           booked: a.booked,
           logged: a.logged,
           remaining: a.remaining,
@@ -228,7 +235,7 @@ function makeLoaderData(
         acc[a.id] = { id: a.id };
         return acc;
       }, {}),
-    qtyRemainingByAssetId,
+    qtyRemainingByBookingAssetId,
     expectedKits: [],
   };
 }
@@ -318,8 +325,59 @@ describe("PartialCheckinDrawer", () => {
     const items = store.get(scannedItemsAtom);
     const keys = Object.keys(items);
     expect(keys).toHaveLength(1);
-    expect(keys[0]).toBe(`${QUICK_CHECKIN_QR_PREFIX}asset-qty-click`);
+    // Polish-7b: synthetic key is the slice's bookingAssetId (`ba-<id>`).
+    expect(keys[0]).toBe(`${QUICK_CHECKIN_QR_PREFIX}ba-asset-qty-click`);
     expect(items[keys[0]]?.type).toBe("asset");
+  });
+
+  it("renders independent quick-checkin rows for two pending slices of the same asset", async () => {
+    // Polish-7b: an asset with two BookingAsset slices (same asset.id,
+    // different bookingAssetId) must render two independently checkable
+    // rows — neither synthetic entry overwrites the other.
+    const assets: BookingExpectedAsset[] = [
+      qty({
+        id: "asset-multi",
+        bookingAssetId: "ba-slice-a",
+        title: "AA batteries",
+        booked: 50,
+        remaining: 50,
+      }),
+      qty({
+        id: "asset-multi",
+        bookingAssetId: "ba-slice-b",
+        title: "AA batteries",
+        booked: 33,
+        remaining: 33,
+      }),
+    ];
+    useLoaderDataMock.mockReturnValue(makeLoaderData(assets));
+
+    const store = seedStore(assets);
+    renderDrawer(store);
+
+    expect(
+      screen.getAllByRole("button", { name: /check in without scanning/i })
+    ).toHaveLength(2);
+
+    const user = userEvent.setup();
+    // Click the first slice's button; that moves it into the scanned
+    // bucket (its button disappears), so re-query for the second.
+    await user.click(
+      screen.getAllByRole("button", {
+        name: /check in without scanning/i,
+      })[0]
+    );
+    await user.click(
+      screen.getByRole("button", { name: /check in without scanning/i })
+    );
+
+    const keys = Object.keys(store.get(scannedItemsAtom)).sort();
+    expect(keys).toEqual(
+      [
+        `${QUICK_CHECKIN_QR_PREFIX}ba-slice-a`,
+        `${QUICK_CHECKIN_QR_PREFIX}ba-slice-b`,
+      ].sort()
+    );
   });
 
   it("unit-weighted progress counts individuals + logged qty + typed disposition", () => {

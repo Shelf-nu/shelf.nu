@@ -22,6 +22,7 @@ const dbMocks = vi.hoisted(() => ({
   kit: { update: vi.fn() },
   asset: { update: vi.fn() },
   custody: { deleteMany: vi.fn(), count: vi.fn() },
+  assetKit: { findMany: vi.fn() },
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -32,6 +33,7 @@ vi.mock("~/database/db.server", () => ({
       deleteMany: dbMocks.custody.deleteMany,
       count: dbMocks.custody.count,
     },
+    assetKit: { findMany: dbMocks.assetKit.findMany },
     // why: the removeAsset case wraps kit disconnect + custody cleanup
     // + status flip in a single transaction; we route the inner calls
     // through to the same hoisted mocks.
@@ -43,6 +45,7 @@ vi.mock("~/database/db.server", () => ({
           deleteMany: dbMocks.custody.deleteMany,
           count: dbMocks.custody.count,
         },
+        assetKit: { findMany: dbMocks.assetKit.findMany },
       })
     ),
   },
@@ -67,8 +70,16 @@ vi.mock("~/modules/note/service.server", () => ({
 vi.mock("~/modules/kit/service.server", () => ({
   deleteKit: vi.fn(),
   deleteKitImage: vi.fn(),
+  // why: removeAsset action calls these helpers to coordinate with the
+  // kit→booking cascade. They no-op in this unit test — the cascade
+  // semantics are covered separately by kit/service.server.test.ts.
+  emitAssetKitDetachmentNotes: vi.fn().mockResolvedValue(undefined),
+  fetchAssetKitDetachmentImpact: vi.fn().mockResolvedValue([]),
   getKit: vi.fn(),
   getKitCurrentBooking: vi.fn(),
+  mergeStandaloneCollisionsForKitDetachment: vi
+    .fn()
+    .mockResolvedValue(undefined),
   relinkKitQrCode: vi.fn(),
 }));
 
@@ -191,6 +202,7 @@ beforeEach(() => {
 
   dbMocks.custody.deleteMany.mockResolvedValue({ count: 1 });
   dbMocks.asset.update.mockResolvedValue({});
+  dbMocks.assetKit.findMany.mockResolvedValue([]);
 });
 
 describe("kits/$kitId removeAsset action", () => {

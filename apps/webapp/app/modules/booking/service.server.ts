@@ -2291,6 +2291,180 @@ const CHECKIN_DISPOSITION_CATEGORIES = [
  * @param bookingId - Booking to measure against
  * @param assetId - Asset whose remaining quantity we want
  */
+/**
+ * Distributes a (booking, asset) pair's ConsumptionLog dispositions
+ * across its BookingAsset rows for per-row "logged" reads.
+ *
+ * Logs with a non-null `bookingAssetId` are attributed exactly to
+ * that row (the Polish-6+ contract). Logs with `bookingAssetId IS NULL`
+ * (legacy rows + back-compat callers) are greedy-filled: kit-driven
+ * rows first by `createdAt`, then standalone rows by `createdAt`, each
+ * taking up to its booked quantity until the legacy pool is exhausted.
+ *
+ * Kit-driven slices fill first because they were created via an
+ * automated path (kit add) that the user is unlikely to be returning
+ * units against ad-hoc; attribute their fixed allocation as "done"
+ * before opening the more flexible standalone pool.
+ *
+ * Returns a Map<bookingAssetId, dispositionedQuantity>. Rows with no
+ * attribution are present in the map with `0`.
+ *
+ * Pure derivation — no DB calls. Caller pre-fetches the rows and logs.
+ */
+export function attributeDispositionsByBookingAsset(args: {
+  bookingAssetRows: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  consumptionLogs: Array<{
+    bookingAssetId: string | null;
+    quantity: number;
+  }>;
+}): Map<string, number> {
+  const { bookingAssetRows, consumptionLogs } = args;
+  const out = new Map<string, number>();
+  for (const row of bookingAssetRows) out.set(row.id, 0);
+
+  let legacyPool = 0;
+  for (const log of consumptionLogs) {
+    if (log.bookingAssetId) {
+      out.set(
+        log.bookingAssetId,
+        (out.get(log.bookingAssetId) ?? 0) + (log.quantity ?? 0)
+      );
+    } else {
+      legacyPool += log.quantity ?? 0;
+    }
+  }
+
+  if (legacyPool === 0) return out;
+
+  // Greedy fill: kit-driven first, then standalone. Within each bucket,
+  // sort by `id` ascending — BookingAsset.id is a cuid, which is
+  // chronologically sortable (creation-time prefix), so this stands in
+  // for "by createdAt" without needing the column on the model.
+  const ordered = [...bookingAssetRows].sort((a, b) => {
+    const aIsKit = a.assetKitId != null;
+    const bIsKit = b.assetKitId != null;
+    if (aIsKit !== bIsKit) return aIsKit ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  for (const row of ordered) {
+    if (legacyPool === 0) break;
+    const already = out.get(row.id) ?? 0;
+    const capacity = Math.max(0, row.quantity - already);
+    if (capacity === 0) continue;
+    const take = Math.min(capacity, legacyPool);
+    out.set(row.id, already + take);
+    legacyPool -= take;
+  }
+  return out;
+}
+
+/** Per-category disposition split for a single BookingAsset row. */
+export type DispositionCategoryBreakdown = {
+  returned: number;
+  consumed: number;
+  lost: number;
+  damaged: number;
+};
+
+/**
+ * Like {@link attributeDispositionsByBookingAsset} but produces a
+ * per-category breakdown (returned / consumed / lost / damaged) per
+ * BookingAsset row, with capacity **shared across categories**.
+ *
+ * This is the correct primitive when you need both the per-row total
+ * AND the category split. Naïvely running the simple attributor once
+ * per category over-counts: each pass would refill a kit-driven row to
+ * its full quantity, so RETURN + CONSUME + LOSS could each independently
+ * fill the same 33-unit row to 33 (= 99 attributed against 33 booked).
+ *
+ * Here a single running total per row is shared: categories are
+ * processed in a fixed order (RETURN → CONSUME → LOSS → DAMAGE) and each
+ * row only accepts units up to its remaining capacity
+ * (`quantity − runningTotal`). The per-category split of legacy
+ * (`bookingAssetId IS NULL`) logs is therefore deterministic but
+ * somewhat arbitrary — that's inherent to legacy data that never
+ * recorded which slice each disposition hit. Logs WITH a
+ * `bookingAssetId` are always attributed exactly.
+ *
+ * Pure derivation — no DB calls.
+ */
+export function attributeCategorizedDispositionsByBookingAsset(args: {
+  bookingAssetRows: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  consumptionLogs: Array<{
+    bookingAssetId: string | null;
+    category: "RETURN" | "CONSUME" | "LOSS" | "DAMAGE";
+    quantity: number;
+  }>;
+}): Map<string, DispositionCategoryBreakdown> {
+  const { bookingAssetRows, consumptionLogs } = args;
+
+  const breakdown = new Map<string, DispositionCategoryBreakdown>();
+  const runningTotal = new Map<string, number>();
+  for (const row of bookingAssetRows) {
+    breakdown.set(row.id, { returned: 0, consumed: 0, lost: 0, damaged: 0 });
+    runningTotal.set(row.id, 0);
+  }
+
+  const CATEGORY_FIELD = {
+    RETURN: "returned",
+    CONSUME: "consumed",
+    LOSS: "lost",
+    DAMAGE: "damaged",
+  } as const;
+
+  // Exact pass: logs that already know their slice land precisely.
+  const legacyByCategory = new Map<string, number>();
+  for (const log of consumptionLogs) {
+    if (log.bookingAssetId && breakdown.has(log.bookingAssetId)) {
+      const b = breakdown.get(log.bookingAssetId)!;
+      b[CATEGORY_FIELD[log.category]] += log.quantity ?? 0;
+      runningTotal.set(
+        log.bookingAssetId,
+        (runningTotal.get(log.bookingAssetId) ?? 0) + (log.quantity ?? 0)
+      );
+    } else {
+      legacyByCategory.set(
+        log.category,
+        (legacyByCategory.get(log.category) ?? 0) + (log.quantity ?? 0)
+      );
+    }
+  }
+
+  // Greedy pass: fill legacy pool category-by-category, kit-driven rows
+  // first, respecting the SHARED running total so a row never exceeds
+  // its booked quantity across all categories combined.
+  const ordered = [...bookingAssetRows].sort((a, b) => {
+    const aIsKit = a.assetKitId != null;
+    const bIsKit = b.assetKitId != null;
+    if (aIsKit !== bIsKit) return aIsKit ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  for (const category of ["RETURN", "CONSUME", "LOSS", "DAMAGE"] as const) {
+    let pool = legacyByCategory.get(category) ?? 0;
+    if (pool === 0) continue;
+    for (const row of ordered) {
+      if (pool === 0) break;
+      const used = runningTotal.get(row.id) ?? 0;
+      const capacity = Math.max(0, row.quantity - used);
+      if (capacity === 0) continue;
+      const take = Math.min(capacity, pool);
+      breakdown.get(row.id)![CATEGORY_FIELD[category]] += take;
+      runningTotal.set(row.id, used + take);
+      pool -= take;
+    }
+  }
+
+  return breakdown;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function computeBookingAssetRemaining(
   tx: any,
@@ -2324,6 +2498,49 @@ export async function computeBookingAssetRemaining(
     (sum, p) => sum + (p.quantity ?? 0),
     0
   );
+  const logged = loggedSum._sum?.quantity ?? 0;
+  return Math.max(0, booked - logged);
+}
+
+/**
+ * Remaining units for a SINGLE BookingAsset slice (Polish-7b per-row
+ * check-in cap). Unlike {@link computeBookingAssetRemaining} (which sums
+ * every slice of the asset), this bounds one slice:
+ *
+ *   `slice.quantity − Σ(ConsumptionLog tagged with this bookingAssetId)`
+ *
+ * Only logs explicitly attributed to this slice count — legacy
+ * `bookingAssetId IS NULL` logs are intentionally excluded here. The
+ * caller (`partialCheckinBooking`) takes `min(asset-level remaining,
+ * slice remaining)` as the cap, so the asset-level guard still accounts
+ * for those NULL logs and the total can never be over-checked-in.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the slice belongs to
+ * @param bookingAssetId - The BookingAsset row id to measure
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeBookingAssetSliceRemaining(
+  tx: any,
+  bookingId: Booking["id"],
+  bookingAssetId: string
+): Promise<number> {
+  const [slice, loggedSum] = await Promise.all([
+    tx.bookingAsset.findUnique({
+      where: { id: bookingAssetId },
+      select: { quantity: true },
+    }),
+    tx.consumptionLog.aggregate({
+      where: {
+        bookingId,
+        bookingAssetId,
+        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+      },
+      _sum: { quantity: true },
+    }),
+  ]);
+
+  const booked = (slice as { quantity: number } | null)?.quantity ?? 0;
   const logged = loggedSum._sum?.quantity ?? 0;
   return Math.max(0, booked - logged);
 }
@@ -2733,6 +2950,12 @@ export async function checkinBooking({
             }
           }
 
+          // Per-row attribution: when the explicit disposition carries a
+          // bookingAssetId we tag every ConsumptionLog row with it. The
+          // implicit "return-all-remaining" path (no explicit disposition)
+          // leaves it null — Polish-6 multi-row attribution only makes
+          // sense for callers that picked a specific slice.
+          const dispBookingAssetId = disposition.bookingAssetId ?? null;
           if ((disposition.returned ?? 0) > 0) {
             await createConsumptionLog({
               assetId: asset.id,
@@ -2740,6 +2963,7 @@ export async function checkinBooking({
               quantity: disposition.returned!,
               userId: userId!,
               bookingId: id,
+              bookingAssetId: dispBookingAssetId,
               tx,
             });
           }
@@ -2750,6 +2974,7 @@ export async function checkinBooking({
               quantity: disposition.consumed!,
               userId: userId!,
               bookingId: id,
+              bookingAssetId: dispBookingAssetId,
               tx,
             });
           }
@@ -2760,6 +2985,7 @@ export async function checkinBooking({
               quantity: disposition.lost!,
               userId: userId!,
               bookingId: id,
+              bookingAssetId: dispBookingAssetId,
               tx,
             });
           }
@@ -2770,6 +2996,7 @@ export async function checkinBooking({
               quantity: disposition.damaged!,
               userId: userId!,
               bookingId: id,
+              bookingAssetId: dispBookingAssetId,
               tx,
             });
           }
@@ -3196,6 +3423,17 @@ export async function checkinBooking({
  */
 export type CheckinDispositionInput = {
   assetId: string;
+  /**
+   * Per-row attribution for QUANTITY_TRACKED assets with multiple
+   * BookingAsset slices (kit-driven + standalone). When set the
+   * ConsumptionLog rows get this `bookingAssetId` so future reads
+   * can attribute the disposition to the right slice. Optional for
+   * back-compat with callers that pre-date Polish-6 per-row support
+   * (mobile API, simple `assetIds`-only check-ins) — those write
+   * `bookingAssetId: null` and rely on the greedy-fill fallback in
+   * the loaders.
+   */
+  bookingAssetId?: string | null;
   returned?: number;
   consumed?: number;
   lost?: number;
@@ -3293,18 +3531,39 @@ export async function partialCheckinBooking({
      * INDIVIDUAL scans would silently drop out whenever a qty-tracked
      * disposition was in the same submit.
      */
-    const dispositionByAssetId = new Map<string, CheckinDispositionInput>();
+    const dispositions: CheckinDispositionInput[] = [];
+    /**
+     * Dedup key for `checkins`: `(assetId, bookingAssetId)`. Polish-7b
+     * allows MULTIPLE dispositions for the same asset in one submit — one
+     * per BookingAsset slice (kit-driven + standalone) — so we must NOT
+     * collapse by `assetId`. A repeated (assetId, bookingAssetId) pair
+     * (double-submit of the same slice) still collapses to one. Legacy
+     * callers omit `bookingAssetId`, so they key on `assetId::null` and
+     * behave exactly as before (one entry per asset).
+     */
+    const seenDispositionKeys = new Set<string>();
+    const assetIdsWithDisposition = new Set<string>();
     for (const d of checkins ?? []) {
-      dispositionByAssetId.set(d.assetId, d);
+      const key = `${d.assetId}::${d.bookingAssetId ?? "null"}`;
+      if (seenDispositionKeys.has(key)) continue;
+      seenDispositionKeys.add(key);
+      dispositions.push(d);
+      assetIdsWithDisposition.add(d.assetId);
     }
+    /**
+     * INDIVIDUAL scans (and legacy `assetIds`-only callers) arrive via
+     * `assetIds`. Add a no-disposition entry for any asset not already
+     * covered by a `checkins` entry — the INDIVIDUAL status-update branch
+     * below picks them up. Treating the two arrays as mutually exclusive
+     * was a regression: INDIVIDUAL scans dropped out whenever a qty
+     * disposition shared the submit.
+     */
     for (const assetId of assetIds ?? []) {
-      if (!dispositionByAssetId.has(assetId)) {
-        dispositionByAssetId.set(assetId, { assetId });
+      if (!assetIdsWithDisposition.has(assetId)) {
+        assetIdsWithDisposition.add(assetId);
+        dispositions.push({ assetId });
       }
     }
-    const dispositions: CheckinDispositionInput[] = [
-      ...dispositionByAssetId.values(),
-    ];
 
     if (dispositions.length === 0) {
       throw new ShelfError({
@@ -3530,12 +3789,31 @@ export async function partialCheckinBooking({
         );
         const claimed = sumDisposition(disp);
 
-        if (claimed > remaining) {
+        /**
+         * Per-slice cap (Polish-7b): when the drawer targets a specific
+         * BookingAsset slice, bound the claim by BOTH the slice's own
+         * remaining AND the asset-level remaining. The asset-level guard
+         * still backstops the total (and counts legacy NULL-tagged logs),
+         * while the slice guard stops one slice over-claiming into
+         * another. Legacy callers omit `bookingAssetId` → asset-level cap
+         * only, unchanged.
+         */
+        let cap = remaining;
+        if (disp.bookingAssetId) {
+          const sliceRemaining = await computeBookingAssetSliceRemaining(
+            tx,
+            id,
+            disp.bookingAssetId
+          );
+          cap = Math.min(cap, sliceRemaining);
+        }
+
+        if (claimed > cap) {
           throw new ShelfError({
             cause: null,
             status: 400,
             label,
-            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${remaining} remaining on this booking.`,
+            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} remaining on this booking.`,
             shouldBeCaptured: false,
           });
         }
@@ -3567,6 +3845,10 @@ export async function partialCheckinBooking({
         }
 
         // One ConsumptionLog per non-zero category, all scoped to this booking.
+        // `bookingAssetId` carries per-row attribution when the caller knows
+        // the slice (drawer post-Polish-6); legacy callers leave it null and
+        // the loader's greedy-fill handles them on read.
+        const dispBookingAssetId = disp.bookingAssetId ?? null;
         if ((disp.returned ?? 0) > 0) {
           await createConsumptionLog({
             assetId: disp.assetId,
@@ -3574,6 +3856,7 @@ export async function partialCheckinBooking({
             quantity: disp.returned!,
             userId,
             bookingId: id,
+            bookingAssetId: dispBookingAssetId,
             tx,
           });
         }
@@ -3584,6 +3867,7 @@ export async function partialCheckinBooking({
             quantity: disp.consumed!,
             userId,
             bookingId: id,
+            bookingAssetId: dispBookingAssetId,
             tx,
           });
         }
@@ -3594,6 +3878,7 @@ export async function partialCheckinBooking({
             quantity: disp.lost!,
             userId,
             bookingId: id,
+            bookingAssetId: dispBookingAssetId,
             tx,
           });
         }
@@ -3604,6 +3889,7 @@ export async function partialCheckinBooking({
             quantity: disp.damaged!,
             userId,
             bookingId: id,
+            bookingAssetId: dispBookingAssetId,
             tx,
           });
         }
@@ -3647,9 +3933,16 @@ export async function partialCheckinBooking({
       // QUANTITY_TRACKED assets: only reset status to AVAILABLE if they
       // have no other active bookings and no custody records — pools
       // shared across bookings must not flicker on a partial check-in.
-      const qtyCheckinIds = effectiveAssetIds.filter(
-        (id_) => assetTypeById.get(id_) === AssetType.QUANTITY_TRACKED
-      );
+      // De-dup: with multiple slices of the same asset in one submit
+      // (Polish-7b) `effectiveAssetIds` can list an asset twice — the
+      // status reset must run once per asset.
+      const qtyCheckinIds = [
+        ...new Set(
+          effectiveAssetIds.filter(
+            (id_) => assetTypeById.get(id_) === AssetType.QUANTITY_TRACKED
+          )
+        ),
+      ];
       for (const assetId of qtyCheckinIds) {
         const [otherBookings, custodyCount] = await Promise.all([
           tx.bookingAsset.count({
@@ -3711,9 +4004,13 @@ export async function partialCheckinBooking({
       // (matches `checkoutBooking` + the project's `use-record-event` rule).
       // Qty assets with 0/0/0/0 dispositions are filtered out — they
       // haven't actually been touched.
+      // De-dup assetIds: multiple slices of one asset (Polish-7b) share
+      // a single BOOKING_PARTIAL_CHECKIN event per asset.
       const assetIdsTouchedInTx = [
-        ...individualAssetIds,
-        ...qtySummaries.map((s) => s.assetId),
+        ...new Set([
+          ...individualAssetIds,
+          ...qtySummaries.map((s) => s.assetId),
+        ]),
       ];
       if (assetIdsTouchedInTx.length > 0) {
         await recordEvents(
@@ -3802,12 +4099,37 @@ export async function partialCheckinBooking({
       );
 
       /**
+       * Polish-7b: a single submit can disposition MULTIPLE slices of one
+       * asset (kit-driven + standalone). The per-asset note + booking-note
+       * fragment below read per-asset, so fold the per-slice summaries
+       * into one entry per asset — sum the category counts; `pendingAfter`
+       * is the asset's final outstanding (the last slice processed already
+       * carries the running asset-level total).
+       */
+      const aggregatedQtySummaries: QtyDispositionSummary[] = (() => {
+        const byAsset = new Map<string, QtyDispositionSummary>();
+        for (const s of txResult.qtySummaries) {
+          const prev = byAsset.get(s.assetId);
+          if (!prev) {
+            byAsset.set(s.assetId, { ...s });
+          } else {
+            prev.returned += s.returned;
+            prev.consumed += s.consumed;
+            prev.lost += s.lost;
+            prev.damaged += s.damaged;
+            prev.pendingAfter = s.pendingAfter;
+          }
+        }
+        return [...byAsset.values()];
+      })();
+
+      /**
        * Per-row asset note summarizing this session's disposition.
        * Only generated for qty-tracked assets that actually had activity
        * this session; individual assets get the short "checked in" note
        * to preserve current behavior.
        */
-      for (const summary of txResult.qtySummaries) {
+      for (const summary of aggregatedQtySummaries) {
         const parts: string[] = [];
         if (summary.returned > 0)
           parts.push(`returned **${summary.returned}**`);
@@ -3898,7 +4220,7 @@ export async function partialCheckinBooking({
       // with its non-zero categories. Replaces the old aggregate-only
       // tail that just said "(10 returned, 2 lost)" with no asset
       // names.
-      const qtyPerAsset = buildQtyPerAssetFragment(txResult.qtySummaries);
+      const qtyPerAsset = buildQtyPerAssetFragment(aggregatedQtySummaries);
       const qtyTail = qtyPerAsset ? ` — qty: ${qtyPerAsset}` : "";
 
       if (txResult.isComplete) {
@@ -6855,12 +7177,38 @@ async function addScannedAssetsToBookingWithinTx(
     });
   }
 
+  /**
+   * Resolve the slice quantity for kit-driven scans. When a kit QR is
+   * scanned, the drawer attributes each member to the kit via
+   * `assetKitIdByAsset` but doesn't pass an explicit `quantities` entry —
+   * so a QUANTITY_TRACKED member would otherwise default to 1 instead of
+   * the kit's `AssetKit.quantity` (e.g. 33 batteries booked as 1). Fetch
+   * the AssetKit rows for the referenced ids and use their quantity as
+   * the fallback. Explicit `quantities[id]` (the per-row qty input on a
+   * direct asset scan) still wins; standalone scans (no assetKitId) keep
+   * the 1 default.
+   */
+  const referencedAssetKitIds = Array.from(
+    new Set(Object.values(assetKitIdByAsset).filter(Boolean))
+  );
+  const assetKitQtyById = new Map<string, number>(
+    referencedAssetKitIds.length > 0
+      ? (
+          await tx.assetKit.findMany({
+            where: { id: { in: referencedAssetKitIds } },
+            select: { id: true, quantity: true },
+          })
+        ).map((ak: { id: string; quantity: number }) => [ak.id, ak.quantity])
+      : []
+  );
+
   const booking = await tx.booking.update({
     where: { id: bookingId, organizationId },
     data: {
       bookingAssets: {
-        // Per-asset quantity from the scanned drawer's qty input.
-        // Defaults to 1 — matches schema default.
+        // Quantity precedence: explicit per-row qty input → kit slice
+        // qty (when scanned via a kit) → 1 (standalone scan / schema
+        // default).
         //
         // `assetKitId` is set when the scanner passes a kit-source
         // context for this asset (e.g. user scanned a kit QR and the
@@ -6868,11 +7216,17 @@ async function addScannedAssetsToBookingWithinTx(
         // Missing entries = standalone scan, default `assetKitId = null`
         // which keeps the booking UI grouping independent of the
         // asset's incidental kit memberships.
-        create: assetIds.map((id) => ({
-          assetId: id,
-          quantity: quantities[id] ?? 1,
-          assetKitId: assetKitIdByAsset[id] ?? null,
-        })),
+        create: assetIds.map((id) => {
+          const assetKitId = assetKitIdByAsset[id] ?? null;
+          const kitSliceQty = assetKitId
+            ? assetKitQtyById.get(assetKitId)
+            : undefined;
+          return {
+            assetId: id,
+            quantity: quantities[id] ?? kitSliceQty ?? 1,
+            assetKitId,
+          };
+        }),
       },
     },
     select: {

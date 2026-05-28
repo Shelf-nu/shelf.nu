@@ -1282,14 +1282,147 @@ User-flow bug that triggered this: scanning a qty-tracked asset (Gloves, 250 tot
 
 **Deferred to Phase 4d (explicitly NOT in Polish-6):**
 
-- Check-in floor guard when shrinking AssetKit.quantity below per-row check-in (ConsumptionLog is keyed by bookingId+assetId, not bookingAssetId).
+- ~~Check-in floor guard when shrinking AssetKit.quantity below per-row check-in~~ — **RESOLVED in Polish-7 (2026-05-28).** `ConsumptionLog.bookingAssetId` added; loaders attribute per-row. See the Polish-7 section below.
 - Booking-side multi-row picker UX (picker currently scopes to standalone rows only; kit-driven slices managed via kit removal).
 - `BOOKING_ASSET_DETACHED_FROM_KIT` activity event (would need a new enum value + migration; system notes cover the audit trail for now).
 - Server-side `enforce_booking_asset_sum_within_availability` DEFERRED trigger (cross-booking + time-windowed; complex enough to defer).
+- ~~Kit booking-context status doesn't reach `PARTIALLY_CHECKED_IN` when a qty-tracked member has a mix of slices~~ — **RESOLVED in Polish-7 (2026-05-28).** `getBookingContextKitStatus` now reads per-row `bookedQuantity`/`dispositionedQuantity` for qty-tracked members. See Polish-7 below.
+- **AtomsResetHandler render-storm under React 19** (surfaced 2026-05-27 during §15a manual test): navigating from a list page (assets index, kits list) into manage-{assets,kits} intermittently throws `useContext, dispatcher is null` inside React Router's `WithErrorBoundaryProps` → blank page; refresh fixes it. Pre-existing pattern, not a Polish-6 regression — `apps/webapp/app/atoms/atoms-reset-handler.tsx`:29-46 writes 4 atoms during render (deliberate "parent-runs-first" anti-hydration-flicker pattern from `7576974d7`), and the matching manage-\* route init writes `setSelectedBulkItems` during render too (`bookings.$bookingId.overview.manage-assets.tsx`:1191-1195). React 18 tolerated this; React 19.2.1 promotes "setState during render of another component" to a hard render bailout when `BulkListItemCheckbox` subscribers from the previous route are still mounted. Real fix (Phase 4d): replace during-render writes with `getDefaultStore().set()` in a navigation listener (Jotai store-imperative), or `useHydrateAtoms` for the route-side seed. Workaround during 4b testing is refresh.
 
 `pnpm webapp:validate` green at **2202 / 2202**. The migration is NOT yet applied to dev — the user will run it manually for testing.
 
 **Open follow-up after manual test pass:** commit Polish-6 as its own commit on `feat-quantities` (same cadence as Polish-1..5 + 4a-Polish-2). When merging the 4b release, the migration ships alongside the other 4b migrations. Backfill heuristic numbers (175k total, 64,505 → kit-driven, 9,865 standalone) belong in the PR description so reviewers understand the data-shape change ahead of time.
+
+#### Phase 4b/6-Polish-7 — Per-row check-in attribution (2026-05-28) — UNCOMMITTED
+
+Surfaced by manual check-in testing of Polish-6 multi-row qty slices. The
+booking-overview badge, the booking detail Qty column, the kit rollup status,
+and the explicit check-in drawer all aggregated qty dispositions by
+`assetId`, which can't distinguish "the kit slice is done" from "all slices
+are done" once an asset has both a kit-driven and a standalone
+`BookingAsset` row in the same booking.
+
+**Schema (NEW migration, run via `pnpm db:deploy-migration`):**
+`packages/database/prisma/migrations/20260527150000_consumptionlog_bookingasset_attribution/` —
+adds `ConsumptionLog.bookingAssetId TEXT` (nullable FK → `BookingAsset(id)`,
+`ON DELETE SET NULL`) + index. Legacy rows stay `NULL`; readers greedy-fill
+them. Schema mirror in `packages/database/prisma/schema.prisma` (plain column,
+no Prisma `@relation` accessor — same pattern as `BookingAsset.assetKitId`).
+
+**Service writes (`booking/service.server.ts`):** `createConsumptionLog` +
+`CheckinDispositionInput` gained `bookingAssetId`; `partialCheckinBooking` +
+`checkinBooking` tag each ConsumptionLog row with it **when the caller
+supplies it**.
+
+**Attribution helpers (`booking/service.server.ts`):**
+
+- `attributeDispositionsByBookingAsset` — per-row TOTAL. Exact for rows with
+  `bookingAssetId`; greedy-fills `NULL` legacy rows (kit-driven slices first
+  by `id`-ordered cuid, then standalone).
+- `attributeCategorizedDispositionsByBookingAsset` — per-row per-category
+  (returned/consumed/lost/damaged) with **capacity shared across
+  categories**. Critical: running the simple attributor once per category
+  over-counts (each pass refills a kit row to full), which is the bug that
+  made a fully-reconciled standalone slice read "Partially checked out".
+
+**Loaders:** `bookings.$bookingId.overview.tsx` (badge + Qty column +
+breakdown) and `bookings.$bookingId.overview.checkin-assets.tsx` (drawer
+expected-assets, now one entry per BookingAsset row, each with
+`bookingAssetId` + per-category `breakdown`). `getBookingContextKitStatus`
+(`utils/booking-assets.ts`) reads per-row `bookedQuantity`/
+`dispositionedQuantity` for qty members. New status `PARTIALLY_CHECKED_OUT_QTY`
+(violet, "Partially checked out") + `list-asset-content.tsx` /
+`booking-assets-sidebar.tsx` compute per-row state.
+
+**Drawer (`partial-checkin-drawer.tsx`):** reconciled section grouped by each
+slice's own `kitId` (so a standalone slice isn't absorbed into the kit group);
+foldable kit groups; per-row Qty `logged / booked` + breakdown tooltip
+(`ReconciledQtySummary`).
+
+**Scan-kit qty fix (`addScannedAssetsToBookingWithinTx`, `:~7076`):** scanning
+a kit now books qty-tracked members at their `AssetKit.quantity` (resolved
+server-side from the `assetKitIdByAsset` map) instead of defaulting to 1.
+Manage-kits "Add" path + add-asset-to-kit cascade already booked correct qty.
+
+`pnpm webapp:validate` green at **2202 / 2202** throughout.
+
+##### Polish-7b — drawer disposition WRITE-flow migrated to `bookingAssetId` keying (2026-05-28) — DONE, UNCOMMITTED
+
+The previously-deferred "very complex" piece is now implemented. The check-in
+drawer's qty disposition flow keys by `bookingAssetId` (the slice), not
+`asset.id`. INDIVIDUAL assets stay keyed by `asset.id` (always single-slice).
+
+**What changed:**
+
+- **Shared schema** (`partial-checkin-drawer.tsx` `checkinDispositionSchema`):
+  added optional `bookingAssetId`. Server-imported via
+  `partialCheckinAssetsSchema` → covers client serialization + server parse.
+- **Atom** (`atoms/qr-scanner.ts` `quickCheckinQtyAssetAtom`): synthetic key →
+  `qty-checkin:${bookingAssetId}`; synthetic `data` carries `bookingAssetId`.
+- **Drawer** (`partial-checkin-drawer.tsx`): new `bookingAssetIdForScannedItem`
+  resolver (synthetic suffix / first-pending qty slice / kit-driven slice by
+  `kitId`); `dispositions` map + `updateField` + `DispositionContextValue` +
+  `QuantityDispositionBlock` + `AssetRow` keyed by `bookingAssetId`; context
+  exposes `qtyRemainingByBookingAssetId`; new `activatedQtyBookingAssetIds` +
+  `qrIdByBookingAssetId` (replaces `qtyTrackedIdsForCheckin`); seeding effect,
+  blockers, `checkinsJson` (sends `{ assetId, bookingAssetId, ... }`), buckets,
+  and progress all per-slice; `recentlyAddedBookingAssetId`.
+- **Display** (the user-visible fix): pending qty slices now nest under their
+  kit via each slice's OWN `kitId` (`PendingKitGroup` accepts mixed children;
+  new `PendingKitQtyChild` renders the "Check in without scanning" affordance);
+  standalone slices render loose. Removed `kitByAssetId` (asset-level, was the
+  source of the "Part of kit: Camera kit" mislabel).
+- **Server** (`booking/service.server.ts` `partialCheckinBooking`): stopped
+  collapsing dispositions by `assetId` (dedup by `assetId::bookingAssetId`);
+  new `computeBookingAssetSliceRemaining` helper; per-slice cap =
+  `min(asset-level remaining, slice remaining)` when `bookingAssetId` supplied
+  (legacy callers → asset-level only, unchanged); de-dup qty status-reset loop
+  + per-asset events; aggregate `qtySummaries` by assetId for the notes.
+
+**Backwards-compat (verified):** single-slice / legacy bookings have
+`asset.id ↔ bookingAssetId` 1:1 → identical behaviour. All existing
+`ConsumptionLog` rows are `bookingAssetId = NULL`; the attribution helpers
+combine exact-tagged + NULL-greedy. Mobile / `assetIds`-only callers send no
+`bookingAssetId` → asset-level path. No new migration (column already exists).
+
+**Tests:** `qr-scanner.booking.test.ts`, `partial-checkin-drawer.test.tsx`
+(incl. NEW two-slice independence case), and `booking/service.server.test.ts`
+(NEW: per-slice tagging, per-slice cap rejection, legacy-null path skips the
+slice helper, `computeBookingAssetSliceRemaining`, legacy-NULL+tagged mix).
+`pnpm webapp:validate` green at **2209 / 2209**.
+
+**Manual verify (booking `cmpphlceg004hulvp5t6u6am4`):** AA-batteries qty-50
+nests under Kit A, qty-33 under Camera kit, qty-55 stays loose; each
+independently quick-checkable. After quick-checking one slice + submit,
+confirm via MCP the new `ConsumptionLog` row carries that slice's
+`bookingAssetId`.
+
+**Kit-scan follow-up (Polish-7b, same session):** scanning a kit QR with
+qty-tracked members was throwing "Quantity-tracked assets must include at least
+one non-zero disposition" on submit. Root cause: the drawer's kit branches
+(activation memo + `scannedAssetIds`) read `item.data.assets`, but
+`KitFromScanner` (`utils/scanner-includes.server.ts` `KIT_INCLUDE`) exposes
+`assetKits: { asset: { id } }`, NOT a flat `assets` list — so the field was
+always `undefined`, the kit's qty members never activated, and they reached the
+server as zero-disposition no-ops. Fixes: (1) activation matches kit-driven qty
+slices by each slice's own `kitId` (the loader's authoritative per-slice link),
+not the kit member-id list; (2) `scannedAssetIds` reads `assetKits[].asset.id`.
+Also added `ScannedKitQtyMemberRow` — a scanned kit now renders an EDITABLE
+disposition row (Consumed/Returned/Lost/Damaged, seeded to full remaining) for
+each of its qty members, indented under the kit row, so they get the same
+consumption-log handling as standalone qty assets instead of a silent
+full-remaining auto-checkin. INDIVIDUAL kit members stay covered by the kit
+row's summary. `pnpm webapp:validate` green at **2209 / 2209**.
+
+**Check-in floor guard (Polish-7b, formerly a Phase-4d deferral):** now that
+`ConsumptionLog.bookingAssetId` exists, `updateKitAssets`
+(`kit/service.server.ts`, qty-sync block) guards the kit→booking live-link: it
+sums per-slice check-ins (`consumptionLog.groupBy` by `bookingAssetId`,
+RETURN/CONSUME/LOSS/DAMAGE) and **throws** (blocks the edit) when a new kit
+quantity would drop a kit-driven `BookingAsset` slice below what's already been
+checked in against it — error names the asset + booking. Legacy NULL-tagged
+logs aren't counted (no regression). 2 unit tests added. `pnpm webapp:validate`
+green at **2211 / 2211**.
 
 **Mid-test sweep — booking-side write paths that bypassed the discriminator.** First user test of Polish-6 surfaced multiple booking-add paths that hadn't been audited in the initial implementation: a booking with one scanned standalone qty-tracked asset + two added kits ended up with 6 BookingAsset rows where every `assetKitId` was NULL, `quantity` defaulted to 1 for kit-driven slices, and the same-asset overlap (Gloves in both kits + standalone) silently dropped the kit-driven slices. Sweep covered:
 
@@ -1301,6 +1434,18 @@ User-flow bug that triggered this: scanning a qty-tracked asset (Gloves, 250 tot
 - **`/api/bookings/$bookingId/adjust-asset-quantity`** — `findFirst({ where: { bookingId, assetId } })` returned an arbitrary row when both standalone and kit-driven slices existed for the same asset. Scoped to `assetKitId: null` since the route only adjusts the standalone slice (kit-driven qty is managed via the kit picker, not here).
 
 Sweep typecheck + tests still green at **2202 / 2202** (after fixes; the broken `bookingId_assetId` query was caught by typecheck before runtime). The user's broken booking from the first test attempt was cleared so they can retest from a clean slate.
+
+**Mid-test sweep follow-up (2026-05-27) — kit-remove-asset action collided with `BookingAsset_manual_unique` when a standalone slice already existed.** User had Kit A (containing AA batteries qty 50) added to booking + a standalone slice of AA batteries (qty 33) on the same booking. Removing AA batteries from Kit A via `/kits/$kitId/assets`'s row trash icon threw P2002 `Unique constraint failed on the fields: (\`bookingId\`,\`assetId\`)`and the whole tx rolled back. Root cause:`kits.$kitId.tsx` `removeAsset`action does a raw`tx.kit.update({ assetKits: { deleteMany: { assetId } } })`which deletes the AssetKit row → DB's`ON DELETE SET NULL`cascade on`BookingAsset.assetKitId`fires → the kit-driven BookingAsset row's`assetKitId`becomes NULL → violates`BookingAsset_manual_unique`(which already has a standalone row for the same`(bookingId, assetId)`). The same bug was latent in `updateKitAssets`(the picker-driven kit-removal path) — both code paths called`tx.assetKit.deleteMany`without resolving the standalone collision first. Polish-6's design assumed all kit-removal paths would merge or refuse the collision; neither was implemented. Fix: new exported helper`mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds)`in`kit/service.server.ts`. For each kit-driven BookingAsset row about to be SET-NULL'd, checks if a standalone row exists for the same (bookingId, assetId); if yes, bumps the standalone row's qty by the kit-driven qty + deletes the kit-driven row (so cascade has nothing left to touch). Non-colliding rows still cascade-SET-NULL as Polish-6 designed. Wired into both `updateKitAssets`(at both`tx.assetKit.deleteMany`sites — primary removal + cross-kit-move) and the route's`removeAsset`action. The route also gains`emitAssetKitDetachmentNotes` (it was bypassing the booking-side detachment notification entirely before).
+
+INDIVIDUAL assets can't collide (trigger `enforce_individual_asset_single_kit` prevents multiple slices), but the helper handles them safely either way. Asset-status flips already correct for the ONGOING-booking case — `Asset.status` only flips back to AVAILABLE when `remainingCustody === 0`, which the existing route code already guards.
+
+**Mid-test sweep follow-up (2026-05-27) — booking detail page collapsed multi-row qty by assetId.** With both fixes above in place, the user added a standalone slice (qty 33) to a booking that already had a kit-driven slice (qty 50, via Kit A) for the same asset (AA batteries). Both rows in the "Assets & Kits" list rendered with `Qty 33` — the kit-driven row should have shown `50`. Per-row qty WAS being attached correctly at `bookings.$bookingId.overview.tsx`:268 (one `bookedQuantity` per BookingAsset), but the enrichment step at line 488-490 built a `bookedQuantityMap = new Map(booking.bookingAssets.map((ba) => [ba.assetId, ba.quantity]))` keyed by `assetId` — which collapses two slices for the same asset to a single arbitrary value — and then clobbered the correct per-row qty at line 566 with `bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1`. Fix: drop the `bookedQuantityMap` entirely and read `asset.bookedQuantity ?? 1` from the per-row enrichment that already happened at line 268. Single 4-line change. Verified DB: AA batteries in booking cmpntahtv001aultewnjiph9i has two BookingAsset rows — standalone (qty 33, assetKitId NULL) + kit-driven (qty 50, assetKitId=cmpnt9s5n000nulte919pla83).
+
+**Mid-test sweep follow-up (2026-05-27) — booking manage-assets loader didn't scope `bookingAssets` to standalone slices.** With the `hideUnavailable` picker fix in place, qty-tracked-in-kit assets now surface in the picker, but they showed as PRE-SELECTED with the kit's slice quantity pre-filled (e.g. "AA batteries — 50 / 410" pre-checked, "3 selected" counter), even though no standalone BookingAsset row existed. The component's `quantities`, `bookingAssets` (selection seed), and `initialQuantities` memos at `bookings.$bookingId.overview.manage-assets.tsx`:1072 / 1123 / 1143 all read `booking.bookingAssets` and all carried comments claiming the loader scopes to `assetKitId IS NULL` — but the loader's `getBooking(...)` call never applied that filter (`getBooking` returns the full set; only the route's ACTION handler at line 634-640 already scoped its own query to `where: { assetKitId: null }`). Fix: after computing `bookingKitIds` (which still needs the full set for kit-detection), reassign `booking.bookingAssets = booking.bookingAssets.filter((ba) => ba.assetKitId === null)`. All three component-side consumers now match their comments. Verified asset cmo2mq85c001dul52ls03qy0l (AA batteries, total 460, 50 in Kit A as `assetKitId = cmpnt9s5n000nulte919pla83`) in booking cmpntahtv001aultewnjiph9i: only the kit-driven BookingAsset row exists for this asset, no standalone row.
+
+**Mid-test sweep follow-up (2026-05-27) — `hideUnavailable=true` picker filter excluded qty-tracked-in-kit assets.** Picker for the booking manage-assets route hid QUANTITY_TRACKED assets that had ANY AssetKit row, even though their free pool was bookable as standalone (the explicit Polish-6 "Wave 5" promise). Verified against dev DB: "AA batteries" (cmo2mq85c001dul52ls03qy0l), QUANTITY_TRACKED total 460, 50 in Kit A, 410 free pool — picker returned empty for this asset. Root cause: `apps/webapp/app/modules/asset/service.server.ts`:834 set `where.assetKits = { none: {} }` unconditionally when `hideUnavailable=true`, with no qty-tracked bypass. Polish-2's matching custody branch at line 694-711 already had the right pattern (`where.AND.push({ OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }] })`); the kit branch hadn't been updated to mirror it. Fix: replace the bare assignment with the same AND-push + OR-bypass pattern, swapping `custody` for `assetKits`. The picker's downstream "Available" math (manage-assets.tsx:207-263 in the loader) already subtracts AssetKit sums, so the displayed count stays accurate.
+
+**Mid-test sweep follow-up (2026-05-27) — search-where builder still referenced `Asset.location`.** Searching from the manage-assets picker (`?s=a`) returned a 500 with `PrismaClientValidationError: Unknown argument \`location\``because`getAssets`at`apps/webapp/app/modules/asset/service.server.ts`:586 still had a bare `{ location: { name: { contains: term } } }`clause in its OR-search block — the pivot migration removed the`Asset.location`relation but the search-side builder wasn't rewritten. Prisma can't validate this at compile-time (it only fails at request time), and the test suite had no`?s=...`case across the manage-assets loader, so typecheck + the existing 2202 tests both let it slip through. Fix: rewrite to`{ assetLocations: { some: { location: { name: { contains: term, mode: "insensitive" } } } } }`. Single site — full sweep across `apps/webapp/app/modules/{asset,booking,kit}`showed no other bare`location:`filter clauses on Asset (the other two hits at lines 2239 + 4748 are correctly nested inside`assetLocations.select`).
 
 #### Phase 4c — Split / merge UX (third)
 

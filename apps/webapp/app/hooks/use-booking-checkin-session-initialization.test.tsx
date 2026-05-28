@@ -49,9 +49,11 @@ function makeSession(
 function individual(
   overrides: Partial<Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }>> = {}
 ): Extract<BookingExpectedAsset, { kind: "INDIVIDUAL" }> {
+  const id = overrides.id ?? "asset-ind-1";
   return {
     kind: "INDIVIDUAL",
-    id: "asset-ind-1",
+    id,
+    bookingAssetId: `ba-${id}`,
     title: "Camera",
     mainImage: null,
     thumbnailImage: null,
@@ -67,9 +69,11 @@ function qty(
     Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }>
   > = {}
 ): Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }> {
+  const id = overrides.id ?? "asset-qty-1";
   return {
     kind: "QUANTITY_TRACKED",
-    id: "asset-qty-1",
+    id,
+    bookingAssetId: `ba-${id}`,
     title: "Battery",
     mainImage: null,
     thumbnailImage: null,
@@ -78,6 +82,7 @@ function qty(
     booked: 20,
     logged: 0,
     remaining: 20,
+    breakdown: { returned: 0, consumed: 0, lost: 0, damaged: 0 },
     consumptionType: "TWO_WAY",
     ...overrides,
   };

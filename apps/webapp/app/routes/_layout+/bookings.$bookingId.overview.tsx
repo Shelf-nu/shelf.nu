@@ -35,6 +35,7 @@ import {
   archiveBooking,
   cancelBooking,
   checkinAssets,
+  attributeCategorizedDispositionsByBookingAsset,
   checkinBooking,
   checkoutBooking,
   deleteBooking,
@@ -484,11 +485,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
 
-    // Build a lookup for booked quantities from the booking pivot
-    const bookedQuantityMap = new Map(
-      booking.bookingAssets.map((ba) => [ba.assetId, ba.quantity])
-    );
-
     /**
      * Sum already-dispositioned units per qty-tracked asset for this
      * booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
@@ -504,22 +500,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .map((ba) => ba.assetId);
 
     /**
-     * Per-asset, per-category sums of disposition logs. Broken down so
-     * the row's tooltip can show Returned / Consumed / Lost / Damaged
-     * separately instead of conflating everything into a single
-     * "Checked in" total — lost and damaged units shouldn't read the
-     * same as units that came back to the pool.
+     * Per-row attribution. With Polish-6 multi-row slices, an asset
+     * can have a kit-driven row AND a standalone row in the same
+     * booking; ConsumptionLog now carries `bookingAssetId` so each
+     * disposition can be attributed exactly. Legacy logs
+     * (`bookingAssetId IS NULL`) get greedy-attributed by
+     * `attributeDispositionsByBookingAsset` — kit-driven rows fill
+     * first, then standalone.
+     *
+     * Per-category breakdown is also computed per-row so the tooltip
+     * can show this row's returned / consumed / lost / damaged split.
      */
-    const dispositionSums =
+    const dispositionLogs =
       qtyAssetIdsInBooking.length > 0
-        ? await db.consumptionLog.groupBy({
-            by: ["assetId", "category"],
+        ? await db.consumptionLog.findMany({
             where: {
               bookingId: booking.id,
               assetId: { in: qtyAssetIdsInBooking },
               category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
             },
-            _sum: { quantity: true },
+            select: {
+              assetId: true,
+              category: true,
+              quantity: true,
+              bookingAssetId: true,
+            },
           })
         : [];
 
@@ -536,37 +541,89 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       damaged: 0,
     });
 
-    const breakdownByAsset = new Map<string, DispositionBreakdown>();
-    for (const row of dispositionSums) {
-      const qty = row._sum.quantity ?? 0;
-      const bucket = breakdownByAsset.get(row.assetId) ?? emptyBreakdown();
-      if (row.category === "RETURN") bucket.returned += qty;
-      else if (row.category === "CONSUME") bucket.consumed += qty;
-      else if (row.category === "LOSS") bucket.lost += qty;
-      else if (row.category === "DAMAGE") bucket.damaged += qty;
-      breakdownByAsset.set(row.assetId, bucket);
+    /**
+     * Map<assetId, BookingAsset[]> sorted for the greedy fallback.
+     * Built once and shared across all four category attributions
+     * so the kit-driven-fills-first ordering stays consistent.
+     */
+    const bookingAssetRowsByAsset = new Map<
+      string,
+      Array<{
+        id: string;
+        quantity: number;
+        assetKitId: string | null;
+      }>
+    >();
+    for (const ba of booking.bookingAssets) {
+      if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
+      const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
+      arr.push({
+        id: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId ?? null,
+      });
+      bookingAssetRowsByAsset.set(ba.assetId, arr);
     }
 
-    const dispositionedByAsset = new Map<string, number>();
-    for (const [assetId, b] of breakdownByAsset) {
-      dispositionedByAsset.set(
-        assetId,
-        b.returned + b.consumed + b.lost + b.damaged
-      );
+    /** Logs grouped by assetId (each carries its own category). */
+    const logsByAsset = new Map<
+      string,
+      Array<{
+        bookingAssetId: string | null;
+        category: "RETURN" | "CONSUME" | "LOSS" | "DAMAGE";
+        quantity: number;
+      }>
+    >();
+    for (const log of dispositionLogs) {
+      const arr = logsByAsset.get(log.assetId) ?? [];
+      arr.push({
+        bookingAssetId: log.bookingAssetId ?? null,
+        category: log.category as "RETURN" | "CONSUME" | "LOSS" | "DAMAGE",
+        quantity: log.quantity,
+      });
+      logsByAsset.set(log.assetId, arr);
+    }
+
+    const breakdownByBookingAsset = new Map<string, DispositionBreakdown>();
+    const dispositionedByBookingAsset = new Map<string, number>();
+    for (const [assetId, rows] of bookingAssetRowsByAsset) {
+      for (const row of rows) {
+        breakdownByBookingAsset.set(row.id, emptyBreakdown());
+        dispositionedByBookingAsset.set(row.id, 0);
+      }
+      // Shared-capacity attribution across all categories — prevents a
+      // kit-driven row from being independently refilled by each category
+      // (which over-counted before, surfacing wrong totals + breakdowns).
+      const attributed = attributeCategorizedDispositionsByBookingAsset({
+        bookingAssetRows: rows,
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const [bookingAssetId, b] of attributed) {
+        breakdownByBookingAsset.set(bookingAssetId, b);
+        dispositionedByBookingAsset.set(
+          bookingAssetId,
+          b.returned + b.consumed + b.lost + b.damaged
+        );
+      }
     }
 
     // Enrich the paginated items with full asset details, booked quantity,
-    // and qty-tracked disposition progress.
+    // and qty-tracked disposition progress (per-row, keyed by bookingAssetId).
     const enrichedPaginatedItems = paginatedItems.map((item) => ({
       ...item,
       assets: item.assets.map((asset) => {
         const details = assetDetailsMap.get(asset.id);
+        const bookingAssetId = (asset as { bookingAssetId?: string })
+          .bookingAssetId;
         return {
           ...(details || asset),
-          bookedQuantity: bookedQuantityMap.get(asset.id) ?? 1,
-          dispositionedQuantity: dispositionedByAsset.get(asset.id) ?? 0,
+          bookedQuantity: asset.bookedQuantity ?? 1,
+          dispositionedQuantity: bookingAssetId
+            ? dispositionedByBookingAsset.get(bookingAssetId) ?? 0
+            : 0,
           dispositionBreakdown:
-            breakdownByAsset.get(asset.id) ?? emptyBreakdown(),
+            (bookingAssetId && breakdownByBookingAsset.get(bookingAssetId)) ||
+            emptyBreakdown(),
         };
       }),
       kit: item.type === "kit" ? kitsMap.get(item.id) : null,

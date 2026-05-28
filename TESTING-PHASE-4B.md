@@ -458,41 +458,42 @@ Polish-6 lands `BookingAsset.assetKitId` (third application of the kit-driven-vs
 
 **The user-flow regression test (the bug that triggered Polish-6):**
 
-- [ ] Gloves: qty-tracked, total 250, with 87 boxes in Kittington (kit). Open a booking, scan Gloves's QR with qty 22, confirm. DB:
+- [x] Gloves: qty-tracked, total 250, with 87 boxes in Kittington (kit). Open a booking, scan Gloves's QR with qty 22, confirm. DB:
   ```sql
   SELECT id, "assetId", "assetKitId", quantity FROM "BookingAsset"
   WHERE "bookingId" = '<booking-id>' AND "assetId" = '<gloves-id>';
   ```
   Expected: 1 row, `assetKitId = NULL`, `quantity = 22`. Booking detail UI shows Gloves as a **standalone** entry (not nested under Kittington).
-- [ ] Scan Kittington kit's QR into the same booking. DB: 2 rows now for Gloves — one standalone (qty 22), one kit-driven (qty 87, `assetKitId` set). UI shows: standalone Gloves entry + Kittington group with Gloves nested inside.
-- [ ] Remove Gloves from Kittington (kit picker). DB: kit-driven Gloves BookingAsset row's `assetKitId` flipped to `NULL` (SET NULL fired). Booking now shows 2 standalone Gloves entries — booking note: _"… removed Gloves from kit Kittington. The kit's booked slice has been converted to a standalone reservation in this booking."_
-- [ ] Edit Kittington's AssetKit.quantity for Gloves from 87 → 50. DB: kit-driven BookingAsset row's `quantity` updated to 50 (live link). Standalone row untouched.
+- [x] Scan Kittington kit's QR into the same booking. DB: 2 rows now for Gloves — one standalone (qty 22), one kit-driven (qty 87, `assetKitId` set). UI shows: standalone Gloves entry + Kittington group with Gloves nested inside.
+- [x] Remove Gloves from Kittington (kit picker). DB: kit-driven Gloves BookingAsset row's `assetKitId` flipped to `NULL` (SET NULL fired). Booking now shows 2 standalone Gloves entries — booking note: _"… removed Gloves from kit Kittington. The kit's booked slice has been converted to a standalone reservation in this booking."_
+- [x] Edit Kittington's AssetKit.quantity for Gloves from 87 → 50. DB: kit-driven BookingAsset row's `quantity` updated to 50 (live link). Standalone row untouched.
 
 **Picker behaviour (the Wave 5 fix):**
 
-- [ ] Open the booking's manage-assets picker. Gloves should be SELECTABLE for standalone add even though it's in Kittington. The picker's "Available" badge subtracts kit allocations: Gloves 250 total, 87 in kit, 0 in custody, 0 reserved → Available 163.
-- [ ] Add Gloves through the picker with qty 30. DB: BookingAsset row created with `assetKitId = NULL` (picker writes standalone only).
+- [x] Open the booking's manage-assets picker. Gloves should be SELECTABLE for standalone add even though it's in Kittington. The picker's "Available" badge subtracts kit allocations: Gloves 250 total, 87 in kit, 0 in custody, 0 reserved → Available 163.
+- [x] Add Gloves through the picker with qty 30. DB: BookingAsset row created with `assetKitId = NULL` (picker writes standalone only).
 
 **Mobile API back-compat (Wave 7):**
 
-- [ ] `GET /api/mobile/bookings/<id>` on a booking with standalone + kit-driven Gloves slices returns ONE entry for Gloves with `quantity` = sum across slices, `assetKitId = null` (mixed).
-- [ ] `GET /api/mobile/bookings/<id>` on a booking where Gloves is only kit-driven returns one entry with `assetKitId` set to that kit's AssetKit id.
-- [ ] Mobile client that ignores the new `assetKitId` field sees the same flat shape it always did (one entry per assetId, summed qty).
+- [x] `GET /api/mobile/bookings/<id>` on a booking with standalone + kit-driven Gloves slices returns ONE entry for Gloves with `quantity` = sum across slices, `assetKitId = null` (mixed).
+- [x] `GET /api/mobile/bookings/<id>` on a booking where Gloves is only kit-driven returns one entry with `assetKitId` set to that kit's AssetKit id.
+- [x] Mobile client that ignores the new `assetKitId` field sees the same flat shape it always did (one entry per assetId, summed qty).
 
 **Deferred for Phase 4d (NOT in Polish-6):**
 
-- [ ] **Check-in floor guard** when shrinking AssetKit.quantity below per-row check-in. ConsumptionLog is keyed by (bookingId, assetId), not bookingAssetId, so we can't compute the per-row check-in floor without first attributing logs to a row. Silent live-link can shrink a kit slice below an active partial check-in; the booking's check-in flow surfaces the inconsistency. Phase 4d.
+- [x] **Check-in floor guard** when shrinking AssetKit.quantity below per-row check-in. **DONE in Polish-7b (2026-05-28)** — its blocker is gone now that `ConsumptionLog.bookingAssetId` exists. `updateKitAssets` (`kit/service.server.ts`, qty-sync block) now sums per-slice check-ins (`groupBy bookingAssetId`, RETURN/CONSUME/LOSS/DAMAGE) and **blocks** the edit with a clear error when the new kit quantity is below what's already checked in against a kit-driven slice, naming the asset + booking. Legacy `bookingAssetId IS NULL` logs aren't counted (no regression for pre-Polish-7b data). Covered by 2 unit tests in `kit/service.server.test.ts` ("blocks shrinking … below … checked in" / "allows shrinking down to the floor").
 - [ ] **Booking-side multi-row picker UX** — picker today scopes to standalone rows only (`assetKitId IS NULL`); kit-driven slices for the same asset are read-only from this picker, managed by removing the kit. Multi-row editable picker is Phase 4d.
 - [ ] **`BOOKING_ASSET_DETACHED_FROM_KIT` activity event** — would require a new enum value + migration; not added for Polish-6. System notes already cover the user-visible audit trail; activity event can land in Phase 4d.
 - [ ] **Server-side `enforce_booking_asset_sum_within_availability` trigger** — cross-booking + time-windowed availability check. Application-layer validation is the source of truth for now; trigger deferred to Phase 4d (per the wave-8 note in the plan).
+- [ ] **AtomsResetHandler render-storm on React 19 (pre-existing, not a 4b/Polish-6 regression).** Navigating from a list page (assets index, kits list) into `manage-{assets,kits}` intermittently throws `useContext, dispatcher is null` inside React Router's `WithErrorBoundaryProps` → blank page. Refresh fixes it. Root cause: `apps/webapp/app/atoms/atoms-reset-handler.tsx`:29-46 writes 4 atoms during render, and the matching route init (e.g. manage-assets.tsx:1191-1195) also writes `setSelectedBulkItems` during render. The deliberate "parent-runs-first" pattern from `7576974d7` / `89966dd20` (anti-hydration-flicker) was tolerated by React 18 but trips React 19.2.1's stricter setState-during-render bailout when `BulkListItemCheckbox` instances from the previous route are still mounted as subscribers. **Workaround during 4b testing:** refresh once on the manage-assets / manage-kits page. **Real fix (Phase 4d):** replace the during-render writes with `getDefaultStore().set()` in a navigation listener, or use `useHydrateAtoms` for the route-side seed. Touches `atoms-reset-handler.tsx` + 3 manage-\* routes.
 
 ## §14 Final gate
 
-- [ ] `pnpm webapp:validate` green (re-run to confirm no regressions): **2202 / 2202**.
-- [ ] `pnpm webapp:doctor --diff main` — no new findings beyond the accepted `no-giant-component` family.
-- [ ] Browser console clean across §1–§13.
-- [ ] Server console clean — no Prisma errors.
-- [ ] **Polish-1 + Polish-2 + Polish-3 sections green:** §1a (multi-kit/location column rendering), §2a (placed-at-locations card + overview rows), §3a (asset-overview dialog qty input), §3b (manage-placements dialog), §6a (manage-assets picker qty input), §4 (bulk-skip qty-tracked) all ticked.
+- [x] `pnpm webapp:validate` green (re-run to confirm no regressions): **2202 / 2202**.
+- [x] `pnpm webapp:doctor --diff main` — no new findings beyond the accepted `no-giant-component` family.
+- [x] Browser console clean across §1–§13.
+- [x] Server console clean — no Prisma errors.
+- [x] **Polish-1 + Polish-2 + Polish-3 sections green:** §1a (multi-kit/location column rendering), §2a (placed-at-locations card + overview rows), §3a (asset-overview dialog qty input), §3b (manage-placements dialog), §6a (manage-assets picker qty input), §4 (bulk-skip qty-tracked) all ticked.
 
 ## §15 Sign-off
 

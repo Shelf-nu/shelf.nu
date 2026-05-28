@@ -328,6 +328,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     /**
+     * Strip kit-driven slices from `booking.bookingAssets` so the picker's
+     * pre-selection + qty pre-fill reflect standalone state only. Kit-driven
+     * slices are managed by removing the kit (action handler at the bottom
+     * of this file already scopes its bookingAssets fetch to
+     * `assetKitId: null` for the same reason). `bookingKitIds` above
+     * captured the kit presence already, so downstream kit-detection logic
+     * is unaffected by this filter.
+     */
+    booking.bookingAssets = booking.bookingAssets.filter(
+      (ba) => ba.assetKitId === null
+    );
+
+    /**
      * Book-by-Model — Models tab payload.
      *
      * We always count the org's AssetModels so the UI knows whether to

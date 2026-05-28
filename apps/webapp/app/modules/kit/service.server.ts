@@ -159,7 +159,7 @@ type KitCustodyInheritTxClient = {
  *   capturing the affected pre-delete state so the post-delete note can
  *   reference the kit by name (which would otherwise be unrecoverable).
  */
-async function fetchAssetKitDetachmentImpact(
+export async function fetchAssetKitDetachmentImpact(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any,
   assetKitIds: string[]
@@ -175,40 +175,58 @@ async function fetchAssetKitDetachmentImpact(
   }>
 > {
   if (assetKitIds.length === 0) return [];
-  const rows = await tx.bookingAsset.findMany({
-    where: {
-      assetKitId: { in: assetKitIds },
-      booking: {
-        status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+  // `BookingAsset.assetKitId` is a plain FK column with no back-relation
+  // (see schema.prisma:1603 — relation deliberately omitted), so we
+  // can't `select: { assetKit: {...} }` here. Two queries + in-memory
+  // join instead.
+  const [rows, assetKitRows] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: {
+        assetKitId: { in: assetKitIds },
+        booking: {
+          status: { in: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] },
+        },
       },
-    },
-    select: {
-      id: true,
-      bookingId: true,
-      booking: { select: { name: true } },
-      asset: { select: { id: true, title: true } },
-      assetKit: { select: { kitId: true, kit: { select: { name: true } } } },
-    },
-  });
+      select: {
+        id: true,
+        bookingId: true,
+        assetKitId: true,
+        booking: { select: { name: true } },
+        asset: { select: { id: true, title: true } },
+      },
+    }),
+    tx.assetKit.findMany({
+      where: { id: { in: assetKitIds } },
+      select: { id: true, kitId: true, kit: { select: { name: true } } },
+    }),
+  ]);
+  const akById = new Map<
+    string,
+    { id: string; kitId: string; kit: { name: string } }
+  >(
+    assetKitRows.map(
+      (ak: { id: string; kitId: string; kit: { name: string } }) => [ak.id, ak]
+    )
+  );
   return rows.map(
     (r: {
       id: string;
       bookingId: string;
+      assetKitId: string;
       booking: { name: string };
       asset: { id: string; title: string };
-      assetKit: { kitId: string; kit: { name: string } } | null;
-    }) => ({
-      bookingAssetId: r.id,
-      bookingId: r.bookingId,
-      bookingName: r.booking.name,
-      assetId: r.asset.id,
-      assetTitle: r.asset.title,
-      // `assetKit` is non-null at the moment of the pre-fetch (we filter
-      // on `assetKitId IN (...)` upstream), but TS doesn't know that —
-      // the empty-string fallback should never fire in practice.
-      kitId: r.assetKit?.kitId ?? "",
-      kitName: r.assetKit?.kit?.name ?? "",
-    })
+    }) => {
+      const ak = akById.get(r.assetKitId);
+      return {
+        bookingAssetId: r.id,
+        bookingId: r.bookingId,
+        bookingName: r.booking.name,
+        assetId: r.asset.id,
+        assetTitle: r.asset.title,
+        kitId: ak?.kitId ?? "",
+        kitName: ak?.kit?.name ?? "",
+      };
+    }
   );
 }
 
@@ -224,7 +242,81 @@ async function fetchAssetKitDetachmentImpact(
  * (e.g. `BOOKING_ASSET_DETACHED_FROM_KIT`) and a migration. Deferred;
  * the system notes alone cover the user-visible audit trail.
  */
-async function emitAssetKitDetachmentNotes({
+/**
+ * Resolves the standalone-vs-kit-driven `BookingAsset` collision that
+ * arises when an `AssetKit` row is about to be deleted (kit removal,
+ * cross-kit move). The DB-level `ON DELETE SET NULL` cascade would clear
+ * `assetKitId` on the matching `BookingAsset` rows — but if a standalone
+ * row (`assetKitId IS NULL`) already exists for the same
+ * `(bookingId, assetId)` pair, the SET NULL violates
+ * `BookingAsset_manual_unique` and the whole tx rolls back with P2002.
+ *
+ * For each colliding pair this helper merges the kit-driven qty into the
+ * standalone row and deletes the kit-driven row, so the subsequent
+ * `tx.assetKit.deleteMany(...)` has no row to cascade onto for that pair.
+ * Non-colliding kit-driven rows are left untouched — the cascade converts
+ * them to standalone as before.
+ *
+ * Call BEFORE `tx.assetKit.deleteMany(...)`. The companion
+ * {@link fetchAssetKitDetachmentImpact} must run BEFORE this helper too,
+ * since it needs the kit-driven rows to still exist to capture their
+ * booking + asset names.
+ *
+ * INDIVIDUAL assets can't collide (the trigger
+ * `enforce_individual_asset_single_kit` already prevents an INDIVIDUAL
+ * asset from being in multiple slices), but for safety the merge handles
+ * them the same way QUANTITY_TRACKED ones are handled.
+ */
+export async function mergeStandaloneCollisionsForKitDetachment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  assetKitIds: string[]
+): Promise<void> {
+  if (assetKitIds.length === 0) return;
+  const kitDrivenRows: Array<{
+    id: string;
+    bookingId: string;
+    assetId: string;
+    quantity: number;
+  }> = await tx.bookingAsset.findMany({
+    where: { assetKitId: { in: assetKitIds } },
+    select: { id: true, bookingId: true, assetId: true, quantity: true },
+  });
+  if (kitDrivenRows.length === 0) return;
+
+  const standaloneMatches: Array<{
+    id: string;
+    bookingId: string;
+    assetId: string;
+    quantity: number;
+  }> = await tx.bookingAsset.findMany({
+    where: {
+      assetKitId: null,
+      OR: kitDrivenRows.map((r) => ({
+        bookingId: r.bookingId,
+        assetId: r.assetId,
+      })),
+    },
+    select: { id: true, bookingId: true, assetId: true, quantity: true },
+  });
+  if (standaloneMatches.length === 0) return;
+
+  const standaloneByPair = new Map<string, (typeof standaloneMatches)[number]>(
+    standaloneMatches.map((s) => [`${s.bookingId}::${s.assetId}`, s])
+  );
+
+  for (const kdr of kitDrivenRows) {
+    const standalone = standaloneByPair.get(`${kdr.bookingId}::${kdr.assetId}`);
+    if (!standalone) continue;
+    await tx.bookingAsset.update({
+      where: { id: standalone.id },
+      data: { quantity: standalone.quantity + kdr.quantity },
+    });
+    await tx.bookingAsset.delete({ where: { id: kdr.id } });
+  }
+}
+
+export async function emitAssetKitDetachmentNotes({
   impact,
   actorUserId,
   actorFirstName,
@@ -3482,12 +3574,11 @@ export async function updateKitAssets({
           },
           select: { id: true },
         });
+        const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
         detachmentImpact = detachmentImpact.concat(
-          await fetchAssetKitDetachmentImpact(
-            tx,
-            aksToDelete.map((ak: { id: string }) => ak.id)
-          )
+          await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
+        await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
           where: {
             kitId: kit.id,
@@ -3521,12 +3612,11 @@ export async function updateKitAssets({
           where: { assetId: { in: movedFromOtherKitIds } },
           select: { id: true },
         });
+        const aksToDeleteIds = aksToDelete.map((ak: { id: string }) => ak.id);
         detachmentImpact = detachmentImpact.concat(
-          await fetchAssetKitDetachmentImpact(
-            tx,
-            aksToDelete.map((ak: { id: string }) => ak.id)
-          )
+          await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
+        await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
           where: { assetId: { in: movedFromOtherKitIds } },
         });
@@ -3625,15 +3715,6 @@ export async function updateKitAssets({
         // `BookingAsset` has no Prisma relation accessor on `assetKit`
         // (intentional — see the schema comment); resolve the AssetKit
         // id first, then update BookingAsset rows by `assetKitId`.
-        //
-        // Deferred follow-up: check-in floor guard — refuse to shrink
-        // AssetKit.quantity below per-row check-in already recorded for
-        // the kit-driven BookingAsset row. The ConsumptionLog model is
-        // keyed by (bookingId, assetId), not by bookingAssetId, so the
-        // per-row check-in floor can't be computed without attributing
-        // logs to a row first. For now the silent live-link can shrink
-        // a kit-driven slice below an active partial check-in; the
-        // booking's check-in flow would catch the inconsistency.
         const aksToSync = await tx.assetKit.findMany({
           where: {
             kitId: kit.id,
@@ -3647,6 +3728,82 @@ export async function updateKitAssets({
             return [ak.id, change?.newQuantity ?? null] as const;
           })
         );
+
+        // Check-in floor guard (Polish-7b): the kit's slice quantity is
+        // the source of truth for its kit-driven BookingAsset rows, but it
+        // must NOT be shrunk below units already checked in against that
+        // exact slice. `ConsumptionLog` now carries `bookingAssetId`, so we
+        // can sum per-row check-ins and refuse the shrink with a clear
+        // error. (Legacy `bookingAssetId IS NULL` logs pre-date per-row
+        // attribution and aren't counted here — same as the pre-guard
+        // behaviour for those rows, so no regression.)
+        const akIdsWithNewQty = [...newQtyByAk.entries()]
+          .filter(([, q]) => q != null)
+          .map(([id]) => id);
+        if (akIdsWithNewQty.length > 0) {
+          const drivenRows = await tx.bookingAsset.findMany({
+            where: { assetKitId: { in: akIdsWithNewQty } },
+            select: {
+              id: true,
+              assetKitId: true,
+              asset: { select: { title: true } },
+              booking: { select: { name: true } },
+            },
+          });
+          if (drivenRows.length > 0) {
+            const checkedInByRow = new Map<string, number>();
+            const logSums = await tx.consumptionLog.groupBy({
+              by: ["bookingAssetId"],
+              where: {
+                bookingAssetId: {
+                  in: drivenRows.map((r: { id: string }) => r.id),
+                },
+                // The four check-in disposition categories — units that
+                // have flowed back against this slice.
+                category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+              },
+              _sum: { quantity: true },
+            });
+            for (const g of logSums as Array<{
+              bookingAssetId: string | null;
+              _sum: { quantity: number | null };
+            }>) {
+              if (g.bookingAssetId) {
+                checkedInByRow.set(g.bookingAssetId, g._sum.quantity ?? 0);
+              }
+            }
+            const violations = drivenRows.flatMap(
+              (row: {
+                id: string;
+                assetKitId: string | null;
+                asset: { title: string };
+                booking: { name: string };
+              }) => {
+                const newQty = row.assetKitId
+                  ? newQtyByAk.get(row.assetKitId)
+                  : null;
+                const checkedIn = checkedInByRow.get(row.id) ?? 0;
+                return newQty != null && newQty < checkedIn
+                  ? [
+                      `"${row.asset.title}" on booking "${row.booking.name}" (${checkedIn} already checked in)`,
+                    ]
+                  : [];
+              }
+            );
+            if (violations.length > 0) {
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message: `Cannot reduce kit quantity below units already checked in: ${violations.join(
+                  "; "
+                )}. Check in fewer units or choose a higher quantity.`,
+                shouldBeCaptured: false,
+              });
+            }
+          }
+        }
+
         for (const [akId, newQty] of newQtyByAk) {
           if (newQty == null) continue;
           await tx.bookingAsset.updateMany({

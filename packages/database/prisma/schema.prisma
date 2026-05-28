@@ -1328,6 +1328,26 @@ model ConsumptionLog {
   custodian   TeamMember? @relation(fields: [custodianId], references: [id])
   custodianId String? // Who received/returned the items (if applicable)
 
+  // Per-row attribution for QUANTITY_TRACKED check-in. With Polish-6 a
+  // single (booking, asset) pair can have multiple BookingAsset rows
+  // (kit-driven + standalone slices); aggregating dispositions by
+  // (bookingId, assetId) alone can't distinguish "the kit slice is
+  // done" from "all slices are done". `bookingAssetId` points the log
+  // at the specific row the units were returned/consumed against.
+  //
+  // Declared as a plain column without a Prisma `@relation` accessor
+  // (same pattern as `BookingAsset.assetKitId`) to avoid deep-generic
+  // explosion on read paths that pull ConsumptionLog through Booking
+  // / Asset graphs. The migration SQL creates a proper FK with
+  // `ON DELETE SET NULL` so removing a BookingAsset row doesn't lose
+  // history — the log stays but loses its per-row attribution.
+  //
+  // Legacy rows (pre-Polish-6, pre-this-migration) keep `NULL` and are
+  // handled by a greedy-fill fallback in readers (kit-driven slices
+  // attribute first, then standalone) so existing bookings still
+  // render sensibly.
+  bookingAssetId String?
+
   // Datetime
   createdAt DateTime @default(now())
 
@@ -1335,6 +1355,7 @@ model ConsumptionLog {
   @@index([userId])
   @@index([bookingId])
   @@index([custodianId])
+  @@index([bookingAssetId])
 }
 
 /**

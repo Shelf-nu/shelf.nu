@@ -438,11 +438,19 @@ export const endAuditSessionAtom = atom(null, (_get, set) => {
  */
 
 export type BookingExpectedAssetBase = {
+  /** Asset id (not unique within the booking if Polish-6 multi-row slices exist) */
   id: string;
+  /**
+   * BookingAsset.id — the row this expected-asset entry represents.
+   * Polish-6 introduced multi-row slices: an asset can appear twice
+   * (kit-driven + standalone) in the same booking, so atoms and
+   * synthetic QR keys hang off this id, not `asset.id`.
+   */
+  bookingAssetId: string;
   title: string;
   mainImage?: string | null;
   thumbnailImage?: string | null;
-  /** When this asset belongs to a kit on the booking. */
+  /** When this slice was booked via a kit on the booking. */
   kitId?: string | null;
   kitName?: string | null;
 };
@@ -456,13 +464,22 @@ export type BookingExpectedAsset =
     })
   | (BookingExpectedAssetBase & {
       kind: "QUANTITY_TRACKED";
-      /** BookingAsset.quantity — what was reserved. */
+      /** BookingAsset.quantity — what was reserved (for THIS slice). */
       booked: number;
-      /** Σ of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows
-       * for this (booking, asset) pair. */
+      /** Units dispositioned against THIS slice (RETURN + CONSUME +
+       * LOSS + DAMAGE), per-row attributed. */
       logged: number;
       /** `max(0, booked − logged)`. Remaining units to reconcile. */
       remaining: number;
+      /** Per-category split of `logged` for this slice, so the drawer
+       * can render the same Booked/Returned/Consumed/Lost/Remaining
+       * tooltip the booking page shows. */
+      breakdown: {
+        returned: number;
+        consumed: number;
+        lost: number;
+        damaged: number;
+      };
       consumptionType: "ONE_WAY" | "TWO_WAY" | null;
     });
 
@@ -533,7 +550,13 @@ export const quickCheckinQtyAssetAtom = atom(
     set,
     asset: Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }>
   ) => {
-    const key = `${QUICK_CHECKIN_QR_PREFIX}${asset.id}`;
+    // Keyed by `bookingAssetId` (Polish-7b), NOT `asset.id`. An asset can
+    // have multiple BookingAsset slices in one booking (kit-driven +
+    // standalone); keying by the slice lets each pending slice be
+    // quick-checked-in independently and gives the server an exact
+    // `ConsumptionLog.bookingAssetId` to attribute against. The drawer's
+    // disposition flow keys qty rows by `bookingAssetId` to match.
+    const key = `${QUICK_CHECKIN_QR_PREFIX}${asset.bookingAssetId}`;
     const current = get(scannedItemsAtom);
     if (current[key]) return;
     set(scannedItemsAtom, {
@@ -548,13 +571,16 @@ export const quickCheckinQtyAssetAtom = atom(
          * Prisma `Asset.include({ location, custody })` payload, which
          * is vastly larger than what the drawer's `AssetRow` actually
          * reads (id, title, images, kitId, consumptionType,
-         * unitOfMeasure). Synthesizing the whole shape would be
+         * bookingAssetId). Synthesizing the whole shape would be
          * wasteful. The narrower downstream consumers don't touch the
          * missing fields; if a new consumer starts reading them, the
          * TS error on the cast site flags it.
          */
         data: {
           id: asset.id,
+          // The slice this synthetic scan represents. AssetRow reads it
+          // back to key the disposition block + qtyRemaining lookups.
+          bookingAssetId: asset.bookingAssetId,
           title: asset.title,
           mainImage: asset.mainImage,
           thumbnailImage: asset.thumbnailImage,

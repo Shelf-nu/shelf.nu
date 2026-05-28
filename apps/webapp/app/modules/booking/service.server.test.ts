@@ -44,6 +44,8 @@ import {
   addScannedAssetsToBooking,
   // Phase 3c helpers
   computeBookingAssetRemaining,
+  computeBookingAssetSliceRemaining,
+  attributeDispositionsByBookingAsset,
   isBookingFullyCheckedIn,
   // Test helper functions
   getActionTextFromTransition,
@@ -4384,6 +4386,76 @@ describe("computeBookingAssetRemaining", () => {
   });
 });
 
+describe("computeBookingAssetSliceRemaining", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue(null);
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+  });
+
+  it("returns slice.quantity minus only the logs tagged to that slice", async () => {
+    expect.assertions(1);
+
+    // why: the slice was booked at 50; 12 units already disposed against
+    // THIS slice (tagged). Remaining = 50 − 12 = 38.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 50 });
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 12 } });
+
+    const remaining = await computeBookingAssetSliceRemaining(
+      db,
+      "booking-1",
+      "ba-slice-1"
+    );
+
+    expect(remaining).toBe(38);
+  });
+
+  it("clamps at zero and treats a missing slice as 0 booked", async () => {
+    expect.assertions(1);
+
+    // why: findUnique → null (slice not found) → booked 0 → remaining 0.
+    const remaining = await computeBookingAssetSliceRemaining(
+      db,
+      "booking-1",
+      "ba-missing"
+    );
+
+    expect(remaining).toBe(0);
+  });
+});
+
+describe("attributeDispositionsByBookingAsset (legacy NULL + tagged mix)", () => {
+  it("attributes tagged logs exactly and greedy-fills NULL logs (kit-driven first)", () => {
+    // Two slices of the same asset: a kit-driven slice (50) and a
+    // standalone slice (33). One NEW log is tagged to the standalone
+    // slice (20); one LEGACY log has no bookingAssetId (40) and must be
+    // greedy-filled — kit-driven slice first.
+    const result = attributeDispositionsByBookingAsset({
+      bookingAssetRows: [
+        { id: "ba-standalone", quantity: 33, assetKitId: null },
+        { id: "ba-kit", quantity: 50, assetKitId: "ak-1" },
+      ],
+      consumptionLogs: [
+        { bookingAssetId: "ba-standalone", quantity: 20 },
+        { bookingAssetId: null, quantity: 40 },
+      ],
+    });
+
+    // Kit-driven slice fills the 40-unit legacy pool first (capacity 50).
+    expect(result.get("ba-kit")).toBe(40);
+    // Standalone slice keeps only its exactly-tagged 20.
+    expect(result.get("ba-standalone")).toBe(20);
+  });
+});
+
 describe("isBookingFullyCheckedIn", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -4812,6 +4884,90 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         assetIds: [],
       })
     ).rejects.toThrow(ShelfError);
+  });
+
+  /* ---------------- Polish-7b: per-slice attribution ---------------- */
+
+  it("tags each slice's ConsumptionLog with its bookingAssetId (multi-slice, same asset)", async () => {
+    expect.assertions(2);
+
+    setupQtyMocks();
+    // why: the per-slice cap reads `bookingAsset.findUnique` — give each
+    // slice ample headroom so both claims pass the cap.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 50 });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-A", returned: 5 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-B", returned: 3 },
+      ],
+    });
+
+    // Each slice's RETURN log carries its OWN bookingAssetId — they must
+    // NOT collapse into a single asset-level entry.
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        quantity: 5,
+        bookingAssetId: "ba-A",
+      })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        quantity: 3,
+        bookingAssetId: "ba-B",
+      })
+    );
+  });
+
+  it("rejects an over-claim against a single slice even when the asset has free units (per-slice cap)", async () => {
+    expect.assertions(2);
+
+    setupQtyMocks();
+    // why: asset-level remaining is 10 (setupQtyMocks), but THIS slice was
+    // only booked at 5. Claiming 8 must fail on the slice cap
+    // (min(10, 5) = 5), not slip through on the looser asset-level guard.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 5 });
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          { assetId: mockQtyAssetId, bookingAssetId: "ba-A", returned: 8 },
+        ],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("leaves bookingAssetId null and skips the per-slice cap for legacy callers", async () => {
+    expect.assertions(2);
+
+    setupQtyMocks();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      // No bookingAssetId → legacy / single-slice path (unchanged).
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    // The per-slice helper (bookingAsset.findUnique) is never consulted
+    // when no bookingAssetId is supplied — pure asset-level handling.
+    expect(db.bookingAsset.findUnique).not.toHaveBeenCalled();
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        quantity: 10,
+        bookingAssetId: null,
+      })
+    );
   });
 });
 

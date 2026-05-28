@@ -38,6 +38,7 @@ function qtyAsset(
   return {
     kind: "QUANTITY_TRACKED",
     id: "asset-qty-1",
+    bookingAssetId: "ba-qty-1",
     title: "Battery pack",
     mainImage: null,
     thumbnailImage: null,
@@ -46,6 +47,7 @@ function qtyAsset(
     booked: 20,
     logged: 0,
     remaining: 20,
+    breakdown: { returned: 0, consumed: 0, lost: 0, damaged: 0 },
     consumptionType: "TWO_WAY",
     ...overrides,
   };
@@ -56,6 +58,7 @@ describe("quickCheckinQtyAssetAtom", () => {
     const store = createStore();
     const asset = qtyAsset({
       id: "asset-qty-42",
+      bookingAssetId: "ba-qty-42",
       consumptionType: "ONE_WAY",
     });
 
@@ -65,16 +68,20 @@ describe("quickCheckinQtyAssetAtom", () => {
     const keys = Object.keys(items);
 
     expect(keys).toHaveLength(1);
-    const expectedKey = `${QUICK_CHECKIN_QR_PREFIX}${asset.id}`;
+    // Polish-7b: keyed by the slice (bookingAssetId), not asset.id.
+    const expectedKey = `${QUICK_CHECKIN_QR_PREFIX}${asset.bookingAssetId}`;
     expect(keys[0]).toBe(expectedKey);
 
     const entry = items[expectedKey];
     expect(entry?.type).toBe("asset");
     expect(entry?.codeType).toBe("qr");
     // Data is cast through `unknown` in the atom — the behaviour contract
-    // is that `id` and `consumptionType` survive the round-trip so the
-    // drawer can look them up.
+    // is that `id`, `bookingAssetId` and `consumptionType` survive the
+    // round-trip so the drawer can look them up.
     expect((entry?.data as { id?: string } | undefined)?.id).toBe(asset.id);
+    expect(
+      (entry?.data as { bookingAssetId?: string } | undefined)?.bookingAssetId
+    ).toBe(asset.bookingAssetId);
     expect(
       (entry?.data as { consumptionType?: string } | undefined)?.consumptionType
     ).toBe("ONE_WAY");
@@ -100,7 +107,7 @@ describe("quickCheckinQtyAssetAtom", () => {
   it("round-trips cleanly with removeScannedItemAtom", () => {
     const store = createStore();
     const asset = qtyAsset({ id: "asset-qty-round-trip" });
-    const key = `${QUICK_CHECKIN_QR_PREFIX}${asset.id}`;
+    const key = `${QUICK_CHECKIN_QR_PREFIX}${asset.bookingAssetId}`;
 
     store.set(quickCheckinQtyAssetAtom, asset);
     expect(Object.keys(store.get(scannedItemsAtom))).toContain(key);

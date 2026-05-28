@@ -149,18 +149,41 @@ export default function ListAssetContent({
     lost: 0,
     damaged: 0,
   };
+  /**
+   * Per-row attribution for qty-tracked rows. With Polish-6 multi-row
+   * slices, an asset can have its kit-driven slice fully reconciled
+   * while a parallel standalone slice is still partly out. The badge
+   * needs the state of THIS row, not the asset's global rollup.
+   *
+   *  - Fully reconciled for this row → PARTIALLY_CHECKED_IN ("Already
+   *    checked in", blue) — same label as the INDIVIDUAL fully-checked-
+   *    in case.
+   *  - Partly reconciled for this row → PARTIALLY_CHECKED_OUT_QTY
+   *    ("Partially checked out", violet) — emphasises the outstanding
+   *    portion rather than the returned portion.
+   */
+  const isActiveBooking =
+    booking.status === "ONGOING" || booking.status === "OVERDUE";
+  const isQtyFullyCheckedIn =
+    isQuantityTracked(item) &&
+    qtyBooked > 0 &&
+    qtyDispositioned >= qtyBooked &&
+    isActiveBooking;
   const isQtyPartiallyCheckedIn =
     isQuantityTracked(item) &&
     qtyBooked > 0 &&
     qtyDispositioned > 0 &&
     qtyRemaining > 0 &&
-    (booking.status === "ONGOING" || booking.status === "OVERDUE");
+    isActiveBooking;
 
-  const contextStatus = isQtyPartiallyCheckedIn
-    ? "PARTIALLY_CHECKED_IN_QTY"
+  const contextStatus = isQtyFullyCheckedIn
+    ? "PARTIALLY_CHECKED_IN"
+    : isQtyPartiallyCheckedIn
+    ? "PARTIALLY_CHECKED_OUT_QTY"
     : baseContextStatus;
 
   const isPartiallyCheckedIn =
+    isQtyFullyCheckedIn ||
     isQtyPartiallyCheckedIn ||
     isAssetPartiallyCheckedIn(item, partialCheckinDetails, booking.status);
 

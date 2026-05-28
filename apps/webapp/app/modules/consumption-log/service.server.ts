@@ -46,6 +46,14 @@ type CreateConsumptionLogArgs = {
   note?: string;
   /** Optional booking associated with this consumption */
   bookingId?: string;
+  /**
+   * Optional BookingAsset row this disposition was performed against.
+   * Set by check-in flows that know the exact slice (kit-driven vs
+   * standalone). `NULL` for non-booking writers (adjustments etc.) and
+   * for legacy callers — readers fall back to greedy attribution when
+   * the column is null.
+   */
+  bookingAssetId?: string | null;
   /** Optional team member who received/returned items */
   custodianId?: string;
   /**
@@ -76,6 +84,7 @@ export async function createConsumptionLog({
   userId,
   note,
   bookingId,
+  bookingAssetId,
   custodianId,
   tx,
 }: CreateConsumptionLogArgs) {
@@ -100,6 +109,7 @@ export async function createConsumptionLog({
         userId,
         note: note ?? null,
         bookingId: bookingId ?? null,
+        bookingAssetId: bookingAssetId ?? null,
         custodianId: custodianId ?? null,
       },
     });

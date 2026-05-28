@@ -582,8 +582,15 @@ export async function getAssets(params: {
           { description: { contains: term, mode: "insensitive" } },
           // Search in related category
           { category: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related location
-          { location: { name: { contains: term, mode: "insensitive" } } },
+          // Search in related location — traverses the AssetLocation pivot
+          // since an asset can be placed at multiple locations.
+          {
+            assetLocations: {
+              some: {
+                location: { name: { contains: term, mode: "insensitive" } },
+              },
+            },
+          },
           // Search in related tags
           { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
           // Search in custodian names
@@ -820,12 +827,25 @@ export async function getAssets(params: {
     }
 
     /**
-     * `hideUnavailable` filters out assets that are in a kit. Since kit
-     * membership lives on the `AssetKit` pivot, "not in any kit" is
-     * "asset has zero AssetKit rows".
+     * `hideUnavailable` filters INDIVIDUAL assets that are in any kit out
+     * of the picker (those are managed via the kit, not picked directly).
+     * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
+     * is a slice, not whole-asset exclusion — the free pool stays bookable
+     * as a standalone slice. Picker's availability math subtracts the
+     * kit-committed sum downstream so the displayed "Available" count is
+     * already correct.
      */
     if (hideUnavailable === true) {
-      where.assetKits = { none: {} };
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
+        },
+      ];
     }
 
     if (teamMemberIds && teamMemberIds.length) {

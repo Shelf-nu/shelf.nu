@@ -262,21 +262,30 @@ function AssetTitleAndStatus({
   const qtyBreakdown: DispositionBreakdown | undefined =
     dispositionBreakdownByAsset?.[asset.id];
 
+  const isActiveBooking =
+    bookingStatus === "ONGOING" || bookingStatus === "OVERDUE";
+  const isQtyFullyCheckedIn =
+    isQuantityTracked(asset) &&
+    qtyBooked > 0 &&
+    qtyDispositioned >= qtyBooked &&
+    isActiveBooking;
   const isQtyPartial =
     isQuantityTracked(asset) &&
     qtyBooked > 0 &&
     qtyDispositioned > 0 &&
     qtyRemaining > 0 &&
-    (bookingStatus === "ONGOING" || bookingStatus === "OVERDUE");
+    isActiveBooking;
 
   /**
-   * The sidebar only knows the asset's raw DB status (no partial-checkin
-   * details are loaded here), so we start from that and only override to
-   * the qty-partial extended status when we have evidence from the
-   * `dispositionedByAsset` map.
+   * Sidebar mirrors the booking-row badge: fully reconciled rows show
+   * "Already checked in", partly reconciled rows show "Partially
+   * checked out" (still-out semantic). See `list-asset-content.tsx`
+   * for the same logic with extra docs.
    */
-  const effectiveStatus = isQtyPartial
-    ? "PARTIALLY_CHECKED_IN_QTY"
+  const effectiveStatus = isQtyFullyCheckedIn
+    ? "PARTIALLY_CHECKED_IN"
+    : isQtyPartial
+    ? "PARTIALLY_CHECKED_OUT_QTY"
     : asset.status;
 
   return (

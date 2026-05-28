@@ -89,10 +89,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         custody: { include: { custodian: true } },
         assetKits: {
           select: {
+            id: true,
+            quantity: true,
             kit: { select: { id: true, name: true, status: true } },
           },
         },
         qrCodes: true,
+        bookingAssets: {
+          where: {
+            booking: { status: { in: ["RESERVED", "ONGOING", "OVERDUE"] } },
+          },
+          select: {
+            quantity: true,
+            assetKitId: true,
+            booking: { select: { id: true, name: true, status: true } },
+          },
+        },
       },
     });
 

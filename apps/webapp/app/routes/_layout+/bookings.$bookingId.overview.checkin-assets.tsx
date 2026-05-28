@@ -21,6 +21,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
+  attributeCategorizedDispositionsByBookingAsset,
   checkinAssets,
   getBooking,
   getDetailedPartialCheckinData,
@@ -130,28 +131,115 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const qtyAssetIds = qtyTrackedAssets.map((ba) => ba.assetId);
 
-    const loggedSums =
+    /**
+     * Per-row attribution: ConsumptionLog now carries `bookingAssetId`,
+     * letting us split a (booking, asset)'s dispositions across its
+     * multiple BookingAsset slices (kit-driven + standalone). Legacy
+     * NULL-bookingAssetId rows get greedy-attributed (kit-driven first)
+     * by `attributeDispositionsByBookingAsset`.
+     */
+    const dispositionLogs =
       qtyAssetIds.length > 0
-        ? await db.consumptionLog.groupBy({
-            by: ["assetId"],
+        ? await db.consumptionLog.findMany({
             where: {
               bookingId: booking.id,
               assetId: { in: qtyAssetIds },
               category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
             },
-            _sum: { quantity: true },
+            select: {
+              assetId: true,
+              category: true,
+              quantity: true,
+              bookingAssetId: true,
+            },
           })
         : [];
 
-    const loggedSumById = new Map<string, number>(
-      loggedSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
-    );
+    const logsByAsset = new Map<
+      string,
+      Array<{
+        bookingAssetId: string | null;
+        category: "RETURN" | "CONSUME" | "LOSS" | "DAMAGE";
+        quantity: number;
+      }>
+    >();
+    for (const log of dispositionLogs) {
+      const arr = logsByAsset.get(log.assetId) ?? [];
+      arr.push({
+        bookingAssetId: log.bookingAssetId ?? null,
+        category: log.category as "RETURN" | "CONSUME" | "LOSS" | "DAMAGE",
+        quantity: log.quantity,
+      });
+      logsByAsset.set(log.assetId, arr);
+    }
+
+    /**
+     * Per-bookingAssetId "logged" total + category breakdown. The drawer
+     * consumes these via the bookingAssetId key so two slices of the
+     * same asset display separately (kit-driven fully reconciled vs
+     * standalone still pending), each with its own Booked/Returned/
+     * Consumed/Lost/Remaining tooltip.
+     */
+    const loggedByBookingAssetId = new Map<string, number>();
+    const breakdownByBookingAssetId = new Map<
+      string,
+      { returned: number; consumed: number; lost: number; damaged: number }
+    >();
+    const rowsByAsset = new Map<
+      string,
+      Array<{
+        id: string;
+        quantity: number;
+        assetKitId: string | null;
+      }>
+    >();
+    for (const ba of qtyTrackedAssets) {
+      const arr = rowsByAsset.get(ba.assetId) ?? [];
+      arr.push({
+        id: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId ?? null,
+      });
+      rowsByAsset.set(ba.assetId, arr);
+    }
+    for (const [assetId, rows] of rowsByAsset) {
+      const attributed = attributeCategorizedDispositionsByBookingAsset({
+        bookingAssetRows: rows,
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const [bookingAssetId, b] of attributed) {
+        breakdownByBookingAssetId.set(bookingAssetId, b);
+        loggedByBookingAssetId.set(
+          bookingAssetId,
+          b.returned + b.consumed + b.lost + b.damaged
+        );
+      }
+    }
 
     /**
      * Shape consumed by `partial-checkin-drawer.tsx`:
-     *   { [assetId]: { booked, logged, remaining, consumptionType } }
+     *   { [bookingAssetId]: { booked, logged, remaining, consumptionType } }
      * `consumptionType` lets the drawer pick between "Returned" (TWO_WAY)
      * and "Consumed" (ONE_WAY) as the primary input label.
+     */
+    const qtyRemainingByBookingAssetId: Record<
+      string,
+      {
+        booked: number;
+        logged: number;
+        remaining: number;
+        consumptionType: "ONE_WAY" | "TWO_WAY" | null;
+      }
+    > = {};
+
+    /**
+     * Asset-level rollup of the per-row map. Used by the drawer's
+     * legacy lookups that still key by `assetId` (e.g. pool-drain
+     * validation, "all units of this asset still pending" checks).
+     * For QUANTITY_TRACKED assets with multiple slices, `booked` and
+     * `logged` are summed across rows; `remaining` is the asset's
+     * total outstanding. The new per-bookingAssetId map below is the
+     * source of truth for per-row UI.
      */
     const qtyRemainingByAssetId: Record<
       string,
@@ -165,48 +253,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     for (const ba of qtyTrackedAssets) {
       const booked = ba.quantity ?? 0;
-      const logged = loggedSumById.get(ba.assetId) ?? 0;
-      qtyRemainingByAssetId[ba.assetId] = {
+      const logged = loggedByBookingAssetId.get(ba.id) ?? 0;
+      qtyRemainingByBookingAssetId[ba.id] = {
         booked,
         logged,
         remaining: Math.max(0, booked - logged),
         consumptionType:
           (ba.asset.consumptionType as "ONE_WAY" | "TWO_WAY" | null) ?? null,
       };
+
+      const aggregate = qtyRemainingByAssetId[ba.assetId] ?? {
+        booked: 0,
+        logged: 0,
+        remaining: 0,
+        consumptionType:
+          (ba.asset.consumptionType as "ONE_WAY" | "TWO_WAY" | null) ?? null,
+      };
+      aggregate.booked += booked;
+      aggregate.logged += logged;
+      aggregate.remaining = Math.max(0, aggregate.booked - aggregate.logged);
+      qtyRemainingByAssetId[ba.assetId] = aggregate;
     }
 
     /**
-     * Phase 3c (drawer UX): derive an "expected assets" list — one
-     * entry per BookingAsset — that mirrors the audits drawer's
-     * expected-assets pattern. This lets the partial-checkin drawer
-     * render the booking's full contents up front (pending + already
-     * reconciled) instead of starting empty and only populating as
-     * scans come in.
-     *
-     * This is a pure derivation from `booking.bookingAssets`,
-     * `qtyRemainingByAssetId`, and `partialCheckinDetails` — all of
-     * which are already loaded above. No additional DB calls.
+     * Drawer "expected assets" list — one entry per BookingAsset row.
+     * Polish-6 multi-row slices get separate entries so the user can
+     * see "kit-driven slice done" alongside "standalone slice still
+     * pending" instead of an aggregated half-truth.
      */
     const expectedAssets: BookingExpectedAsset[] = booking.bookingAssets.map(
       (ba) => {
         const asset = ba.asset;
-        // AssetKit pivot for downstream UI consumption.
-        const pivotKit = asset.assetKits[0]?.kit ?? null;
+        // Resolve the kit attribution for THIS slice (kit-driven row
+        // has `assetKitId`; standalone rows fall back to null even when
+        // the asset happens to belong to other kits).
+        const sourceKit = ba.assetKitId
+          ? asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
+          : null;
         const base = {
           id: asset.id,
+          bookingAssetId: ba.id,
           title: asset.title,
           mainImage: asset.mainImage ?? null,
           thumbnailImage: asset.thumbnailImage ?? null,
-          kitId: pivotKit?.id ?? null,
-          kitName: pivotKit?.name ?? null,
+          kitId: sourceKit?.id ?? null,
+          kitName: sourceKit?.name ?? null,
         };
 
         if (asset.type === "QUANTITY_TRACKED") {
-          // Defensive defaults: if the asset was classified as
-          // qty-tracked but somehow isn't in the map (shouldn't
-          // happen), fall back to the raw BookingAsset.quantity and
-          // treat nothing as logged so the UI still renders sensibly.
-          const qty = qtyRemainingByAssetId[asset.id];
+          const qty = qtyRemainingByBookingAssetId[ba.id];
           const booked = qty?.booked ?? ba.quantity ?? 0;
           const logged = qty?.logged ?? 0;
           const remaining = qty?.remaining ?? Math.max(0, booked - logged);
@@ -216,6 +311,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             booked,
             logged,
             remaining,
+            breakdown: breakdownByBookingAssetId.get(ba.id) ?? {
+              returned: 0,
+              consumed: 0,
+              lost: 0,
+              damaged: 0,
+            },
             consumptionType: qty?.consumptionType ?? null,
           };
         }
@@ -243,7 +344,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     >();
     for (const ba of booking.bookingAssets) {
-      const kit = ba.asset.assetKits[0]?.kit ?? null;
+      // Resolve the kit for THIS slice via its `assetKitId` discriminator
+      // (not `assetKits[0]`, which is just the asset's first membership).
+      // Standalone slices (`assetKitId === null`) contribute no kit — the
+      // drawer renders them as loose rows.
+      const kit = ba.assetKitId
+        ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ?? null
+        : null;
       const kitId = kit?.id ?? null;
       if (!kit || !kitId) continue;
       const entry = kitMap.get(kitId) ?? {
@@ -269,6 +376,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       partialCheckinProgress,
       partialCheckinDetails,
       qtyRemainingByAssetId,
+      qtyRemainingByBookingAssetId,
       expectedAssets,
       expectedKits,
     });

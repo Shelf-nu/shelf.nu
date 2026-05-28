@@ -17,20 +17,22 @@ export type KitWithStatus = {
 /**
  * Booking-context status extensions beyond the raw Prisma `AssetStatus`:
  *
- * - `PARTIALLY_CHECKED_IN` — INDIVIDUAL-asset flow. The asset's entire
- *   booking row has been checked in via a partial session (existed
- *   pre-Phase 3c).
- * - `PARTIALLY_CHECKED_IN_QTY` — Phase 3c. A QUANTITY_TRACKED asset has
- *   had SOME units dispositioned on this booking (RETURN / CONSUME /
- *   LOSS / DAMAGE) but `remaining > 0`, so it's not fully reconciled.
- *   Label and color must be distinct from the individual-asset variant
- *   because the semantics differ ("some units are in" vs. "this whole
- *   thing is in").
+ * - `PARTIALLY_CHECKED_IN` — INDIVIDUAL-asset flow OR a fully-reconciled
+ *   QUANTITY_TRACKED row (`dispositioned >= booked` for THIS row). Rendered
+ *   as "Already checked in" (blue).
+ * - `PARTIALLY_CHECKED_IN_QTY` — legacy Phase 3c label. Kept for callers
+ *   that need the "Partially checked in" wording. Rendered amber.
+ * - `PARTIALLY_CHECKED_OUT_QTY` — QUANTITY_TRACKED, this row has SOME
+ *   units dispositioned but `remaining > 0`. Rendered as "Partially
+ *   checked out" (violet) to emphasise that work is still outstanding.
+ *   Booking rows use this in preference to `PARTIALLY_CHECKED_IN_QTY`
+ *   so the user sees "still partly out" rather than "already partly in".
  */
 export type ExtendedAssetStatus =
   | AssetStatus
   | "PARTIALLY_CHECKED_IN"
-  | "PARTIALLY_CHECKED_IN_QTY";
+  | "PARTIALLY_CHECKED_IN_QTY"
+  | "PARTIALLY_CHECKED_OUT_QTY";
 export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
 
 /**
@@ -141,12 +143,32 @@ export function getBookingContextKitStatus(
   const kitAssetsInBooking =
     kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
 
-  // Check if ALL kit assets in booking are partially checked in
+  /**
+   * "All checked in" needs per-row awareness for QUANTITY_TRACKED kit
+   * members. `partialCheckinDetails` is keyed by `assetId` and only
+   * surfaces an asset when it's fully reconciled across the whole
+   * booking — but with Polish-6 multi-row slices a qty-tracked member
+   * can have its kit-driven slice fully reconciled (the only slice
+   * relevant to this kit) while a parallel standalone slice still has
+   * outstanding units. Fall back to per-row `bookedQuantity` vs
+   * `dispositionedQuantity` when those are available on the asset.
+   * INDIVIDUAL members keep the original `partialCheckinDetails` check.
+   */
   const allAssetsCheckedIn =
     kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
+    kitAssetsInBooking.every((asset) => {
+      const a = asset as AssetWithStatus & {
+        type?: string;
+        bookedQuantity?: number;
+        dispositionedQuantity?: number;
+      };
+      if (a.type === "QUANTITY_TRACKED") {
+        const booked = a.bookedQuantity ?? 0;
+        const dispositioned = a.dispositionedQuantity ?? 0;
+        return booked > 0 && dispositioned >= booked;
+      }
+      return Boolean(partialCheckinDetails[asset.id]);
+    });
 
   // Only show as PARTIALLY_CHECKED_IN for active bookings
   // For COMPLETE bookings, kits should show as AVAILABLE
@@ -192,22 +214,13 @@ export function isKitPartiallyCheckedIn(
   bookingAssetIds: Set<string>,
   bookingStatus: string
 ): boolean {
-  const kitAssetsInBooking =
-    kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
-
-  // Check if ALL kit assets in booking are checked in
-  const allAssetsCheckedIn =
-    kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
-
-  if (!allAssetsCheckedIn) {
-    return false;
-  }
-
-  // Only consider as "partially checked in" for active bookings
-  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
+  const contextStatus = getBookingContextKitStatus(
+    kit,
+    partialCheckinDetails,
+    bookingAssetIds,
+    bookingStatus
+  );
+  return contextStatus === "PARTIALLY_CHECKED_IN";
 }
 
 /**

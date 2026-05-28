@@ -29,6 +29,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -63,6 +64,12 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkin-assets";
 import type {
@@ -93,6 +100,15 @@ import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
  */
 export const checkinDispositionSchema = z.object({
   assetId: z.string().min(1),
+  /**
+   * BookingAsset.id this disposition targets. Polish-6 lets one asset
+   * have multiple slices (kit-driven + standalone) in the same booking;
+   * tagging the slice lets the server write an exactly-attributed
+   * `ConsumptionLog.bookingAssetId` instead of relying on greedy-fill on
+   * read. Optional for back-compat: legacy / mobile / `assetIds`-only
+   * callers omit it and the server falls back to asset-level handling.
+   */
+  bookingAssetId: z.string().min(1).optional(),
   /** TWO_WAY return count — writes a RETURN log, no pool change. */
   returned: z.number().int().nonnegative().optional(),
   /** ONE_WAY consumption count — writes a CONSUME log, pool decrements. */
@@ -131,22 +147,27 @@ type QtyDispositionState = {
   damaged: string;
 };
 
+/** Keyed by `bookingAssetId` (the slice), not `asset.id` — Polish-7b. */
 type DispositionMap = Record<string, QtyDispositionState>;
 
 /**
- * Context exposing per-asset disposition state down to the `AssetRow`
+ * Context exposing per-slice disposition state down to the `AssetRow`
  * render function. Using context (not prop drilling) because `AssetRow`
  * is rendered via a callback passed to `ConfigurableDrawer`, making direct
  * prop passing awkward.
+ *
+ * Everything qty-related is keyed by `bookingAssetId` so two slices of
+ * the same asset (kit-driven + standalone) are independent.
  */
 type DispositionContextValue = {
-  /** Map of assetId → per-asset disposition state. */
+  /** Map of bookingAssetId → per-slice disposition state. */
   dispositions: DispositionMap;
   /**
-   * Per-asset `remaining` + `consumptionType` coming from the loader.
-   * Empty when the booking has no qty-tracked assets.
+   * Per-slice `remaining` + `consumptionType` coming from the loader,
+   * keyed by `bookingAssetId`. Empty when the booking has no qty-tracked
+   * assets.
    */
-  qtyRemainingByAssetId: Record<
+  qtyRemainingByBookingAssetId: Record<
     string,
     {
       booked: number;
@@ -156,17 +177,17 @@ type DispositionContextValue = {
     }
   >;
   updateField: (
-    assetId: string,
+    bookingAssetId: string,
     field: keyof QtyDispositionState,
     value: string
   ) => void;
   /**
-   * When set to an asset id, the corresponding
+   * When set to a bookingAssetId, the corresponding
    * {@link QuantityDispositionBlock} auto-focuses its primary input and
    * scrolls into view. Cleared by the caller shortly after so
    * re-renders don't keep stealing focus.
    */
-  recentlyAddedAssetId: string | null;
+  recentlyAddedBookingAssetId: string | null;
 };
 
 const DispositionContext = createContext<DispositionContextValue | null>(null);
@@ -249,18 +270,46 @@ type IndividualExpectedAsset = Extract<
 >;
 
 /**
- * Derive a stable "asset id" from either a real scan key (the qrId is
- * opaque — we read `item.data.id`) or a synthetic quick-checkin key
- * (where the asset id is the suffix of the key).
+ * Derive the asset id for a scanned item. Both real scans and synthetic
+ * quick-checkin entries carry `data.id` (the synthetic entry's suffix is
+ * now a BookingAsset id, not an asset id — Polish-7b — so we always read
+ * `data.id` rather than slicing the key).
  */
-function assetIdForScannedKey(
+function assetIdForScannedKey(item: {
+  data?: { id?: string } | null | undefined;
+}): string | undefined {
+  return item?.data?.id;
+}
+
+/**
+ * Resolve the `BookingAsset` slice id a scanned item targets (Polish-7b).
+ *
+ * - Synthetic quick-checkin entry → the key suffix IS the bookingAssetId
+ *   (also mirrored on `data.bookingAssetId`).
+ * - Real qty scan → the asset's first still-PENDING qty slice. For a
+ *   single-slice asset (the legacy / common case) that's the one slice,
+ *   so behaviour is unchanged.
+ *
+ * Returns `undefined` for INDIVIDUAL assets (they don't carry per-slice
+ * dispositions) and for qty assets with no pending slice.
+ */
+function bookingAssetIdForScannedItem(
   key: string,
-  item: { data?: { id?: string } | null | undefined }
+  item: {
+    data?: { id?: string; bookingAssetId?: string } | null | undefined;
+  },
+  expectedAssets: BookingExpectedAsset[]
 ): string | undefined {
   if (key.startsWith(QUICK_CHECKIN_QR_PREFIX)) {
     return key.slice(QUICK_CHECKIN_QR_PREFIX.length);
   }
-  return item?.data?.id;
+  if (item?.data?.bookingAssetId) return item.data.bookingAssetId;
+  const assetId = item?.data?.id;
+  if (!assetId) return undefined;
+  const slice = expectedAssets.find(
+    (a) => a.kind === "QUANTITY_TRACKED" && a.id === assetId && a.remaining > 0
+  );
+  return slice?.bookingAssetId;
 }
 
 /**
@@ -356,7 +405,7 @@ export default function PartialCheckinDrawer({
     booking,
     partialCheckinProgress,
     partialCheckinDetails,
-    qtyRemainingByAssetId,
+    qtyRemainingByBookingAssetId,
     expectedKits,
   } = useLoaderData<typeof loader>();
 
@@ -370,14 +419,13 @@ export default function PartialCheckinDrawer({
   const quickCheckinQtyAsset = useSetAtom(quickCheckinQtyAssetAtom);
 
   /**
-   * Asset id of the most-recently-added quick-checkin row. The
+   * BookingAsset id of the most-recently-added quick-checkin row. The
    * corresponding {@link QuantityDispositionBlock} auto-focuses + scrolls
    * into view when it mounts. Cleared after ~600ms by the click handler
    * so subsequent re-renders don't re-steal focus.
    */
-  const [recentlyAddedAssetId, setRecentlyAddedAssetId] = useState<
-    string | null
-  >(null);
+  const [recentlyAddedBookingAssetId, setRecentlyAddedBookingAssetId] =
+    useState<string | null>(null);
   const recentlyAddedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -394,22 +442,26 @@ export default function PartialCheckinDrawer({
   );
 
   /**
-   * Per-qty-tracked-asset disposition state. Keyed by assetId. Populated
-   * on-demand when a qty-tracked asset is scanned (see effect below).
-   * Primary defaults to the remaining count so the happy-path is "scan
-   * and submit".
+   * Per-slice disposition state. Keyed by `bookingAssetId` (Polish-7b).
+   * Populated on-demand when a qty-tracked slice is scanned / quick-checked
+   * (see effect below). Primary defaults to the remaining count so the
+   * happy-path is "scan and submit".
    */
   const [dispositions, setDispositions] = useState<DispositionMap>({});
 
   const updateField = useCallback(
-    (assetId: string, field: keyof QtyDispositionState, value: string) => {
+    (
+      bookingAssetId: string,
+      field: keyof QtyDispositionState,
+      value: string
+    ) => {
       setDispositions((prev) => ({
         ...prev,
-        [assetId]: {
-          primary: prev[assetId]?.primary ?? "",
-          returned: prev[assetId]?.returned ?? "",
-          lost: prev[assetId]?.lost ?? "",
-          damaged: prev[assetId]?.damaged ?? "",
+        [bookingAssetId]: {
+          primary: prev[bookingAssetId]?.primary ?? "",
+          returned: prev[bookingAssetId]?.returned ?? "",
+          lost: prev[bookingAssetId]?.lost ?? "",
+          damaged: prev[bookingAssetId]?.damaged ?? "",
           [field]: value,
         },
       }));
@@ -455,61 +507,99 @@ export default function PartialCheckinDrawer({
   );
 
   /**
-   * Asset IDs in `assetIdsForCheckin` that are qty-tracked AND still have
-   * units to reconcile on this booking. The drawer surfaces a per-row
-   * quantity input for these and serializes them into the `checkins`
-   * JSON payload on submit.
+   * Map `bookingAssetId → assetId` from the expected list. Used to label
+   * the `checkins` payload entries (which the server keys by assetId for
+   * type routing) while the drawer keys everything by slice.
    */
-  const qtyTrackedIdsForCheckin = useMemo(
-    () =>
-      assetIdsForCheckin.filter((id) => {
-        const info = qtyRemainingByAssetId?.[id];
-        return !!info && info.remaining > 0;
-      }),
-    [assetIdsForCheckin, qtyRemainingByAssetId]
-  );
+  const assetIdByBookingAssetId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of expectedAssets) m.set(a.bookingAssetId, a.id);
+    return m;
+  }, [expectedAssets]);
 
   /**
-   * Keep the disposition map in sync with the current scan set:
+   * Activation set (Polish-7b): the `bookingAssetId`s of qty-tracked
+   * SLICES put in play this session — via a real scan resolved to the
+   * asset's pending slice, a quick-checkin synthetic entry (keyed by the
+   * slice), or a scanned kit covering a kit-driven slice. Only slices
+   * with `remaining > 0` qualify. `qrIdByBookingAssetId` lets blockers map
+   * a slice back to the scanned-item key that activated it.
+   */
+  const { activatedQtyBookingAssetIds, qrIdByBookingAssetId } = useMemo(() => {
+    const activated = new Set<string>();
+    const qrIdByBaId = new Map<string, string>();
+    const activate = (baId: string | undefined, qrId: string) => {
+      if (!baId) return;
+      const info = qtyRemainingByBookingAssetId?.[baId];
+      if (!info || info.remaining <= 0) return;
+      activated.add(baId);
+      if (!qrIdByBaId.has(baId)) qrIdByBaId.set(baId, qrId);
+    };
+
+    for (const [qrId, item] of Object.entries(items)) {
+      if (!item || item.error) continue;
+      if (item.type === "asset") {
+        activate(
+          bookingAssetIdForScannedItem(qrId, item, expectedAssets),
+          qrId
+        );
+        continue;
+      }
+      // A scanned kit covers its members: activate each kit-driven qty
+      // slice whose own `kitId` matches the scanned kit. The kit payload
+      // exposes `assetKits` (not a flat `assets` list), but the per-slice
+      // `kitId` from the loader is the authoritative link — so we match on
+      // that alone rather than the kit's member-id list.
+      if (item.type === "kit" && item.data) {
+        const kitId = (item.data as { id?: string }).id;
+        if (kitId) {
+          for (const a of expectedAssets) {
+            if (a.kind === "QUANTITY_TRACKED" && a.kitId === kitId) {
+              activate(a.bookingAssetId, qrId);
+            }
+          }
+        }
+      }
+    }
+    return {
+      activatedQtyBookingAssetIds: activated,
+      qrIdByBookingAssetId: qrIdByBaId,
+    };
+  }, [items, expectedAssets, qtyRemainingByBookingAssetId]);
+
+  /**
+   * Keep the disposition map in sync with the current activation set:
    *
-   * 1. Drop entries for assets no longer in `qtyTrackedIdsForCheckin`
-   *    (the user removed the scan via the trash icon). Without this,
-   *    re-scanning the same asset would restore its previous edited
-   *    values — confusing because the trash action is meant to "clear"
-   *    that row.
+   * 1. Drop entries for slices no longer activated (the user removed the
+   *    scan via the trash icon) so a re-scan doesn't restore stale typed
+   *    values.
+   * 2. Seed newly-activated slices with their remaining quantity so the
+   *    happy-path is "scan and submit". Existing entries are preserved so
+   *    typing isn't lost as other scans arrive.
    *
-   * 2. Seed entries for assets that are newly in the queue. Primary
-   *    input defaults to the full remaining quantity so the happy-path
-   *    is "scan and submit". Existing entries (for assets still in the
-   *    queue) are preserved so typing isn't lost as other scans arrive.
-   *
-   * We return the previous reference when nothing changed, to avoid
+   * Returns the previous reference when nothing changed to avoid
    * pointless re-renders.
    */
   useEffect(() => {
-    if (!qtyRemainingByAssetId) return;
     setDispositions((prev) => {
-      const inPlay = new Set(qtyTrackedIdsForCheckin);
       let changed = false;
       let next: DispositionMap = {};
 
-      // Keep only entries whose asset is still scanned.
-      for (const [id, state] of Object.entries(prev)) {
-        if (inPlay.has(id)) {
-          next[id] = state;
+      for (const [baId, state] of Object.entries(prev)) {
+        if (activatedQtyBookingAssetIds.has(baId)) {
+          next[baId] = state;
         } else {
           changed = true;
         }
       }
 
-      // Seed newly-scanned assets with their remaining quantity.
-      for (const id of qtyTrackedIdsForCheckin) {
-        if (next[id]) continue;
-        const info = qtyRemainingByAssetId[id];
+      for (const baId of activatedQtyBookingAssetIds) {
+        if (next[baId]) continue;
+        const info = qtyRemainingByBookingAssetId?.[baId];
         if (!info) continue;
         next = {
           ...next,
-          [id]: {
+          [baId]: {
             primary: String(info.remaining),
             returned: "",
             lost: "",
@@ -521,7 +611,7 @@ export default function PartialCheckinDrawer({
 
       return changed ? next : prev;
     });
-  }, [qtyTrackedIdsForCheckin, qtyRemainingByAssetId]);
+  }, [activatedQtyBookingAssetIds, qtyRemainingByBookingAssetId]);
 
   // Check if this would be a final check-in (all remaining assets are being checked in)
   const remainingAssetCount =
@@ -643,41 +733,40 @@ export default function PartialCheckinDrawer({
    * this" pattern of other blockers. Resolvable either by entering a
    * value or removing the scan.
    */
-  const zeroDispositionQtyIds = qtyTrackedIdsForCheckin.filter((id) => {
-    const parsed = parseDispositionState(dispositions[id]);
-    // Include `returned` — a ONE_WAY asset with only a Returned
-    // entry is non-zero, even if the primary (Consumed) is 0.
-    return (
-      parsed.primary + parsed.returned + parsed.lost + parsed.damaged === 0
-    );
-  });
-  const qrIdsOfZeroDispositionQty = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "asset") return false;
-      return zeroDispositionQtyIds.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
+  // Keyed by `bookingAssetId` (Polish-7b) — one entry per activated slice
+  // with no disposition entered. Mapped back to the scanned-item qrId for
+  // resolution via `qrIdByBookingAssetId`.
+  const zeroDispositionQtyIds = [...activatedQtyBookingAssetIds].filter(
+    (baId) => {
+      const parsed = parseDispositionState(dispositions[baId]);
+      // Include `returned` — a ONE_WAY asset with only a Returned
+      // entry is non-zero, even if the primary (Consumed) is 0.
+      return (
+        parsed.primary + parsed.returned + parsed.lost + parsed.damaged === 0
+      );
+    }
+  );
+  const qrIdsOfZeroDispositionQty = zeroDispositionQtyIds
+    .map((baId) => qrIdByBookingAssetId.get(baId))
+    .filter((qrId): qrId is string => Boolean(qrId));
 
   /**
-   * Also flag over-return: if (primary + lost + damaged) exceeds the
+   * Also flag over-return: if the entered total exceeds the slice's
    * remaining count, the server will reject the submission. Surface it
-   * client-side so the user can fix before hitting submit.
+   * client-side so the user can fix before hitting submit. Per-slice.
    */
-  const overReturnQtyIds = qtyTrackedIdsForCheckin.filter((id) => {
-    const info = qtyRemainingByAssetId?.[id];
+  const overReturnQtyIds = [...activatedQtyBookingAssetIds].filter((baId) => {
+    const info = qtyRemainingByBookingAssetId?.[baId];
     if (!info) return false;
-    const parsed = parseDispositionState(dispositions[id]);
+    const parsed = parseDispositionState(dispositions[baId]);
     return (
       parsed.primary + parsed.returned + parsed.lost + parsed.damaged >
       info.remaining
     );
   });
-  const qrIdsOfOverReturnQty = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "asset") return false;
-      return overReturnQtyIds.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
+  const qrIdsOfOverReturnQty = overReturnQtyIds
+    .map((baId) => qrIdByBookingAssetId.get(baId))
+    .filter((qrId): qrId is string => Boolean(qrId));
 
   // Create blockers configuration
   const blockerConfigs = [
@@ -804,41 +893,52 @@ export default function PartialCheckinDrawer({
    * play; otherwise the form submits the legacy `assetIds` array.
    */
   const checkinsJson = useMemo(() => {
-    if (qtyTrackedIdsForCheckin.length === 0) return "";
-    const payload: CheckinDisposition[] = qtyTrackedIdsForCheckin.map((id) => {
-      const state = dispositions[id];
-      const parsed = parseDispositionState(state);
-      const info = qtyRemainingByAssetId?.[id];
-      const isOneWay = info?.consumptionType === "ONE_WAY";
-      /**
-       * ONE_WAY: `primary` holds the Consumed count; the `returned`
-       * shortfall input holds units the operator is putting back to
-       * the pool unused. Both map to their respective server
-       * categories.
-       *
-       * TWO_WAY: `primary` is the Returned count; the separate
-       * `returned` state field is unused (left at 0 by the UI).
-       */
-      return {
-        assetId: id,
-        ...(isOneWay
-          ? { consumed: parsed.primary, returned: parsed.returned }
-          : { returned: parsed.primary }),
-        lost: parsed.lost,
-        damaged: parsed.damaged,
-      };
-    });
+    if (activatedQtyBookingAssetIds.size === 0) return "";
+    const payload: CheckinDisposition[] = [...activatedQtyBookingAssetIds].map(
+      (baId) => {
+        const state = dispositions[baId];
+        const parsed = parseDispositionState(state);
+        const info = qtyRemainingByBookingAssetId?.[baId];
+        const assetId = assetIdByBookingAssetId.get(baId) ?? "";
+        const isOneWay = info?.consumptionType === "ONE_WAY";
+        /**
+         * `bookingAssetId` lets the server attribute the disposition to the
+         * exact slice (Polish-7b). ONE_WAY: `primary` holds the Consumed
+         * count; the `returned` shortfall input holds units returned to the
+         * pool unused. TWO_WAY: `primary` is the Returned count.
+         */
+        return {
+          assetId,
+          bookingAssetId: baId,
+          ...(isOneWay
+            ? { consumed: parsed.primary, returned: parsed.returned }
+            : { returned: parsed.primary }),
+          lost: parsed.lost,
+          damaged: parsed.damaged,
+        };
+      }
+    );
     return JSON.stringify(payload);
-  }, [qtyTrackedIdsForCheckin, dispositions, qtyRemainingByAssetId]);
+  }, [
+    activatedQtyBookingAssetIds,
+    dispositions,
+    qtyRemainingByBookingAssetId,
+    assetIdByBookingAssetId,
+  ]);
 
   const dispositionCtxValue = useMemo<DispositionContextValue>(
     () => ({
       dispositions,
-      qtyRemainingByAssetId: qtyRemainingByAssetId ?? {},
+      qtyRemainingByBookingAssetId: qtyRemainingByBookingAssetId ?? {},
       updateField,
-      recentlyAddedAssetId,
+      recentlyAddedBookingAssetId,
     }),
-    [dispositions, qtyRemainingByAssetId, updateField, recentlyAddedAssetId]
+    [
+      dispositions,
+      qtyRemainingByBookingAssetId,
+      updateField,
+      recentlyAddedBookingAssetId,
+    ]
   );
 
   /**
@@ -851,10 +951,7 @@ export default function PartialCheckinDrawer({
     for (const [key, item] of Object.entries(items)) {
       if (!item) continue;
       if (item.type === "asset") {
-        const id = assetIdForScannedKey(
-          key,
-          item as { data?: { id?: string } }
-        );
+        const id = assetIdForScannedKey(item as { data?: { id?: string } });
         if (id) ids.add(id);
         continue;
       }
@@ -865,17 +962,18 @@ export default function PartialCheckinDrawer({
        * each of its child assets still shows up under Pending, and
        * `0/N units checked in` stays unchanged.
        *
-       * We read the asset list from the kit payload the scanner API
-       * already fetched (`KIT_INCLUDE` selects `assets: {id,...}`),
-       * not from `expectedKits`, so kits that aren't on the booking
-       * still get handled consistently (their assets aren't in
-       * `expectedAssets`, so the pending loop simply ignores them).
+       * We read the member list from the kit payload the scanner API
+       * already fetched (`KIT_INCLUDE` selects `assetKits: { asset: {id} }`),
+       * not from `expectedKits`, so kits that aren't on the booking still
+       * get handled consistently (their assets aren't in `expectedAssets`,
+       * so the pending loop simply ignores them).
        */
       if (item.type === "kit" && item.data) {
-        const kitAssets = (item.data as { assets?: Array<{ id: string }> })
-          .assets;
-        for (const a of kitAssets ?? []) {
-          if (a?.id) ids.add(a.id);
+        const assetKits = (
+          item.data as { assetKits?: Array<{ asset?: { id?: string } }> }
+        ).assetKits;
+        for (const ak of assetKits ?? []) {
+          if (ak?.asset?.id) ids.add(ak.asset.id);
         }
       }
     }
@@ -912,9 +1010,14 @@ export default function PartialCheckinDrawer({
     const pendingQtyTracked: QtyExpectedAsset[] = [];
     const alreadyReconciled: BookingExpectedAsset[] = [];
 
-    // Index expected assets by id for O(1) lookups.
+    // Index expected assets by id (INDIVIDUAL / unexpected lookup, 1:1)
+    // and by bookingAssetId (qty slices — Polish-7b).
     const expectedById = new Map<string, BookingExpectedAsset>();
-    for (const a of expectedAssets) expectedById.set(a.id, a);
+    const expectedByBookingAssetId = new Map<string, BookingExpectedAsset>();
+    for (const a of expectedAssets) {
+      expectedById.set(a.id, a);
+      expectedByBookingAssetId.set(a.bookingAssetId, a);
+    }
 
     // First pass: walk scanned items to classify scanned buckets.
     for (const [qrId, item] of Object.entries(items)) {
@@ -949,45 +1052,47 @@ export default function PartialCheckinDrawer({
         continue;
       }
 
-      const assetId = assetIdForScannedKey(
+      // Qty slice? Resolve the bookingAssetId this scan targets and
+      // classify against THAT slice's remaining (Polish-7b).
+      const baId = bookingAssetIdForScannedItem(
         qrId,
-        item as {
-          data?: { id?: string };
-        }
+        item as { data?: { id?: string; bookingAssetId?: string } },
+        expectedAssets
       );
+      const slice = baId ? expectedByBookingAssetId.get(baId) : undefined;
+      if (baId && slice && slice.kind === "QUANTITY_TRACKED") {
+        const parsed = parseDispositionState(dispositions[baId]);
+        const sum =
+          parsed.primary + parsed.returned + parsed.lost + parsed.damaged;
+        if (slice.remaining > 0 && sum < slice.remaining) {
+          scannedWithPending.push({ qrId, asset: slice });
+        } else {
+          scannedComplete.push({ qrId, kind: "asset" });
+        }
+        continue;
+      }
+
+      // INDIVIDUAL scan (or qty asset with no pending slice — edge case,
+      // treat as complete). Resolve the plain asset id.
+      const assetId = assetIdForScannedKey(item as { data?: { id?: string } });
       if (!assetId) {
         scannedComplete.push({ qrId, kind: "asset" });
         continue;
       }
-
       const expected = expectedById.get(assetId);
       if (!expected) {
         unexpectedScans.push(qrId);
         continue;
       }
-
-      if (expected.kind === "QUANTITY_TRACKED" && expected.remaining > 0) {
-        const parsed = parseDispositionState(dispositions[assetId]);
-        const sum =
-          parsed.primary + parsed.returned + parsed.lost + parsed.damaged;
-        if (sum < expected.remaining) {
-          scannedWithPending.push({ qrId, asset: expected });
-        } else {
-          scannedComplete.push({ qrId, kind: "asset" });
-        }
-      } else {
-        // INDIVIDUAL scan (or qty with remaining === 0 already — edge
-        // case, treat as complete).
-        scannedComplete.push({ qrId, kind: "asset" });
-      }
+      scannedComplete.push({ qrId, kind: "asset" });
     }
 
     // Second pass: walk expected assets for pending + already-reconciled
     // buckets.
     for (const asset of expectedAssets) {
-      if (scannedAssetIds.has(asset.id)) continue; // covered above
-
       if (asset.kind === "INDIVIDUAL") {
+        // Skip individuals already scanned this session (asset-level).
+        if (scannedAssetIds.has(asset.id)) continue; // covered above
         if (asset.alreadyCheckedIn) {
           alreadyReconciled.push(asset);
         } else {
@@ -996,7 +1101,10 @@ export default function PartialCheckinDrawer({
         continue;
       }
 
-      // QUANTITY_TRACKED, not scanned in this session.
+      // QUANTITY_TRACKED — per-slice (Polish-7b). Skip the slice if it was
+      // activated this session (it renders in the scanned buckets above);
+      // a sibling slice of the SAME asset stays independently pending.
+      if (activatedQtyBookingAssetIds.has(asset.bookingAssetId)) continue;
       if (asset.remaining === 0) {
         alreadyReconciled.push(asset);
       } else {
@@ -1012,7 +1120,13 @@ export default function PartialCheckinDrawer({
       pendingQtyTracked,
       alreadyReconciled,
     };
-  }, [expectedAssets, items, dispositions, scannedAssetIds]);
+  }, [
+    expectedAssets,
+    items,
+    dispositions,
+    scannedAssetIds,
+    activatedQtyBookingAssetIds,
+  ]);
 
   /**
    * Unit-weighted progress: each INDIVIDUAL asset counts for 1, each
@@ -1033,9 +1147,9 @@ export default function PartialCheckinDrawer({
         continue;
       }
 
-      // QUANTITY_TRACKED
+      // QUANTITY_TRACKED — per-slice (keyed by bookingAssetId).
       denom += asset.booked;
-      const parsed = parseDispositionState(dispositions[asset.id]);
+      const parsed = parseDispositionState(dispositions[asset.bookingAssetId]);
       const typed =
         parsed.primary + parsed.returned + parsed.lost + parsed.damaged;
       const reconciled = Math.min(asset.booked, asset.logged + typed);
@@ -1075,41 +1189,43 @@ export default function PartialCheckinDrawer({
   /**
    * Invoked when the user clicks "Check in without scanning" on a
    * pending qty row. Dispatches the synthetic-scan atom, flags the
-   * asset id for auto-focus, then clears the flag after 600ms so
-   * subsequent re-renders don't keep stealing focus.
+   * slice's bookingAssetId for auto-focus, then clears the flag after
+   * 600ms so subsequent re-renders don't keep stealing focus.
    */
   const handleQuickCheckin = useCallback(
     (asset: QtyExpectedAsset) => {
       quickCheckinQtyAsset(asset);
-      setRecentlyAddedAssetId(asset.id);
+      setRecentlyAddedBookingAssetId(asset.bookingAssetId);
       if (recentlyAddedTimerRef.current) {
         clearTimeout(recentlyAddedTimerRef.current);
       }
       recentlyAddedTimerRef.current = setTimeout(() => {
-        setRecentlyAddedAssetId(null);
+        setRecentlyAddedBookingAssetId(null);
       }, 600);
     },
     [quickCheckinQtyAsset]
   );
 
   /**
-   * Map assetId → expectedKit (to pull the kit name/main image for the
-   * pending-asset rows when the asset belongs to a kit on this
-   * booking).
+   * Map kitId → kit meta. Both the pending and reconciled sections group
+   * qty + individual entries by each expected-asset's OWN `kitId` (the
+   * per-slice attribution set by the loader). The distinction matters for
+   * Polish-6 multi-row qty assets: a standalone slice carries
+   * `kitId = null` and must NOT be absorbed into the kit group just
+   * because the asset also has a kit-driven slice elsewhere in the
+   * booking.
    */
-  const kitByAssetId = useMemo(() => {
+  const kitMetaById = useMemo(() => {
     const map = new Map<
       string,
       { id: string; name: string; mainImage: string | null }
     >();
     for (const kit of expectedKits ?? []) {
-      for (const assetId of kit.assetIds) {
-        map.set(assetId, {
-          id: kit.id,
-          name: kit.name,
-          mainImage: kit.mainImage ?? null,
-        });
-      }
+      map.set(kit.id, {
+        id: kit.id,
+        name: kit.name,
+        mainImage: kit.mainImage ?? null,
+      });
     }
     return map;
   }, [expectedKits]);
@@ -1158,10 +1274,36 @@ export default function PartialCheckinDrawer({
           />
         ) : null}
 
-        {/* Scanned rows (buckets 1–3). */}
-        {scannedQrIdsInOrder.map((qrId) =>
-          renderScannedItemRow(qrId, items[qrId])
-        )}
+        {/* Scanned rows (buckets 1–3). A scanned kit also renders an
+            editable disposition row for each of its qty-tracked members
+            (Polish-7b) so the operator can split their consumption log —
+            individuals are covered by the kit row's summary. */}
+        {scannedQrIdsInOrder.map((qrId) => {
+          const item = items[qrId];
+          const kitId =
+            item?.type === "kit"
+              ? (item.data as { id?: string } | undefined)?.id
+              : undefined;
+          const qtyMembers = kitId
+            ? expectedAssets.filter(
+                (a): a is QtyExpectedAsset =>
+                  a.kind === "QUANTITY_TRACKED" &&
+                  a.kitId === kitId &&
+                  activatedQtyBookingAssetIds.has(a.bookingAssetId)
+              )
+            : [];
+          return (
+            <Fragment key={qrId}>
+              {renderScannedItemRow(qrId, item)}
+              {qtyMembers.map((member) => (
+                <ScannedKitQtyMemberRow
+                  key={`scanned-kit-qty-${member.bookingAssetId}`}
+                  asset={member}
+                />
+              ))}
+            </Fragment>
+          );
+        })}
 
         {/* Header for pending section. Same visual weight as the scanned
             header but muted — reinforces the bucket split without
@@ -1171,37 +1313,48 @@ export default function PartialCheckinDrawer({
         ) : null}
 
         {/**
-         * Pending rendering order:
-         *  1. Kit-grouped individuals — one kit header, child asset
-         *     rows indented. Pending kit assets display under their
-         *     kit (scan the kit QR once to cover all children) rather
-         *     than as a flat list.
-         *  2. Loose individuals (no `kitId`).
-         *  3. Qty-tracked (no kit grouping — qty assets aren't kitted
-         *     in practice).
+         * Pending rendering (Polish-7b — grouped by each entry's OWN
+         * `kitId`, the per-slice attribution from the loader):
+         *  1. Kit groups — one foldable header, child rows indented.
+         *     Children are individuals (no action) AND qty slices (with
+         *     the "Check in without scanning" affordance). A qty asset's
+         *     kit-driven slice lands here; its standalone slice does not.
+         *  2. Loose individuals (`kitId == null`).
+         *  3. Loose qty slices (`kitId == null` — e.g. the standalone
+         *     slice of an asset that's also in a kit).
          */}
         {(() => {
           const kitGroups = new Map<
             string,
             {
               kit: { id: string; name: string; mainImage: string | null };
-              assets: IndividualExpectedAsset[];
+              assets: BookingExpectedAsset[];
             }
           >();
           const looseIndividuals: IndividualExpectedAsset[] = [];
-          for (const asset of pendingIndividuals) {
-            const kit = kitByAssetId.get(asset.id);
+          const looseQty: QtyExpectedAsset[] = [];
+
+          const pushToKit = (kitId: string, asset: BookingExpectedAsset) => {
+            const kit = kitMetaById.get(kitId);
             if (!kit) {
-              looseIndividuals.push(asset);
-              continue;
+              if (asset.kind === "INDIVIDUAL") looseIndividuals.push(asset);
+              else looseQty.push(asset);
+              return;
             }
             const existing = kitGroups.get(kit.id);
-            if (existing) {
-              existing.assets.push(asset);
-            } else {
-              kitGroups.set(kit.id, { kit, assets: [asset] });
-            }
+            if (existing) existing.assets.push(asset);
+            else kitGroups.set(kit.id, { kit, assets: [asset] });
+          };
+
+          for (const asset of pendingIndividuals) {
+            if (asset.kitId) pushToKit(asset.kitId, asset);
+            else looseIndividuals.push(asset);
           }
+          for (const asset of pendingQtyTracked) {
+            if (asset.kitId) pushToKit(asset.kitId, asset);
+            else looseQty.push(asset);
+          }
+
           return (
             <>
               {[...kitGroups.values()].map(({ kit, assets }) => (
@@ -1209,29 +1362,39 @@ export default function PartialCheckinDrawer({
                   key={`pending-kit-${kit.id}`}
                   kit={kit}
                   assets={assets}
+                  onQuickCheckin={handleQuickCheckin}
                 />
               ))}
               {looseIndividuals.map((asset) =>
                 renderPendingIndividualAsset(asset, undefined)
               )}
+              {looseQty.map((asset) =>
+                renderPendingQtyAsset(asset, undefined, () =>
+                  handleQuickCheckin(asset)
+                )
+              )}
             </>
           );
         })()}
 
-        {/* Bucket 5: pending / partially-reconciled QTY_TRACKED. */}
-        {pendingQtyTracked.map((asset) =>
-          renderPendingQtyAsset(asset, kitByAssetId.get(asset.id), () =>
-            handleQuickCheckin(asset)
-          )
-        )}
-
         {/* Bucket 6: already fully reconciled (dimmed, collapsed). */}
         {alreadyReconciled.length > 0 ? (
-          <AlreadyReconciledCollapser assets={alreadyReconciled} />
+          <AlreadyReconciledCollapser
+            assets={alreadyReconciled}
+            kitMetaById={kitMetaById}
+          />
         ) : null}
       </>
     );
-  }, [buckets, items, kitByAssetId, handleQuickCheckin, renderScannedItemRow]);
+  }, [
+    buckets,
+    items,
+    expectedAssets,
+    activatedQtyBookingAssetIds,
+    kitMetaById,
+    handleQuickCheckin,
+    renderScannedItemRow,
+  ]);
 
   const progressLabel = (
     <div className="text-right">
@@ -1326,7 +1489,7 @@ function SectionHeader({
       <td
         colSpan={2}
         className={tw(
-          "px-4 py-2 text-xs font-semibold uppercase tracking-wide md:px-6",
+          "px-4 py-3 text-xs font-semibold uppercase tracking-wide md:px-6",
           toneClass
         )}
       >
@@ -1337,21 +1500,24 @@ function SectionHeader({
 }
 
 /**
- * Groups pending INDIVIDUAL assets that belong to the same kit under
- * a kit "header" row, with the child asset rows rendered below.
- * Surfaces the ground truth that the operator only needs to scan the
- * kit QR once to cover everything inside, rather than hunting for
- * each child QR individually.
+ * Groups pending assets that belong to the same kit under a foldable kit
+ * "header" row, with the child rows rendered below. Children are a mix of
+ * INDIVIDUAL assets (no action — scan the kit QR) and QUANTITY_TRACKED
+ * slices (Polish-7b: their kit-driven slice, each with its own "Check in
+ * without scanning" affordance, since qty assets have no physical
+ * barcode).
  *
- * The kit row itself is not actionable — no "Check in without
- * scanning" button (kits stay scan-only by design).
+ * Grouping is by the slice's OWN `kitId`, so an asset's standalone slice
+ * is NOT pulled into this group even when its kit-driven slice is here.
  */
 function PendingKitGroup({
   kit,
   assets,
+  onQuickCheckin,
 }: {
   kit: { id: string; name: string; mainImage: string | null };
-  assets: IndividualExpectedAsset[];
+  assets: BookingExpectedAsset[];
+  onQuickCheckin: (asset: QtyExpectedAsset) => void;
 }) {
   // Collapsed by default — a pending kit is N rows of noise while the
   // operator is still scanning; a single summary row with a count is
@@ -1408,8 +1574,8 @@ function PendingKitGroup({
                   <span className={assetTypePillClass}>kit</span>
                   <AvailabilityBadge
                     badgeText="Pending"
-                    tooltipTitle="Pending kit scan"
-                    tooltipContent="All of this kit's assets are still outstanding. Scan the kit QR once to cover them together."
+                    tooltipTitle="Pending kit"
+                    tooltipContent="This kit's assets are still outstanding. Scan the kit QR (or check in individual quantity-tracked members below)."
                     className="border-gray-200 bg-gray-50 text-gray-600"
                   />
                 </div>
@@ -1422,37 +1588,126 @@ function PendingKitGroup({
         </td>
       </Tr>
       {open
-        ? assets.map((asset) => (
-            <Tr key={`pending-kit-child-${asset.id}`} skipEntrance>
-              <td className="w-full p-0 md:p-0">
-                {/* Indented child row. Left border + padding mirrors
-                    the booking-overview kit grouping so it's visually
-                    obvious these assets belong to the kit above. */}
-                <div className="flex items-center justify-between gap-3 border-l-2 border-gray-200 p-4 pl-8 md:px-6 md:pl-10">
-                  <div className="flex items-center gap-2">
-                    <ImageWithPreview
-                      thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-                      alt={asset.title || "Asset"}
-                      className="size-[40px] rounded-[2px]"
-                    />
-                    <div className="flex flex-col gap-1">
-                      <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-700">
-                        {asset.title}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className={assetTypePillClass}>asset</span>
+        ? assets.map((asset) =>
+            asset.kind === "QUANTITY_TRACKED" ? (
+              <PendingKitQtyChild
+                key={`pending-kit-child-${asset.bookingAssetId}`}
+                asset={asset}
+                onQuickCheckin={() => onQuickCheckin(asset)}
+              />
+            ) : (
+              <Tr
+                key={`pending-kit-child-${asset.bookingAssetId}`}
+                skipEntrance
+              >
+                <td className="w-full p-0 md:p-0">
+                  {/* Indented child row. Left border + padding mirrors
+                      the booking-overview kit grouping so it's visually
+                      obvious these assets belong to the kit above. */}
+                  <div className="flex items-center justify-between gap-3 border-l-2 border-gray-200 p-4 pl-8 md:px-6 md:pl-10">
+                    <div className="flex items-center gap-2">
+                      <ImageWithPreview
+                        thumbnailUrl={asset.thumbnailImage || asset.mainImage}
+                        alt={asset.title || "Asset"}
+                        className="size-[40px] rounded-[2px]"
+                      />
+                      <div className="flex flex-col gap-1">
+                        <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-700">
+                          {asset.title}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className={assetTypePillClass}>asset</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </td>
-              <td>
-                <div className="w-[52px]" />
-              </td>
-            </Tr>
-          ))
+                </td>
+                <td>
+                  <div className="w-[52px]" />
+                </td>
+              </Tr>
+            )
+          )
         : null}
     </>
+  );
+}
+
+/**
+ * Indented kit-child row for a pending QUANTITY_TRACKED slice. Mirrors the
+ * INDIVIDUAL kit-child layout (left border, 40px thumbnail) but adds the
+ * qty badges + "Check in without scanning" button so a kit-driven qty
+ * slice can be reconciled without leaving the kit group (Polish-7b).
+ */
+function PendingKitQtyChild({
+  asset,
+  onQuickCheckin,
+}: {
+  asset: QtyExpectedAsset;
+  onQuickCheckin: () => void;
+}) {
+  const reconciled = Math.max(0, asset.booked - asset.remaining);
+  const isPartial = asset.logged > 0 && reconciled > 0;
+
+  return (
+    <Tr key={`pending-kit-child-${asset.bookingAssetId}`} skipEntrance>
+      <td className="w-full p-0 md:p-0">
+        <div className="flex flex-col gap-3 border-l-2 border-gray-200 p-4 pl-8 sm:flex-row sm:items-center sm:justify-between md:px-6 md:pl-10">
+          <div className="flex min-w-0 items-center gap-2">
+            <ImageWithPreview
+              thumbnailUrl={asset.thumbnailImage || asset.mainImage}
+              alt={asset.title || "Asset"}
+              className="size-[40px] shrink-0 rounded-[2px]"
+            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-700">
+                {asset.title}
+              </span>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className={assetTypePillClass}>asset</span>
+                {isPartial ? (
+                  <AvailabilityBadge
+                    badgeText={`${reconciled}/${asset.booked} reconciled`}
+                    tooltipTitle="Partially reconciled"
+                    tooltipContent="Some units were already reconciled in a previous check-in. The remainder can still be checked in below."
+                    className="border-amber-200 bg-amber-50 text-amber-700"
+                  />
+                ) : (
+                  <AvailabilityBadge
+                    badgeText="Pending"
+                    tooltipTitle="Pending check-in"
+                    tooltipContent="This quantity-tracked asset still has units to reconcile on this booking."
+                    className="border-gray-200 bg-gray-50 text-gray-600"
+                  />
+                )}
+                <AvailabilityBadge
+                  badgeText={`needs ${asset.remaining}`}
+                  tooltipTitle="Remaining units"
+                  tooltipContent={`${asset.remaining} unit${
+                    asset.remaining === 1 ? "" : "s"
+                  } still to be reconciled on this booking.`}
+                  className="border-blue-200 bg-blue-50 text-blue-700"
+                />
+              </div>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            onClick={onQuickCheckin}
+            title="Skip scan — enter disposition inline below."
+            className="w-full sm:w-auto sm:shrink-0"
+          >
+            Check in without scanning
+          </Button>
+        </div>
+      </td>
+      <td>
+        <div className="w-[52px]" />
+      </td>
+    </Tr>
   );
 }
 
@@ -1466,7 +1721,7 @@ function renderPendingIndividualAsset(
   kit?: { id: string; name: string }
 ): ReactNode {
   return (
-    <Tr key={`pending-${asset.id}`} skipEntrance>
+    <Tr key={`pending-${asset.bookingAssetId}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-2">
@@ -1527,7 +1782,7 @@ function renderPendingQtyAsset(
   const isPartial = asset.logged > 0 && reconciled > 0;
 
   return (
-    <Tr key={`pending-qty-${asset.id}`} skipEntrance>
+    <Tr key={`pending-qty-${asset.bookingAssetId}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
         {/* Mobile: content + button stack vertically (flex-col) so the
             "Check in without scanning" button drops below the asset
@@ -1607,12 +1862,48 @@ function renderPendingQtyAsset(
  */
 function AlreadyReconciledCollapser({
   assets,
+  kitMetaById,
 }: {
   assets: BookingExpectedAsset[];
+  kitMetaById: Map<
+    string,
+    { id: string; name: string; mainImage: string | null }
+  >;
 }) {
   // `<details>` doesn't make sense inside a <tbody>, so we fall back
   // to a button-toggled state.
   const [open, setOpen] = useState(false);
+
+  /**
+   * Group reconciled assets by kit (mirror of the pending section) so a
+   * checked-in kit reads as one unit instead of N scattered green rows.
+   * Grouping keys off each entry's OWN `kitId` (per-slice attribution),
+   * NOT the asset's kit membership — so a standalone qty slice stays a
+   * loose row even when the same asset has a kit-driven slice elsewhere.
+   * Loose (non-kit) assets render flat after the kit groups.
+   */
+  const { kitGroups, looseAssets } = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        kit: { id: string; name: string; mainImage: string | null };
+        assets: BookingExpectedAsset[];
+      }
+    >();
+    const loose: BookingExpectedAsset[] = [];
+    for (const asset of assets) {
+      const kitId = asset.kitId ?? null;
+      const kit = kitId ? kitMetaById.get(kitId) : null;
+      if (!kit) {
+        loose.push(asset);
+        continue;
+      }
+      const existing = groups.get(kit.id);
+      if (existing) existing.assets.push(asset);
+      else groups.set(kit.id, { kit, assets: [asset] });
+    }
+    return { kitGroups: [...groups.values()], looseAssets: loose };
+  }, [assets, kitMetaById]);
 
   return (
     <>
@@ -1632,8 +1923,225 @@ function AlreadyReconciledCollapser({
           </button>
         </td>
       </Tr>
-      {open ? assets.map((asset) => renderAlreadyReconciledAsset(asset)) : null}
+      {open ? (
+        <>
+          {kitGroups.map(({ kit, assets: kitAssets }) => (
+            <ReconciledKitGroup
+              key={`reconciled-kit-${kit.id}`}
+              kit={kit}
+              assets={kitAssets}
+            />
+          ))}
+          {looseAssets.map((asset) => renderAlreadyReconciledAsset(asset))}
+        </>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * Kit grouping for the "already checked in" section — a foldable kit
+ * header row followed by its indented child rows (all green "Checked
+ * in"). Mirrors {@link PendingKitGroup}'s collapsible chevron pattern;
+ * collapsed by default to keep the reconciled section compact.
+ */
+function ReconciledKitGroup({
+  kit,
+  assets,
+}: {
+  kit: { id: string; name: string; mainImage: string | null };
+  assets: BookingExpectedAsset[];
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Tr key={`reconciled-kit-header-${kit.id}`} skipEntrance>
+        <td className="w-full p-0 md:p-0">
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-expanded={open}
+            className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-gray-50 md:px-6"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={tw(
+                  "size-5 shrink-0 text-gray-500 transition-transform duration-150",
+                  open ? "rotate-0" : "-rotate-90"
+                )}
+              />
+              {kit.mainImage ? (
+                <ImageWithPreview
+                  thumbnailUrl={kit.mainImage}
+                  alt={kit.name || "Kit"}
+                  className="size-[54px] rounded-[2px]"
+                />
+              ) : (
+                <div className="flex size-[54px] shrink-0 items-center justify-center rounded-[2px] border border-gray-200 bg-gray-50">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                    Kit
+                  </span>
+                </div>
+              )}
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="word-break whitespace-break-spaces font-medium text-gray-800">
+                  {kit.name}
+                  <span className="ml-1 text-xs font-normal text-gray-500">
+                    ({assets.length} {assets.length === 1 ? "asset" : "assets"})
+                  </span>
+                </span>
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className={assetTypePillClass}>kit</span>
+                  <AvailabilityBadge
+                    badgeText="Checked in"
+                    tooltipTitle="Already checked in"
+                    tooltipContent="All of this kit's assets on the booking have been reconciled."
+                    className="border-green-200 bg-green-50 text-green-700"
+                  />
+                </div>
+              </div>
+            </div>
+          </button>
+        </td>
+        <td>
+          <div className="w-[52px]" />
+        </td>
+      </Tr>
+      {open
+        ? assets.map((asset) => (
+            <Tr
+              key={`reconciled-kit-child-${asset.bookingAssetId}`}
+              skipEntrance
+            >
+              <td className="w-full p-0 md:p-0">
+                <div className="flex items-center justify-between gap-3 border-l-2 border-gray-200 p-4 pl-8 md:px-6 md:pl-10">
+                  <div className="flex items-center gap-2">
+                    <ImageWithPreview
+                      thumbnailUrl={asset.thumbnailImage || asset.mainImage}
+                      alt={asset.title || "Asset"}
+                      className="size-[40px] rounded-[2px]"
+                    />
+                    <div className="flex flex-col gap-1">
+                      <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-700">
+                        {asset.title}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className={assetTypePillClass}>asset</span>
+                        <AvailabilityBadge
+                          badgeText="Checked in"
+                          tooltipTitle="Already checked in"
+                          tooltipContent={
+                            asset.kind === "QUANTITY_TRACKED"
+                              ? "All booked units for this quantity-tracked asset have already been reconciled on this booking."
+                              : "This asset was already checked in during a previous session."
+                          }
+                          className="border-green-200 bg-green-50 text-green-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td className="pr-4 text-right md:pr-6">
+                <ReconciledQtySummary asset={asset} />
+              </td>
+            </Tr>
+          ))
+        : null}
+    </>
+  );
+}
+
+/**
+ * `logged / booked` summary with a hover tooltip breaking the logged
+ * units into Returned / Consumed / Lost / Damaged + Remaining. Mirrors
+ * the qty column on the booking-overview asset rows so the reconciled
+ * drawer section is no longer "completely unclear" for qty assets.
+ * Renders nothing for INDIVIDUAL entries.
+ */
+function ReconciledQtySummary({
+  asset,
+}: {
+  asset: BookingExpectedAsset;
+}): ReactNode {
+  if (asset.kind !== "QUANTITY_TRACKED" || asset.booked <= 0) return null;
+  const { booked, logged, remaining, breakdown } = asset;
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={tw(
+              "inline-flex cursor-help items-center gap-1 text-sm tabular-nums",
+              remaining === 0 ? "text-emerald-700" : "text-gray-900"
+            )}
+          >
+            <span className="font-medium">{logged}</span>
+            <span className="text-gray-400">/ {booked}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" className="max-w-xs">
+          <div className="flex flex-col gap-1 text-xs">
+            <div className="font-semibold text-gray-900">
+              {remaining === 0
+                ? "All units checked in"
+                : "Partially checked in"}
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-gray-600">Booked</span>
+              <span className="tabular-nums text-gray-900">{booked}</span>
+            </div>
+            {breakdown.returned > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600">Returned</span>
+                <span className="tabular-nums text-emerald-700">
+                  {breakdown.returned}
+                </span>
+              </div>
+            ) : null}
+            {breakdown.consumed > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600">Consumed</span>
+                <span className="tabular-nums text-gray-900">
+                  {breakdown.consumed}
+                </span>
+              </div>
+            ) : null}
+            {breakdown.lost > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600">Lost</span>
+                <span className="tabular-nums text-rose-700">
+                  {breakdown.lost}
+                </span>
+              </div>
+            ) : null}
+            {breakdown.damaged > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600">Damaged</span>
+                <span className="tabular-nums text-amber-700">
+                  {breakdown.damaged}
+                </span>
+              </div>
+            ) : null}
+            <div className="mt-1 flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
+              <span className="text-gray-600">Remaining</span>
+              <span
+                className={tw(
+                  "tabular-nums",
+                  remaining === 0
+                    ? "text-gray-400"
+                    : "font-medium text-amber-700"
+                )}
+              >
+                {remaining}
+              </span>
+            </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -1644,7 +2152,7 @@ function AlreadyReconciledCollapser({
  */
 function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
   return (
-    <Tr key={`reconciled-${asset.id}`} skipEntrance>
+    <Tr key={`reconciled-${asset.bookingAssetId}`} skipEntrance>
       <td className="w-full p-0 md:p-0">
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-2">
@@ -1674,8 +2182,8 @@ function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
           </div>
         </div>
       </td>
-      <td>
-        <div className="w-[52px]" />
+      <td className="pr-4 text-right md:pr-6">
+        <ReconciledQtySummary asset={asset} />
       </td>
     </Tr>
   );
@@ -1685,6 +2193,19 @@ function renderAlreadyReconciledAsset(asset: BookingExpectedAsset): ReactNode {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const { booking, partialCheckinDetails } = useLoaderData<typeof loader>();
   const items = useAtomValue(scannedItemsAtom);
+  const expectedAssets = useAtomValue(bookingExpectedAssetsAtom);
+
+  // The BookingAsset slice this row represents (Polish-7b). A synthetic
+  // quick-checkin entry carries `bookingAssetId` on its data; a real scan
+  // resolves to the asset's first still-pending qty slice (single-slice
+  // assets resolve to their one slice — unchanged behaviour).
+  const bookingAssetId =
+    (asset as unknown as { bookingAssetId?: string }).bookingAssetId ??
+    expectedAssets.find(
+      (a) =>
+        a.kind === "QUANTITY_TRACKED" && a.id === asset.id && a.remaining > 0
+    )?.bookingAssetId ??
+    null;
 
   // Check if asset is in this booking
   const isInBooking = booking.bookingAssets.some(
@@ -1725,10 +2246,10 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     })();
 
   // An active synthetic entry (via quick-checkin) lives under a key
-  // prefixed by `qty-checkin:`. Used below to pick between the
-  // "Scanned" and "Checked in without scan" positive badges.
+  // prefixed by `qty-checkin:` + the slice's bookingAssetId. Used below to
+  // pick between the "Scanned" and "Checked in without scan" badges.
   const isQuickCheckin = Boolean(
-    items[`${QUICK_CHECKIN_QR_PREFIX}${asset.id}`]
+    bookingAssetId && items[`${QUICK_CHECKIN_QR_PREFIX}${bookingAssetId}`]
   );
 
   // Use custom configurations for partial check-in context
@@ -1803,11 +2324,17 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const [, AssetAvailabilityLabels] =
     createAvailabilityLabels(availabilityConfigs);
 
-  const { qtyRemainingByAssetId, recentlyAddedAssetId } =
+  const { qtyRemainingByBookingAssetId, recentlyAddedBookingAssetId } =
     useDispositionContext();
-  const qtyInfo = qtyRemainingByAssetId[asset.id] ?? null;
+  const qtyInfo = bookingAssetId
+    ? qtyRemainingByBookingAssetId[bookingAssetId] ?? null
+    : null;
   const showQtyControls =
-    !!qtyInfo && isInBooking && !isAlreadyCheckedIn && qtyInfo.remaining > 0;
+    !!qtyInfo &&
+    !!bookingAssetId &&
+    isInBooking &&
+    !isAlreadyCheckedIn &&
+    qtyInfo.remaining > 0;
 
   return (
     // Mobile: title column + disposition block stack vertically (the
@@ -1831,9 +2358,9 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       {/* Right column: quantity disposition block (qty-tracked only). */}
       {showQtyControls ? (
         <QuantityDispositionBlock
-          assetId={asset.id}
+          bookingAssetId={bookingAssetId!}
           info={qtyInfo!}
-          shouldFocusOnMount={recentlyAddedAssetId === asset.id}
+          shouldFocusOnMount={recentlyAddedBookingAssetId === bookingAssetId}
         />
       ) : null}
     </div>
@@ -1866,16 +2393,18 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
  * scanner on every re-render.
  */
 function QuantityDispositionBlock({
-  assetId,
+  bookingAssetId,
   info,
   shouldFocusOnMount = false,
 }: {
-  assetId: string;
-  info: NonNullable<DispositionContextValue["qtyRemainingByAssetId"][string]>;
+  bookingAssetId: string;
+  info: NonNullable<
+    DispositionContextValue["qtyRemainingByBookingAssetId"][string]
+  >;
   shouldFocusOnMount?: boolean;
 }) {
   const { dispositions, updateField } = useDispositionContext();
-  const state = dispositions[assetId] ?? {
+  const state = dispositions[bookingAssetId] ?? {
     primary: "",
     returned: "",
     lost: "",
@@ -1949,7 +2478,9 @@ function QuantityDispositionBlock({
             max={info.remaining}
             step={1}
             value={state.primary}
-            onChange={(e) => updateField(assetId, "primary", e.target.value)}
+            onChange={(e) =>
+              updateField(bookingAssetId, "primary", e.target.value)
+            }
             inputMode="numeric"
             aria-label={`${primaryLabel} quantity`}
             className={numInput}
@@ -1982,7 +2513,7 @@ function QuantityDispositionBlock({
                 step={1}
                 value={state.returned}
                 onChange={(e) =>
-                  updateField(assetId, "returned", e.target.value)
+                  updateField(bookingAssetId, "returned", e.target.value)
                 }
                 inputMode="numeric"
                 aria-label="Returned quantity"
@@ -1998,7 +2529,9 @@ function QuantityDispositionBlock({
               max={info.remaining}
               step={1}
               value={state.lost}
-              onChange={(e) => updateField(assetId, "lost", e.target.value)}
+              onChange={(e) =>
+                updateField(bookingAssetId, "lost", e.target.value)
+              }
               inputMode="numeric"
               aria-label="Lost quantity"
               className={tw(numInput, "w-12")}
@@ -2012,7 +2545,9 @@ function QuantityDispositionBlock({
               max={info.remaining}
               step={1}
               value={state.damaged}
-              onChange={(e) => updateField(assetId, "damaged", e.target.value)}
+              onChange={(e) =>
+                updateField(bookingAssetId, "damaged", e.target.value)
+              }
               inputMode="numeric"
               aria-label="Damaged quantity"
               className={tw(numInput, "w-12")}
@@ -2030,6 +2565,59 @@ function QuantityDispositionBlock({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Editable disposition row for a qty-tracked member of a SCANNED kit
+ * (Polish-7b). Scanning a kit covers its members, but qty members still
+ * need a consumption-log split (Consumed / Returned / Lost / Damaged) just
+ * like a standalone qty asset — they aren't simply "checked in" at full
+ * remaining. Rendered indented beneath the kit row in the scanned section,
+ * keyed by the slice's `bookingAssetId`.
+ *
+ * The disposition state is seeded to the slice's full remaining by the
+ * activation effect, so submitting as-is reconciles everything; the
+ * operator can edit before submit.
+ */
+function ScannedKitQtyMemberRow({ asset }: { asset: QtyExpectedAsset }) {
+  const { qtyRemainingByBookingAssetId, recentlyAddedBookingAssetId } =
+    useDispositionContext();
+  const info = qtyRemainingByBookingAssetId[asset.bookingAssetId] ?? null;
+  // Nothing to reconcile (already fully logged) → no row.
+  if (!info || info.remaining <= 0) return null;
+
+  return (
+    <Tr key={`scanned-kit-qty-${asset.bookingAssetId}`} skipEntrance>
+      <td className="w-full p-0 md:p-0">
+        <div className="flex flex-col gap-3 border-l-2 border-gray-200 p-4 pb-6 pl-8 sm:flex-row sm:items-start sm:justify-between md:px-6 md:pb-6 md:pl-10">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-700">
+              {asset.title}
+            </span>
+            <div className="flex flex-wrap items-center gap-1">
+              <span className={assetTypePillClass}>asset</span>
+              <AvailabilityBadge
+                badgeText="From kit"
+                tooltipTitle="Quantity-tracked kit member"
+                tooltipContent="This quantity-tracked asset is part of the scanned kit. Enter how its units are being returned / consumed / lost / damaged."
+                className="border-indigo-200 bg-indigo-50 text-indigo-700"
+              />
+            </div>
+          </div>
+          <QuantityDispositionBlock
+            bookingAssetId={asset.bookingAssetId}
+            info={info}
+            shouldFocusOnMount={
+              recentlyAddedBookingAssetId === asset.bookingAssetId
+            }
+          />
+        </div>
+      </td>
+      <td>
+        <div className="w-[52px]" />
+      </td>
+    </Tr>
   );
 }
 

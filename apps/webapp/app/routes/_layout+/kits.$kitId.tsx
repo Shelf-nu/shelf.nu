@@ -35,8 +35,11 @@ import {
 import {
   deleteKit,
   deleteKitImage,
+  emitAssetKitDetachmentNotes,
+  fetchAssetKitDetachmentImpact,
   getKit,
   getKitCurrentBooking,
+  mergeStandaloneCollisionsForKitDetachment,
   relinkKitQrCode,
 } from "~/modules/kit/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -305,8 +308,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          *   2. the asset's status is only flipped back to AVAILABLE when
          *      no custody rows remain — if operator custody still exists
          *      on the asset, status stays IN_CUSTODY.
+         *
+         * The AssetKit row is deleted at the end, which cascades
+         * `ON DELETE SET NULL` to any BookingAsset rows holding this
+         * kit-driven slice. Before that fires we resolve the rare case
+         * where a standalone slice already exists for the same
+         * `(bookingId, assetId)` — merging the kit qty into the
+         * standalone row so the SET NULL doesn't trip
+         * `BookingAsset_manual_unique`. Detachment notes get the kit /
+         * asset names from a snapshot taken before the merge.
          */
-        const kit = await db.$transaction(async (tx) => {
+        const { kit, detachmentImpact } = await db.$transaction(async (tx) => {
+          const assetKitRows = await tx.assetKit.findMany({
+            where: { kitId, assetId },
+            select: { id: true },
+          });
+          const assetKitIds = assetKitRows.map((ak: { id: string }) => ak.id);
+          const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
+          await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
+
           const updatedKit = await tx.kit.update({
             where: { id: kitId, organizationId },
             data: {
@@ -346,7 +366,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }
           }
 
-          return updatedKit;
+          return { kit: updatedKit, detachmentImpact: impact };
+        });
+
+        await emitAssetKitDetachmentNotes({
+          impact: detachmentImpact,
+          actorUserId: userId,
+          actorFirstName: user.firstName,
+          actorLastName: user.lastName,
+          organizationId,
         });
 
         const actor = wrapUserLinkForNote({
