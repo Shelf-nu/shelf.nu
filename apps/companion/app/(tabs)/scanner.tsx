@@ -280,6 +280,10 @@ function ScannerContent() {
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
+        // A QR can be asset-less but still linked to a kit. We track kitId
+        // separately because the create-asset flow must not be offered for
+        // kit-linked QRs (see the !asset branch below for the full rationale).
+        let kitId: string | null = null;
 
         if (qrId) {
           // ── Shelf QR path ──
@@ -339,6 +343,7 @@ function ScannerContent() {
           codeId = qrId;
           codeOrgId = qrData.qr?.organizationId ?? null;
           asset = qrData.qr?.asset ?? null;
+          kitId = qrData.qr?.kitId ?? null;
         } else {
           // ── Barcode fallback path ──
 
@@ -431,8 +436,25 @@ function ScannerContent() {
             action: "create",
           });
 
-          if (qrId && codeOrgId === currentOrg?.id && canCreateAsset) {
-            // QR is claimed to current org and user can create assets — create in-app
+          // A QR linked to a kit (kitId set, asset null) must NOT offer in-app
+          // "Create Asset". createAsset only attaches a passed QR when both its
+          // assetId AND kitId are null; for a kit-linked QR it silently mints a
+          // *different* QR and leaves the scanned kit QR untouched — breaking the
+          // "this QR will be linked" promise. Bridge those to the web kit view.
+          const isKitLinked = Boolean(kitId);
+
+          if (qrId && isKitLinked) {
+            // QR belongs to a kit — open the web app to view the kit
+            unlinkedQrAction = {
+              label: "Open in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+          } else if (qrId && codeOrgId === currentOrg?.id && canCreateAsset) {
+            // QR is claimed to current org, truly unlinked, and user can create — create in-app
             unlinkedQrAction = {
               label: "Create Asset",
               icon: "add-circle-outline",
@@ -458,9 +480,11 @@ function ScannerContent() {
 
           setScanResult({
             type: "not_found",
-            title: "No Asset Linked",
+            title: isKitLinked ? "Linked to a Kit" : "No Asset Linked",
             message: qrId
-              ? codeOrgId === currentOrg?.id && canCreateAsset
+              ? isKitLinked
+                ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
+                : codeOrgId === currentOrg?.id && canCreateAsset
                 ? "This QR code is not linked to any asset. Create one now."
                 : "This QR code is not linked to any asset. Open the web app to link it."
               : "This code exists but is not linked to any asset.",
