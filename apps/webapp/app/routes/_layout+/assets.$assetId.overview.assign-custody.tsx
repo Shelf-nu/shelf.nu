@@ -315,6 +315,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
+      organizationId,
     });
 
     sendNotification({

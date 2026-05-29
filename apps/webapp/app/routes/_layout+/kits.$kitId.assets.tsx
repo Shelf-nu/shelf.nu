@@ -5,6 +5,7 @@ import {
   type MetaFunction,
 } from "react-router";
 import { z } from "zod";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
@@ -22,8 +23,10 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getAssetsForKits } from "~/modules/kit/service.server";
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -179,6 +182,10 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
   const { kitId } = useParams<{ kitId: string }>();
 
   const { roles } = useUserRoleHelper();
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -235,12 +242,19 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                     })()
                   : null}
               </span>
-              <AssetStatusBadge
-                id={item.id}
-                status={item.status}
-                availableToBook={item.availableToBook}
-                asset={item}
-              />
+              {/*
+                Single metadata line: status first (glanceable color cue),
+                code chip second. flex-wrap keeps narrow viewports safe.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
+                <AssetStatusBadge
+                  id={item.id}
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                  asset={item}
+                />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
+              </div>
             </div>
           </div>
         </div>

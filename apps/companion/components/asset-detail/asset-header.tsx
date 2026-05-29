@@ -18,6 +18,8 @@ interface AssetHeaderProps {
   onImagePress: () => void;
   onUploadPress: () => void;
   isUploading: boolean;
+  /** Role can update the asset image. Server-enforced; this hides the affordance. */
+  canUpload: boolean;
 }
 
 export const AssetHeader = memo(function AssetHeader({
@@ -25,6 +27,7 @@ export const AssetHeader = memo(function AssetHeader({
   onImagePress,
   onUploadPress,
   isUploading,
+  canUpload,
 }: AssetHeaderProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -66,7 +69,7 @@ export const AssetHeader = memo(function AssetHeader({
       )}
 
       {/* Update image button */}
-      {!isUploading && (
+      {!isUploading && canUpload && (
         <TouchableOpacity
           style={styles.heroEditBtn}
           onPress={onUploadPress}

@@ -61,6 +61,9 @@ export async function createAssetReminder({
     await Promise.all([
       createNote({
         assetId,
+        // why: scope the note's asset to the reminder's org so a caller
+        // cannot attach a note to another tenant's asset (cross-org IDOR)
+        organizationId,
         userId: createdById,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
@@ -257,6 +260,7 @@ export async function editAssetReminder({
     }
 
     const updatedReminder = await db.assetReminder.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: reminder.id comes from the org-scoped findFirstOrThrow on lines 247-249 (where id + organizationId)
       where: { id: reminder.id },
       data: {
         name,

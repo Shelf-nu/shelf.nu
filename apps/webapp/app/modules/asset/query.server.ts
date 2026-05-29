@@ -69,11 +69,22 @@ export function generateWhereClause(
           c.name ILIKE ${`%${term}%`} OR
           l.name ILIKE ${`%${term}%`} OR
           t.name ILIKE ${`%${term}%`} OR
-          tm.name ILIKE ${`%${term}%`} OR
-          u."firstName" ILIKE ${`%${term}%`} OR
-          u."lastName" ILIKE ${`%${term}%`} OR
           EXISTS (
-            SELECT 1 FROM public."Qr" q 
+            -- Custodian search. Custody moved to the custody_agg LATERAL
+            -- (multi-custodian), so there is no top-level tm/u join to
+            -- reference here — match against ALL of the asset's
+            -- custodians via a per-asset scoped subquery instead.
+            SELECT 1 FROM public."Custody" cust
+            LEFT JOIN public."TeamMember" ctm ON cust."teamMemberId" = ctm.id
+            LEFT JOIN public."User" cusr ON ctm."userId" = cusr.id
+            WHERE cust."assetId" = a.id AND (
+              ctm.name ILIKE ${`%${term}%`} OR
+              cusr."firstName" ILIKE ${`%${term}%`} OR
+              cusr."lastName" ILIKE ${`%${term}%`}
+            )
+          ) OR
+          EXISTS (
+            SELECT 1 FROM public."Qr" q
             WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
           ) OR
           EXISTS (

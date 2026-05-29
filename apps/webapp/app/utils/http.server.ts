@@ -81,6 +81,40 @@ export function getActionMethod(request: Request) {
 }
 
 /**
+ * Reads form data from a Remix request and converts undici's
+ * `TypeError: Content-Type was not one of "multipart/form-data" or
+ * "application/x-www-form-urlencoded".` into a non-captured `badRequest`.
+ *
+ * Only `TypeError` (the malformed-body case) is downgraded to a 400 — any
+ * other exception is rethrown so genuine server/runtime faults stay visible
+ * to Sentry instead of being masked as client errors.
+ *
+ * Use this in actions that may receive malformed bodies (auth endpoints
+ * and other public routes that external/mobile clients could hit).
+ *
+ * @param request - The Remix request whose body will be read as form data.
+ *   Pass `request.clone()` if the body needs to be read more than once.
+ * @returns The parsed FormData.
+ * @throws A non-captured `badRequest` if the body is not form-encoded.
+ */
+export async function readFormData(request: Request): Promise<FormData> {
+  try {
+    return await request.formData();
+  } catch (cause) {
+    if (cause instanceof TypeError) {
+      throw new ShelfError({
+        cause,
+        message: "Invalid request body. Expected a form submission.",
+        label: "Request validation",
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+    throw cause;
+  }
+}
+
+/**
  * Validate data with a zod schema.
  *
  * @throws A `badRequest` error if the form data is invalid.

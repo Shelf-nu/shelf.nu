@@ -673,7 +673,10 @@ export async function bulkDeleteNRMs({
     }
 
     return await db.teamMember.updateMany({
-      where: { id: { in: teamMembers.map((tm) => tm.id) } },
+      where: {
+        id: { in: teamMembers.map((tm) => tm.id) },
+        organizationId,
+      },
       data: { deletedAt: new Date() },
     });
   } catch (cause) {
@@ -743,7 +746,10 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
           }
 
           return db.teamMember.update({
-            where: { id: teamMember.id },
+            where: {
+              id: teamMember.id,
+              organizationId: teamMember.organizationId,
+            },
             data: { name },
           });
         })

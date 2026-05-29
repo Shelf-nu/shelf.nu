@@ -625,6 +625,8 @@ describe("manage-assets route validation", () => {
         type: "UPDATE",
         userId: "user123",
         assetIds: ["asset3"], // only the new asset
+        // why: createNotes now requires organizationId (cross-org asset guard).
+        organizationId: "org123",
       });
     });
 

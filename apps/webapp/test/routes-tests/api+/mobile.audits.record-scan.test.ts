@@ -1,3 +1,8 @@
+/**
+ * Test suite for POST /api/mobile/audits/record-scan.
+ * Covers scan recording, permission checks, and the paid Audits add-on
+ * enforcement (403 when disabled).
+ */
 import { action } from "~/routes/api+/mobile+/audits.record-scan";
 import { createActionArgs } from "@mocks/remix";
 
@@ -29,6 +34,7 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  getMobileUserContext: vi.fn(),
   requireMobilePermission: vi.fn(),
 }));
 
@@ -52,6 +58,7 @@ vi.mock("~/utils/error", () => ({
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  getMobileUserContext,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { recordAuditScan } from "~/modules/audit/service.server";
@@ -91,6 +98,11 @@ describe("POST /api/mobile/audits/record-scan", () => {
     });
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: true,
+      canUseBarcodes: true,
+    });
     (requireMobilePermission as any).mockResolvedValue(undefined);
   });
 
@@ -150,6 +162,27 @@ describe("POST /api/mobile/audits/record-scan", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
 
+    expect(recordAuditScan).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 when the Audits add-on is disabled", async () => {
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseAudits: false,
+      canUseBarcodes: true,
+    });
+
+    const request = createRecordScanRequest({
+      auditSessionId: "session-1",
+      qrId: "qr-abc",
+      assetId: "asset-1",
+      isExpected: true,
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(403);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("not enabled");
     expect(recordAuditScan).not.toHaveBeenCalled();
   });
 });

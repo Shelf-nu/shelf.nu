@@ -21,6 +21,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // First fetch just the QR code to check authorization
     const qr = await db.qr.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: mobile QR scan resolves code->org before any org context exists; org membership is enforced immediately below (lines 38-66) before any linked data is returned
       where: { id: qrId },
       select: {
         id: true,
@@ -65,11 +66,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // Now fetch the full data (only after authorization passes)
+    // Now fetch the full data (only after authorization passes).
+    // Scope by qr.organizationId — proven above (line 38 ensures it exists,
+    // lines 47-66 verify the caller is a member of that org) — so the linked
+    // asset can be safely constrained to the same organization.
     let asset = null;
     if (qr.assetId) {
-      asset = await db.asset.findUnique({
-        where: { id: qr.assetId },
+      asset = await db.asset.findFirst({
+        where: { id: qr.assetId, organizationId: qr.organizationId },
         select: MOBILE_ASSET_SELECT,
       });
     }

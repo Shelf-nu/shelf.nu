@@ -389,14 +389,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * Get detailed asset information with bookings for the paginated assets
        */
       db.asset.findMany({
+        // SECURITY (cross-org IDOR): scope the asset fetch to the caller's
+        // organization so a foreign-org asset ID cannot be hydrated and
+        // surfaced in the booking overview.
         where: {
           id: { in: assetIdsToFetch },
+          organizationId,
         },
         include: {
           category: true,
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           assetKits: { include: { kit: true } },
+          // Code-resolution relations — required for AssetCodeBadge on the
+          // booking detail page rows. Scalar fields (sequentialId,
+          // preferredBarcodeId) come in automatically via `include`; the
+          // relations must be listed explicitly. Tight selects per
+          // `~/modules/barcode/display.ts`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           bookingAssets: {
             where: {
               booking: {
@@ -455,6 +466,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         modelRequestCount: booking.modelRequests?.length ?? 0,
         from: booking.from,
         to: booking.to,
+        organizationId,
       }),
 
       /** Get kit details for the kits in the current page */
@@ -465,6 +477,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               .filter((item) => item.type === "kit")
               .map((item) => item.id),
           },
+          organizationId,
         },
         include: {
           category: {
@@ -474,6 +487,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               color: true,
             },
           },
+          // Code-resolution relations — required for AssetCodeBadge on
+          // the kit row inside this booking. See `~/modules/barcode/display.ts`
+          // and `.claude/rules/code-bearing-entity-list-consistency.md`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           _count: { select: { assetKits: true } },
         },
       }),
@@ -890,9 +908,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         content: `${actor} deleted booking ${deletedBookingLink}.`,
         type: "UPDATE",
         userId: userId,
-        assetIds: deletedBooking.bookingAssets.map(
-          (ba: { asset: { id: string } }) => ba.asset.id
-        ),
+        assetIds: [
+          ...new Set(
+            deletedBooking.bookingAssets.map(
+              (ba: { asset: { id: string } }) => ba.asset.id
+            )
+          ),
+        ],
+        organizationId,
       });
 
       sendNotification({
@@ -911,8 +934,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Booking lookup, working hours, and booking settings are independent — fetch in parallel
     const [basicBookingInfo, workingHours, bookingSettings] = await Promise.all(
       [
-        db.booking.findUniqueOrThrow({
-          where: { id },
+        db.booking.findFirstOrThrow({
+          where: { id, organizationId },
           select: { id: true, status: true, from: true, to: true },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -1063,7 +1086,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.bookingAssets.map((ba) => ba.assetId),
+          assetIds: [...new Set(booking.bookingAssets.map((ba) => ba.assetId))],
+          organizationId,
         });
 
         sendNotification({
@@ -1136,7 +1160,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.bookingAssets.map((ba) => ba.asset.id),
+          assetIds: [
+            ...new Set(booking.bookingAssets.map((ba) => ba.asset.id)),
+          ],
+          organizationId,
         });
 
         sendNotification({
@@ -1250,9 +1277,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }`,
           type: "UPDATE",
           userId,
-          assetIds: cancelledBooking.bookingAssets.map(
-            (ba: { assetId: string }) => ba.assetId
-          ),
+          assetIds: [
+            ...new Set(
+              cancelledBooking.bookingAssets.map(
+                (ba: { assetId: string }) => ba.assetId
+              )
+            ),
+          ],
+          organizationId,
         });
 
         sendNotification({
@@ -1347,15 +1379,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const newEndDate = DateTime.fromFormat(endDate, DATE_TIME_FORMAT, {
-          zone: hints.timeZone,
-        }).toJSDate();
-
+        // `endDate` is already a zoned `Date` produced by the schema's
+        // `coerceLocalDate(timeZone)`, so no further parsing is needed here.
         await extendBooking({
           id,
           organizationId,
           hints,
-          newEndDate,
+          newEndDate: endDate,
           userId,
           role,
         });
@@ -1414,12 +1444,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * here we are separating them and excluding assets that belong to kits
          * */
         const assets = await db.asset.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
         });
 
         const kits = await db.kit.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: {
             id: true,
             name: true,

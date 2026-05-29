@@ -305,6 +305,7 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
       }
 
       return db.assetIndexSettings.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: entry.id comes from the org-scoped findMany on lines 272-274 (where organizationId)
         where: { id: entry.id },
         data: { columns },
       });
@@ -407,6 +408,7 @@ export async function updateAssetIndexSettingsWithNewCustomFields({
       );
 
       return db.assetIndexSettings.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: setting.id comes from the org-scoped findMany on lines 384-386 (where organizationId)
         where: { id: setting.id },
         data: {
           columns: [...existingColumns, ...newColumns],

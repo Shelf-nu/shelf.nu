@@ -37,6 +37,9 @@ vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
       findUnique: vi.fn(),
+      // why: route verifies via findUnique then re-fetches the updated asset
+      // via findFirst (org-scoped) — both must be mocked.
+      findFirst: vi.fn(),
     },
   },
 }));
@@ -105,8 +108,8 @@ describe("POST /api/mobile/asset/update-image", () => {
       title: "Test Laptop",
     });
     (updateAssetMainImage as any).mockResolvedValue(undefined);
-    // Second findUnique: fetch updated asset
-    (db.asset.findUnique as any).mockResolvedValueOnce({
+    // findFirst: fetch updated asset (org-scoped re-fetch)
+    (db.asset.findFirst as any).mockResolvedValueOnce({
       id: "asset-1",
       title: "Test Laptop",
       mainImage: "https://storage.example.com/image.jpg",
@@ -142,6 +145,7 @@ describe("POST /api/mobile/asset/update-image", () => {
 
   it("should return 404 when asset is not found", async () => {
     (db.asset.findUnique as any).mockResolvedValue(null);
+    (db.asset.findFirst as any).mockResolvedValue(null);
 
     const request = createRequest("nonexistent");
     const result = await action(createActionArgs({ request }));

@@ -54,6 +54,12 @@ export const KITS_INCLUDE_FIELDS = {
   // The count semantics are identical (rows per kit) since today's
   // unique constraint on `AssetKit.assetId` keeps it 1:1.
   _count: { select: { assetKits: true } },
+  // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
+  // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so
+  // every kit-listing surface needs these included to render the chip.
+  // Kit v1 has no sequentialId / preferredBarcodeId — resolver tolerates that.
+  qrCodes: { take: 1, select: { id: true } },
+  barcodes: { select: { id: true, type: true, value: true } },
   custody: {
     select: {
       custodian: {
@@ -88,12 +94,12 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
   type: true,
   quantity: true,
   unitOfMeasure: true,
-  // why: Phase 4a-Polish-2 makes `AssetKit.quantity` the source of truth
-  // for "how many units this kit holds". The kit-page row reads the
-  // matching pivot row (filter by this route's kitId client-side) and
-  // renders `N / total units in kit`. Before Polish-2 the count was
-  // derived from `asset.quantity − operator custody`, which is now wrong
-  // once the kit can hold a strict subset of the pool.
+  // why: `AssetKit.quantity` is the source of truth for "how many units
+  // this kit holds". The kit-page row reads the matching pivot row (filter
+  // by this route's kitId client-side) and renders `N / total units in
+  // kit`. Previously the count was derived from `asset.quantity − operator
+  // custody`, which is wrong once the kit can hold a strict subset of the
+  // pool.
   assetKits: {
     select: { kitId: true, quantity: true },
   },
@@ -103,6 +109,11 @@ export const KIT_SELECT_FIELDS_FOR_LIST_ITEMS = {
       kitCustodyId: true,
     },
   },
+  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+  sequentialId: true,
+  preferredBarcodeId: true,
+  qrCodes: { take: 1, select: { id: true } },
+  barcodes: { select: { id: true, type: true, value: true } },
   category: {
     select: {
       id: true,

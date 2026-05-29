@@ -2,9 +2,11 @@ import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
@@ -16,6 +18,7 @@ import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
+import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ListItemTagsColumn } from "../assets/assets-index/list-item-tags-column";
@@ -51,7 +54,18 @@ export default function ListAssetContent({
 }: ListAssetContentProps) {
   const { category, tags } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const currentOrganization = useCurrentOrganization();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+
+  // Resolve the asset's display code (QR id, SAM id, or barcode value) per
+  // the workspace preference and per-asset override. Cheap pure call; safe
+  // inline. Renders nothing if the asset lacks the necessary related fields.
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+      })
+    : null;
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
     booking.status
   );
@@ -232,7 +246,13 @@ export default function ListAssetContent({
                   {item.title}
                 </Button>
               </span>
-              <div className="flex flex-wrap items-center gap-1">
+              {/*
+                Single metadata line under the title: status (returned/active)
+                first as the most glanceable cue, code chip after as the
+                identification reference. `flex-wrap` keeps long codes safe on
+                narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 {isFinished ? (
                   <ReturnedBadge />
                 ) : (
@@ -243,6 +263,7 @@ export default function ListAssetContent({
                     asset={item}
                   />
                 )}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
                 {/* Minimal qty-tracked hint — renders nothing for
                     INDIVIDUAL assets. */}
                 <ConsumptionTypeBadge

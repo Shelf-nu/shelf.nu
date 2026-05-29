@@ -34,9 +34,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
+import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { CategoryBadge } from "../assets/category-badge";
@@ -65,6 +68,13 @@ type BookingWithAssets = Prisma.BookingGetPayload<{
             mainImage: true;
             thumbnailImage: true;
             mainImageExpiration: true;
+            // Code-resolution fields — mirror of getBookings' assets select.
+            // Enables the asset-code chip on every row, matching the booking
+            // overview list and other code-bearing surfaces.
+            sequentialId: true;
+            preferredBarcodeId: true;
+            qrCodes: { take: 1; select: { id: true } };
+            barcodes: { select: { id: true; type: true; value: true } };
             category: {
               select: {
                 id: true;
@@ -214,15 +224,17 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
     };
     if (asset.kitId && asset.kit) {
       const kitId = asset.kitId;
-      if (!itemsMap.has(kitId)) {
+      const existing = itemsMap.get(kitId);
+      if (existing && existing.type === "kit") {
+        existing.assets.push(asset);
+      } else {
         itemsMap.set(kitId, {
           id: kitId,
           type: "kit",
-          assets: [],
+          assets: [asset],
           kit: asset.kit,
         });
       }
-      itemsMap.get(kitId)!.assets.push(asset);
     } else {
       individualAssets.push(asset);
     }
@@ -256,6 +268,12 @@ function AssetTitleAndStatus({
   dispositionedByAsset?: Record<string, number>;
   dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
 }) {
+  // Workspace pref + addon entitlement — resolveDisplayCode short-circuits to
+  // QR when the org has lost the barcode add-on, so this read is always safe.
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: asset, organization: currentOrganization })
+    : null;
   const qtyBooked = asset.bookedQuantity ?? 0;
   const qtyDispositioned = dispositionedByAsset?.[asset.id] ?? 0;
   const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
@@ -408,6 +426,7 @@ function AssetTitleAndStatus({
           availableToBook={asset.availableToBook}
           asset={asset}
         />
+        {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
         <ConsumptionTypeBadge consumptionType={asset.consumptionType ?? null} />
       </div>
     </div>

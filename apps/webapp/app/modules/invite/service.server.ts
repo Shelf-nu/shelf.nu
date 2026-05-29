@@ -318,6 +318,7 @@ export async function updateInviteStatus({
 }: Pick<Invite, "id" | "status"> & { password: string }) {
   try {
     const invite = await db.invite.findFirst({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; `id` comes from a JWT verified with INVITE_TOKEN_SECRET in the accept-invite action and the user is not yet a member of the org, so there is no caller organizationId to scope by — the invite record establishes the org relationship
       where: { id },
       include: { inviteeTeamMember: true },
     });
@@ -383,7 +384,10 @@ export async function updateInviteStatus({
       });
 
       await db.teamMember.update({
-        where: { id: invite.teamMemberId },
+        where: {
+          id: invite.teamMemberId,
+          organizationId: invite.organizationId,
+        },
         data: {
           deletedAt: null,
           user: { connect: { id: user.id } },
@@ -403,6 +407,7 @@ export async function updateInviteStatus({
       });
     }
 
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; same `id` already resolved and PENDING-validated via the findFirst above (line ~321), and there is no caller organizationId in this token-driven flow
     const updatedInvite = await db.invite.update({ where: { id }, data });
 
     //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1

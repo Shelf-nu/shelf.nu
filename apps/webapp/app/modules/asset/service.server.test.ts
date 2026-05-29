@@ -87,9 +87,12 @@ vitest.mock("~/database/db.server", () => ({
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
     },
     // why: checkOutQuantity / releaseQuantity look up the custodian's user.id so
-    // the CUSTODY_ASSIGNED / CUSTODY_RELEASED activity event can carry targetUserId
+    // the CUSTODY_ASSIGNED / CUSTODY_RELEASED activity event can carry targetUserId.
+    // `bulkCheckOutAssets` resolves the custodian via `findFirst` scoped to
+    // { id, organizationId } (cross-org IDOR guard), so both are mocked.
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue({ user: null }),
+      findFirst: vitest.fn().mockResolvedValue({ user: null }),
     },
   },
 }));
@@ -690,7 +693,9 @@ describe("checkOutQuantity — activity events", () => {
   // Typed handles. The CUSTODY_ASSIGNED event is emitted inside the tx
   // after the custody upsert succeeds.
   const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
-  const mockTeamMemberFindUnique = db.teamMember.findUnique as ReturnType<
+  // checkOutQuantity / releaseQuantity now resolve the custodian via
+  // `findFirst` scoped to { id, organizationId } (cross-org IDOR guard).
+  const mockTeamMemberFindUnique = db.teamMember.findFirst as ReturnType<
     typeof vitest.fn
   >;
   const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
@@ -768,7 +773,9 @@ describe("releaseQuantity — activity events", () => {
   const mockCustodyFindUnique = db.custody.findUnique as ReturnType<
     typeof vitest.fn
   >;
-  const mockTeamMemberFindUnique = db.teamMember.findUnique as ReturnType<
+  // checkOutQuantity / releaseQuantity now resolve the custodian via
+  // `findFirst` scoped to { id, organizationId } (cross-org IDOR guard).
+  const mockTeamMemberFindUnique = db.teamMember.findFirst as ReturnType<
     typeof vitest.fn
   >;
   const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
@@ -1214,17 +1221,17 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         type: "INDIVIDUAL",
       },
     ]);
-    (
-      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({
-      name: "Other Person",
-      user: {
-        id: "other-user",
-        firstName: "Other",
-        lastName: "Person",
-        displayName: null,
-      },
-    });
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Other Person",
+        user: {
+          id: "other-user",
+          firstName: "Other",
+          lastName: "Person",
+          displayName: null,
+        },
+      }
+    );
 
     let caught: unknown;
     try {
@@ -1257,17 +1264,17 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         type: "INDIVIDUAL",
       },
     ]);
-    (
-      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({
-      name: "Self",
-      user: {
-        id: "user-current",
-        firstName: "Self",
-        lastName: "User",
-        displayName: null,
-      },
-    });
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Self",
+        user: {
+          id: "user-current",
+          firstName: "Self",
+          lastName: "User",
+          displayName: null,
+        },
+      }
+    );
 
     // Should not throw the 403; downstream calls may stub-fail but the
     // SELF_SERVICE branch is past by the time that happens.
@@ -1297,12 +1304,17 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         type: "INDIVIDUAL",
       },
     ]);
-    (
-      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({
-      name: "Anyone",
-      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
-    });
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Anyone",
+        user: {
+          id: "anyone",
+          firstName: "A",
+          lastName: "B",
+          displayName: null,
+        },
+      }
+    );
 
     let threw403 = false;
     try {
@@ -1330,12 +1342,17 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         type: "INDIVIDUAL",
       },
     ]);
-    (
-      db.teamMember.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({
-      name: "Anyone",
-      user: { id: "anyone", firstName: "A", lastName: "B", displayName: null },
-    });
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Anyone",
+        user: {
+          id: "anyone",
+          firstName: "A",
+          lastName: "B",
+          displayName: null,
+        },
+      }
+    );
 
     let threw403 = false;
     try {

@@ -45,8 +45,10 @@ export async function checkAndNotifyLowStock({
   userId: string;
   organizationId: string;
 }): Promise<void> {
-  const asset = await db.asset.findUnique({
-    where: { id: assetId },
+  const asset = await db.asset.findFirst({
+    // org-scoped: scope the low-stock lookup to the caller's org
+    // (cross-org IDOR guard).
+    where: { id: assetId, organizationId },
     select: {
       title: true,
       quantity: true,

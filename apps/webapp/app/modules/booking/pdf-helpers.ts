@@ -106,9 +106,17 @@ export async function fetchAllPdfRelatedData(
     const [rawAssets, organization] = await Promise.all([
       db.asset.findMany({
         where: {
+          // A booking can carry multiple BookingAsset rows per asset
+          // (one standalone + N kit-driven slices), so dedupe the ids
+          // before the `in` clause.
           id: {
-            in: booking?.bookingAssets.map((ba) => ba.assetId) || [],
+            in: [
+              ...new Set(booking?.bookingAssets.map((ba) => ba.assetId) || []),
+            ],
           },
+          // Defense-in-depth: scope to the caller's org even though the
+          // asset ids originate from an already org-scoped booking
+          organizationId,
         },
         include: {
           category: {

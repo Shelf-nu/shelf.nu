@@ -7,6 +7,7 @@ import {
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -96,13 +97,22 @@ export async function getUserOrganizations(userId: string) {
           type: true,
           imageId: true,
           barcodesEnabled: true,
+          auditsEnabled: true,
         },
       },
     },
   });
 
+  // Serialize the *canonical* add-on capability (premium-aware), not the
+  // raw DB flags, so the companion's client-side gating
+  // (`currentOrg.auditsEnabled` / `.barcodesEnabled`) stays aligned with
+  // the server gating, which now uses canUseAudits/canUseBarcodes. Without
+  // this, non-premium/self-hosted deployments would allow the feature on
+  // the API but hide it in the app.
   return userOrgs.map((uo) => ({
     ...uo.organization,
+    barcodesEnabled: canUseBarcodes(uo.organization),
+    auditsEnabled: canUseAudits(uo.organization),
     roles: uo.roles,
   }));
 }
@@ -175,7 +185,9 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the user's role and org barcode settings for a given organization.
+ * Fetches the user's role and org capability flags (barcodes, audits) for
+ * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
+ * subscription.server predicates so mobile matches webapp gating exactly.
  *
  * Used by mobile routes that call service layer functions requiring
  * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody).
@@ -183,12 +195,18 @@ export async function requireMobilePermission({
 export async function getMobileUserContext(
   userId: string,
   organizationId: string
-): Promise<{ role: OrganizationRoles; canUseBarcodes: boolean }> {
+): Promise<{
+  role: OrganizationRoles;
+  canUseBarcodes: boolean;
+  canUseAudits: boolean;
+}> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
     select: {
       roles: true,
-      organization: { select: { barcodesEnabled: true } },
+      organization: {
+        select: { barcodesEnabled: true, auditsEnabled: true },
+      },
     },
   });
 
@@ -206,7 +224,8 @@ export async function getMobileUserContext(
     // the convention used in roles.server.ts and invite/service.server.ts so
     // an empty array doesn't surface as `undefined` to downstream callers.
     role: userOrg.roles[0] ?? OrganizationRoles.BASE,
-    canUseBarcodes: userOrg.organization.barcodesEnabled,
+    canUseBarcodes: canUseBarcodes(userOrg.organization),
+    canUseAudits: canUseAudits(userOrg.organization),
   };
 }
 

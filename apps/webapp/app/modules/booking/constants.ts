@@ -126,6 +126,13 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           availableToBook: true,
           status: true,
           valuation: true,
+          // Asset-code resolution fields — see `app/modules/barcode/display.ts`
+          // for the canonical select shape. Tight `take: 1` + narrow `select`
+          // keeps query weight minimal even with hundreds of booking assets.
+          sequentialId: true,
+          preferredBarcodeId: true,
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           // `mainImage`/`thumbnailImage` are consumed by the partial
           // check-in drawer's "expected assets" list (see the loader in
           // `bookings.$bookingId.overview.checkin-assets.tsx`) and by

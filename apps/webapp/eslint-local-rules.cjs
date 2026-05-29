@@ -5,4 +5,5 @@ module.exports = {
   "require-meta-export-in-routes": require("./eslint-local-rules/require-meta-export-in-routes.cjs"),
   "require-react-import-when-using-namespace": require("./eslint-local-rules/require-react-import-when-using-namespace.cjs"),
   "require-button-type": require("./eslint-local-rules/require-button-type.cjs"),
+  "require-org-scope-on-id-queries": require("./eslint-local-rules/require-org-scope-on-id-queries.cjs"),
 };

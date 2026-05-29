@@ -41,7 +41,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     );
 
-    let { finalAssetIds, bookingInfo } = await processBooking(id, assetsIds);
+    let { finalAssetIds, bookingInfo } = await processBooking(
+      id,
+      assetsIds,
+      organizationId
+    );
 
     /**
      * Remove already added assets and proceed with not added assets.
@@ -108,6 +112,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
+      organizationId,
     });
 
     sendNotification({

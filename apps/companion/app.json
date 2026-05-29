@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.shelf.companion",
       "infoPlist": {
         "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets."

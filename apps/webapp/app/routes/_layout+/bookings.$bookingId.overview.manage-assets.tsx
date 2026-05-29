@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Asset,
+  BarcodeType,
   Booking,
   Category,
   Custody,
@@ -31,6 +32,7 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
@@ -64,11 +66,13 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
@@ -137,6 +141,11 @@ export type AssetWithBooking = Asset & {
     lost: number;
     damaged: number;
   } | null;
+  // Fields required by `resolveDisplayCode` for the asset-code badge.
+  // Loader-included relations — see `ASSET_CODE_RESOLUTION_SELECT` and
+  // `BOOKING_WITH_ASSETS_INCLUDE`.
+  qrCodes: { id: string }[];
+  barcodes: { id: string; type: BarcodeType; value: string }[];
 };
 
 export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
@@ -705,6 +714,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const potentiallyCheckedOutAssets = await db.asset.findMany({
       where: {
         id: { in: newAssetIds },
+        organizationId,
         status: AssetStatus.CHECKED_OUT,
       },
       select: { id: true, title: true, status: true },
@@ -820,6 +830,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               type: "UPDATE",
               userId: authSession.userId,
               assetIds: [assetId],
+              organizationId,
             });
           })
         );
@@ -954,6 +965,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               type: "UPDATE",
               userId: authSession.userId,
               assetIds: [adj.assetId],
+              organizationId,
             })
           )
         );
@@ -1426,7 +1438,6 @@ export default function AddAssetsToNewBooking() {
           disableSelectAllItems
           headerChildren={
             <>
-              <Th>Id</Th>
               <Th>Category</Th>
               <Th>Tags</Th>
               <Th>Location</Th>
@@ -1546,6 +1557,7 @@ const RowComponent = ({
   };
 }) => {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const currentOrganization = useCurrentOrganization();
   const checked = selectedBulkItems.some((asset) => asset.id === item.id);
   const { category, tags, location } = item;
   const isPartOfKit = (item.assetKits ?? []).length > 0;
@@ -1576,7 +1588,16 @@ const RowComponent = ({
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}{" "}
               </p>
-              <div className="flex flex-row flex-wrap items-center gap-x-2 gap-y-1">
+              {/*
+                Single metadata line under the title — same composition as
+                every other picker/list surface (see
+                `.claude/rules/code-bearing-entity-list-consistency.md`):
+                status/availability first, code chip last. flex-wrap keeps
+                narrow viewports safe. Qty-tracked assets show their own
+                "Qty tracked · N available" + consumption badges instead of
+                the plain status badge.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 {isQuantityTracked(item) ? (
                   <>
                     <Badge
@@ -1607,6 +1628,15 @@ const RowComponent = ({
                     />
                   </>
                 )}
+
+                {currentOrganization ? (
+                  <AssetCodeBadge
+                    {...resolveDisplayCode({
+                      entity: item,
+                      organization: currentOrganization,
+                    })}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
@@ -1650,9 +1680,6 @@ const RowComponent = ({
           ) : null}
         </div>
       </Td>
-
-      {/* ID */}
-      <Td>{item.id}</Td>
 
       {/* Category */}
       <Td>

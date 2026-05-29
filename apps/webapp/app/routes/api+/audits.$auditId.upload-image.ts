@@ -31,8 +31,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     });
 
     // Enforce assignee access for BASE/SELF_SERVICE roles on audit mutations.
-    const audit = await db.auditSession.findUnique({
-      where: { id: auditId },
+    // Scope the lookup by organizationId so a cross-org auditId can never
+    // resolve a record (defense-in-depth alongside the explicit check below).
+    const audit = await db.auditSession.findFirst({
+      where: { id: auditId, organizationId },
       select: {
         id: true,
         organizationId: true,

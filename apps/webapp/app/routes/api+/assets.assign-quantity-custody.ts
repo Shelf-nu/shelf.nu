@@ -144,6 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         type: "UPDATE",
         userId,
         assetId,
+        organizationId,
       });
     } catch (noteError) {
       Logger.error(

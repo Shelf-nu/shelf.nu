@@ -234,7 +234,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Execute parallel searches
     const [assetResults, audits, kits, bookings, locations, teamMembers] =
       await Promise.all([
-        // Assets (always allowed) - using enhanced search from asset service
+        // Assets (always allowed) - using enhanced search from asset service.
+        // The asset-index default include no longer eagerly loads customFields
+        // (see fields.ts), so add them back here for the command palette,
+        // which surfaces matching custom-field values in its results.
         getAssets({
           search: query,
           organizationId,
@@ -250,6 +253,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             // primary placement (read via `getPrimaryLocation`).
             assetLocations: {
               select: { location: { select: { name: true } } },
+            },
+            customFields: {
+              where: {
+                customField: { active: true, deletedAt: null },
+              },
             },
           },
         }),

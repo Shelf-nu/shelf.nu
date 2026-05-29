@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -88,10 +89,29 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // why: short-circuit when the requested location matches the asset's
+    // current primary placement. Without this guard the route would write a
+    // no-op pivot replace, an `ASSET_LOCATION_CHANGED` event whose
+    // `fromValue === toValue`, and a misleading "updated the location from
+    // X to X" note. Mirrors the singular/bulk parity rule in
+    // `.claude/rules/bulk-event-parity.md`.
+    const currentPrimaryLocation = getPrimaryLocation(asset);
+    if (currentPrimaryLocation?.id === location.id) {
+      return data({
+        asset: {
+          id: asset.id,
+          title: asset.title,
+          location: currentPrimaryLocation,
+        },
+      });
+    }
+
     // Setting a single primary location is a pivot replace: wipe any
     // existing AssetLocation rows then create the new link.
     // QUANTITY_TRACKED assets place their full quantity at the location;
-    // INDIVIDUAL assets are always quantity 1.
+    // INDIVIDUAL assets are always quantity 1. The ASSET_LOCATION_CHANGED
+    // activity event is recorded atomically so reports + activity-event
+    // aggregations include mobile-initiated location changes.
     const pivotQuantity =
       isQuantityTracked(asset) && asset.quantity != null ? asset.quantity : 1;
 
@@ -101,7 +121,24 @@ export async function action({ request }: ActionFunctionArgs) {
         data: { assetId, locationId, organizationId, quantity: pivotQuantity },
       });
 
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: user.id,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          locationId: location.id,
+          field: "locationId",
+          fromValue: currentPrimaryLocation?.id ?? null,
+          toValue: location.id,
+        },
+        tx
+      );
+
       return tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
         where: { id: assetId },
         select: {
           id: true,
@@ -149,6 +186,7 @@ export async function action({ request }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: user.id,
       assetId: asset.id,
+      organizationId,
     });
 
     return data({ asset: updatedAssetWithLocation });

@@ -1377,7 +1377,7 @@ drawer's qty disposition flow keys by `bookingAssetId` (the slice), not
   new `computeBookingAssetSliceRemaining` helper; per-slice cap =
   `min(asset-level remaining, slice remaining)` when `bookingAssetId` supplied
   (legacy callers → asset-level only, unchanged); de-dup qty status-reset loop
-  + per-asset events; aggregate `qtySummaries` by assetId for the notes.
+  - per-asset events; aggregate `qtySummaries` by assetId for the notes.
 
 **Backwards-compat (verified):** single-slice / legacy bookings have
 `asset.id ↔ bookingAssetId` 1:1 → identical behaviour. All existing

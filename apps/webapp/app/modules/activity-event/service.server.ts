@@ -34,6 +34,10 @@ export type RecordEventTxClient = {
     create: (args: {
       data: Prisma.ActivityEventUncheckedCreateInput;
     }) => Promise<unknown>;
+    createMany: (args: {
+      data: Prisma.ActivityEventUncheckedCreateInput[];
+      skipDuplicates?: boolean;
+    }) => Promise<{ count: number }>;
   };
   user: {
     findUnique: (args: {
@@ -98,6 +102,14 @@ export async function recordEvent(
  * Actor snapshots are memoized per `actorUserId` so we only fetch each user
  * once even when writing many events.
  *
+ * Implementation: snapshots are resolved sequentially (cache hits are sync,
+ * misses are a single `findUnique` per unique actor), then all rows are
+ * written with a single `createMany`. This keeps the call to ~1 round-trip
+ * per unique actor plus 1 for the insert — critical when invoked inside a
+ * `db.$transaction(...)` with its 5-second interactive-tx budget. A previous
+ * per-row `create` loop blew that budget on large bookings (262 assets) and
+ * surfaced as `P2028 Transaction not found` (Sentry SHELF-WEBAPP-1KN).
+ *
  * @param inputs - Array of event payloads
  * @param tx - Optional Prisma transaction client
  * @throws {ShelfError} with label "Activity" on DB failure
@@ -114,16 +126,17 @@ export async function recordEvents(
     // Memoize snapshots per actorUserId — no duplicate user fetches for bulk writes.
     const snapshotCache = new Map<string, ActorSnapshot | null>();
 
+    const rows: Prisma.ActivityEventUncheckedCreateInput[] = [];
     for (const input of inputs) {
       const actorSnapshot = await resolveActorSnapshot(
         input,
         client,
         snapshotCache
       );
-      await client.activityEvent.create({
-        data: toPrismaData(input, actorSnapshot),
-      });
+      rows.push(toPrismaData(input, actorSnapshot));
     }
+
+    await client.activityEvent.createMany({ data: rows });
   } catch (cause) {
     throw new ShelfError({
       cause,

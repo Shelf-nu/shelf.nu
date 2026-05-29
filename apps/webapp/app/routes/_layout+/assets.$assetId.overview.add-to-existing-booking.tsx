@@ -132,7 +132,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
-      assetIds
+      assetIds,
+      organizationId
     );
 
     /**
@@ -177,6 +178,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: `The booking you have selected already contains the asset you are trying to add. Please select a different booking.`,
+        status: 400,
         label: "Booking",
         shouldBeCaptured: false,
       });
@@ -212,6 +214,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
+      organizationId,
     });
 
     sendNotification({

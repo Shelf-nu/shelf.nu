@@ -335,3 +335,50 @@ describe("audit image service", () => {
     });
   });
 });
+
+describe("uploadAuditImage returnParsedFormData", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the bounded-parsed formData alongside the image", async () => {
+    // why: parseFileFormData is the bounded (maxFileSize) streaming parser;
+    // @remix-run/form-data-parser passes text fields through, so the caller
+    // need not re-parse the body unbounded.
+    const fd = new FormData();
+    fd.set("image", JSON.stringify({ originalPath: "p", thumbnailPath: "t" }));
+    fd.set("content", "Dent on top");
+    vi.mocked(parseFileFormData).mockResolvedValue(fd);
+
+    // why: external DB — count returns 0 so the per-asset/per-audit image
+    // limit check passes; create returns a deterministic row so the asserted
+    // return shape ({ image, formData }) is stable without a real Prisma tx.
+    vi.mocked(db.auditImage.count).mockResolvedValue(0);
+    vi.mocked(db.auditImage.create).mockResolvedValue({
+      id: "img-ret-1",
+      auditSessionId: "session-1",
+      auditAssetId: "audit-asset-1",
+      organizationId: "org-1",
+      imageUrl: "https://example.com/p",
+      thumbnailUrl: "https://example.com/t",
+      description: null,
+      uploadedById: "user-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await uploadAuditImage({
+      request: new Request("http://localhost", { method: "POST" }),
+      auditSessionId: "session-1",
+      organizationId: "org-1",
+      uploadedById: "user-1",
+      auditAssetId: "audit-asset-1",
+      returnParsedFormData: true,
+    });
+
+    expect(result).toHaveProperty("image");
+    expect(result).toHaveProperty("formData");
+    expect((result as any).formData.get("content")).toBe("Dent on top");
+    expect((result as any).image.id).toBe("img-ret-1");
+  });
+});

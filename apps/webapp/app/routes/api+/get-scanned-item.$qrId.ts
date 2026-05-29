@@ -22,6 +22,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import {
+  sanitizeAssetExtraInclude,
+  sanitizeKitExtraInclude,
+} from "~/utils/scanner-extra-include.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -119,14 +123,17 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
     };
 
+    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
+    // user-controlled JSON. Allowlist them before merging into the Prisma
+    // include so relation traversal / deep nesting cannot be injected.
     const assetInclude: Prisma.AssetInclude = {
       ...ASSET_INCLUDE,
-      ...(assetExtraInclude ?? {}),
+      ...(sanitizeAssetExtraInclude(assetExtraInclude) ?? {}),
     };
 
     const kitInclude: Prisma.KitInclude = {
       ...KIT_INCLUDE,
-      ...(kitExtraInclude ?? {}),
+      ...(sanitizeKitExtraInclude(kitExtraInclude) ?? {}),
     };
 
     const sequentialId = parseSequentialId(qrId);

@@ -181,6 +181,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               },
             }),
             tx.auditSession.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
               where: { id: auditId },
               data: {
                 foundAssetCount: { decrement: 1 },
@@ -197,6 +198,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               where: { id: existingScan.auditAsset.id },
             }),
             tx.auditSession.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
               where: { id: auditId },
               data: {
                 unexpectedAssetCount: { decrement: 1 },
@@ -241,6 +243,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // different tables and are independent of each other.
         await Promise.all([
           tx.auditSession.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
             where: { id: auditId },
             data: {
               foundAssetCount: foundCount,
@@ -251,6 +254,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           createAssetScanRemovedNote({
             auditSessionId: auditId,
             assetId,
+            organizationId,
             userId,
             tx,
           }),

@@ -229,6 +229,7 @@ export async function computeAvailableQuantity(
   try {
     const [asset, custodySum] = await Promise.all([
       db.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging)
         where: { id: assetId },
         select: { quantity: true },
       }),
@@ -520,6 +521,7 @@ export async function adjustQuantity({
 
       /** Step 6: Update the asset's quantity */
       const updatedAsset = await tx.asset.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier in this transaction via the locked asset's organizationId guard
         where: { id: assetId },
         data: { quantity: newQuantity },
       });

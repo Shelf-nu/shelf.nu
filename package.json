@@ -53,7 +53,7 @@
     "@commitlint/config-conventional": "^20.5.0",
     "@evilmartians/lefthook": "^2.1.5",
     "prettier": "3.0.3",
-    "turbo": "^2.9.5"
+    "turbo": "^2.9.14"
   },
   "pnpm": {
     "overrides": {
@@ -63,7 +63,19 @@
       "@tremor/react>react-day-picker": "^9.14.0",
       "@tremor/react>react-dom": "19.2.1",
       "cross-spawn": "~7.0.6",
-      "p-map": "4.0.0"
+      "defu@<6.1.5": "6.1.5",
+      "flatted@<3.4.0": "3.4.2",
+      "minimatch@<3.1.4": "3.1.4",
+      "minimatch@>=9.0.0 <9.0.7": "9.0.7",
+      "minimatch@>=10.0.0 <10.2.3": "10.2.3",
+      "p-map": "4.0.0",
+      "path-to-regexp@<0.1.13": "0.1.13",
+      "picomatch@<2.3.2": "2.3.2",
+      "picomatch@>=3.0.0 <3.0.2": "3.0.2",
+      "picomatch@>=4.0.0 <4.0.4": "4.0.4",
+      "postcss@<8.5.10": "8.5.10",
+      "yaml@<1.10.3": "1.10.3",
+      "yaml@>=2.0.0 <2.8.3": "2.8.3"
     },
     "patchedDependencies": {
       "expo-image@55.0.6": "patches/expo-image@55.0.6.patch"

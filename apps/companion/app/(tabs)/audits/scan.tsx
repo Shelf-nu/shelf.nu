@@ -500,6 +500,8 @@ function AuditScannerContent() {
           name: asset.name,
           thumbnailImage: asset.thumbnailImage || asset.mainImage,
           mainImage: asset.mainImage,
+          locationName: asset.locationName,
+          categoryName: asset.categoryName,
         });
       }
     }
@@ -1193,7 +1195,7 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center" as const,
     alignSelf: "center" as const,
     backgroundColor: "rgba(0,0,0,0.6)",
-    borderRadius: borderRadius.full,
+    borderRadius: borderRadius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     gap: 4,

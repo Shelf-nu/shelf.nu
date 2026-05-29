@@ -8,3 +8,4 @@ export * from "./teamMember";
 export * from "./asset";
 export * from "./organization";
 export * from "./assetModel";
+export * from "./activityEvent";

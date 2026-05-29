@@ -40,7 +40,9 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .parse(body);
 
-    await deleteAsset({ id: assetId, organizationId });
+    // why: passing actorUserId so the ASSET_DELETED event is attributed to
+    // the mobile user instead of recording as a system-initiated delete.
+    await deleteAsset({ id: assetId, organizationId, actorUserId: user.id });
 
     return data({ success: true });
   } catch (cause) {

@@ -2,6 +2,7 @@ import {
   wrapAssetsWithDataForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { buildAuditImagesNoteContent } from "./note-content.server";
 
 /**
  * Creates an automatic note when an audit is created.
@@ -55,14 +56,16 @@ export async function createAuditCreationNote({
 export async function createAssetScanNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   isExpected,
   tx,
   prefetchedUser,
-  prefetchedAsset,
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   isExpected: boolean;
   tx: any; // Prisma transaction client
@@ -71,15 +74,16 @@ export async function createAssetScanNote({
     firstName: string | null;
     lastName: string | null;
   } | null;
-  prefetchedAsset?: { id: string; title: string } | null;
 }) {
-  // Use pre-fetched data if available, otherwise fetch inside the transaction
+  // why: the asset is ALWAYS fetched org-scoped here (no prefetch shortcut) so
+  // a caller that prefetched an asset without org scoping cannot feed a
+  // foreign-org asset through this note path (cross-org IDOR). The user is not
+  // org-scoped data for this note, so prefetchedUser remains a safe shortcut.
   const [asset, scanner] = await Promise.all([
-    prefetchedAsset ??
-      tx.asset.findUnique({
-        where: { id: assetId },
-        select: { id: true, title: true },
-      }),
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
+      select: { id: true, title: true },
+    }),
     prefetchedUser ??
       tx.user.findUnique({
         where: { id: userId },
@@ -119,17 +123,20 @@ export async function createAssetScanNote({
 export async function createAssetScanRemovedNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
   const [asset, remover] = await Promise.all([
-    tx.asset.findUnique({
-      where: { id: assetId },
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
     tx.user.findUnique({
@@ -411,6 +418,62 @@ export async function createAuditAssetImagesAddedNote({
 }
 
 /**
+ * Records the evidence note that accompanies an image upload on a scanned
+ * asset, in the caller's transaction. Single source of truth shared by the
+ * webapp scan route and the mobile companion image route.
+ *
+ * - With user content: a `COMMENT` note whose body is the **sanitized**
+ *   user text followed by a single trusted `{% audit_images %}` tag
+ *   (Markdoc injection closed via {@link buildAuditImagesNoteContent}).
+ * - Without content: delegates to {@link createAuditAssetImagesAddedNote}
+ *   for the auto-generated `UPDATE` note.
+ *
+ * @param args.tx - Active Prisma transaction client
+ * @param args.auditSessionId - The audit session the note belongs to
+ * @param args.auditAssetId - The scanned AuditAsset this evidence is for
+ * @param args.userId - The author of the note / uploader
+ * @param args.imageIds - Ids of the AuditImage rows just uploaded
+ * @param args.content - Optional user note text (untrusted; sanitized)
+ * @returns Nothing; the note is written via `tx`
+ */
+export async function createAuditImageEvidenceNote({
+  tx,
+  auditSessionId,
+  auditAssetId,
+  userId,
+  imageIds,
+  content,
+}: {
+  tx: any; // Prisma transaction client (matches createAuditAssetImagesAddedNote)
+  auditSessionId: string;
+  auditAssetId: string;
+  userId: string;
+  imageIds: string[];
+  content?: string | null;
+}) {
+  if (content?.trim()) {
+    await tx.auditNote.create({
+      data: {
+        auditSessionId,
+        auditAssetId,
+        userId,
+        type: "COMMENT",
+        content: buildAuditImagesNoteContent({ content, imageIds }),
+      },
+    });
+    return;
+  }
+
+  await createAuditAssetImagesAddedNote({
+    auditSessionId,
+    auditAssetId,
+    userId,
+    imageIds,
+    tx,
+  });
+}
+
+/**
  * Creates an automatic note when the audit due date is changed.
  */
 export async function createDueDateChangedNote({
@@ -621,12 +684,15 @@ export async function createAssetsAddedToAuditNote({
   auditSessionId,
   userId,
   addedAssetIds,
+  organizationId,
   skippedCount,
   tx,
 }: {
   auditSessionId: string;
   userId: string;
   addedAssetIds: string[];
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   skippedCount: number;
   tx: any; // Prisma transaction client
 }) {
@@ -641,7 +707,7 @@ export async function createAssetsAddedToAuditNote({
       },
     }),
     tx.asset.findMany({
-      where: { id: { in: addedAssetIds } },
+      where: { id: { in: addedAssetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
     }),
@@ -683,11 +749,14 @@ export async function createAssetsAddedToAuditNote({
 export async function createAssetRemovedFromAuditNote({
   auditSessionId,
   assetId,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetId: string;
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
@@ -701,8 +770,8 @@ export async function createAssetRemovedFromAuditNote({
         displayName: true,
       },
     }),
-    tx.asset.findUnique({
-      where: { id: assetId },
+    tx.asset.findFirst({
+      where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
   ]);
@@ -736,11 +805,14 @@ export async function createAssetRemovedFromAuditNote({
 export async function createAssetsRemovedFromAuditNote({
   auditSessionId,
   assetIds,
+  organizationId,
   userId,
   tx,
 }: {
   auditSessionId: string;
   assetIds: string[];
+  /** Caller's organization — scopes the asset lookup to prevent cross-org IDOR */
+  organizationId: string;
   userId: string;
   tx: any; // Prisma transaction client
 }) {
@@ -755,7 +827,7 @@ export async function createAssetsRemovedFromAuditNote({
       },
     }),
     tx.asset.findMany({
-      where: { id: { in: assetIds } },
+      where: { id: { in: assetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
     }),

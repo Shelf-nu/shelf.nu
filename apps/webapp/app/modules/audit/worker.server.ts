@@ -20,6 +20,7 @@ import type { AuditSchedulerData } from "./types";
 const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler handler; AuditSchedulerData carries only the audit id (no user request / organizationId in scope). Lookup is keyed on the trusted job payload, not user input.
       where: { id: data.id },
       include: AUDIT_INCLUDE_FOR_EMAIL,
     })
@@ -65,6 +66,7 @@ const reminder24h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler handler; AuditSchedulerData carries only the audit id (no user request / organizationId in scope). Lookup is keyed on the trusted job payload, not user input.
       where: { id: data.id },
       include: AUDIT_INCLUDE_FOR_EMAIL,
     })
@@ -110,6 +112,7 @@ const reminder4h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler handler; AuditSchedulerData carries only the audit id (no user request / organizationId in scope). Lookup is keyed on the trusted job payload, not user input.
       where: { id: data.id },
       include: AUDIT_INCLUDE_FOR_EMAIL,
     })
@@ -155,6 +158,7 @@ const reminder1h = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
 const overdueNotice = async ({ data }: PgBoss.Job<AuditSchedulerData>) => {
   const audit = await db.auditSession
     .findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler handler; AuditSchedulerData carries only the audit id (no user request / organizationId in scope). Lookup is keyed on the trusted job payload, not user input.
       where: { id: data.id },
       include: AUDIT_INCLUDE_FOR_EMAIL,
     })

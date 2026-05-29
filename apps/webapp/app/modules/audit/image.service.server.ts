@@ -38,8 +38,34 @@ const MAX_GENERAL_IMAGES_PER_AUDIT = 5;
  * @param uploadedById - ID of the user uploading the image
  * @param auditAssetId - Optional ID of the audit asset this image is tied to
  * @param description - Optional description for the image
- * @returns The created AuditImage record
+ * @param returnParsedFormData - When `false` (default), returns only the
+ *   created `AuditImage`. When `true`, returns `{ image, formData }` where
+ *   `formData` is the already-bounded `FormData` produced by
+ *   `parseFileFormData` (maxFileSize enforced). Because
+ *   `@remix-run/form-data-parser` passes non-file text fields through, the
+ *   caller can read fields like `content` from it without issuing a second,
+ *   unbounded `request.clone().formData()` parse.
+ * @returns The created `AuditImage` (default), or `{ image, formData }` when
+ *   `returnParsedFormData` is `true`
  */
+export async function uploadAuditImage(args: {
+  request: Request;
+  auditSessionId: AuditSession["id"];
+  organizationId: Organization["id"];
+  uploadedById: User["id"];
+  auditAssetId?: AuditAsset["id"];
+  description?: string;
+  returnParsedFormData?: false;
+}): Promise<AuditImage>;
+export async function uploadAuditImage(args: {
+  request: Request;
+  auditSessionId: AuditSession["id"];
+  organizationId: Organization["id"];
+  uploadedById: User["id"];
+  auditAssetId?: AuditAsset["id"];
+  description?: string;
+  returnParsedFormData: true;
+}): Promise<{ image: AuditImage; formData: FormData }>;
 export async function uploadAuditImage({
   request,
   auditSessionId,
@@ -47,6 +73,7 @@ export async function uploadAuditImage({
   uploadedById,
   auditAssetId,
   description,
+  returnParsedFormData = false,
 }: {
   request: Request;
   auditSessionId: AuditSession["id"];
@@ -54,7 +81,8 @@ export async function uploadAuditImage({
   uploadedById: User["id"];
   auditAssetId?: AuditAsset["id"];
   description?: string;
-}): Promise<AuditImage> {
+  returnParsedFormData?: boolean;
+}): Promise<AuditImage | { image: AuditImage; formData: FormData }> {
   try {
     // Check image count limits before uploading
     await validateImageLimits({
@@ -135,7 +163,9 @@ export async function uploadAuditImage({
       },
     });
 
-    return auditImage;
+    return returnParsedFormData
+      ? { image: auditImage, formData: fileData }
+      : auditImage;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -255,6 +285,7 @@ export async function deleteAuditImage({
 
     // Delete from database
     await db.auditImage.delete({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: image ownership already proven org-scoped above via db.auditImage.findFirst({ where: { id: imageId, organizationId } }) which throws if not found; delete() requires a unique-only selector so organizationId cannot be added here.
       where: {
         id: imageId,
       },

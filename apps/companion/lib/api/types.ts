@@ -6,6 +6,14 @@ export type Organization = {
   type: string;
   roles: string[];
   barcodesEnabled: boolean;
+  /**
+   * Canonical "can use Audits" capability from `/api/mobile/me`
+   * (server-side `canUseAudits`: the paid add-on flag, OR always true when
+   * premium gating is disabled). Premium-aware so client gating matches
+   * the server. When false the companion hides Audits entry points and
+   * every mobile audit endpoint returns 403.
+   */
+  auditsEnabled: boolean;
 };
 
 export type MeResponse = {
@@ -309,6 +317,12 @@ export type AuditListItem = {
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null };
   assigneeCount: number;
+  /**
+   * True when the authenticated mobile user is among the audit's
+   * assignees. Server-computed on the list endpoint so the companion
+   * can render a "Yours" marker without an extra round-trip per row.
+   */
+  isAssignedToMe: boolean;
 };
 
 export type AuditsResponse = {
@@ -325,6 +339,24 @@ export type AuditExpectedAsset = {
   auditAssetId: string;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Where the asset is supposed to be physically. Surfaced on the
+   * audit detail row so the field worker can navigate to the right
+   * shelf / room without leaving the audit context. Null when the
+   * asset has no location set or the server didn't load it.
+   */
+  locationName: string | null;
+  /**
+   * Asset category name — helps when the image is generic and you
+   * need to disambiguate "which laptop" among many identical rows.
+   */
+  categoryName: string | null;
+  /**
+   * Display name of the team member currently holding the asset, if
+   * any. Helps explain why an expected asset can't be found at its
+   * location (someone has it on loan).
+   */
+  custodianName: string | null;
 };
 
 export type AuditScanData = {
@@ -334,6 +366,12 @@ export type AuditScanData = {
   isExpected: boolean;
   scannedAt: string;
   auditAssetId: string | null;
+  /** Asset's location name at scan time, or null if it has no location set. */
+  assetLocationName: string | null;
+  /** Number of COMMENT notes recorded against this scanned asset. */
+  auditNotesCount: number;
+  /** Number of condition photos uploaded for this scanned asset. */
+  auditImagesCount: number;
 };
 
 export type AuditDetailResponse = {

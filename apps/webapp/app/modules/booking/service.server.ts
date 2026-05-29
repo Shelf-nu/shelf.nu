@@ -72,6 +72,12 @@ import {
   wrapCustodianForNote,
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
+import {
+  assertAssetsBelongToOrg,
+  assertTagsBelongToOrg,
+  assertTeamMemberBelongsToOrg,
+  assertUserBelongsToOrg,
+} from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -365,6 +371,7 @@ export async function scheduleNextBookingJob({
       when
     );
     await db.booking.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: internal scheduler bookkeeping; data.id always comes from a booking already org-validated by every caller (e.g. checkoutBooking L1265, reserveBooking L1020) and SchedulerData carries no organizationId; this only writes activeSchedulerReference, not a data read
       where: { id: data.id },
       data: { activeSchedulerReference: id },
     });
@@ -388,7 +395,11 @@ async function updateBookingAssetStates(
     return await db.asset.updateMany({
       where: {
         status: { not: status },
-        id: { in: booking.bookingAssets.map((ba) => ba.asset.id) },
+        id: {
+          in: [...new Set(booking.bookingAssets.map((ba) => ba.asset.id))],
+        },
+        // Scope to the booking's org so we never mutate assets in another org
+        organizationId: booking.organizationId,
       },
       data: { status },
     });
@@ -405,13 +416,16 @@ async function updateBookingAssetStates(
 async function updateBookingKitStates({
   kitIds,
   status,
+  organizationId,
 }: {
   kitIds: string[];
   status: KitStatus;
+  /** Org that owns the booking — scopes the update so we never touch another org's kits */
+  organizationId: string;
 }) {
   try {
     return await db.kit.updateMany({
-      where: { id: { in: kitIds } },
+      where: { id: { in: kitIds }, organizationId },
       data: { status },
     });
   } catch (cause) {
@@ -502,6 +516,49 @@ export async function createBooking({
 
     // Use transaction to ensure booking creation and activity events are atomic
     const createdBooking = await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
+      // member ID all originate from request/form input. Before connecting
+      // them to the new booking we must prove they belong to the booking's
+      // organization — otherwise an attacker in Org A could supply Org B's
+      // IDs and link foreign-org entities into their own booking. Validation
+      // runs with the active `tx` so it commits atomically with the create.
+      if (assetIds.length > 0) {
+        await assertAssetsBelongToOrg(
+          { assetIds, organizationId: booking.organizationId },
+          tx
+        );
+      }
+
+      if (booking.tags.length > 0) {
+        await assertTagsBelongToOrg(
+          {
+            tagIds: booking.tags.map((t) => t.id),
+            organizationId: booking.organizationId,
+          },
+          tx
+        );
+      }
+
+      await assertTeamMemberBelongsToOrg(
+        {
+          teamMemberId: booking.custodianTeamMemberId,
+          organizationId: booking.organizationId,
+        },
+        tx
+      );
+
+      // SECURITY (cross-org IDOR): custodianUserId is also request input and a
+      // valid team member does not prove the paired user belongs to the org.
+      if (booking.custodianUserId) {
+        await assertUserBelongsToOrg(
+          {
+            userId: booking.custodianUserId,
+            organizationId: booking.organizationId,
+          },
+          tx
+        );
+      }
+
       const created = await tx.booking.create({
         data: dataToCreate,
         include: { ...BOOKING_COMMON_INCLUDE, organization: true },
@@ -649,6 +706,14 @@ export async function updateBasicBooking({
     // (for custodian change scenarios)
     const oldCustodianEmail = booking.custodianUser?.email;
 
+    // SECURITY (cross-org IDOR): tags come from form input and are connected
+    // unconditionally below. Prove they belong to this organization before
+    // connecting, mirroring the guard in createBooking.
+    const tagIds = tags?.map((t) => t.id) ?? [];
+    if (tagIds.length > 0) {
+      await assertTagsBelongToOrg({ tagIds, organizationId });
+    }
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       name,
       description,
@@ -696,6 +761,15 @@ export async function updateBasicBooking({
        * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
        */
       if (custodianTeamMemberId) {
+        // SECURITY (cross-org IDOR): custodianTeamMemberId comes from form
+        // input. Prove the team member belongs to this booking's
+        // organization before connecting it, so an attacker cannot assign a
+        // foreign-org team member as the custodian.
+        await assertTeamMemberBelongsToOrg({
+          teamMemberId: custodianTeamMemberId,
+          organizationId,
+        });
+
         dataToUpdate.custodianTeamMember = {
           connect: { id: custodianTeamMemberId },
         };
@@ -705,6 +779,12 @@ export async function updateBasicBooking({
          * This will override the value if there were any previous custodians`
          */
         if (custodianUserId) {
+          // SECURITY (cross-org IDOR): custodianUserId is request input; a
+          // valid team member does not prove the paired user is in this org.
+          await assertUserBelongsToOrg({
+            userId: custodianUserId,
+            organizationId,
+          });
           dataToUpdate.custodianUser = {
             connect: { id: custodianUserId },
           };
@@ -729,6 +809,7 @@ export async function updateBasicBooking({
     }
 
     const updatedBooking = await db.booking.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L619; this is the write on that same proven id
       where: { id: booking.id },
       data: dataToUpdate,
     });
@@ -880,9 +961,12 @@ export async function updateBasicBooking({
         : booking.custodianTeamMember?.name ?? "Unknown";
 
       try {
-        // Fetch new custodian details
-        const newCustodian = await db.teamMember.findUnique({
-          where: { id: custodianTeamMemberId },
+        // Fetch new custodian details.
+        // SECURITY (cross-org IDOR): scope the lookup to this booking's
+        // organization so a foreign-org team member cannot be resolved and
+        // surfaced in the activity note.
+        const newCustodian = await db.teamMember.findFirst({
+          where: { id: custodianTeamMemberId, organizationId },
           select: {
             id: true,
             name: true,
@@ -949,7 +1033,7 @@ export async function updateBasicBooking({
 
       // Get new tag names - we need to fetch them since we only have IDs
       const newTags = await db.tag.findMany({
-        where: { id: { in: newTagIds } },
+        where: { id: { in: newTagIds }, organizationId },
         select: { name: true },
       });
       const newTagNames = newTags.map((tag) => tag.name).join(", ") || "(none)";
@@ -1142,6 +1226,14 @@ export async function reserveBooking({
       });
     }
 
+    // SECURITY (cross-org IDOR): tags come from form input and are connected
+    // below. Prove they belong to this organization before connecting,
+    // mirroring createBooking / updateBasicBooking.
+    const tagIds = tags?.map((t) => t.id) ?? [];
+    if (tagIds.length > 0) {
+      await assertTagsBelongToOrg({ tagIds, organizationId });
+    }
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.RESERVED,
       name,
@@ -1164,6 +1256,14 @@ export async function reserveBooking({
      * However, just in case we need to check it. If its not passed, we need to throw an error to prevent silent failure and corrupted data
      */
     if (custodianTeamMemberId) {
+      // SECURITY (cross-org IDOR): custodianTeamMemberId comes from form input.
+      // Prove the team member belongs to this booking's organization before
+      // connecting it, mirroring updateBasicBooking / createBooking.
+      await assertTeamMemberBelongsToOrg({
+        teamMemberId: custodianTeamMemberId,
+        organizationId,
+      });
+
       dataToUpdate.custodianTeamMember = {
         connect: { id: custodianTeamMemberId },
       };
@@ -1173,6 +1273,12 @@ export async function reserveBooking({
        * This will override the value if there were any previous custodians`
        */
       if (custodianUserId) {
+        // SECURITY (cross-org IDOR): custodianUserId is request input; a valid
+        // team member does not prove the paired user is in this org.
+        await assertUserBelongsToOrg({
+          userId: custodianUserId,
+          organizationId,
+        });
         dataToUpdate.custodianUser = {
           connect: { id: custodianUserId },
         };
@@ -1196,6 +1302,7 @@ export async function reserveBooking({
     }
 
     const updatedBooking = await db.booking.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
       where: { id: bookingFound.id },
       data: dataToUpdate,
     });
@@ -1347,6 +1454,7 @@ async function checkoutBookingWritesWithinTx(
   tx: any,
   {
     bookingId,
+    organizationId,
     bookingAssetIds,
     qtyTrackedBookingAssets,
     uniqueQtyTrackedAssetIds,
@@ -1355,6 +1463,7 @@ async function checkoutBookingWritesWithinTx(
     hasKits,
   }: {
     bookingId: Booking["id"];
+    organizationId: Booking["organizationId"];
     bookingAssetIds: Asset["id"][];
     qtyTrackedBookingAssets: Array<{
       quantity: number;
@@ -1485,14 +1594,19 @@ async function checkoutBookingWritesWithinTx(
     }
   }
 
+  // SECURITY (cross-org IDOR): scope the status mutation to the caller's
+  // organization so it can never flip the status of an asset that lives in
+  // another workspace, even if a foreign asset ID slipped into the list.
   await tx.asset.updateMany({
     where: {
       id: { in: bookingAssetIds },
+      organizationId,
     },
     data: { status: AssetStatus.CHECKED_OUT },
   });
 
   await tx.booking.update({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId already org-checked by the caller via findUniqueOrThrow({where:{id,organizationId}}); this is the write on that same proven id
     where: { id: bookingId },
     data: dataToUpdate,
     select: { id: true },
@@ -1500,7 +1614,7 @@ async function checkoutBookingWritesWithinTx(
 
   if (hasKits) {
     await tx.kit.updateMany({
-      where: { id: { in: kitIds } },
+      where: { id: { in: kitIds }, organizationId },
       data: { status: KitStatus.CHECKED_OUT },
     });
   }
@@ -1569,6 +1683,7 @@ async function runCheckoutSideEffects({
    */
   if (isExpired) {
     return db.booking.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `bookingFound.id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}); this re-fetches the same proven id for the return payload
       where: { id: bookingFound.id },
       include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
     });
@@ -1619,6 +1734,7 @@ async function runCheckoutSideEffects({
 
   /** Hydrate the full booking with relations for the return payload only. */
   return db.booking.findUniqueOrThrow({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `bookingFound.id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}); this re-fetches the same proven id for the return payload
     where: { id: bookingFound.id },
     include: { ...BOOKING_INCLUDE_FOR_EMAIL, bookingAssets: true },
   });
@@ -1679,6 +1795,22 @@ export async function checkoutBooking({
           shouldBeCaptured: !isNotFoundError(cause),
         });
       });
+
+    // SECURITY (defense-in-depth): reject checkout if any attached asset is
+    // not in this org BEFORE any asset-derived logic runs. A legacy
+    // pre-remediation cross-org link would otherwise (a) leak the foreign
+    // asset's title through the conflict/custody error messages below, and
+    // (b) let the booking transition while the org-scoped updateMany skips it.
+    // Legitimately-created bookings (assets validated at create/add) pass.
+    const bookingFoundAssetIds = [
+      ...new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id)),
+    ];
+    if (bookingFoundAssetIds.length > 0) {
+      await assertAssetsBelongToOrg({
+        assetIds: bookingFoundAssetIds,
+        organizationId,
+      });
+    }
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
@@ -1794,7 +1926,9 @@ export async function checkoutBooking({
     /** Keep the transaction lean (writes only + per-asset row locks for
      * qty-tracked availability guard) to stay within the timeout. The
      * heavy read for the return payload is done after commit. This
-     * prevents P2028 timeouts on bookings with many assets.
+     * prevents P2028 timeouts on bookings with many assets (262 assets in
+     * Sentry SHELF-WEBAPP-1KN), so we bump the interactive-tx timeout from
+     * the 5s default to 15s.
      *
      * We use the interactive (callback) form of `$transaction` so we can
      * acquire `SELECT … FOR UPDATE` row locks via
@@ -1810,10 +1944,20 @@ export async function checkoutBooking({
       new Set(qtyTrackedBookingAssets.map((ba) => ba.asset.id))
     );
 
+    // Dedupe asset ids before recording one BOOKING_CHECKED_OUT per asset —
+    // a booking can carry multiple BookingAsset rows per asset.
+    const uniqueCheckedOutAssetIds = Array.from(
+      new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id))
+    );
+
     await db.$transaction(
       async (tx) => {
         await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
+          // SECURITY (cross-org IDOR): the helper scopes the asset/kit
+          // status mutations to this org so a foreign asset id that slipped
+          // into the booking's list can never be flipped.
+          organizationId,
           bookingAssetIds: bookingFound.bookingAssets.map((ba) => ba.asset.id),
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
@@ -1823,18 +1967,18 @@ export async function checkoutBooking({
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
-        // booking. `bookingFound.assets` is the `bookingAssets` pivot,
-        // so we map through `ba.asset.id`.
-        if (bookingFound.bookingAssets.length > 0) {
+        // booking. Map through the deduped asset ids so a multi-row asset
+        // doesn't produce duplicate events.
+        if (uniqueCheckedOutAssetIds.length > 0) {
           await recordEvents(
-            bookingFound.bookingAssets.map((ba) => ({
+            uniqueCheckedOutAssetIds.map((assetId) => ({
               organizationId,
               actorUserId: userId ?? null,
               action: "BOOKING_CHECKED_OUT",
               entityType: "BOOKING",
               entityId: bookingFound.id,
               bookingId: bookingFound.id,
-              assetId: ba.asset.id,
+              assetId,
             })),
             tx
           );
@@ -2161,6 +2305,7 @@ export async function fulfilModelRequestsAndCheckout({
 
         await checkoutBookingWritesWithinTx(tx, {
           bookingId,
+          organizationId,
           bookingAssetIds: allBookingAssetIds,
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
@@ -3003,6 +3148,7 @@ export async function checkinBooking({
 
           if (poolDecrement > 0) {
             await tx.asset.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `asset.id` comes from `bookingFound.bookingAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
               where: { id: asset.id },
               data: { quantity: { decrement: poolDecrement } },
             });
@@ -3019,11 +3165,13 @@ export async function checkinBooking({
         }
 
         if (assetsToCheckin.length > 0) {
-          // INDIVIDUAL assets always get reset to AVAILABLE
+          // INDIVIDUAL assets always get reset to AVAILABLE. Scope to the
+          // caller's org (cross-org IDOR defence) on top of the type filter.
           await tx.asset.updateMany({
             where: {
               id: { in: assetsToCheckin },
               type: AssetType.INDIVIDUAL,
+              organizationId,
             },
             data: { status: AssetStatus.AVAILABLE },
           });
@@ -3056,6 +3204,7 @@ export async function checkinBooking({
 
               if (otherBookings === 0 && custodyCount === 0) {
                 await tx.asset.update({
+                  // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` comes from `bookingFoundAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
                   where: { id: assetId },
                   data: { status: AssetStatus.AVAILABLE },
                 });
@@ -3067,7 +3216,7 @@ export async function checkinBooking({
         if (hasKits) {
           if (kitsToCheckin.length > 0) {
             await tx.kit.updateMany({
-              where: { id: { in: kitsToCheckin } },
+              where: { id: { in: kitsToCheckin }, organizationId },
               data: { status: KitStatus.AVAILABLE },
             });
           }
@@ -3093,6 +3242,7 @@ export async function checkinBooking({
 
         /** Finally update the booking */
         return tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1552; this is the write on that same proven id
           where: { id: bookingFound.id },
           data: dataToUpdate,
           include: {
@@ -3128,7 +3278,7 @@ export async function checkinBooking({
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
-          where: { id: { in: specificAssetIds } },
+          where: { id: { in: specificAssetIds }, organizationId },
           select: {
             id: true,
             title: true,
@@ -3302,6 +3452,7 @@ export async function checkinBooking({
               type: "UPDATE",
               userId,
               assetIds: [summary.assetId],
+              organizationId,
             });
           }
         }
@@ -3674,6 +3825,7 @@ export async function partialCheckinBooking({
     // (so we don't split consumption-log writes across two services).
     if (!hasQuantityDispositions) {
       const currentAssetStatuses = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `bookingFoundAssets` derive from the booking loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
         where: { id: { in: bookingFoundAssets.map((a) => a.id) } },
         select: { id: true, status: true },
       });
@@ -3701,6 +3853,7 @@ export async function partialCheckinBooking({
           type: "UPDATE",
           userId,
           assetIds: effectiveAssetIds,
+          organizationId,
         });
 
         const completedBooking = await checkinBooking({
@@ -3898,6 +4051,7 @@ export async function partialCheckinBooking({
         // the pool alone — the unit is back where it came from.
         if (poolDecrement > 0) {
           await tx.asset.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `disp.assetId` validated against `bookingFoundAssets` (loaded org-scoped) before this loop
             where: { id: disp.assetId },
             data: { quantity: { decrement: poolDecrement } },
           });
@@ -3924,8 +4078,9 @@ export async function partialCheckinBooking({
         (id_) => assetTypeById.get(id_) === AssetType.INDIVIDUAL
       );
       if (individualAssetIds.length > 0) {
+        // Scope to the caller's org (cross-org IDOR defence).
         await tx.asset.updateMany({
-          where: { id: { in: individualAssetIds } },
+          where: { id: { in: individualAssetIds }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         });
       }
@@ -3960,6 +4115,7 @@ export async function partialCheckinBooking({
         ]);
         if (otherBookings === 0 && custodyCount === 0) {
           await tx.asset.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` comes from `effectiveAssetIds` validated against the org-scoped booking assets earlier in partialCheckinBooking
             where: { id: assetId },
             data: { status: AssetStatus.AVAILABLE },
           });
@@ -3968,7 +4124,7 @@ export async function partialCheckinBooking({
 
       if (completeKitIds.length > 0) {
         await tx.kit.updateMany({
-          where: { id: { in: completeKitIds } },
+          where: { id: { in: completeKitIds }, organizationId },
           data: { status: KitStatus.AVAILABLE },
         });
       }
@@ -4032,6 +4188,7 @@ export async function partialCheckinBooking({
       const bookingIsComplete = await isBookingFullyCheckedIn(tx, id);
 
       const updatedBookingSnapshot = await tx.booking.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
         where: { id },
         include: {
           bookingAssets: true,
@@ -4043,6 +4200,7 @@ export async function partialCheckinBooking({
 
       if (bookingIsComplete) {
         const completedBooking = await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
           where: { id },
           data: { status: BookingStatus.COMPLETE },
           include: {
@@ -4148,6 +4306,9 @@ export async function partialCheckinBooking({
           type: "UPDATE",
           userId,
           assetIds: [summary.assetId],
+          // why: createNotes now requires organizationId (it internally runs
+          // the cross-org asset guard); forward the booking's org.
+          organizationId,
         });
       }
 
@@ -4157,6 +4318,9 @@ export async function partialCheckinBooking({
           type: "UPDATE",
           userId,
           assetIds: txResult.individualAssetIds,
+          // why: createNotes now requires organizationId (it internally runs
+          // the cross-org asset guard); forward the booking's org.
+          organizationId,
         });
       }
 
@@ -4170,6 +4334,7 @@ export async function partialCheckinBooking({
       const assetsWithKitInfo =
         assetIdsTouched.length > 0
           ? await db.asset.findMany({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking
               where: { id: { in: assetIdsTouched } },
               select: {
                 id: true,
@@ -4426,6 +4591,7 @@ export async function updateBookingAssets({
           : Promise.resolve(),
         // Touch updatedAt since the raw INSERTs don't update the booking row
         tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2328; this is the write on that same proven id
           where: { id },
           data: { updatedAt: new Date() },
         }),
@@ -4614,6 +4780,7 @@ export async function archiveBooking({
     }
 
     const updatedBooking = await db.booking.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2546; this is the write on that same proven id
       where: { id: booking.id },
       data: { status: BookingStatus.ARCHIVED },
     });
@@ -4717,20 +4884,24 @@ export async function cancelBooking({
       /** If booking is ONGOING or OVERDUE, we have to make the assets available */
       if (bookingFound.status !== BookingStatus.RESERVED) {
         await tx.asset.updateMany({
-          where: { id: { in: cancelAssets.map((a) => a.id) } },
+          where: {
+            id: { in: cancelAssets.map((a) => a.id) },
+            organizationId,
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
 
         /** If there are any kits, then update their status as well */
         if (hasKits) {
           await tx.kit.updateMany({
-            where: { id: { in: kitIds } },
+            where: { id: { in: kitIds }, organizationId },
             data: { status: KitStatus.AVAILABLE },
           });
         }
       }
 
       return tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2624; this is the write on that same proven id
         where: { id: bookingFound.id },
         data: { status: BookingStatus.CANCELLED, cancellationReason },
         include: {
@@ -4847,6 +5018,7 @@ export async function revertBookingToDraft({
     }
 
     const cancelledBooking = await db.booking.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
       where: { id: booking.id },
       data: { status: BookingStatus.DRAFT },
     });
@@ -5014,6 +5186,7 @@ export async function extendBooking({
       }
 
       return tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
         where: { id: booking.id },
         data: {
           /**
@@ -5537,6 +5710,14 @@ export async function getBookings(params: {
                   mainImage: true,
                   thumbnailImage: true,
                   mainImageExpiration: true,
+                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+                  // Surfaced by the BookingAssetsSidebar so the chip matches the
+                  // simple-mode booking overview list and every other code-bearing
+                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+                  sequentialId: true,
+                  preferredBarcodeId: true,
+                  qrCodes: { take: 1, select: { id: true } },
+                  barcodes: { select: { id: true, type: true, value: true } },
                   category: {
                     select: {
                       id: true,
@@ -5775,6 +5956,7 @@ export async function removeAssets({
       type: "UPDATE",
       userId,
       assetIds,
+      organizationId,
     });
 
     // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
@@ -5974,6 +6156,7 @@ export async function deleteBooking(
         await updateBookingKitStates({
           kitIds: [...uniqueKitIds],
           status: KitStatus.AVAILABLE,
+          organizationId,
         });
       }
     }
@@ -6030,10 +6213,20 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
-      assetsWhere.title = {
-        contains: search,
-        mode: "insensitive",
-      };
+      // Match the asset's title OR any of its codes (QR id, barcode value)
+      // so a field worker can find an asset in a booking by the same string
+      // that's printed on the physical label.
+      assetsWhere.OR = [
+        { title: { contains: search, mode: "insensitive" } },
+        {
+          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
+        },
+        {
+          barcodes: {
+            some: { value: { contains: search, mode: "insensitive" } },
+          },
+        },
+      ];
     }
 
     // if (status) {
@@ -6290,10 +6483,17 @@ export async function getBookingFlags(
      * book-by-model bookings.
      */
     modelRequestCount?: number;
+    /** Caller's validated org — scopes the asset lookup (cross-org IDOR guard) */
+    organizationId: string;
   }
 ) {
   const assets = await db.asset.findMany({
-    where: { id: { in: booking.assetIds } },
+    // why: organizationId scoping prevents flag computation from reading
+    // assets that belong to another tenant.
+    where: {
+      id: { in: booking.assetIds },
+      organizationId: booking.organizationId,
+    },
     include: {
       category: true,
       custody: true,
@@ -6472,7 +6672,10 @@ export async function bulkDeleteBookings({
     await db.$transaction(async (tx) => {
       /** Deleting all selected bookings */
       await tx.booking.deleteMany({
-        where: { id: { in: bookings.map((booking) => booking.id) } },
+        where: {
+          id: { in: bookings.map((booking) => booking.id) },
+          organizationId,
+        },
       });
 
       /** Making assets and kits available */
@@ -6488,12 +6691,15 @@ export async function bulkDeleteBookings({
         const uniqueKitIds = new Set(allKitIds);
 
         await tx.asset.updateMany({
-          where: { id: { in: allAssets.map((asset) => asset.id) } },
+          where: {
+            id: { in: allAssets.map((asset) => asset.id) },
+            organizationId,
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
 
         await tx.kit.updateMany({
-          where: { id: { in: [...uniqueKitIds] } },
+          where: { id: { in: [...uniqueKitIds] }, organizationId },
           data: { status: KitStatus.AVAILABLE },
         });
       }
@@ -6630,7 +6836,7 @@ export async function bulkArchiveBookings({
     await db.$transaction(async (tx) => {
       /** Updating status of bookings to ARCHIVED  */
       await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) } },
+        where: { id: { in: bookings.map((b) => b.id) }, organizationId },
         data: { status: BookingStatus.ARCHIVED },
       });
 
@@ -6773,7 +6979,7 @@ export async function bulkCancelBookings({
     await db.$transaction(async (tx) => {
       /** Updating status of bookings to CANCELLED */
       await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) } },
+        where: { id: { in: bookings.map((b) => b.id) }, organizationId },
         data: { status: BookingStatus.CANCELLED },
       });
 
@@ -6790,13 +6996,13 @@ export async function bulkCancelBookings({
 
         /** Making assets available */
         await tx.asset.updateMany({
-          where: { id: { in: allAssets.map((a) => a.id) } },
+          where: { id: { in: allAssets.map((a) => a.id) }, organizationId },
           data: { status: AssetStatus.AVAILABLE },
         });
 
         /** Making kits available */
         await tx.kit.updateMany({
-          where: { id: { in: [...uniqueKitIds] } },
+          where: { id: { in: [...uniqueKitIds] }, organizationId },
           data: { status: KitStatus.AVAILABLE },
         });
       }
@@ -7035,6 +7241,7 @@ async function createNotesForScannedAssetsAndKits({
       type: "UPDATE",
       userId,
       assetIds: standaloneAssetIds,
+      organizationId,
     });
   }
 
@@ -7064,6 +7271,7 @@ async function createNotesForScannedAssetsAndKits({
           type: "UPDATE",
           userId,
           assetIds: kitAssetIds,
+          organizationId,
         });
       }
     }
@@ -7195,6 +7403,7 @@ async function addScannedAssetsToBookingWithinTx(
     referencedAssetKitIds.length > 0
       ? (
           await tx.assetKit.findMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `referencedAssetKitIds` come from the org-scoped booking assets loaded earlier in this flow
             where: { id: { in: referencedAssetKitIds } },
             select: { id: true, quantity: true },
           })
@@ -7361,10 +7570,27 @@ export async function addScannedAssetsToBooking({
   }
 }
 
-export async function getExistingBookingDetails(bookingId: string) {
+/**
+ * Loads minimal details for an existing booking when adding assets/kits to it.
+ *
+ * `organizationId` is required and scopes the lookup so a caller cannot read
+ * another tenant's booking status or asset titles by id (cross-org IDOR).
+ *
+ * @param bookingId - Target booking id (from request input)
+ * @param organizationId - Caller's validated organization id
+ * @throws {ShelfError} if the booking is missing, cross-org, or not DRAFT/RESERVED
+ */
+export async function getExistingBookingDetails(
+  bookingId: string,
+  organizationId: string
+) {
   try {
-    const booking = await db.booking.findUniqueOrThrow({
-      where: { id: bookingId },
+    // why: findFirst + organizationId (findUnique can't take a non-unique org
+    // filter) prevents cross-org booking disclosure. We null-check explicitly
+    // instead of findFirstOrThrow so a cross-org/missing id returns a clean
+    // 404 "Booking not found." rather than leaking a raw Prisma error string.
+    const booking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
       select: {
         id: true,
         status: true,
@@ -7376,11 +7602,23 @@ export async function getExistingBookingDetails(bookingId: string) {
       },
     });
 
+    if (!booking) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking not found.",
+        status: 404,
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
     if (!["DRAFT", "RESERVED"].includes(booking.status!)) {
       throw new ShelfError({
         cause: null,
         message: "Booking is not in Draft or Reserved status.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
@@ -7397,12 +7635,30 @@ export async function getExistingBookingDetails(bookingId: string) {
   }
 }
 
+/**
+ * Resolves the subset of the given asset IDs that can be added to a booking.
+ *
+ * Assets that belong to a kit are rejected (kits are added as a unit, not as
+ * loose assets).
+ *
+ * @param assetIds - Asset IDs sourced from request/form input
+ * @param organizationId - The caller's validated organization ID. Scopes the
+ *   lookup so foreign-org asset IDs are silently excluded (they simply won't
+ *   be returned), preventing a cross-org IDOR where an attacker in Org A could
+ *   add Org B's assets to a booking.
+ * @returns The IDs of the assets that exist in `organizationId` and are not
+ *   part of a kit
+ * @throws {ShelfError} If any selected asset belongs to a kit
+ */
 export async function getAvailableAssetsIdsForBooking(
-  assetIds: Asset["id"][]
+  assetIds: Asset["id"][],
+  organizationId: string
 ): Promise<string[]> {
   try {
     const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds } },
+      // SECURITY (cross-org IDOR): scope by organizationId so an attacker
+      // cannot resolve / attach assets that live in another workspace.
+      where: { id: { in: assetIds }, organizationId },
       select: {
         status: true,
         id: true,
@@ -7431,21 +7687,35 @@ export async function getAvailableAssetsIdsForBooking(
 }
 
 /**
- * This function checks for the available assets.
- * and returns the ids and booking info.
+ * Checks which of the given assets are available and returns them together
+ * with the existing booking info.
+ *
+ * @param bookingId - The booking the assets are being added to
+ * @param assetIds - Asset IDs sourced from request/form input
+ * @param organizationId - The caller's validated organization ID. Forwarded to
+ *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
+ *   added to the booking (cross-org IDOR protection).
+ * @returns The resolved (org-scoped) asset IDs and the booking details
+ * @throws {ShelfError} If no assets are available or the booking lookup fails
  */
-export async function processBooking(bookingId: string, assetIds: string[]) {
+export async function processBooking(
+  bookingId: string,
+  assetIds: string[],
+  organizationId: string
+) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
-      getAvailableAssetsIdsForBooking(assetIds),
-      getExistingBookingDetails(bookingId),
+      getAvailableAssetsIdsForBooking(assetIds, organizationId),
+      getExistingBookingDetails(bookingId, organizationId),
     ]);
 
     if (!finalAssetIds.length) {
       throw new ShelfError({
         cause: null,
         message: "No assets available.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
