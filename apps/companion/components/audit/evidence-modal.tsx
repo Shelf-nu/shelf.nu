@@ -20,9 +20,18 @@ import {
   ActivityIndicator,
   Alert,
   ActionSheetIOS,
+  ScrollView,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+// Lazy-load image manipulator to avoid crash if native module not rebuilt
+let ImageManipulator: typeof import("expo-image-manipulator") | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ImageManipulator = require("expo-image-manipulator");
+} catch {
+  // expo-image-manipulator not available
+}
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -38,6 +47,39 @@ try {
   ImagePicker = require("expo-image-picker");
 } catch {
   // expo-image-picker not available
+}
+
+/**
+ * Converts HEIC/HEIF images to JPEG for server compatibility.
+ * iOS captures photos in HEIC format by default, which many servers don't accept.
+ */
+async function ensureJpegFormat(
+  uri: string,
+  mimeType: string | null
+): Promise<{ uri: string; mimeType: string }> {
+  // If already JPEG/PNG/etc, return as-is
+  const isHeic =
+    mimeType?.includes("heic") ||
+    mimeType?.includes("heif") ||
+    uri.toLowerCase().endsWith(".heic") ||
+    uri.toLowerCase().endsWith(".heif");
+
+  if (!isHeic) {
+    return { uri, mimeType: mimeType || "image/jpeg" };
+  }
+
+  // If ImageManipulator not available, return as-is and let server handle it
+  if (!ImageManipulator) {
+    return { uri, mimeType: mimeType || "image/jpeg" };
+  }
+
+  // Convert HEIC to JPEG using expo-image-manipulator
+  const result = await ImageManipulator.manipulateAsync(uri, [], {
+    compress: 0.8,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+
+  return { uri: result.uri, mimeType: "image/jpeg" };
 }
 
 type EvidenceModalProps = {
@@ -138,8 +180,13 @@ export function EvidenceModal({
 
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      setSelectedImageUri(asset.uri);
-      setImageMimeType(asset.mimeType || "image/jpeg");
+      // Convert HEIC to JPEG if needed (iOS captures in HEIC by default)
+      const { uri, mimeType } = await ensureJpegFormat(
+        asset.uri,
+        asset.mimeType || null
+      );
+      setSelectedImageUri(uri);
+      setImageMimeType(mimeType);
     }
   }, []);
 
@@ -232,7 +279,7 @@ export function EvidenceModal({
           onPress={handleClose}
         />
         <View style={styles.sheet}>
-          {/* Header */}
+          {/* Header - fixed at top */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Ionicons
@@ -253,141 +300,160 @@ export function EvidenceModal({
             </TouchableOpacity>
           </View>
 
-          {isPending ? (
-            <View style={styles.pendingContainer}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.pendingText}>
-                Waiting for scan to sync...
-              </Text>
-              <Text style={styles.pendingHint}>
-                You can add notes and photos once the scan is confirmed.
-              </Text>
-            </View>
-          ) : (
-            <>
-              {/* Evidence counts */}
-              <View style={styles.countsRow}>
-                <View style={styles.countBadge}>
-                  <Ionicons
-                    name="document-text-outline"
-                    size={14}
-                    color={colors.muted}
-                  />
-                  <Text style={styles.countText}>
-                    {item.notesCount ?? 0} notes
-                  </Text>
-                </View>
-                <View style={styles.countBadge}>
-                  <Ionicons
-                    name="camera-outline"
-                    size={14}
-                    color={colors.muted}
-                  />
-                  <Text style={styles.countText}>
-                    {item.imagesCount ?? 0} photos
-                  </Text>
-                </View>
+          {/* Scrollable content - allows button to remain visible with keyboard */}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.scrollContent}
+          >
+            {isPending ? (
+              <View style={styles.pendingContainer}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.pendingText}>
+                  Waiting for scan to sync...
+                </Text>
+                <Text style={styles.pendingHint}>
+                  You can add notes and photos once the scan is confirmed.
+                </Text>
               </View>
-
-              {/* Image preview / picker */}
-              {selectedImageUri ? (
-                <View style={styles.imagePreviewContainer}>
-                  <Image
-                    key={selectedImageUri}
-                    source={{ uri: selectedImageUri }}
-                    style={styles.imagePreview}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                  <TouchableOpacity
-                    style={styles.removeImageButton}
-                    onPress={() => setSelectedImageUri(null)}
-                    accessibilityLabel="Remove photo"
-                  >
-                    <Ionicons name="close-circle" size={28} color="#fff" />
-                  </TouchableOpacity>
+            ) : (
+              <>
+                {/* Evidence counts */}
+                <View style={styles.countsRow}>
+                  <View style={styles.countBadge}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={14}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.countText}>
+                      {item.notesCount ?? 0}{" "}
+                      {(item.notesCount ?? 0) === 1 ? "note" : "notes"}
+                    </Text>
+                  </View>
+                  <View style={styles.countBadge}>
+                    <Ionicons
+                      name="camera-outline"
+                      size={14}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.countText}>
+                      {item.imagesCount ?? 0}{" "}
+                      {(item.imagesCount ?? 0) === 1 ? "photo" : "photos"}
+                    </Text>
+                  </View>
                 </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.addPhotoButton}
-                  onPress={handleImagePress}
-                  disabled={isSubmitting}
-                  accessibilityLabel="Add photo"
-                >
-                  <Ionicons
-                    name="camera-outline"
-                    size={24}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.addPhotoText}>Add Photo</Text>
-                </TouchableOpacity>
-              )}
 
-              {/* Note input */}
-              <View style={styles.noteContainer}>
-                <TextInput
-                  style={styles.noteInput}
-                  placeholder="Add a condition note..."
-                  placeholderTextColor={colors.muted}
-                  value={noteText}
-                  onChangeText={setNoteText}
-                  multiline
-                  maxLength={5000}
-                  editable={!isSubmitting}
-                  accessibilityLabel="Condition note"
-                />
-              </View>
-
-              {/* Submit buttons */}
-              <View style={styles.actions}>
+                {/* Image preview / picker */}
                 {selectedImageUri ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.submitButton,
-                      !canSubmitImage && styles.submitButtonDisabled,
-                    ]}
-                    onPress={handleSubmitImage}
-                    disabled={!canSubmitImage}
-                    accessibilityLabel="Upload photo"
-                  >
-                    {isSubmittingImage ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="cloud-upload-outline"
-                          size={18}
-                          color="#fff"
-                        />
-                        <Text style={styles.submitButtonText}>
-                          Upload Photo{noteText.trim() ? " + Note" : ""}
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                  <View style={styles.imagePreviewContainer}>
+                    <Image
+                      key={selectedImageUri}
+                      source={{ uri: selectedImageUri }}
+                      style={styles.imagePreview}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                    <TouchableOpacity
+                      style={styles.removeImageButton}
+                      onPress={() => setSelectedImageUri(null)}
+                      accessibilityLabel="Remove photo"
+                    >
+                      <Ionicons name="close-circle" size={28} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 ) : (
                   <TouchableOpacity
-                    style={[
-                      styles.submitButton,
-                      !canSubmitNote && styles.submitButtonDisabled,
-                    ]}
-                    onPress={handleSubmitNote}
-                    disabled={!canSubmitNote}
-                    accessibilityLabel="Save note"
+                    style={styles.addPhotoButton}
+                    onPress={handleImagePress}
+                    disabled={isSubmitting}
+                    accessibilityLabel="Add photo"
                   >
-                    {isSubmittingNote ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
-                        <Ionicons name="save-outline" size={18} color="#fff" />
-                        <Text style={styles.submitButtonText}>Save Note</Text>
-                      </>
-                    )}
+                    <Ionicons
+                      name="camera-outline"
+                      size={24}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.addPhotoText}>Add Photo</Text>
                   </TouchableOpacity>
                 )}
-              </View>
-            </>
-          )}
+
+                {/* Note input */}
+                <View style={styles.noteContainer}>
+                  <TextInput
+                    style={styles.noteInput}
+                    placeholder={
+                      item.isExpected
+                        ? "Add a condition note..."
+                        : "Why is this item here?"
+                    }
+                    placeholderTextColor={colors.muted}
+                    value={noteText}
+                    onChangeText={setNoteText}
+                    multiline
+                    maxLength={5000}
+                    editable={!isSubmitting}
+                    accessibilityLabel={
+                      item.isExpected ? "Condition note" : "Explanation note"
+                    }
+                  />
+                </View>
+
+                {/* Submit buttons */}
+                <View style={styles.actions}>
+                  {selectedImageUri ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        !canSubmitImage && styles.submitButtonDisabled,
+                      ]}
+                      onPress={handleSubmitImage}
+                      disabled={!canSubmitImage}
+                      accessibilityLabel="Upload photo"
+                    >
+                      {isSubmittingImage ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name="cloud-upload-outline"
+                            size={18}
+                            color="#fff"
+                          />
+                          <Text style={styles.submitButtonText}>
+                            Upload Photo{noteText.trim() ? " + Note" : ""}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        !canSubmitNote && styles.submitButtonDisabled,
+                      ]}
+                      onPress={handleSubmitNote}
+                      disabled={!canSubmitNote}
+                      accessibilityLabel="Save note"
+                    >
+                      {isSubmittingNote ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name="save-outline"
+                            size={18}
+                            color="#fff"
+                          />
+                          <Text style={styles.submitButtonText}>Save Note</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -433,6 +499,9 @@ const useStyles = createStyles((colors) => ({
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   headerLeft: {
     flexDirection: "row",
@@ -542,7 +611,7 @@ const useStyles = createStyles((colors) => ({
     paddingVertical: spacing.md,
   },
   submitButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.4)",
   },
   submitButtonText: {
     fontSize: fontSize.md,
