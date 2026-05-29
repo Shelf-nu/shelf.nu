@@ -24,14 +24,6 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-// Lazy-load image manipulator to avoid crash if native module not rebuilt
-let ImageManipulator: typeof import("expo-image-manipulator") | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  ImageManipulator = require("expo-image-manipulator");
-} catch {
-  // expo-image-manipulator not available
-}
 import * as Haptics from "expo-haptics";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -40,7 +32,16 @@ import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
-// Lazy-load image picker to avoid crash if native module not rebuilt
+// Lazy-load native image modules below all imports (keeps import/first happy)
+// to avoid a crash when the native module isn't present in the current build.
+let ImageManipulator: typeof import("expo-image-manipulator") | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ImageManipulator = require("expo-image-manipulator");
+} catch {
+  // expo-image-manipulator not available
+}
+
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
