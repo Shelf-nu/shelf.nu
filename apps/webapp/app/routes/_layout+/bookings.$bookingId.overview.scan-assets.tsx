@@ -118,7 +118,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       quantities: rawQuantities,
-      assetKitIdByAsset: rawAssetKitIdByAsset,
+      kitSlices: rawKitSlices,
     } = parseData(formData, addScannedAssetsToBookingSchema);
 
     // Parse the JSON-encoded `quantities` blob into a
@@ -164,32 +164,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
-    // Parse the kit-source map the drawer sends. Shape-only validation
-    // here; the service trusts the IDs and will fail at the FK level
-    // if a stale assetKitId is submitted.
-    const assetKitIdByAsset: Record<string, string> = {};
-    if (rawAssetKitIdByAsset && rawAssetKitIdByAsset !== "{}") {
+    // Parse the kit-slice specs the drawer sends. Shape-only validation
+    // here; the service trusts the IDs and will fail at the FK level if a
+    // stale assetKitId is submitted. One element per (asset, AssetKit)
+    // membership, so an asset scanned via two kits yields two slices.
+    const kitSlices: Array<{ assetId: string; assetKitId: string }> = [];
+    if (rawKitSlices && rawKitSlices !== "[]") {
       try {
-        const parsed = JSON.parse(rawAssetKitIdByAsset);
-        if (
-          typeof parsed !== "object" ||
-          parsed === null ||
-          Array.isArray(parsed)
-        ) {
-          throw new Error("expected object");
+        const parsed = JSON.parse(rawKitSlices);
+        if (!Array.isArray(parsed)) {
+          throw new Error("expected array");
         }
-        for (const [assetId, rawValue] of Object.entries(
-          parsed as Record<string, unknown>
-        )) {
-          if (typeof rawValue !== "string" || rawValue.length === 0) {
-            throw new Error(`invalid assetKitId for ${assetId}`);
+        for (const entry of parsed as unknown[]) {
+          if (typeof entry !== "object" || entry === null) {
+            throw new Error("expected object entry");
           }
-          assetKitIdByAsset[assetId] = rawValue;
+          const { assetId, assetKitId } = entry as Record<string, unknown>;
+          if (
+            typeof assetId !== "string" ||
+            assetId.length === 0 ||
+            typeof assetKitId !== "string" ||
+            assetKitId.length === 0
+          ) {
+            throw new Error("invalid kit slice entry");
+          }
+          kitSlices.push({ assetId, assetKitId });
         }
       } catch (e) {
         throw new ShelfError({
           cause: e,
-          message: `Invalid assetKitIdByAsset payload: ${
+          message: `Invalid kitSlices payload: ${
             e instanceof Error ? e.message : "parse error"
           }`,
           status: 400,
@@ -199,14 +203,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
     }
 
+    // The drawer sends the full union in `assetIds`. Split out the
+    // standalone bucket (everything not represented by a kit slice) so
+    // kit members go through the kit-driven path and standalone scans
+    // stay standalone.
+    const kitSliceAssetIds = new Set(kitSlices.map((s) => s.assetId));
+    const standaloneAssetIds = assetIds.filter(
+      (id) => !kitSliceAssetIds.has(id)
+    );
+
     await addScannedAssetsToBooking({
       bookingId,
-      assetIds,
+      assetIds: standaloneAssetIds,
       kitIds,
       organizationId,
       userId,
       quantities,
-      assetKitIdByAsset,
+      kitSlices,
     });
 
     sendNotification({

@@ -391,32 +391,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .filter((v): v is string => v != null)
     );
 
-    // Build the (asset, slice, AssetKit id) tuples for every kit-driven
-    // row we'd want to insert. Skip tuples whose AssetKit is already
-    // represented in the booking — the user already added that kit.
+    // Build the kit-driven slice specs — one element per `AssetKit`
+    // membership we'd want to insert. Skip slices whose AssetKit is
+    // already represented in the booking — the user already added that
+    // kit.
     //
-    // Same asset appearing in multiple selected kits is fine: each kit's
-    // AssetKit is a distinct row in the kit-driven bucket (partial
-    // unique is on `assetKitId`, not `assetId`). For the
-    // `updateBookingAssets` call we only need the (asset → AssetKit id)
-    // and (asset → slice qty) maps; if two kits both contain Gloves with
-    // different slice qties we can only pass ONE entry per asset via the
-    // current `updateBookingAssets` signature — pick the first kit
-    // deterministically. (Multi-kit-per-asset add in one submission is
-    // an edge case; see the deferred note below.)
-    const assetKitIdByAsset: Record<string, string> = {};
-    const sliceQuantities: Record<string, number> = {};
-    const newAssetIdsSet = new Set<string>();
+    // The SAME asset appearing in multiple selected kits produces
+    // MULTIPLE slice specs (one per AssetKit), each a distinct row in
+    // the kit-driven bucket (partial unique is on `assetKitId`, not
+    // `assetId`). This is what fixes the multi-kit-per-asset drop: a
+    // qty-tracked asset in two kits added to one booking now yields two
+    // kit-driven `BookingAsset` rows.
+    const kitSlices: Array<{
+      assetId: string;
+      assetKitId: string;
+      quantity: number;
+    }> = [];
     for (const kit of selectedKits) {
       for (const ak of kit.assetKits) {
         if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
-        newAssetIdsSet.add(ak.asset.id);
-        if (assetKitIdByAsset[ak.asset.id]) continue; // first-wins on multi-kit
-        assetKitIdByAsset[ak.asset.id] = ak.id;
-        sliceQuantities[ak.asset.id] = ak.quantity;
+        kitSlices.push({
+          assetId: ak.asset.id,
+          assetKitId: ak.id,
+          quantity: ak.quantity,
+        });
       }
     }
-    const newAssetIds = Array.from(newAssetIdsSet);
+    const newAssetIds = Array.from(new Set(kitSlices.map((s) => s.assetId)));
 
     // Only validate kits that are actually adding NEW slices to the
     // booking (i.e. at least one of the kit's AssetKits isn't already
@@ -470,31 +471,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** We only update the booking if there are NEW assets to add */
-    if (newAssetIds.length > 0) {
-      // Filter the slice + attribution maps down to only the newly-added
-      // ids — `updateBookingAssets` should ignore entries for assets that
-      // are already in the booking (those keep their existing rows).
-      const newAssetQuantities: Record<string, number> = {};
-      const newAssetKitIdByAsset: Record<string, string> = {};
-      for (const assetId of newAssetIds) {
-        if (sliceQuantities[assetId] != null) {
-          newAssetQuantities[assetId] = sliceQuantities[assetId];
-        }
-        if (assetKitIdByAsset[assetId]) {
-          newAssetKitIdByAsset[assetId] = assetKitIdByAsset[assetId];
-        }
-      }
-
-      /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
+    /** We only update the booking if there are NEW slices to add */
+    if (kitSlices.length > 0) {
+      /**
+       * Kit-add only contributes kit-driven rows — `assetIds` (the
+       * standalone bucket) is empty. `kitSlices` already excludes
+       * AssetKits already represented in the booking, so each spec is a
+       * genuinely new kit-driven row. Each carries its own slice
+       * quantity, so we don't need a separate `quantities` map.
+       */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds: newAssetIds, // Only the newly added assets from kits
+        assetIds: [], // Kit-add adds no standalone assets
         kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
         userId,
-        quantities: newAssetQuantities,
-        assetKitIdByAsset: newAssetKitIdByAsset,
+        kitSlices,
       });
 
       /** We create notes for the newly added kits instead of individual assets */

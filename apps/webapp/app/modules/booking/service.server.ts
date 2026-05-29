@@ -2971,20 +2971,51 @@ export async function checkinBooking({
       : [];
 
     /**
-     * Build the lookup of explicit per-asset dispositions. Qty-tracked
-     * assets without an explicit entry will auto-fill their remaining
-     * slice inside the transaction (default: RETURN all for TWO_WAY,
-     * CONSUME all for ONE_WAY). This is the "big Check-in button"
-     * happy path — everything's back.
+     * Build the lookups of explicit dispositions. Qty-tracked slices
+     * without an explicit entry will auto-fill their remaining quantity
+     * inside the transaction (default: RETURN all for TWO_WAY, CONSUME
+     * all for ONE_WAY). This is the "big Check-in button" happy path —
+     * everything's back.
+     *
+     * Two maps because a caller can target a disposition either:
+     *   - at a specific slice (`bookingAssetId` set) — exact attribution,
+     *     consumed once for that slice; OR
+     *   - at the asset as a whole (`bookingAssetId` omitted) — legacy /
+     *     drawer-less callers. An asset-level explicit disposition is
+     *     applied to exactly ONE slice (see `consumedAssetLevelExplicit`
+     *     below) so it isn't double-counted across every slice.
      */
-    const explicitDispositionByAsset = new Map<string, CheckinDispositionInput>(
-      checkins?.map((d) => [d.assetId, d]) ?? []
+    const explicitByBookingAssetId = new Map<string, CheckinDispositionInput>(
+      checkins
+        ?.filter((d) => d.bookingAssetId)
+        .map((d) => [d.bookingAssetId!, d]) ?? []
+    );
+    const explicitByAssetId = new Map<string, CheckinDispositionInput>(
+      checkins?.filter((d) => !d.bookingAssetId).map((d) => [d.assetId, d]) ??
+        []
     );
 
-    /** Qty-tracked assets in this booking — candidates for disposition. */
-    const qtyTrackedBookingAssets = bookingFoundAssets.filter(
-      (a) => a.type === AssetType.QUANTITY_TRACKED
-    );
+    /**
+     * Per-BookingAsset SLICE rows for qty-tracked assets. The same asset
+     * can have multiple slices in one booking (one standalone +
+     * N kit-driven), and each slice's ConsumptionLog rows must be tagged
+     * with its own `bookingAssetId`. We carry the slice `id`, `assetId`
+     * and `quantity` from the org-scoped `bookingFound.bookingAssets`
+     * load at the top of this function.
+     */
+    const qtyTrackedSlices = bookingFound.bookingAssets
+      .filter((ba) => ba.asset.type === AssetType.QUANTITY_TRACKED)
+      .map((ba) => ({
+        id: ba.id,
+        assetId: ba.assetId,
+        consumptionType: ba.asset.consumptionType,
+        title: ba.asset.title,
+      }));
+
+    /** Distinct qty-tracked asset ids touched by the slices above. */
+    const qtyTrackedAssetIds = [
+      ...new Set(qtyTrackedSlices.map((s) => s.assetId)),
+    ];
 
     /**
      * Per-asset disposition summary populated inside the transaction
@@ -3014,13 +3045,13 @@ export async function checkinBooking({
          * write logs without one. If the booking has qty-tracked assets
          * with remaining units, userId must be provided.
          */
-        if (qtyTrackedBookingAssets.length > 0 && !userId) {
+        if (qtyTrackedAssetIds.length > 0 && !userId) {
           // Check if any qty-tracked asset actually has work to do.
-          for (const asset of qtyTrackedBookingAssets) {
+          for (const assetId of qtyTrackedAssetIds) {
             const remaining = await computeBookingAssetRemaining(
               tx,
               id,
-              asset.id
+              assetId
             );
             if (remaining > 0) {
               throw new ShelfError({
@@ -3034,43 +3065,98 @@ export async function checkinBooking({
           }
         }
 
-        for (const asset of qtyTrackedBookingAssets) {
-          const remaining = await computeBookingAssetRemaining(
+        /**
+         * Per-asset running pool of remaining units, seeded once from the
+         * asset-level `computeBookingAssetRemaining`. As each slice claims
+         * units we decrement this so the SUM across all slices of one asset
+         * can never exceed the asset-level remaining — the backstop that
+         * accounts for legacy `bookingAssetId IS NULL` logs which the
+         * per-slice helper deliberately excludes.
+         */
+        const assetRemainingSoFar = new Map<string, number>();
+        for (const assetId of qtyTrackedAssetIds) {
+          assetRemainingSoFar.set(
+            assetId,
+            await computeBookingAssetRemaining(tx, id, assetId)
+          );
+        }
+
+        /**
+         * Asset-level explicit dispositions (no `bookingAssetId`) apply to
+         * exactly ONE slice. Track which asset ids have already consumed
+         * their asset-level explicit so later slices fall back to the
+         * auto-default rather than re-applying it.
+         */
+        const consumedAssetLevelExplicit = new Set<string>();
+
+        /**
+         * Accumulate per-slice work into ONE summary per assetId so the
+         * post-tx activity note (which renders per asset) isn't duplicated
+         * when an asset has multiple slices.
+         */
+        const summaryByAssetId = new Map<string, CheckinQtySummary>();
+
+        for (const slice of qtyTrackedSlices) {
+          const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
             id,
-            asset.id
+            slice.id
           );
-          if (remaining <= 0) continue; // Already reconciled.
+          if (sliceRemaining <= 0) continue; // Already reconciled.
 
-          const locked = await lockAssetForQuantityUpdate(tx, asset.id);
-          const explicit = explicitDispositionByAsset.get(asset.id);
+          // Cap by BOTH the slice's own remaining AND the asset-level
+          // remaining still unclaimed in this pass. The asset-level cap is
+          // the safety net for legacy NULL-tagged logs (excluded by the
+          // per-slice helper) — without it, an asset with both tagged and
+          // NULL logs could over-decrement the shared pool.
+          const assetCap = assetRemainingSoFar.get(slice.assetId) ?? 0;
+          const cap = Math.min(sliceRemaining, assetCap);
+          if (cap <= 0) continue;
 
-          // Determine the effective disposition. Explicit wins; otherwise
-          // auto-fill based on consumptionType.
+          // Resolve the effective disposition: explicit-by-slice wins;
+          // else an asset-level explicit applied to ONE slice only; else
+          // the auto-default based on consumptionType (capped to `cap`).
+          let explicit = explicitByBookingAssetId.get(slice.id);
+          if (!explicit) {
+            const assetExplicit = explicitByAssetId.get(slice.assetId);
+            if (
+              assetExplicit &&
+              !consumedAssetLevelExplicit.has(slice.assetId)
+            ) {
+              explicit = assetExplicit;
+              consumedAssetLevelExplicit.add(slice.assetId);
+            }
+          }
+
           const disposition: CheckinDispositionInput = explicit ?? {
-            assetId: asset.id,
-            ...(asset.consumptionType === "ONE_WAY"
-              ? { consumed: remaining }
-              : { returned: remaining }),
+            assetId: slice.assetId,
+            // Auto-default claims exactly `cap` units — never more than the
+            // pool can cover, so it can't throw on legacy-NULL-reduced pools.
+            ...(slice.consumptionType === "ONE_WAY"
+              ? { consumed: cap }
+              : { returned: cap }),
           };
 
           const claimed = sumDisposition(disposition);
-
           if (claimed === 0) {
-            // Explicit disposition with no quantities — equivalent to
-            // "leave everything pending". Fine, just skip.
+            // Explicit disposition with no quantities — "leave pending".
             continue;
           }
 
-          if (claimed > remaining) {
+          // Explicit dispositions that over-claim are a hard error (the
+          // caller asked for more than is available). The auto-default
+          // path is pre-clamped to `cap` above, so it never trips this.
+          if (claimed > cap) {
             throw new ShelfError({
               cause: null,
               status: 400,
               label,
-              message: `Cannot check in ${claimed} units for "${locked.title}". Only ${remaining} remaining on this booking.`,
+              message: `Cannot check in ${claimed} units for "${slice.title}". Only ${cap} remaining on this booking.`,
               shouldBeCaptured: false,
             });
           }
+
+          const locked = await lockAssetForQuantityUpdate(tx, slice.assetId);
 
           const poolDecrement =
             (disposition.consumed ?? 0) +
@@ -3079,7 +3165,7 @@ export async function checkinBooking({
 
           if (poolDecrement > 0) {
             const custodyAgg = await tx.custody.aggregate({
-              where: { assetId: asset.id },
+              where: { assetId: slice.assetId },
               _sum: { quantity: true },
             });
             const inCustody = custodyAgg._sum?.quantity ?? 0;
@@ -3095,15 +3181,14 @@ export async function checkinBooking({
             }
           }
 
-          // Per-row attribution: when the explicit disposition carries a
-          // bookingAssetId we tag every ConsumptionLog row with it. The
-          // implicit "return-all-remaining" path (no explicit disposition)
-          // leaves it null — Polish-6 multi-row attribution only makes
-          // sense for callers that picked a specific slice.
-          const dispBookingAssetId = disposition.bookingAssetId ?? null;
+          // Always tag the slice id. An explicit disposition may already
+          // carry its own `bookingAssetId` (drawer flow that picked a
+          // specific slice) — honour that; otherwise tag with this slice's
+          // id so the auto-default path no longer writes NULL.
+          const dispBookingAssetId = disposition.bookingAssetId ?? slice.id;
           if ((disposition.returned ?? 0) > 0) {
             await createConsumptionLog({
-              assetId: asset.id,
+              assetId: slice.assetId,
               category: "RETURN",
               quantity: disposition.returned!,
               userId: userId!,
@@ -3114,7 +3199,7 @@ export async function checkinBooking({
           }
           if ((disposition.consumed ?? 0) > 0) {
             await createConsumptionLog({
-              assetId: asset.id,
+              assetId: slice.assetId,
               category: "CONSUME",
               quantity: disposition.consumed!,
               userId: userId!,
@@ -3125,7 +3210,7 @@ export async function checkinBooking({
           }
           if ((disposition.lost ?? 0) > 0) {
             await createConsumptionLog({
-              assetId: asset.id,
+              assetId: slice.assetId,
               category: "LOSS",
               quantity: disposition.lost!,
               userId: userId!,
@@ -3136,7 +3221,7 @@ export async function checkinBooking({
           }
           if ((disposition.damaged ?? 0) > 0) {
             await createConsumptionLog({
-              assetId: asset.id,
+              assetId: slice.assetId,
               category: "DAMAGE",
               quantity: disposition.damaged!,
               userId: userId!,
@@ -3148,21 +3233,33 @@ export async function checkinBooking({
 
           if (poolDecrement > 0) {
             await tx.asset.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `asset.id` comes from `bookingFound.bookingAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
-              where: { id: asset.id },
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `slice.assetId` comes from `bookingFound.bookingAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
+              where: { id: slice.assetId },
               data: { quantity: { decrement: poolDecrement } },
             });
           }
 
-          qtySummariesRef.value.push({
-            assetId: asset.id,
+          // Decrement the per-asset running pool by the amount claimed so
+          // the next slice of the same asset can't re-claim it.
+          assetRemainingSoFar.set(slice.assetId, assetCap - claimed);
+
+          // Fold this slice's work into the per-asset summary.
+          const existing = summaryByAssetId.get(slice.assetId) ?? {
+            assetId: slice.assetId,
             title: locked.title,
-            returned: disposition.returned ?? 0,
-            consumed: disposition.consumed ?? 0,
-            lost: disposition.lost ?? 0,
-            damaged: disposition.damaged ?? 0,
-          });
+            returned: 0,
+            consumed: 0,
+            lost: 0,
+            damaged: 0,
+          };
+          existing.returned += disposition.returned ?? 0;
+          existing.consumed += disposition.consumed ?? 0;
+          existing.lost += disposition.lost ?? 0;
+          existing.damaged += disposition.damaged ?? 0;
+          summaryByAssetId.set(slice.assetId, existing);
         }
+
+        qtySummariesRef.value.push(...summaryByAssetId.values());
 
         if (assetsToCheckin.length > 0) {
           // INDIVIDUAL assets always get reset to AVAILABLE. Scope to the
@@ -4477,26 +4574,34 @@ export async function updateBookingAssets({
   kitIds,
   userId,
   quantities,
-  assetKitIdByAsset,
+  kitSlices,
 }: Pick<Booking, "id" | "organizationId"> & {
+  /**
+   * Standalone assets to add (no kit attribution). Kit-driven rows are
+   * supplied separately via `kitSlices` so the same asset can be both
+   * standalone AND a member of one-or-more kits in the same booking.
+   */
   assetIds: Asset["id"][];
   kitIds?: Kit["id"][];
   userId?: User["id"];
-  /** Optional map of assetId → quantity for QUANTITY_TRACKED assets. Defaults to 1 for any asset not in the map. */
+  /** Optional map of assetId → quantity for standalone QUANTITY_TRACKED assets. Defaults to 1 for any asset not in the map. */
   quantities?: Record<string, number>;
   /**
-   * Optional map of assetId → `AssetKit.id` recording which asset rows
-   * are coming from a kit-add flow (manage-kits picker, scanner). When
-   * an entry is set, the corresponding BookingAsset row is written with
-   * `assetKitId` populated so the booking UI groups it under the kit
-   * rather than rendering as standalone. Missing entries default to
-   * `null` = standalone, preserving the behaviour for non-kit callers
-   * (manage-assets picker, asset bulk actions).
+   * Optional list of kit-driven slice specs — one element per
+   * `AssetKit` membership being added. Each spec records the source
+   * asset, the originating `AssetKit.id`, and that slice's quantity.
+   *
+   * Carrying a list (rather than a 1:1 assetId → assetKitId map) is
+   * what lets a single quantity-tracked asset belonging to MULTIPLE
+   * kits produce MULTIPLE kit-driven `BookingAsset` rows: the kit
+   * partial unique is on `(bookingId, assetKitId)`, so each kit's
+   * slice is a distinct, legal row. Non-kit callers (manage-assets
+   * picker, asset bulk actions) omit this and only add standalone rows.
    */
-  assetKitIdByAsset?: Record<string, string>;
+  kitSlices?: Array<{ assetId: string; assetKitId: string; quantity: number }>;
 }) {
   try {
-    const booking = await db.$transaction(async (tx) => {
+    const { booking, addedAssetIds } = await db.$transaction(async (tx) => {
       // Verify booking exists before inserting into the join table,
       // so a stale/deleted booking returns a proper 404 (P2025)
       // instead of a FK violation (P2003)
@@ -4509,9 +4614,15 @@ export async function updateBookingAssets({
         },
       });
 
-      // Dedupe assetIds so duplicate entries don't cause false validation failures
-      // (findMany returns unique rows, so duplicates would inflate the expected count)
-      const uniqueAssetIds = [...new Set(assetIds)];
+      const slices = kitSlices ?? [];
+
+      // Validate the UNION of standalone asset ids and the asset ids
+      // referenced by kit slices. An asset can legitimately appear in
+      // both buckets (standalone + kit-driven), so we validate the
+      // distinct set once.
+      const uniqueAssetIds = [
+        ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
+      ];
 
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and submission
@@ -4543,29 +4654,31 @@ export async function updateBookingAssets({
         });
       }
 
-      // Split the validated assets into "standalone" and "kit-driven"
-      // buckets. Standalone rows go through an upsert keyed on the
-      // (bookingId, assetId) partial unique. Kit-driven rows go through
-      // a separate insert keyed on the (bookingId, assetKitId) partial
-      // unique — they use ON CONFLICT DO NOTHING because adding the same
-      // kit twice should be a no-op, not an upsert (the picker filters
-      // already-added kits out client-side anyway).
-      const standaloneAssetIds: string[] = [];
-      const standaloneQuantities: number[] = [];
-      const kitAssetIds: string[] = [];
-      const kitQuantities: number[] = [];
-      const kitAssetKitIds: string[] = [];
-      for (const assetId of validAssetIds) {
-        const akId = assetKitIdByAsset?.[assetId];
-        if (akId) {
-          kitAssetIds.push(assetId);
-          kitQuantities.push(quantities?.[assetId] ?? 1);
-          kitAssetKitIds.push(akId);
-        } else {
-          standaloneAssetIds.push(assetId);
-          standaloneQuantities.push(quantities?.[assetId] ?? 1);
-        }
-      }
+      // Standalone rows go through an upsert keyed on the
+      // (bookingId, assetId) partial unique. Dedupe the standalone ids
+      // since the upsert can't accept duplicate keys in one statement.
+      const standaloneAssetIds = [...new Set(assetIds)];
+      const standaloneQuantities = standaloneAssetIds.map(
+        (assetId) => quantities?.[assetId] ?? 1
+      );
+
+      // Kit-driven rows go through a separate insert keyed on the
+      // (bookingId, assetKitId) partial unique — they use ON CONFLICT
+      // DO NOTHING because adding the same kit twice should be a no-op,
+      // not an upsert (the picker filters already-added kits out
+      // client-side anyway). One row per kit slice, so an asset in two
+      // kits yields two rows with distinct assetKitId.
+      const kitAssetIds = slices.map((s) => s.assetId);
+      const kitQuantities = slices.map((s) => s.quantity);
+      const kitAssetKitIds = slices.map((s) => s.assetKitId);
+
+      // The complete set of assets touched by this call — standalone +
+      // kit-driven, deduped. Everything after the insert (status flip,
+      // events, notes) operates on this set so a kit-only add still
+      // flips statuses and records events for its member assets.
+      const addedAssetIds = [
+        ...new Set([...standaloneAssetIds, ...kitAssetIds]),
+      ];
 
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique
@@ -4605,7 +4718,7 @@ export async function updateBookingAssets({
         b.status === BookingStatus.OVERDUE
       ) {
         await tx.asset.updateMany({
-          where: { id: { in: validAssetIds }, organizationId },
+          where: { id: { in: addedAssetIds }, organizationId },
           data: { status: AssetStatus.CHECKED_OUT },
         });
 
@@ -4622,9 +4735,11 @@ export async function updateBookingAssets({
 
       // Activity events — one BOOKING_ASSETS_ADDED per asset added, inside the tx.
       // Must be atomic with asset addition for audit trail consistency.
-      if (assetIds.length > 0) {
+      // Use the deduped union of standalone + kit-driven assets so a
+      // kit-only add still records events for its member assets.
+      if (addedAssetIds.length > 0) {
         await recordEvents(
-          assetIds.map((assetId) => ({
+          addedAssetIds.map((assetId) => ({
             organizationId,
             actorUserId: userId ?? null,
             action: "BOOKING_ASSETS_ADDED",
@@ -4637,7 +4752,7 @@ export async function updateBookingAssets({
         );
       }
 
-      return b;
+      return { booking: b, addedAssetIds };
     });
 
     // BOOKING ACTIVITY LOG: Log asset addition activity
@@ -4648,7 +4763,7 @@ export async function updateBookingAssets({
     if (!kitIds || kitIds.length === 0) {
       try {
         const assets = await db.asset.findMany({
-          where: { id: { in: assetIds }, organizationId },
+          where: { id: { in: addedAssetIds }, organizationId },
           select: { id: true, title: true },
         });
 
@@ -7301,7 +7416,8 @@ async function createNotesForScannedAssetsAndKits({
  * contract byte-for-byte.
  *
  * @param tx - Prisma transaction client (must be a real `$transaction` tx)
- * @param args.assetIds - IDs of scanned assets to add
+ * @param args.assetIds - IDs of directly-scanned (standalone) assets to add
+ * @param args.kitSlices - Kit-driven slice specs (one per AssetKit membership)
  * @param args.kitIds - Optional kit IDs (only used to propagate kit status sync when booking is active)
  * @param args.bookingId - Booking being modified
  * @param args.organizationId - Organization scope for the booking + assets
@@ -7318,31 +7434,46 @@ async function addScannedAssetsToBookingWithinTx(
     organizationId,
     userId,
     quantities = {},
-    assetKitIdByAsset = {},
+    kitSlices = [],
   }: {
+    /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
     kitIds: string[];
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     userId: string;
     /**
-     * Per-asset quantity for QUANTITY_TRACKED scans. Missing entries
-     * fall back to `BookingAsset.quantity`'s schema default (1) — keeps
-     * callers that don't supply quantities (mobile, fulfil flow)
-     * working unchanged.
+     * Per-asset quantity for standalone QUANTITY_TRACKED scans. Missing
+     * entries fall back to `BookingAsset.quantity`'s schema default (1)
+     * — keeps callers that don't supply quantities (mobile, fulfil
+     * flow) working unchanged.
      */
     quantities?: Record<Asset["id"], number>;
     /**
-     * Per-asset kit-source context. When the scanned asset came from
-     * scanning a kit's QR (not the asset's own QR), the scanner drawer
-     * resolves the `AssetKit.id` for (asset, kit) and passes it here.
-     * The created `BookingAsset` row gets the `assetKitId` set so the
-     * booking UI groups it under the kit rather than rendering it as
-     * standalone. Missing entries = standalone scan (default).
+     * Kit-driven slice specs — one element per `AssetKit` membership
+     * scanned (the drawer resolves the `AssetKit.id` for each member of
+     * a scanned kit's QR). Each spec produces a `BookingAsset` row with
+     * `assetKitId` set so the booking UI groups it under the kit. An
+     * asset scanned via TWO kits yields TWO slices (distinct
+     * `assetKitId`), each a legal row under the `(bookingId, assetKitId)`
+     * partial unique. The slice's quantity defaults to the kit's
+     * `AssetKit.quantity` when omitted.
      */
-    assetKitIdByAsset?: Record<Asset["id"], string>;
+    kitSlices?: Array<{
+      assetId: string;
+      assetKitId: string;
+      quantity?: number;
+    }>;
   }
 ) {
+  // The deduped union of standalone + kit-slice asset ids. Model-request
+  // materialisation, events, and status flips operate on this set so a
+  // kit-only scan still materialises requests and records events for its
+  // member assets.
+  const allScannedAssetIds = Array.from(
+    new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
+  );
+
   /**
    * Pre-fetch metadata for the scanned assets so we can run the
    * model-request materialization loop — each scanned asset that
@@ -7358,9 +7489,9 @@ async function addScannedAssetsToBookingWithinTx(
   // client tx type is incompatible with `Prisma.TransactionClient`).
   type ScannedAssetMeta = Pick<Asset, "id" | "title" | "type" | "assetModelId">;
   const scannedAssetsMeta: ScannedAssetMeta[] =
-    assetIds.length > 0
+    allScannedAssetIds.length > 0
       ? await tx.asset.findMany({
-          where: { id: { in: assetIds }, organizationId },
+          where: { id: { in: allScannedAssetIds }, organizationId },
           select: {
             id: true,
             title: true,
@@ -7373,7 +7504,7 @@ async function addScannedAssetsToBookingWithinTx(
     scannedAssetsMeta.map((a) => [a.id, a])
   );
 
-  for (const assetId of assetIds) {
+  for (const assetId of allScannedAssetIds) {
     const meta = scannedAssetsMetaById.get(assetId);
     if (!meta) continue; // asset not found in org — caught later by FK
     await materializeModelRequestForAsset({
@@ -7387,17 +7518,16 @@ async function addScannedAssetsToBookingWithinTx(
 
   /**
    * Resolve the slice quantity for kit-driven scans. When a kit QR is
-   * scanned, the drawer attributes each member to the kit via
-   * `assetKitIdByAsset` but doesn't pass an explicit `quantities` entry —
-   * so a QUANTITY_TRACKED member would otherwise default to 1 instead of
-   * the kit's `AssetKit.quantity` (e.g. 33 batteries booked as 1). Fetch
+   * scanned, the drawer attributes each member to its `AssetKit` via
+   * `kitSlices` but may not pass an explicit slice quantity — so a
+   * QUANTITY_TRACKED member would otherwise default to 1 instead of the
+   * kit's `AssetKit.quantity` (e.g. 33 batteries booked as 1). Fetch
    * the AssetKit rows for the referenced ids and use their quantity as
-   * the fallback. Explicit `quantities[id]` (the per-row qty input on a
-   * direct asset scan) still wins; standalone scans (no assetKitId) keep
-   * the 1 default.
+   * the fallback. An explicit `slice.quantity` (when the caller already
+   * resolved it) still wins.
    */
   const referencedAssetKitIds = Array.from(
-    new Set(Object.values(assetKitIdByAsset).filter(Boolean))
+    new Set(kitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
   const assetKitQtyById = new Map<string, number>(
     referencedAssetKitIds.length > 0
@@ -7415,27 +7545,27 @@ async function addScannedAssetsToBookingWithinTx(
     where: { id: bookingId, organizationId },
     data: {
       bookingAssets: {
-        // Quantity precedence: explicit per-row qty input → kit slice
-        // qty (when scanned via a kit) → 1 (standalone scan / schema
-        // default).
-        //
-        // `assetKitId` is set when the scanner passes a kit-source
-        // context for this asset (e.g. user scanned a kit QR and the
-        // kit's assets were added with this kit's `AssetKit.id`).
-        // Missing entries = standalone scan, default `assetKitId = null`
-        // which keeps the booking UI grouping independent of the
+        // One row per standalone scan + one row per kit slice. An asset
+        // scanned via TWO kits yields TWO kit-driven rows with distinct
+        // `assetKitId`; the standalone bucket stays independent of an
         // asset's incidental kit memberships.
-        create: assetIds.map((id) => {
-          const assetKitId = assetKitIdByAsset[id] ?? null;
-          const kitSliceQty = assetKitId
-            ? assetKitQtyById.get(assetKitId)
-            : undefined;
-          return {
+        create: [
+          // Standalone scans: `assetKitId = null`. Quantity precedence:
+          // explicit per-row qty input → 1 (schema default).
+          ...assetIds.map((id) => ({
             assetId: id,
-            quantity: quantities[id] ?? kitSliceQty ?? 1,
-            assetKitId,
-          };
-        }),
+            quantity: quantities[id] ?? 1,
+            assetKitId: null,
+          })),
+          // Kit-driven slices: `assetKitId` set. Quantity precedence:
+          // explicit slice qty → kit's `AssetKit.quantity` → 1.
+          ...kitSlices.map((slice) => ({
+            assetId: slice.assetId,
+            quantity:
+              slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1,
+            assetKitId: slice.assetKitId,
+          })),
+        ],
       },
     },
     select: {
@@ -7450,11 +7580,11 @@ async function addScannedAssetsToBookingWithinTx(
    * `BOOKING_ASSETS_ADDED` emission in `updateBookingAssets` so the
    * scanner-driven path produces the same audit-trail rows as the
    * manage-assets dialog. Inside the tx — rolls back together with
-   * the BookingAsset row creates above.
+   * the BookingAsset row creates above. One event per distinct asset.
    */
-  if (assetIds.length > 0) {
+  if (allScannedAssetIds.length > 0) {
     await recordEvents(
-      assetIds.map((assetId) => ({
+      allScannedAssetIds.map((assetId) => ({
         organizationId,
         actorUserId: userId,
         action: "BOOKING_ASSETS_ADDED" as const,
@@ -7473,9 +7603,9 @@ async function addScannedAssetsToBookingWithinTx(
     booking.status === BookingStatus.OVERDUE;
 
   if (isActiveBooking) {
-    if (assetIds.length > 0) {
+    if (allScannedAssetIds.length > 0) {
       await tx.asset.updateMany({
-        where: { id: { in: assetIds }, organizationId },
+        where: { id: { in: allScannedAssetIds }, organizationId },
         data: { status: AssetStatus.CHECKED_OUT },
       });
     }
@@ -7495,7 +7625,8 @@ async function addScannedAssetsToBookingWithinTx(
  * Adds scanned assets (and optionally kits) to a booking.
  *
  * @param {Object} params - The parameters for the function.
- * @param {string[]} params.assetIds - Array of asset IDs to add to the booking.
+ * @param {string[]} params.assetIds - Array of directly-scanned (standalone) asset IDs to add.
+ * @param {Array} [params.kitSlices] - Kit-driven slice specs (one per AssetKit membership). An asset scanned via two kits yields two slices.
  * @param {string[]} [params.kitIds] - Optional array of kit IDs. Used to differentiate kit vs. standalone asset additions when creating notes. If not provided, only standalone assets are added.
  * @param {string} params.bookingId - The ID of the booking to update.
  * @param {string} params.organizationId - The organization ID associated with the booking.
@@ -7508,7 +7639,7 @@ export async function addScannedAssetsToBooking({
   organizationId,
   userId,
   quantities = {},
-  assetKitIdByAsset = {},
+  kitSlices = [],
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
@@ -7516,15 +7647,19 @@ export async function addScannedAssetsToBooking({
   organizationId: Booking["organizationId"];
   userId: string;
   /**
-   * Per-asset quantity for QUANTITY_TRACKED scans. Missing entries
-   * default `BookingAsset.quantity` to 1.
+   * Per-asset quantity for standalone QUANTITY_TRACKED scans. Missing
+   * entries default `BookingAsset.quantity` to 1.
    */
   quantities?: Record<Asset["id"], number>;
   /**
-   * Per-asset kit-source context. See the within-tx helper for full
-   * semantics.
+   * Kit-driven slice specs — one per `AssetKit` membership scanned.
+   * See the within-tx helper for full semantics.
    */
-  assetKitIdByAsset?: Record<Asset["id"], string>;
+  kitSlices?: Array<{
+    assetId: string;
+    assetKitId: string;
+    quantity?: number;
+  }>;
 }) {
   try {
     /**
@@ -7541,14 +7676,21 @@ export async function addScannedAssetsToBooking({
         organizationId,
         userId,
         quantities,
-        assetKitIdByAsset,
+        kitSlices,
       })
     );
 
-    /** Step 2: Create activity notes */
+    /**
+     * Step 2: Create activity notes. The notes helper derives standalone
+     * vs kit-driven attribution from `kitIds` membership, so it needs the
+     * full union of standalone + kit-slice asset ids.
+     */
+    const allAddedAssetIds = Array.from(
+      new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
+    );
     await createNotesForScannedAssetsAndKits({
       booking: updatedBooking,
-      assetIds,
+      assetIds: allAddedAssetIds,
       kitIds,
       organizationId,
       userId,
@@ -7869,6 +8011,15 @@ export async function duplicateBooking({
              * which silently drops reservation sizes for QUANTITY_TRACKED
              * assets.
              *
+             * Also preserve `assetKitId` (the kit-source discriminator).
+             * Polish-6 allows multiple BookingAsset rows per asset (one
+             * standalone + N kit-driven). Dropping `assetKitId` would make
+             * every duplicated row standalone, so an asset with both a
+             * standalone and a kit-driven slice collapses to two
+             * `assetKitId IS NULL` rows for the same asset — a P2002 on the
+             * `BookingAsset_manual_unique (bookingId, assetId)` partial
+             * unique. Copying it keeps each slice distinct.
+             *
              * Note: we copy the intent verbatim — the duplicate starts in
              * DRAFT and availability is re-validated at checkout, so an
              * over-reservation here is surfaced to the user at the right
@@ -7877,6 +8028,7 @@ export async function duplicateBooking({
             create: bookingToDuplicate.bookingAssets.map((ba) => ({
               assetId: ba.assetId,
               quantity: ba.quantity,
+              assetKitId: ba.assetKitId,
             })),
           },
           tags: {

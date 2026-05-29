@@ -142,11 +142,11 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       // QTY_TRACKED rows; this test posts no quantities, so the
       // service receives an empty map.
       quantities: {},
-      // Scanner drawer sends an `assetKitIdByAsset` JSON blob
-      // recording which scanned assets came from kit scans (so the
-      // created BookingAsset rows get `assetKitId` set). Empty map
-      // when only direct asset scans were submitted.
-      assetKitIdByAsset: {},
+      // Scanner drawer sends a `kitSlices` JSON array recording each
+      // (asset, AssetKit) membership scanned (so each gets its own
+      // kit-driven BookingAsset row). Empty when only direct asset
+      // scans were submitted.
+      kitSlices: [],
     });
     expect(vi.mocked(redirect)).toHaveBeenCalledWith("/bookings/booking-123");
   });

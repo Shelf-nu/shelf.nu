@@ -222,6 +222,86 @@ describe("manage-kits route validation", () => {
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(2);
     });
 
+    it("passes two kit slices for a shared asset belonging to two kits", async () => {
+      // Data-integrity fix: when the SAME asset belongs to TWO selected
+      // kits, the action must hand `updateBookingAssets` TWO kit slices
+      // (one per AssetKit, distinct assetKitId) so both kit-driven rows
+      // get created. The old 1:1 map dropped the second.
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.DRAFT, // avoid checked-out kit guard
+        bookingAssets: [],
+      } as any);
+
+      const mockKits = [
+        {
+          id: "kit1",
+          name: "Kit 1",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            {
+              id: "ak-kit1-shared",
+              quantity: 10,
+              asset: { id: "asset-shared" },
+            },
+          ],
+          organizationId: "org123",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: "kit2",
+          name: "Kit 2",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            {
+              id: "ak-kit2-shared",
+              quantity: 5,
+              asset: { id: "asset-shared" },
+            },
+          ],
+          organizationId: "org123",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ] as any;
+
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit1", "kit2"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+
+      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
+
+      await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetIds: [], // kit-add contributes no standalone assets
+          kitSlices: [
+            {
+              assetId: "asset-shared",
+              assetKitId: "ak-kit1-shared",
+              quantity: 10,
+            },
+            {
+              assetId: "asset-shared",
+              assetKitId: "ak-kit2-shared",
+              quantity: 5,
+            },
+          ],
+        })
+      );
+    });
+
     it("should not validate kits whose AssetKit ids are already kit-driven in the booking", async () => {
       // Override the default mockBooking with one that already holds
       // kit1's kit-driven slices.

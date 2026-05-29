@@ -1633,6 +1633,72 @@ describe("updateBookingAssets", () => {
     expect(result).toEqual(mockBooking);
     expect(db.$executeRaw).toHaveBeenCalled();
   });
+
+  it("creates two kit-driven rows for the same asset in two kits", async () => {
+    // The data-integrity fix: a single quantity-tracked asset that
+    // belongs to TWO kits added to one booking must produce TWO
+    // kit-driven BookingAsset inserts — one per AssetKit (distinct
+    // assetKitId). The old 1:1 assetId→assetKitId map silently dropped
+    // the second slice. We assert the kit-driven raw INSERT receives
+    // both assetKitIds (and the shared assetId twice).
+    expect.assertions(4);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // why: validation reads the union of standalone + kit-slice asset
+    // ids; the shared asset exists exactly once in the org.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-shared" }]);
+
+    const params = {
+      id: "booking-1",
+      organizationId: "org-1",
+      // No standalone assets — this mirrors a kit-add submission.
+      assetIds: [] as string[],
+      // `kitIds` is always passed on the kit-add path; it skips the
+      // standalone-asset note block (kit notes are created separately).
+      kitIds: ["kit-1", "kit-2"],
+      kitSlices: [
+        { assetId: "asset-shared", assetKitId: "ak-kit-1", quantity: 10 },
+        { assetId: "asset-shared", assetKitId: "ak-kit-2", quantity: 5 },
+      ],
+    };
+
+    const result = await updateBookingAssets(params);
+
+    expect(result).toEqual(mockBooking);
+    expect(db.$executeRaw).toHaveBeenCalled();
+
+    // The kit-driven branch interpolates the (assetIds, quantities,
+    // assetKitIds) arrays as raw-template values. Find the call whose
+    // interpolated values include the assetKitIds array carrying both
+    // AssetKit ids — proving both slices were written.
+    const kitDrivenCall = (
+      db.$executeRaw as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls.find((call: unknown[]) =>
+      call.some(
+        (arg) =>
+          Array.isArray(arg) &&
+          arg.includes("ak-kit-1") &&
+          arg.includes("ak-kit-2")
+      )
+    );
+    expect(kitDrivenCall).toBeDefined();
+
+    // The same assetId appears twice (one row per AssetKit slice).
+    const sharedAssetIdArray = kitDrivenCall?.find(
+      (arg: unknown) =>
+        Array.isArray(arg) &&
+        arg.filter((v) => v === "asset-shared").length === 2
+    );
+    expect(sharedAssetIdArray).toBeDefined();
+  });
 });
 
 describe("reserveBooking", () => {
@@ -3300,6 +3366,80 @@ describe("duplicateBooking", () => {
       ]),
       expect.anything()
     );
+  });
+
+  it("preserves assetKitId per slice when the same asset has standalone + kit-driven rows (Bug 3)", async () => {
+    // Bug 3 repro: a source booking holds TWO slices for the SAME asset —
+    // a standalone slice (assetKitId NULL) and a kit-driven slice
+    // (assetKitId "ak-x"). If duplicateBooking dropped `assetKitId`, both
+    // copied rows would be standalone for the same (bookingId, assetId),
+    // tripping the `BookingAsset_manual_unique` partial unique. The fix
+    // copies `assetKitId` verbatim so each slice stays distinct.
+    expect.assertions(2);
+
+    const originalBooking = {
+      ...mockBookingData,
+      bookingAssets: [
+        {
+          asset: { id: "asset-shared" },
+          assetId: "asset-shared",
+          quantity: 5,
+          assetKitId: null,
+          id: "ba-standalone",
+        },
+        {
+          asset: { id: "asset-shared" },
+          assetId: "asset-shared",
+          quantity: 3,
+          assetKitId: "ak-x",
+          id: "ba-kit",
+        },
+      ],
+      tags: [],
+    };
+    const duplicatedBooking = {
+      ...originalBooking,
+      id: "booking-2",
+      name: "Test Booking (Copy)",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(duplicatedBooking);
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("https://example.com"),
+    });
+
+    // Both slices are recreated, each carrying its own assetKitId — the
+    // standalone keeps NULL, the kit-driven keeps "ak-x".
+    expect(db.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingAssets: {
+            create: [
+              { assetId: "asset-shared", quantity: 5, assetKitId: null },
+              { assetId: "asset-shared", quantity: 3, assetKitId: "ak-x" },
+            ],
+          },
+        }),
+      })
+    );
+
+    // Sanity: the two copied rows are distinct on assetKitId so they
+    // won't collide on the manual-unique partial index.
+    const createArg = (
+      db.booking.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    const createdSlices = createArg?.data?.bookingAssets?.create as Array<{
+      assetKitId: string | null;
+    }>;
+    const distinctKitIds = new Set(createdSlices.map((s) => s.assetKitId));
+    expect(distinctKitIds.size).toBe(2);
   });
 });
 
@@ -5140,7 +5280,9 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       to: futureToDate,
       bookingAssets: [
         {
+          id: "ba-pens-standalone",
           assetId: mockQtyAssetId,
+          assetKitId: null,
           quantity: 10,
           asset: {
             id: mockQtyAssetId,
@@ -5194,6 +5336,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
+    // why: the per-slice loop reads `computeBookingAssetSliceRemaining`,
+    // which queries `bookingAsset.findUnique({ select: { quantity } })`
+    // for the slice being dispositioned. The single slice here is booked
+    // for 10 units (matches the `bookingAssets[0].quantity` shell above).
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
 
@@ -5219,6 +5367,9 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         category: "CONSUME",
         quantity: 10,
         bookingId: mockBookingId,
+        // Bug 2 fix: auto-default tags the log with the slice's bookingAssetId
+        // (not NULL) so future reads attribute it to the right slice.
+        bookingAssetId: "ba-pens-standalone",
       })
     );
     expect(db.asset.update).toHaveBeenCalledWith({
@@ -5244,6 +5395,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         assetId: mockQtyAssetId,
         category: "RETURN",
         quantity: 10,
+        // Bug 2 fix: auto-default RETURN is tagged with the slice id too.
+        bookingAssetId: "ba-pens-standalone",
       })
     );
     // RETURN must NOT decrement Asset.quantity.
@@ -5285,6 +5438,136 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       where: { id: mockQtyAssetId },
       data: { quantity: { decrement: 10 } },
     });
+  });
+
+  it("tags EACH slice's auto-default ConsumptionLog with its own bookingAssetId (Bug 2)", async () => {
+    // Bug 2 repro: a single qty-tracked asset booked via TWO BookingAsset
+    // slices in one booking — a standalone slice (assetKitId NULL) plus a
+    // kit-driven slice (assetKitId set). Before the fix, the completion
+    // path computed an ASSET-LEVEL disposition and wrote ConsumptionLog
+    // rows with `bookingAssetId: NULL`. The fix iterates per slice and
+    // tags each log with that slice's own id.
+    expect.assertions(4);
+
+    const standaloneSliceId = "ba-cam-standalone";
+    const kitSliceId = "ba-cam-kit";
+    const camAssetId = "asset-camera";
+
+    const booking = {
+      id: mockBookingId,
+      name: "Multi-slice Checkin",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFromDate,
+      to: futureToDate,
+      bookingAssets: [
+        {
+          id: standaloneSliceId,
+          assetId: camAssetId,
+          assetKitId: null,
+          quantity: 33,
+          asset: {
+            id: camAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            consumptionType: ConsumptionType.TWO_WAY,
+            title: "Camera",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: mockBookingId, status: BookingStatus.ONGOING } },
+            ],
+          },
+        },
+        {
+          id: kitSliceId,
+          assetId: camAssetId,
+          assetKitId: "ak-1",
+          quantity: 22,
+          asset: {
+            id: camAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            consumptionType: ConsumptionType.TWO_WAY,
+            title: "Camera",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: mockBookingId, status: BookingStatus.ONGOING } },
+            ],
+          },
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    // why: asset-level remaining = 33 + 22 booked, 0 logged = 55.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      { quantity: 33 },
+      { quantity: 22 },
+    ]);
+    // why: per-slice remaining reads `findUnique({ where: { id } })` — return
+    // each slice's booked quantity so both slices have work to do.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(
+        where.id === standaloneSliceId
+          ? { quantity: 33 }
+          : where.id === kitSliceId
+          ? { quantity: 22 }
+          : null
+      )
+    );
+    // why: no logs written yet on either slice or the asset.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ id: camAssetId, title: "Camera", quantity: 100 });
+
+    await checkinBooking(baseParams);
+
+    const logCalls = (
+      consumptionLogService.createConsumptionLog as ReturnType<typeof vitest.fn>
+    ).mock.calls.map((c) => c[0]);
+
+    // Exactly two RETURN logs — one per slice.
+    const returnLogs = logCalls.filter((l) => l.category === "RETURN");
+    expect(returnLogs).toHaveLength(2);
+
+    // Each slice's log is tagged with its OWN bookingAssetId (33 → standalone,
+    // 22 → kit), and the right quantity.
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: camAssetId,
+        category: "RETURN",
+        quantity: 33,
+        bookingAssetId: standaloneSliceId,
+      })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: camAssetId,
+        category: "RETURN",
+        quantity: 22,
+        bookingAssetId: kitSliceId,
+      })
+    );
+
+    // None of the logs are NULL-tagged (the bug).
+    expect(returnLogs.every((l) => l.bookingAssetId != null)).toBe(true);
   });
 });
 

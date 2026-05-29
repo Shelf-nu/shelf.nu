@@ -42,14 +42,16 @@ export const addScannedAssetsToBookingSchema = z
      */
     quantities: z.string().optional().default("{}"),
     /**
-     * JSON-encoded `Record<assetId, assetKitId>` recording which
-     * scanned assets came from scanning a kit's QR. The action passes
-     * this through to `addScannedAssetsToBooking` so the created
-     * `BookingAsset` rows get `assetKitId` set, which lets the booking
-     * UI group those rows under the kit. Directly-scanned assets stay
-     * unmapped (standalone, `assetKitId = null`).
+     * JSON-encoded `Array<{ assetId, assetKitId }>` — one element per
+     * `AssetKit` membership scanned (i.e. per asset, per kit it belongs
+     * to). The action passes this through to `addScannedAssetsToBooking`
+     * as `kitSlices` so each gets its own kit-driven `BookingAsset` row
+     * with `assetKitId` set. Carrying a list (not a 1:1 map) is what
+     * lets a single asset belonging to MULTIPLE scanned kits produce
+     * MULTIPLE kit-driven rows. Directly-scanned assets stay out of this
+     * list (standalone, `assetKitId = null`).
      */
-    assetKitIdByAsset: z.string().optional().default("{}"),
+    kitSlices: z.string().optional().default("[]"),
   })
   .refine((data) => data.assetIds.length > 0, {
     message: "At least one asset or kit must be selected",
@@ -101,30 +103,28 @@ export default function AddAssetsToBookingDrawer({
   );
   const kitIdsForBooking = kits.map((k) => k.id);
 
-  // Build per-asset kit-source map for the server. When a scanned KIT
-  // contributes assets, those assets get the kit's matching
-  // `AssetKit.id` recorded; directly-scanned assets stay unmapped
+  // Build the kit-driven slice specs for the server. When a scanned KIT
+  // contributes assets, each contributes one slice carrying that kit's
+  // matching `AssetKit.id`; directly-scanned assets stay out of the list
   // (server defaults `assetKitId` to NULL → standalone).
   //
-  // If the same asset shows up via both paths (scan the asset AND
-  // scan a kit containing it), the directly-scanned entry wins —
-  // standalone takes precedence so the user's explicit asset scan
-  // isn't silently treated as kit-driven.
+  // If the same asset shows up via both paths (scan the asset AND scan a
+  // kit containing it), the directly-scanned entry wins — standalone
+  // takes precedence so the user's explicit asset scan isn't silently
+  // treated as kit-driven.
+  //
+  // An asset appearing in MULTIPLE scanned kits produces MULTIPLE slices
+  // (distinct `assetKitId` each) — each is a legal row under the
+  // `(bookingId, assetKitId)` partial unique, so all are created.
   const directlyScannedAssetIds = new Set(assetIds);
-  const assetKitIdByAsset: Record<string, string> = {};
+  const kitSlices: Array<{ assetId: string; assetKitId: string }> = [];
   for (const kit of kits) {
     for (const ak of kit.assetKits) {
       if (directlyScannedAssetIds.has(ak.asset.id)) continue;
-      // First kit wins if the same asset appears in multiple scanned
-      // kits — partial unique on `(bookingId, assetKitId)` enforces
-      // one row per AssetKit anyway; multi-kit assets via scanner
-      // would need a separate UX (out of scope here).
-      if (!assetKitIdByAsset[ak.asset.id]) {
-        assetKitIdByAsset[ak.asset.id] = ak.id;
-      }
+      kitSlices.push({ assetId: ak.asset.id, assetKitId: ak.id });
     }
   }
-  const assetKitIdByAssetJson = JSON.stringify(assetKitIdByAsset);
+  const kitSlicesJson = JSON.stringify(kitSlices);
 
   // Per-asset qty for QUANTITY_TRACKED scans. Only includes ids that
   // actually appear in the submitted `assetIds` (filters out stale
@@ -337,10 +337,14 @@ export default function AddAssetsToBookingDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsToBookingSchema}
       formData={{
+        // `assetIds` carries the full union (directly-scanned + kit
+        // members); the server splits it into the standalone bucket vs
+        // the `kitSlices` bucket so an asset in two kits still produces
+        // two kit-driven rows.
         assetIds: assetIdsForBooking,
         kitIds: kitIdsForBooking,
         quantities: quantitiesJson,
-        assetKitIdByAsset: assetKitIdByAssetJson,
+        kitSlices: kitSlicesJson,
       }}
       items={items}
       onClearItems={clearList}
