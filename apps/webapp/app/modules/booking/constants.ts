@@ -101,9 +101,29 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           color: true,
         },
       },
+      // Asset's own location — drives the Location column sort and search.
+      location: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       kit: {
         select: {
           name: true,
+          // Kit's own location + category — needed for kit-group location
+          // sorting and kit-level search. Kits have no sequentialId/tags.
+          location: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          category: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
     },
@@ -144,6 +164,7 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
   status: "Status",
   title: "Name",
   category: "Category",
+  location: "Location",
 } as const;
 
 export type BookingAssetSortingOption =
