@@ -1293,7 +1293,7 @@ User-flow bug that triggered this: scanning a qty-tracked asset (Gloves, 250 tot
 
 **Open follow-up after manual test pass:** commit Polish-6 as its own commit on `feat-quantities` (same cadence as Polish-1..5 + 4a-Polish-2). When merging the 4b release, the migration ships alongside the other 4b migrations. Backfill heuristic numbers (175k total, 64,505 → kit-driven, 9,865 standalone) belong in the PR description so reviewers understand the data-shape change ahead of time.
 
-#### Phase 4b/6-Polish-7 — Per-row check-in attribution (2026-05-28) — UNCOMMITTED
+#### Phase 4b/6-Polish-7 — Per-row check-in attribution (2026-05-28) — COMMITTED (`f457757d1`)
 
 Surfaced by manual check-in testing of Polish-6 multi-row qty slices. The
 booking-overview badge, the booking detail Qty column, the kit rollup status,
@@ -1346,7 +1346,7 @@ Manage-kits "Add" path + add-asset-to-kit cascade already booked correct qty.
 
 `pnpm webapp:validate` green at **2202 / 2202** throughout.
 
-##### Polish-7b — drawer disposition WRITE-flow migrated to `bookingAssetId` keying (2026-05-28) — DONE, UNCOMMITTED
+##### Polish-7b — drawer disposition WRITE-flow migrated to `bookingAssetId` keying (2026-05-28) — COMMITTED (`f457757d1`)
 
 The previously-deferred "very complex" piece is now implemented. The check-in
 drawer's qty disposition flow keys by `bookingAssetId` (the slice), not
@@ -1446,6 +1446,63 @@ INDIVIDUAL assets can't collide (trigger `enforce_individual_asset_single_kit` p
 **Mid-test sweep follow-up (2026-05-27) — `hideUnavailable=true` picker filter excluded qty-tracked-in-kit assets.** Picker for the booking manage-assets route hid QUANTITY_TRACKED assets that had ANY AssetKit row, even though their free pool was bookable as standalone (the explicit Polish-6 "Wave 5" promise). Verified against dev DB: "AA batteries" (cmo2mq85c001dul52ls03qy0l), QUANTITY_TRACKED total 460, 50 in Kit A, 410 free pool — picker returned empty for this asset. Root cause: `apps/webapp/app/modules/asset/service.server.ts`:834 set `where.assetKits = { none: {} }` unconditionally when `hideUnavailable=true`, with no qty-tracked bypass. Polish-2's matching custody branch at line 694-711 already had the right pattern (`where.AND.push({ OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }] })`); the kit branch hadn't been updated to mirror it. Fix: replace the bare assignment with the same AND-push + OR-bypass pattern, swapping `custody` for `assetKits`. The picker's downstream "Available" math (manage-assets.tsx:207-263 in the loader) already subtracts AssetKit sums, so the displayed count stays accurate.
 
 **Mid-test sweep follow-up (2026-05-27) — search-where builder still referenced `Asset.location`.** Searching from the manage-assets picker (`?s=a`) returned a 500 with `PrismaClientValidationError: Unknown argument \`location\``because`getAssets`at`apps/webapp/app/modules/asset/service.server.ts`:586 still had a bare `{ location: { name: { contains: term } } }`clause in its OR-search block — the pivot migration removed the`Asset.location`relation but the search-side builder wasn't rewritten. Prisma can't validate this at compile-time (it only fails at request time), and the test suite had no`?s=...`case across the manage-assets loader, so typecheck + the existing 2202 tests both let it slip through. Fix: rewrite to`{ assetLocations: { some: { location: { name: { contains: term, mode: "insensitive" } } } } }`. Single site — full sweep across `apps/webapp/app/modules/{asset,booking,kit}`showed no other bare`location:`filter clauses on Asset (the other two hits at lines 2239 + 4748 are correctly nested inside`assetLocations.select`).
+
+##### 2026-05-29 — main merge + post-merge fixes + multi-slice bug bash + security
+
+**`main` merged into `feat-quantities` (`8f9f14de6`, 27 conflicts).** Main
+brought the mobile companion app, the reports module, and a batch of pending
+migrations (incl. `Kit.preferredBarcodeId`). Conflict resolution +
+post-merge breakage fixes landed in the merge commit and `21ce040a0`. Things
+that needed manual attention after the merge:
+
+- **Pending migrations.** Main shipped migrations the worktree DB hadn't run
+  (e.g. `Kit.preferredBarcodeId`) → kit pages threw P2022 until
+  `db:deploy-migration` was run. (Operator action, not a code fix.)
+- **Advanced asset-index search 500 (`missing FROM-clause entry for table
+"tm"`).** Latent bug exposed by the merge: the custodian search clause in
+  `asset/query.server.ts` still referenced top-level `tm`/`u` joins that were
+  removed when custody moved to the `custody_agg` LATERAL. Rewritten to a
+  per-asset `EXISTS (… Custody cust LEFT JOIN TeamMember/User … WHERE
+cust."assetId" = a.id AND name ILIKE …)`. Tests mock `$queryRaw`, so this
+  was invisible to validate — caught only in the browser.
+- Booking/asset service + drawer merge conflicts re-verified (tasks #57–#67).
+
+**Three multi-slice booking bugs fixed (`21ce040a0`)** — surfaced while the
+user tested mixed kit+standalone qty bookings:
+
+1. **Multi-kit same-asset dropped a kit slice on add.** `updateBookingAssets`
+   collapsed kit attribution into a 1:1 `Record<assetId, assetKitId>`, so an
+   asset in two kits kept only one slice. Replaced with a `kitSlices`
+   list (`{assetId, assetKitId, quantity}[]`) threaded through manage-kits,
+   `updateBookingAssets`, and the scan-add path. Verified on a fresh booking:
+   3 distinct AA-battery slices.
+2. **Kit-scan check-in logged NULL `bookingAssetId`.** `checkinBooking` (the
+   full-check-in path, distinct from `partialCheckinBooking`) auto-defaulted
+   each disposition with `?? null`. Now iterates per `BookingAsset` slice,
+   uses `computeBookingAssetSliceRemaining`, caps per-asset, and tags
+   `bookingAssetId: disposition.bookingAssetId ?? slice.id`. The "AA wrongly
+   checked in inside Camera Kit" screenshot was a legacy-NULL greedy-fill
+   artifact, resolved by this fix (MCP-confirmed zero NULL post-fix).
+3. **`duplicateBooking` dropped `assetKitId` → P2002** on a multi-slice
+   source. One-line fix: copy `assetKitId` into the duplicated rows.
+
+Tests for all three added in the same commit.
+
+**Security follow-up (`2c15aca09` + `dde0f9d00`)** — the pre-commit security
+review on `21ce040a0` flagged that `kitSlices[].assetKitId` is request-supplied
+but never org-validated (cross-org IDOR — attach Org B's `AssetKit.id` to your
+own booking). Added `assertAssetKitsBelongToOrg` to the shared
+`~/utils/org-validation.server` guards (mirrors `assertAssetsBelongToOrg`),
+wired into `updateBookingAssets` + `addScannedAssetsToBookingWithinTx` inside
+the mutation tx; the scan path also gained the asset-id count guard it was
+missing. Follow-up commit filters falsy `assetKitId` from the scan-path guard
+(the kit-qty resolution below it already tolerates non-kit slices);
+`updateBookingAssets` is intentionally left unfiltered (its insert writes the
+id into a NOT NULL column, so rejecting a falsy id there is the correct
+fail-closed behaviour). `pnpm webapp:validate` green at **2354 / 2354**.
+
+**Unpushed:** the 2 security commits are ahead of `origin/feat-quantities`
+(which already has the merge + `21ce040a0`). Push needs explicit go-ahead.
 
 #### Phase 4c — Split / merge UX (third)
 
@@ -1592,12 +1649,13 @@ All review threads resolved on the PR.
 
 ## Last sync with main
 
-| When                 | Merge commit | What main brought                                                                                                              | Pre-merge HEAD |
-| -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------- |
-| 2026-04-29 (earlier) | `a613f4231`  | Misc churn pre-PR-2495                                                                                                         | `1a5a12ffe`    |
-| 2026-04-29 (later)   | `a64d8c22e`  | **PR #2495 — Activity Events / Reports system** + React Doctor integration + audit bulk-actions + 4 new `.claude/rules/` files | `a613f4231`    |
-| 2026-05-07 (earlier) | `197b51c8c`  | **PR #2412 — Mobile companion app** (Expo + Maestro flows) + reports review-feedback fixes (main tip `5afc116833`)             | `4c340063d`    |
-| 2026-05-07 (later)   | `d66b6cd34`  | Tiny pickup of `ddb104b98` — mobile path-to-regexp wildcard fix that landed on main mid-merge                                  | `197b51c8c`    |
+| When                 | Merge commit | What main brought                                                                                                                                                                        | Pre-merge HEAD |
+| -------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| 2026-04-29 (earlier) | `a613f4231`  | Misc churn pre-PR-2495                                                                                                                                                                   | `1a5a12ffe`    |
+| 2026-04-29 (later)   | `a64d8c22e`  | **PR #2495 — Activity Events / Reports system** + React Doctor integration + audit bulk-actions + 4 new `.claude/rules/` files                                                           | `a613f4231`    |
+| 2026-05-07 (earlier) | `197b51c8c`  | **PR #2412 — Mobile companion app** (Expo + Maestro flows) + reports review-feedback fixes (main tip `5afc116833`)                                                                       | `4c340063d`    |
+| 2026-05-07 (later)   | `d66b6cd34`  | Tiny pickup of `ddb104b98` — mobile path-to-regexp wildcard fix that landed on main mid-merge                                                                                            | `197b51c8c`    |
+| 2026-05-29           | `8f9f14de6`  | Mobile companion + reports + pending migrations (incl. `Kit.preferredBarcodeId`) — 27 conflicts; post-merge fixes in `21ce040a0` (advanced-search FROM-clause, custodian EXISTS rewrite) | `f457757d1`    |
 
 Conflicted files in the `a64d8c22e` merge: `utils/error.ts`,
 `assets/form.tsx`, `booking/availability-label.tsx`,
