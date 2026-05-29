@@ -4,7 +4,7 @@ import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 
 /**
  * Generates dynamic Prisma orderBy clause for booking assets
- * @param orderBy - The field to sort by (status, title, category, kit)
+ * @param orderBy - The field to sort by (status, title, category, location, kit)
  * @param orderDirection - The sort direction (asc or desc)
  * @returns Array of Prisma orderBy inputs
  */
@@ -16,6 +16,7 @@ export function getBookingAssetsOrderBy(
     status: [{ status: orderDirection }, { createdAt: "asc" }],
     title: [{ title: orderDirection }],
     category: [{ category: { name: orderDirection } }],
+    location: [{ location: { name: orderDirection } }],
   };
   return orderByMap[orderBy] || orderByMap.status;
 }
@@ -25,8 +26,9 @@ type AssetWithKit = {
   title: string;
   status: string;
   kitId: string | null;
-  kit: { name: string } | null;
+  kit: { name: string; location?: { name: string } | null } | null;
   category: { name: string } | null;
+  location?: { name: string } | null;
   [key: string]: unknown;
 };
 
@@ -35,7 +37,7 @@ type AssetWithKit = {
  * Returns: sorted kit assets (grouped) followed by sorted individual assets.
  *
  * @param assets - Array of assets with kit information
- * @param orderBy - Field to sort by (status, title, category, kit)
+ * @param orderBy - Field to sort by (status, title, category, location)
  * @param orderDirection - Sort direction (asc or desc)
  * @returns Sorted array with kit assets grouped together
  */
@@ -57,11 +59,18 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
   }
 
   // Group kit assets by kitId
-  const kitGroups = new Map<string, { kitName: string; assets: T[] }>();
+  const kitGroups = new Map<
+    string,
+    { kitName: string; kitLocationName: string | null; assets: T[] }
+  >();
   for (const asset of kitAssets) {
     const kitId = asset.kitId!;
     if (!kitGroups.has(kitId)) {
-      kitGroups.set(kitId, { kitName: asset.kit!.name, assets: [] });
+      kitGroups.set(kitId, {
+        kitName: asset.kit!.name,
+        kitLocationName: asset.kit!.location?.name ?? null,
+        assets: [],
+      });
     }
     kitGroups.get(kitId)!.assets.push(asset);
   }
@@ -82,6 +91,15 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
         if (!catA && !catB) return a.title.localeCompare(b.title);
         // At this point both catA and catB are defined (handled above)
         return multiplier * catA!.localeCompare(catB!);
+      }
+      case "location": {
+        const locA = a.location?.name;
+        const locB = b.location?.name;
+        // Null locations go to the end regardless of direction
+        if (!locA && locB) return 1;
+        if (locA && !locB) return -1;
+        if (!locA && !locB) return a.title.localeCompare(b.title);
+        return multiplier * locA!.localeCompare(locB!);
       }
       case "status":
       default: {
@@ -133,6 +151,16 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
             return groupA.kitName.localeCompare(groupB.kitName);
           // At this point both catA and catB are defined (handled above)
           return multiplier * catA!.localeCompare(catB!);
+        }
+        case "location": {
+          const locA = groupA.kitLocationName;
+          const locB = groupB.kitLocationName;
+          // Null locations go to the end regardless of direction
+          if (!locA && locB) return 1;
+          if (locA && !locB) return -1;
+          if (!locA && !locB)
+            return groupA.kitName.localeCompare(groupB.kitName);
+          return multiplier * locA!.localeCompare(locB!);
         }
         case "status":
         default: {
@@ -271,4 +299,50 @@ export function isAssetAlreadyBooked(
   currentBookingId: string
 ): boolean {
   return hasAssetBookingConflicts(asset, currentBookingId);
+}
+
+/**
+ * Builds the per-term OR clauses for searching a booking's assets across
+ * multiple fields. Each comma-separated term becomes one OR group; a row
+ * matches the term if any field matches (case-insensitive substring).
+ *
+ * Asset-level fields: title, sequentialId (SAM-id), category, tags, location,
+ * QR id, barcode value. Kit-level fields (name, location, category) are
+ * included so a kit surfaces when its own attributes match — kits have no
+ * sequentialId or tags, so those remain asset-only.
+ *
+ * Returned as an array intended to be spread into a `where.OR`. Returns an
+ * empty array for blank input.
+ *
+ * @param search - Raw search string from the `s` query param
+ * @returns Array of `{ OR: [...] }` clauses, one per term
+ */
+export function buildBookingAssetsSearchOR(
+  search: string
+): Prisma.AssetWhereInput[] {
+  const terms = search
+    .toLowerCase()
+    .trim()
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+
+  return terms.map((term) => ({
+    OR: [
+      // Asset-level fields
+      { title: { contains: term, mode: "insensitive" } },
+      { sequentialId: { contains: term, mode: "insensitive" } },
+      { category: { name: { contains: term, mode: "insensitive" } } },
+      { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
+      { location: { name: { contains: term, mode: "insensitive" } } },
+      { qrCodes: { some: { id: { contains: term, mode: "insensitive" } } } },
+      {
+        barcodes: { some: { value: { contains: term, mode: "insensitive" } } },
+      },
+      // Kit-level fields (kits have no sequentialId / tags)
+      { kit: { name: { contains: term, mode: "insensitive" } } },
+      { kit: { location: { name: { contains: term, mode: "insensitive" } } } },
+      { kit: { category: { name: { contains: term, mode: "insensitive" } } } },
+    ],
+  }));
 }

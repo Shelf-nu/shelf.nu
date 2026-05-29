@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { getBookingAssetsOrderBy, groupAndSortAssetsByKit } from "./helpers";
+import {
+  buildBookingAssetsSearchOR,
+  getBookingAssetsOrderBy,
+  groupAndSortAssetsByKit,
+} from "./helpers";
+
+// Helper to create test assets, shared across all describe blocks
+const createAsset = (
+  id: string,
+  title: string,
+  status: string,
+  kitId: string | null = null,
+  kitName: string | null = null,
+  categoryName: string | null = null,
+  locationName: string | null = null,
+  kitLocationName: string | null = null
+) => ({
+  id,
+  title,
+  status,
+  kitId,
+  kit: kitName
+    ? {
+        name: kitName,
+        location: kitLocationName ? { name: kitLocationName } : null,
+      }
+    : null,
+  category: categoryName ? { name: categoryName } : null,
+  location: locationName ? { name: locationName } : null,
+});
 
 describe("getBookingAssetsOrderBy", () => {
   it("returns status ordering by default", () => {
@@ -36,26 +65,14 @@ describe("getBookingAssetsOrderBy", () => {
     const result = getBookingAssetsOrderBy("unknown", "desc");
     expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
   });
+
+  it("returns location ordering when orderBy is 'location'", () => {
+    const result = getBookingAssetsOrderBy("location", "asc");
+    expect(result).toEqual([{ location: { name: "asc" } }]);
+  });
 });
 
 describe("groupAndSortAssetsByKit", () => {
-  // Helper to create test assets
-  const createAsset = (
-    id: string,
-    title: string,
-    status: string,
-    kitId: string | null = null,
-    kitName: string | null = null,
-    categoryName: string | null = null
-  ) => ({
-    id,
-    title,
-    status,
-    kitId,
-    kit: kitName ? { name: kitName } : null,
-    category: categoryName ? { name: categoryName } : null,
-  });
-
   describe("grouping behavior", () => {
     it("groups assets by kit and places kits before individual assets", () => {
       const assets = [
@@ -262,5 +279,84 @@ describe("groupAndSortAssetsByKit", () => {
       expect(result[0].status).toBe("CHECKED_OUT");
       expect(result[1].status).toBe("AVAILABLE");
     });
+  });
+});
+
+describe("groupAndSortAssetsByKit — location", () => {
+  it("sorts individual assets by location name ascending", () => {
+    const assets = [
+      createAsset("1", "A", "AVAILABLE", null, null, null, "Warehouse B"),
+      createAsset("2", "B", "AVAILABLE", null, null, null, "Warehouse A"),
+    ];
+
+    const result = groupAndSortAssetsByKit(assets, "location", "asc");
+
+    expect(result[0].location?.name).toBe("Warehouse A");
+    expect(result[1].location?.name).toBe("Warehouse B");
+  });
+
+  it("places assets with no location at the end regardless of direction", () => {
+    const assets = [
+      createAsset("1", "NoLoc", "AVAILABLE"),
+      createAsset("2", "HasLoc", "AVAILABLE", null, null, null, "Shelf 1"),
+    ];
+
+    const ascResult = groupAndSortAssetsByKit(assets, "location", "asc");
+    expect(ascResult[0].location?.name).toBe("Shelf 1");
+    expect(ascResult[1].location).toBeNull();
+
+    const descResult = groupAndSortAssetsByKit(assets, "location", "desc");
+    expect(descResult[1].location).toBeNull();
+  });
+
+  it("sorts kit groups by the kit's own location", () => {
+    const assets = [
+      createAsset(
+        "1",
+        "A",
+        "AVAILABLE",
+        "kit-z",
+        "Kit Z",
+        null,
+        null,
+        "Zone Z"
+      ),
+      createAsset(
+        "2",
+        "B",
+        "AVAILABLE",
+        "kit-a",
+        "Kit A",
+        null,
+        null,
+        "Zone A"
+      ),
+    ];
+
+    const result = groupAndSortAssetsByKit(assets, "location", "asc");
+
+    expect(result[0].kit?.name).toBe("Kit A");
+    expect(result[1].kit?.name).toBe("Kit Z");
+  });
+});
+
+describe("buildBookingAssetsSearchOR", () => {
+  it("produces one OR group per comma-separated term", () => {
+    const result = buildBookingAssetsSearchOR("laptop, dock");
+    expect(result).toHaveLength(2);
+  });
+
+  it("matches asset title, location, and kit location for a term", () => {
+    const [group] = buildBookingAssetsSearchOR("warehouse");
+    const json = JSON.stringify(group);
+    expect(json).toContain('"title"');
+    expect(json).toContain('"location"');
+    expect(json).toContain('"sequentialId"');
+    expect(json).toContain('"kit"');
+    expect(json).toContain("warehouse");
+  });
+
+  it("returns an empty array for blank search", () => {
+    expect(buildBookingAssetsSearchOR("   ")).toEqual([]);
   });
 });
