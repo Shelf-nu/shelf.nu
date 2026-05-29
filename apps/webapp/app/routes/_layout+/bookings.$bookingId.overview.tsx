@@ -29,6 +29,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
@@ -359,6 +360,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
+          // Asset's pickup location — rendered in the booking Location column.
+          location: LOCATION_WITH_HIERARCHY,
           // Code-resolution relations — required for AssetCodeBadge on the
           // booking detail page rows. Scalar fields (sequentialId,
           // preferredBarcodeId) come in automatically via `include`; the
@@ -441,6 +444,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // and `.claude/rules/code-bearing-entity-list-consistency.md`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
+          // Kit's pickup location — rendered on the kit row.
+          location: LOCATION_WITH_HIERARCHY,
           _count: { select: { assets: true } },
         },
       }),
@@ -542,8 +547,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
-        // Asset search tooltip
-        searchFieldLabel: "Search by asset name",
+        // Asset search label + tooltip listing searchable fields
+        searchFieldLabel: "Search assets & kits",
+        searchFieldTooltip: {
+          title: "Search booking items",
+          text: "Search the assets and kits in this booking. Separate keywords with a comma (,) to search with OR. Supported fields:\n- Name\n- Asset ID (SAM-id, assets only)\n- Category\n- Tags (assets only)\n- Location\n- QR code value\n- Barcode value",
+        },
         ...notifyData,
       }),
       {
