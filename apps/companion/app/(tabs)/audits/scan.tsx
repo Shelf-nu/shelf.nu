@@ -51,6 +51,8 @@ import {
   SegmentedControl,
   type ListTab,
 } from "@/components/audit/segmented-control";
+import { EvidenceModal } from "@/components/audit/evidence-modal";
+import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // ── Main Export ──────────────────────────────────────────
 
@@ -133,10 +135,38 @@ function AuditScannerContent() {
     { assetId: string; name: string; isExpected: boolean; scannedAt: string }[]
   >([]);
 
+  // Ref to hold setScannedItems - populated after useAuditInit
+  const setScannedItemsRef = useRef<React.Dispatch<
+    React.SetStateAction<ScannedItem[]>
+  > | null>(null);
+
+  // Ref to hold setSelectedItem - used by handleScanSynced
+  const setSelectedItemRef = useRef<React.Dispatch<
+    React.SetStateAction<ScannedItem | null>
+  > | null>(null);
+
+  // Callback for when scan is synced - updates React state with auditAssetId
+  const handleScanSynced = useCallback(
+    (assetId: string, auditAssetId: string) => {
+      // Update the scanned items list
+      setScannedItemsRef.current?.((prev) =>
+        prev.map((item) =>
+          item.assetId === assetId ? { ...item, auditAssetId } : item
+        )
+      );
+      // Also update selectedItem if evidence modal is open for this asset
+      setSelectedItemRef.current?.((prev) =>
+        prev?.assetId === assetId ? { ...prev, auditAssetId } : prev
+      );
+    },
+    []
+  );
+
   const { scanQueueRef, enqueueScan, processQueue, retryTimerRef } =
     useScanQueue({
       orgId: currentOrg?.id,
       scannedItemsRef: stableScannedItemsRef,
+      onScanSynced: handleScanSynced,
     });
 
   // ── Audit init (extracted hook) ─────────────────────
@@ -168,6 +198,8 @@ function AuditScannerContent() {
 
   // Keep the stable ref in sync with the audit init ref
   stableScannedItemsRef.current = scannedItemsRef.current;
+  // Wire up setScannedItems for the scan sync callback
+  setScannedItemsRef.current = setScannedItems;
 
   // Track expectedTotal in a ref for animateProgress
   const expectedTotalRef = useRef(expectedTotal);
@@ -182,6 +214,53 @@ function AuditScannerContent() {
   // ── List tab toggle (scanned / remaining) ──────────
 
   const [activeTab, setActiveTab] = useState<ListTab>("scanned");
+
+  // ── Evidence modal (notes + photos per scanned item) ──
+
+  const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
+  // Wire up setSelectedItem for the scan sync callback
+  setSelectedItemRef.current = setSelectedItem;
+
+  const handleItemPress = useCallback((item: ScannedItem) => {
+    setSelectedItem(item);
+    setEvidenceModalVisible(true);
+  }, []);
+
+  const handleCloseEvidenceModal = useCallback(() => {
+    setEvidenceModalVisible(false);
+    setSelectedItem(null);
+  }, []);
+
+  const handleEvidenceAdded = useCallback(
+    (assetId: string, type: "note" | "image") => {
+      // Optimistically update the local evidence count
+      setScannedItems((prev) =>
+        prev.map((item) => {
+          if (item.assetId !== assetId) return item;
+          return {
+            ...item,
+            notesCount:
+              type === "note" ? (item.notesCount ?? 0) + 1 : item.notesCount,
+            imagesCount:
+              type === "image" ? (item.imagesCount ?? 0) + 1 : item.imagesCount,
+          };
+        })
+      );
+      // Also update the selected item in the modal
+      setSelectedItem((prev) => {
+        if (!prev || prev.assetId !== assetId) return prev;
+        return {
+          ...prev,
+          notesCount:
+            type === "note" ? (prev.notesCount ?? 0) + 1 : prev.notesCount,
+          imagesCount:
+            type === "image" ? (prev.imagesCount ?? 0) + 1 : prev.imagesCount,
+        };
+      });
+    },
+    [setScannedItems]
+  );
 
   // ── Inactivity timer (shared hook) ──────────────────
 
@@ -871,7 +950,10 @@ function AuditScannerContent() {
 
           {/* List content */}
           {activeTab === "scanned" ? (
-            <ScannedItemsList items={scannedItems} />
+            <ScannedItemsList
+              items={scannedItems}
+              onItemPress={handleItemPress}
+            />
           ) : (
             <RemainingAssetsList items={remainingAssets} />
           )}
@@ -894,6 +976,15 @@ function AuditScannerContent() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Evidence modal for adding notes + photos to scanned items */}
+      <EvidenceModal
+        visible={evidenceModalVisible}
+        onClose={handleCloseEvidenceModal}
+        item={selectedItem}
+        auditSessionId={auditId ?? ""}
+        onEvidenceAdded={handleEvidenceAdded}
+      />
     </View>
   );
 }

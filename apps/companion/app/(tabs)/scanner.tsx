@@ -280,6 +280,10 @@ function ScannerContent() {
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
+        // A QR can be asset-less but still linked to a kit. We track kitId
+        // separately because the create-asset flow must not be offered for
+        // kit-linked QRs (see the !asset branch below for the full rationale).
+        let kitId: string | null = null;
 
         if (qrId) {
           // ── Shelf QR path ──
@@ -305,11 +309,33 @@ function ScannerContent() {
           if (error || !qrData) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            setScanResult({
-              type: "error",
-              title: "Lookup Failed",
-              message: error || "Could not look up this QR code.",
-            });
+
+            // Detect unclaimed QR codes — offer browser link instead of generic error
+            const isUnclaimed =
+              error === "This QR code is not linked to any organization";
+
+            if (isUnclaimed) {
+              setScanResult({
+                type: "not_found",
+                title: "No Asset Linked",
+                message:
+                  "This QR code is not linked to any asset. Open the web app to link it.",
+                action: {
+                  label: "Link in Browser",
+                  icon: "open-outline",
+                  onPress: () => {
+                    Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                    dismissResult();
+                  },
+                },
+              });
+            } else {
+              setScanResult({
+                type: "error",
+                title: "Lookup Failed",
+                message: error || "Could not look up this QR code.",
+              });
+            }
             finalizeScan();
             return;
           }
@@ -317,6 +343,7 @@ function ScannerContent() {
           codeId = qrId;
           codeOrgId = qrData.qr?.organizationId ?? null;
           asset = qrData.qr?.asset ?? null;
+          kitId = qrData.qr?.kitId ?? null;
         } else {
           // ── Barcode fallback path ──
 
@@ -390,10 +417,78 @@ function ScannerContent() {
         if (!asset) {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+          // For Shelf QR codes, offer a path to link the QR to a new asset:
+          // - If claimed to current org → navigate to in-app asset creation
+          // - If unclaimed → bridge to web for the claim+link flow
+          // Barcodes don't have an external link flow, so no action for those
+          let unlinkedQrAction:
+            | {
+                label: string;
+                icon: string;
+                onPress: () => void;
+              }
+            | undefined;
+
+          const canCreateAsset = userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "create",
+          });
+
+          // A QR linked to a kit (kitId set, asset null) must NOT offer in-app
+          // "Create Asset". createAsset only attaches a passed QR when both its
+          // assetId AND kitId are null; for a kit-linked QR it silently mints a
+          // *different* QR and leaves the scanned kit QR untouched — breaking the
+          // "this QR will be linked" promise. Bridge those to the web kit view.
+          const isKitLinked = Boolean(kitId);
+
+          if (qrId && isKitLinked) {
+            // QR belongs to a kit — open the web app to view the kit
+            unlinkedQrAction = {
+              label: "Open in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+          } else if (qrId && codeOrgId === currentOrg?.id && canCreateAsset) {
+            // QR is claimed to current org, truly unlinked, and user can create — create in-app
+            unlinkedQrAction = {
+              label: "Create Asset",
+              icon: "add-circle-outline",
+              onPress: () => {
+                pushIntoTab("/(tabs)/assets", {
+                  pathname: "/(tabs)/assets/new",
+                  params: { qrId },
+                });
+                dismissResult();
+              },
+            };
+          } else if (qrId) {
+            // QR is unclaimed — bridge to web for claim flow
+            unlinkedQrAction = {
+              label: "Link in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                Linking.openURL(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+          }
+
           setScanResult({
             type: "not_found",
-            title: "No Asset Linked",
-            message: "This code exists but is not linked to any asset.",
+            title: isKitLinked ? "Linked to a Kit" : "No Asset Linked",
+            message: qrId
+              ? isKitLinked
+                ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
+                : codeOrgId === currentOrg?.id && canCreateAsset
+                ? "This QR code is not linked to any asset. Create one now."
+                : "This QR code is not linked to any asset. Open the web app to link it."
+              : "This code exists but is not linked to any asset.",
+            action: unlinkedQrAction,
           });
           finalizeScan();
           return;
