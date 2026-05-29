@@ -31,6 +31,7 @@ import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { clearAuditScanState } from "@/lib/audit-scan-persistence";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -53,6 +54,10 @@ import {
 } from "@/components/audit/segmented-control";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
 import type { ScannedItem } from "@/hooks/use-audit-init";
+
+// ── Constants ────────────────────────────────────────────
+
+const EVIDENCE_HINT_SHOWN_KEY = "audit_evidence_hint_shown";
 
 // ── Main Export ──────────────────────────────────────────
 
@@ -219,6 +224,39 @@ function AuditScannerContent() {
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
+
+  // ── One-time hint for evidence feature ──────────────────
+
+  const hasShownEvidenceHintRef = useRef(false);
+
+  // Check if user has seen the evidence hint before
+  useEffect(() => {
+    AsyncStorage.getItem(EVIDENCE_HINT_SHOWN_KEY)
+      .then((value) => {
+        hasShownEvidenceHintRef.current = value === "true";
+      })
+      .catch(() => {
+        // Ignore storage errors - hint will just show again
+      });
+  }, []);
+
+  /** Show a one-time hint about the evidence feature after first scan */
+  const maybeShowEvidenceHint = useCallback(() => {
+    if (hasShownEvidenceHintRef.current) return;
+    hasShownEvidenceHintRef.current = true;
+    AsyncStorage.setItem(EVIDENCE_HINT_SHOWN_KEY, "true").catch(() => {
+      // Ignore storage errors
+    });
+
+    // Delay slightly so it appears after the scan toast
+    setTimeout(() => {
+      showToast(
+        "found",
+        "Tip: Add Evidence",
+        "Tap any scanned item to add photos or notes"
+      );
+    }, 2500);
+  }, [showToast]);
   // Wire up setSelectedItem for the scan sync callback
   setSelectedItemRef.current = setSelectedItem;
 
@@ -468,6 +506,9 @@ function AuditScannerContent() {
           scanQueueRef.current
         );
 
+        // 7. Show one-time hint about evidence feature
+        maybeShowEvidenceHint();
+
         finalizeScan();
       } catch (err) {
         if (__DEV__) console.error("[AuditScanner] Error:", err);
@@ -498,6 +539,7 @@ function AuditScannerContent() {
       scanQueueRef,
       shouldSkipScan,
       lastScanRef,
+      maybeShowEvidenceHint,
     ]
   );
 
@@ -508,13 +550,21 @@ function AuditScannerContent() {
 
     const remaining = expectedTotal - foundCount;
 
+    // Build completion message with context about remaining and unexpected items
+    const unexpectedNote =
+      unexpectedCount > 0
+        ? `\n${unexpectedCount} unexpected ${
+            unexpectedCount === 1 ? "item" : "items"
+          } will be recorded.`
+        : "";
+
     Alert.alert(
       "Complete Audit",
       remaining > 0
         ? `Complete "${auditName}"?\n\n${remaining} unscanned ${
             remaining === 1 ? "asset" : "assets"
-          } will be marked as missing.`
-        : `Complete "${auditName}"?\n\nAll expected assets have been found.`,
+          } will be marked as missing.${unexpectedNote}`
+        : `Complete "${auditName}"?\n\nAll expected assets have been found.${unexpectedNote}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -561,6 +611,7 @@ function AuditScannerContent() {
     auditName,
     expectedTotal,
     foundCount,
+    unexpectedCount,
     router,
     debouncedSaverRef,
   ]);

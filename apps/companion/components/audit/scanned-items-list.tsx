@@ -47,12 +47,22 @@ export function ScannedItemsList({
           <Text style={styles.scannedItemName} numberOfLines={1}>
             {item.name}
           </Text>
-          {hasEvidence && (
-            <View style={styles.evidenceBadge}>
-              <Ionicons name="attach" size={12} color={colors.primary} />
+          {/* Camera icon - always visible to hint at evidence feature */}
+          <View
+            style={[
+              styles.cameraHint,
+              hasEvidence && styles.cameraHintWithEvidence,
+            ]}
+          >
+            <Ionicons
+              name="camera"
+              size={14}
+              color={hasEvidence ? colors.primary : colors.muted}
+            />
+            {hasEvidence && (
               <Text style={styles.evidenceCount}>{evidenceCount}</Text>
-            </View>
-          )}
+            )}
+          </View>
           <Text style={styles.scannedItemBadge}>
             {item.isExpected ? "Found" : "Unexpected"}
           </Text>
@@ -135,14 +145,18 @@ const useStyles = createStyles((colors) => ({
     fontWeight: "500",
     color: colors.muted,
   },
-  evidenceBadge: {
+  cameraHint: {
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
-    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.1)",
     paddingHorizontal: spacing.xs,
     paddingVertical: 2,
     borderRadius: borderRadius.sm,
+    opacity: 0.5,
+  },
+  cameraHintWithEvidence: {
+    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.1)",
+    opacity: 1,
   },
   evidenceCount: {
     fontSize: fontSize.xs,

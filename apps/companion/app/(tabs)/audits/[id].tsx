@@ -34,6 +34,7 @@ import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
+import { playScanSound } from "@/lib/scan-sound";
 
 // ── Asset filter pills ──────────────────────────────────
 
@@ -64,6 +65,9 @@ type DisplayAsset = {
   locationName: string | null;
   categoryName: string | null;
   custodianName: string | null;
+  /** Evidence counts from audit scans — only available for scanned items */
+  notesCount: number;
+  imagesCount: number;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -223,6 +227,7 @@ function AuditDetailContent() {
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
             Alert.alert(
               "Audit Complete",
               `"${audit.name}" has been completed.`,
@@ -260,6 +265,8 @@ function AuditDetailContent() {
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
+        notesCount: scan?.auditNotesCount ?? 0,
+        imagesCount: scan?.auditImagesCount ?? 0,
       });
     }
 
@@ -281,6 +288,8 @@ function AuditDetailContent() {
           locationName: scan.assetLocationName,
           categoryName: null,
           custodianName: null,
+          notesCount: scan.auditNotesCount ?? 0,
+          imagesCount: scan.auditImagesCount ?? 0,
         });
       }
     }
@@ -402,6 +411,16 @@ function AuditDetailContent() {
               </Text>
             )}
           </View>
+
+          {/* Evidence badge - show when item has notes or photos */}
+          {(item.notesCount > 0 || item.imagesCount > 0) && (
+            <View style={styles.evidenceBadge}>
+              <Ionicons name="camera" size={12} color={colors.primary} />
+              <Text style={styles.evidenceCount}>
+                {item.notesCount + item.imagesCount}
+              </Text>
+            </View>
+          )}
 
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
@@ -1051,6 +1070,20 @@ const useStyles = createStyles((colors, shadows) => ({
     borderWidth: 1,
     borderColor: colors.border,
     gap: spacing.sm,
+  },
+  evidenceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.1)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    gap: 3,
+  },
+  evidenceCount: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.primary,
   },
   assetImage: {
     width: 36,

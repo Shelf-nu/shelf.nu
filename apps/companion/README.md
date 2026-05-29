@@ -305,6 +305,47 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 
 ---
 
+## EAS Build Budget Management
+
+> **Important:** EAS Starter plan includes $45/month of build credit. Stay within budget by following these practices.
+
+### Build Cost Estimates
+
+| Build Type | Duration | Approx Cost |
+| ---------- | -------- | ----------- |
+| iOS        | 10-15 min | $0.50-1.50 |
+| Android    | 8-12 min | $0.40-1.20 |
+
+With $45 credit, you get roughly **30-50 iOS builds per month**.
+
+### Best Practices to Stay Within Budget
+
+1. **Batch changes** - Don't build after every small fix. Collect multiple fixes, then build once.
+2. **Local validation first** - Always run `npx tsc --noEmit` and `npx eslint` before triggering a cloud build.
+3. **Use simulator for non-camera features** - `pnpm companion:build:ios` (simulator) is free when run locally.
+4. **EAS builds only for physical device testing** - Camera, haptics, push notifications require real device.
+5. **Track usage** - Check build history at https://expo.dev/accounts/shelfassetmanagement/builds
+
+### When to Use Each Build Method
+
+| Scenario | Method | Cost |
+| -------- | ------ | ---- |
+| UI changes, navigation, logic | Local simulator build | Free |
+| Camera/scanner testing | EAS preview build | ~$1 |
+| Final QA before release | EAS preview build | ~$1 |
+| App Store submission | EAS production build | ~$1 |
+
+### Monitor Your Usage
+
+```bash
+# Check remaining builds (in Expo dashboard)
+open https://expo.dev/accounts/shelfassetmanagement/settings/billing
+```
+
+If you're approaching the $45 limit mid-month, either wait for reset or batch remaining work.
+
+---
+
 ## Tech Stack
 
 | Layer      | Technology                        |
