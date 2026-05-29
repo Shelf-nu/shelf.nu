@@ -1,9 +1,11 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiUpload } from "./client";
 import type {
   AuditsResponse,
   AuditDetailResponse,
   RecordScanResponse,
   CompleteAuditResponse,
+  CreateAuditNoteResponse,
+  UploadAuditImageResponse,
 } from "./types";
 
 export const auditsApi = {
@@ -95,4 +97,77 @@ export const auditsApi = {
         body: JSON.stringify(payload),
       }
     ),
+
+  /**
+   * Create a condition note for a scanned asset within an audit.
+   *
+   * This is the per-scan evidence that shows in the audit PDF report.
+   * The note is tied to a specific `auditAssetId` (the scan record),
+   * not directly to the asset itself.
+   *
+   * @param orgId Active organization ID
+   * @param payload.auditSessionId The audit session ID
+   * @param payload.auditAssetId The audit-asset record ID (from scan)
+   * @param payload.content Note text (1-5000 chars, trimmed)
+   */
+  createNote: (
+    orgId: string,
+    payload: {
+      auditSessionId: string;
+      auditAssetId: string;
+      content: string;
+    }
+  ) =>
+    apiFetch<CreateAuditNoteResponse>(
+      `/api/mobile/audits/note?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+
+  /**
+   * Upload a condition photo for a scanned asset within an audit.
+   *
+   * Photos are auto-resized to 1200px max and a 108px thumbnail is
+   * generated server-side. Max file size is 4MB.
+   *
+   * @param orgId Active organization ID
+   * @param auditSessionId The audit session ID
+   * @param auditAssetId The audit-asset record ID (from scan)
+   * @param imageUri Local file URI from expo-image-picker
+   * @param mimeType Image MIME type (defaults to image/jpeg)
+   * @param content Optional note text to accompany the image
+   */
+  uploadImage: (
+    orgId: string,
+    auditSessionId: string,
+    auditAssetId: string,
+    imageUri: string,
+    mimeType: string = "image/jpeg",
+    content?: string
+  ) => {
+    const formData = new FormData();
+    // React Native FormData accepts objects with uri/type/name for file uploads
+    formData.append("image", {
+      uri: imageUri,
+      type: mimeType,
+      name: `audit-photo.${mimeType === "image/png" ? "png" : "jpg"}`,
+    } as any);
+
+    if (content) {
+      formData.append("content", content);
+    }
+
+    const params = new URLSearchParams({
+      orgId,
+      auditSessionId,
+      auditAssetId,
+    });
+
+    return apiUpload<UploadAuditImageResponse>(
+      `/api/mobile/audits/image?${params}`,
+      formData
+    );
+  },
 };

@@ -13,6 +13,8 @@ const RETRY_DELAYS = [2_000, 5_000, 15_000];
 type UseScanQueueParams = {
   orgId: string | undefined;
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
+  /** Called when a scan is confirmed and auditAssetId is received from server */
+  onScanSynced?: (assetId: string, auditAssetId: string) => void;
 };
 
 export type ScanQueueResult = {
@@ -25,6 +27,7 @@ export type ScanQueueResult = {
 export function useScanQueue({
   orgId,
   scannedItemsRef,
+  onScanSynced,
 }: UseScanQueueParams): ScanQueueResult {
   const scanQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
@@ -39,9 +42,29 @@ export function useScanQueue({
     while (scanQueueRef.current.length > 0) {
       const entry = scanQueueRef.current[0];
       try {
-        await api.recordAuditScan(orgId, entry);
+        const { data, error } = await api.recordAuditScan(orgId, entry);
+        // Treat envelope errors as failures — keep item in queue for retry
+        if (error || !data) {
+          throw new Error(error ?? "Failed to sync audit scan");
+        }
         // Success — remove from queue and persist immediately
         scanQueueRef.current.shift();
+
+        // Capture auditAssetId from response so notes/photos can be attached
+        if (data?.auditAssetId) {
+          const itemIndex = scannedItemsRef.current.findIndex(
+            (item) => item.assetId === entry.assetId
+          );
+          if (itemIndex !== -1) {
+            scannedItemsRef.current[itemIndex] = {
+              ...scannedItemsRef.current[itemIndex],
+              auditAssetId: data.auditAssetId,
+            };
+          }
+          // Notify caller to update React state for re-render
+          onScanSynced?.(entry.assetId, data.auditAssetId);
+        }
+
         saveAuditScanState(
           entry.auditSessionId,
           scannedItemsRef.current,
@@ -77,7 +100,7 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef]);
+  }, [orgId, scannedItemsRef, onScanSynced]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {

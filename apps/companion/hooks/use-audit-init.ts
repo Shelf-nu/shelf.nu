@@ -15,6 +15,12 @@ export type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /** The audit-asset record ID, needed for adding notes/photos. Set after server confirms scan. */
+  auditAssetId?: string;
+  /** Local count of notes added during this session (optimistic). */
+  notesCount?: number;
+  /** Local count of photos added during this session (optimistic). */
+  imagesCount?: number;
 };
 
 export type ScanQueueEntry = {
@@ -114,7 +120,7 @@ export function useAuditInit({
       expectedAssetIdsRef.current = expectedIds;
       expectedAssetMapRef.current = expectedMap;
 
-      // Restore existing scans from server
+      // Restore existing scans from server (including evidence counts)
       const scannedIds = new Set<string>();
       const restoredItems: ScannedItem[] = [];
       for (const scan of data.existingScans) {
@@ -124,6 +130,9 @@ export function useAuditInit({
           name: scan.assetTitle,
           isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
+          auditAssetId: scan.auditAssetId ?? undefined,
+          notesCount: scan.auditNotesCount,
+          imagesCount: scan.auditImagesCount,
         });
       }
       scannedAssetIdsRef.current = scannedIds;

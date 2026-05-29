@@ -29,7 +29,7 @@ import {
   ActionSheetIOS,
 } from "react-native";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -62,6 +62,7 @@ try {
 
 export default function CreateAssetScreen() {
   const router = useRouter();
+  const { qrId } = useLocalSearchParams<{ qrId?: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -411,6 +412,7 @@ export default function CreateAssetScreen() {
       locationId: selectedLocation?.id,
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
+      qrId: qrId || undefined,
     });
 
     setIsSubmitting(false);
@@ -481,6 +483,19 @@ export default function CreateAssetScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── QR Link Banner (when creating from scanned QR) ── */}
+        {qrId && (
+          <View style={styles.qrBanner}>
+            <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
+            <View style={styles.qrBannerText}>
+              <Text style={styles.qrBannerTitle}>QR Code Ready to Link</Text>
+              <Text style={styles.qrBannerSubtitle}>
+                This asset will be linked to the scanned QR code
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* ── Photo (optional) ─────────────────────── */}
         <TouchableOpacity
           style={styles.imagePicker}
@@ -492,9 +507,19 @@ export default function CreateAssetScreen() {
           {imageUri ? (
             <View style={styles.imagePreviewContainer}>
               <Image
+                key={imageUri}
                 source={{ uri: imageUri }}
                 style={styles.imagePreview}
                 contentFit="cover"
+                cachePolicy="memory-disk"
+                onError={() => {
+                  // On Android, temporary file:// URIs from the camera can
+                  // become inaccessible. Log for debugging but don't crash.
+                  console.warn(
+                    "[NewAsset] Image preview failed to load:",
+                    imageUri
+                  );
+                }}
               />
               <View style={styles.imageOverlay}>
                 <Ionicons name="camera-outline" size={16} color="#fff" />
@@ -893,6 +918,32 @@ const useStyles = createStyles((colors, shadows) => ({
   scrollContent: {
     padding: spacing.lg,
     paddingBottom: 120,
+  },
+
+  // ── QR Link Banner ───────────────────────────
+  qrBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: "rgba(239, 104, 32, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 104, 32, 0.3)",
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  qrBannerText: {
+    flex: 1,
+  },
+  qrBannerTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  qrBannerSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    marginTop: 2,
   },
 
   // ── Image picker ─────────────────────────────

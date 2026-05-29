@@ -51,6 +51,7 @@ import {
  *   locationId?: string
  *   valuation?: number
  *   customFields?: { id: string; value: string | number | boolean | null }[]
+ *   qrId?: string (optional - links an existing unlinked QR code to the asset)
  * }
  *
  * @param args - React Router action args (carrying the incoming request).
@@ -80,6 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
       locationId,
       valuation,
       customFields,
+      qrId,
     } = z
       .object({
         title: z.string().min(2, "Title must be at least 2 characters"),
@@ -95,6 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
             })
           )
           .optional(),
+        qrId: z.string().optional(),
       })
       .parse(body);
 
@@ -193,6 +196,7 @@ export async function action({ request }: ActionFunctionArgs) {
       locationId: locationId || undefined,
       valuation: valuation ?? null,
       customFieldsValues,
+      qrId: qrId || undefined,
     });
 
     return data({
