@@ -7497,7 +7497,13 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
   await assertAssetKitsBelongToOrg(
-    { assetKitIds: kitSlices.map((s) => s.assetKitId), organizationId },
+    // Filter falsy ids: the kit-qty resolution below (line ~7557) already
+    // tolerates slices with no assetKitId, so the guard must too — otherwise
+    // a non-kit slice would surface a confusing "Invalid kits" 400.
+    {
+      assetKitIds: kitSlices.map((s) => s.assetKitId).filter(Boolean),
+      organizationId,
+    },
     tx
   );
 
