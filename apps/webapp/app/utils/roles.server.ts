@@ -1,5 +1,6 @@
 import type { SsoDetails } from "@prisma/client";
 import { OrganizationRoles, Roles } from "@prisma/client";
+import * as Sentry from "@sentry/react-router";
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { ShelfError } from "./error";
@@ -82,6 +83,13 @@ export async function requirePermission({
     organizationId,
     userId,
   });
+
+  // Tag the current Sentry scope with the resolved user + organization so
+  // every span / error emitted later in this request is filterable in
+  // Sentry by `user.id` and `organizationId`. requirePermission runs in
+  // every authenticated loader/action, so this is the natural choke point.
+  Sentry.setUser({ id: userId });
+  Sentry.setTag("organizationId", organizationId);
 
   const role = roles ? roles[0] : OrganizationRoles.BASE;
 

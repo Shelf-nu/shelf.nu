@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Roles } from "@prisma/client";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import { ScanBarcodeIcon } from "lucide-react";
 import type {
   LinksFunction,
@@ -13,12 +13,13 @@ import {
   Link,
   NavLink,
   Outlet,
+  useFetchers,
   useLoaderData,
 } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
+import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
@@ -44,6 +45,7 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -277,7 +279,26 @@ export default function App() {
     needsSequentialIdMigration,
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
-  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
+  const fetchers = useFetchers();
+  const isHydrated = useHydrated();
+  // Several authenticated routes (assets._index, kits._index, locations.*, …)
+  // call `userHasPermission` from `permission.validator.client` during their
+  // component render. That module is `.client.ts`, so RR7's vite plugin
+  // stubs every export to `undefined` in the server bundle — calling them
+  // during SSR throws `TypeError: userHasPermission is not a function`.
+  // Until those call sites are lifted into loaders (or wrapped in
+  // ClientOnly), we suppress route SSR rendering by showing the workspace
+  // spinner until the client has hydrated. This matches the prior status
+  // quo, when `switchingWorkspaceAtom` defaulted to `true` and produced the
+  // same one-frame spinner on every full reload.
+  // TODO: lift `userHasPermission` checks into route loaders so SSR works.
+  const workspaceSwitching =
+    !isHydrated ||
+    fetchers.some(
+      (f) =>
+        f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
+        (f.state === "submitting" || f.state === "loading")
+    );
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );

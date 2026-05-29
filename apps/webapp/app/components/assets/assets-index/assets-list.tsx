@@ -22,14 +22,17 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+import { AssetCodeBadge } from "../asset-code-badge";
 import { AssetImage } from "../asset-image";
 import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
@@ -68,6 +71,10 @@ export const AssetsList = ({
   const { isBase } = useUserRoleHelper();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
+  // Workspace pref + addon entitlement — used by the availability-view
+  // resourceLabelContent to render AssetCodeBadge next to status + category.
+  // resolveDisplayCode short-circuits to QR for non-addon orgs, so always safe.
+  const currentOrganization = useCurrentOrganization();
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
@@ -138,47 +145,65 @@ export const AssetsList = ({
               <AvailabilityCalendar
                 resources={resources}
                 events={events}
-                resourceLabelContent={({ resource }) => (
-                  <div className="flex items-center gap-2 px-2">
-                    <AssetImage
-                      asset={{
-                        id: resource.id,
-                        mainImage: resource.extendedProps?.mainImage,
-                        thumbnailImage: resource.extendedProps?.thumbnailImage,
-                        mainImageExpiration:
-                          resource.extendedProps?.mainImageExpiration,
-                      }}
-                      alt={`Image of ${resource.title}`}
-                      className="size-14 rounded border object-cover"
-                      withPreview
-                    />
-                    <div className="flex flex-col gap-1">
-                      <div className="min-w-0 flex-1 truncate">
-                        <Button
-                          to={`/assets/${resource.id}`}
-                          variant="link"
-                          className="text-left font-medium text-gray-900 hover:text-gray-700"
-                          target={"_blank"}
-                          onlyNewTabIconOnHover={true}
-                        >
-                          {resource.title}
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <AssetStatusBadge
-                          id={resource.id}
-                          status={resource.extendedProps?.status}
-                          availableToBook={
-                            resource.extendedProps?.availableToBook
-                          }
-                        />
-                        <CategoryBadge
-                          category={resource.extendedProps?.category}
-                        />
+                resourceLabelContent={({ resource }) => {
+                  const displayCode = currentOrganization
+                    ? resolveDisplayCode({
+                        entity: {
+                          sequentialId: resource.extendedProps?.sequentialId,
+                          preferredBarcodeId:
+                            resource.extendedProps?.preferredBarcodeId,
+                          qrCodes: resource.extendedProps?.qrCodes,
+                          barcodes: resource.extendedProps?.barcodes,
+                        },
+                        organization: currentOrganization,
+                      })
+                    : null;
+                  return (
+                    <div className="flex items-center gap-2 px-2">
+                      <AssetImage
+                        asset={{
+                          id: resource.id,
+                          mainImage: resource.extendedProps?.mainImage,
+                          thumbnailImage:
+                            resource.extendedProps?.thumbnailImage,
+                          mainImageExpiration:
+                            resource.extendedProps?.mainImageExpiration,
+                        }}
+                        alt={`Image of ${resource.title}`}
+                        className="size-14 rounded border object-cover"
+                        withPreview
+                      />
+                      <div className="flex flex-col gap-1">
+                        <div className="min-w-0 flex-1 truncate">
+                          <Button
+                            to={`/assets/${resource.id}`}
+                            variant="link"
+                            className="text-left font-medium text-gray-900 hover:text-gray-700"
+                            target={"_blank"}
+                            onlyNewTabIconOnHover={true}
+                          >
+                            {resource.title}
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <AssetStatusBadge
+                            id={resource.id}
+                            status={resource.extendedProps?.status}
+                            availableToBook={
+                              resource.extendedProps?.availableToBook
+                            }
+                          />
+                          <CategoryBadge
+                            category={resource.extendedProps?.category}
+                          />
+                          {displayCode ? (
+                            <AssetCodeBadge {...displayCode} />
+                          ) : null}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                }}
               />
               <AssetIndexPagination />
             </>
@@ -217,6 +242,10 @@ export const ListAssetContent = ({
   isUserPage?: boolean;
 }) => {
   const { category, tags, custody, location, kit } = item;
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
   return (
     <>
       {/* Item */}
@@ -267,12 +296,20 @@ export const ListAssetContent = ({
                   {item.title}
                 </Button>
               </span>
-              <div>
+              {/*
+                Single metadata line: status badge first (most glanceable —
+                color + word), code chip second (identification reference).
+                Reads as paired metadata, frees a row of vertical space vs.
+                the previous three-stack layout. `flex-wrap` keeps the layout
+                safe when code/status are long on narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 <AssetStatusBadge
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>

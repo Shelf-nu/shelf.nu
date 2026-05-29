@@ -22,6 +22,7 @@ import { SidebarTrigger } from "./components/layout/sidebar/sidebar";
 import { Clarity } from "./components/marketing/clarity";
 import { CloudflareWebAnalytics } from "./components/marketing/cloudflare-web-analytics";
 import { AnimationProvider } from "./components/shared/animation-provider";
+import { TooltipProvider } from "./components/shared/tooltip";
 import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
@@ -118,7 +119,12 @@ export function Layout({ children }: { children: ReactNode }) {
         </noscript>
 
         {hasCookies ? (
-          children
+          // Single app-level TooltipProvider. Radix recommends wrapping the
+          // app once and tolerates nested providers (they merge configs), but
+          // hoisting avoids spinning up a provider per-row for high-frequency
+          // chips like AssetCodeBadge. delayDuration matches the previous
+          // per-chip default so tooltip timing doesn't change.
+          <TooltipProvider delayDuration={100}>{children}</TooltipProvider>
         ) : (
           <BlockInteractions
             title="Cookies are disabled"

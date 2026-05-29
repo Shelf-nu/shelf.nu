@@ -18,6 +18,13 @@ declare global {
       URL_SHORTENER: string;
       FREE_TRIAL_DAYS: string;
       SENTRY_DSN: string;
+      /**
+       * Release identifier passed to Sentry.init so events on the client
+       * are tagged with the same version as the server. Resolved from
+       * SENTRY_RELEASE / FLY_RELEASE_VERSION at request time (see
+       * getBrowserEnv); empty when neither is set in the deploy env.
+       */
+      SENTRY_RELEASE: string;
       SUPPORT_EMAIL: string;
       FULL_CALENDAR_LICENSE_KEY: string;
       SHOW_HOW_DID_YOU_FIND_US: string;
@@ -55,6 +62,9 @@ declare global {
       DATABASE_URL: string;
       DIRECT_URL: string;
       SENTRY_DSN: string;
+      SENTRY_RELEASE: string;
+      /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
+      FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
@@ -181,6 +191,17 @@ export const SENTRY_DSN = getEnv("SENTRY_DSN", {
   isSecret: false,
   isRequired: false,
 });
+
+/**
+ * Release identifier for Sentry. Set explicitly via SENTRY_RELEASE at
+ * deploy time (e.g. the git SHA); falls back to Fly's auto-injected
+ * FLY_RELEASE_VERSION so we still get *some* tag on production hosts
+ * even before the deploy pipeline is updated. Empty in local dev.
+ */
+export const SENTRY_RELEASE =
+  getEnv("SENTRY_RELEASE", { isSecret: false, isRequired: false }) ||
+  getEnv("FLY_RELEASE_VERSION", { isSecret: false, isRequired: false }) ||
+  "";
 
 export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
   isRequired: false,
@@ -313,5 +334,6 @@ export function getBrowserEnv() {
     SUPPORT_EMAIL,
     FULL_CALENDAR_LICENSE_KEY,
     SENTRY_DSN,
+    SENTRY_RELEASE,
   };
 }

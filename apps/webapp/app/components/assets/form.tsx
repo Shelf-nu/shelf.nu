@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import type {
   AssetEditLoaderData,
   loader,
@@ -20,6 +21,7 @@ import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissio
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
+import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -60,6 +62,16 @@ export const NewAssetFormSchema = z.object({
   currentLocationId: z.string().optional(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
+  /**
+   * Per-asset override of which Barcode to display in list views. Empty
+   * string means "use workspace default" (resolver follows
+   * `Organization.qrIdDisplayPreference`). A non-empty value must match
+   * one of this asset's persisted barcode ids — enforced server-side.
+   */
+  preferredBarcodeId: z
+    .string()
+    .optional()
+    .transform((val) => (val && val.length > 0 ? val : null)),
   valuation: z
     .string()
     .optional()
@@ -86,6 +98,7 @@ type Props = Partial<
     | "locationId"
     | "description"
     | "valuation"
+    | "preferredBarcodeId"
   >
 > & {
   qrId?: Qr["id"] | null;
@@ -109,11 +122,26 @@ export const AssetForm = ({
   qrId,
   tags,
   barcodes,
+  preferredBarcodeId,
   referer,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
+  // Workspace's current code-display preference — used by PreferredBarcodeSelector
+  // to tell the user what "Workspace default" actually resolves to (and to warn
+  // about silent fallback when this asset can't satisfy the workspace preference).
+  const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
+  // removing a barcode in the section above immediately removes the matching
+  // override option. Initial value seeded from the loader; BarcodesInput
+  // notifies us via `onBarcodesChange`. `id` is optional because rows newly
+  // added in this edit session have no persisted id yet — the call-site
+  // filter strips them before handing to PreferredBarcodeSelector.
+  const [liveBarcodes, setLiveBarcodes] = useState<
+    { id?: string; type: Barcode["type"]; value: string }[]
+  >(barcodes ?? []);
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
     (cf) =>
@@ -570,20 +598,37 @@ export const AssetForm = ({
         </FormRow>
 
         {canUseBarcodes ? (
-          <FormRow
-            rowLabel={"Barcodes"}
-            className="border-b-0"
-            subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
-          >
-            <BarcodesInput
-              ref={barcodesInputRef}
-              barcodes={barcodes || []}
-              typeName={(i) => `barcodes[${i}].type`}
-              valueName={(i) => `barcodes[${i}].value`}
-              idName={(i) => `barcodes[${i}].id`}
-              disabled={disabled}
+          <>
+            <FormRow
+              rowLabel={"Barcodes"}
+              className="border-b-0"
+              subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
+            >
+              <BarcodesInput
+                ref={barcodesInputRef}
+                barcodes={barcodes || []}
+                typeName={(i) => `barcodes[${i}].type`}
+                valueName={(i) => `barcodes[${i}].value`}
+                idName={(i) => `barcodes[${i}].id`}
+                disabled={disabled}
+                onBarcodesChange={setLiveBarcodes}
+              />
+            </FormRow>
+
+            {/* why: newly-added barcodes in this edit session have no id yet
+                and cannot be referenced server-side until the asset is
+                saved. Filtering keeps the selector in sync with persisted
+                ids only; the selector's empty-state copy already explains
+                this gap to the user. */}
+            <PreferredBarcodeFormRow
+              barcodes={liveBarcodes.filter(
+                (b): b is typeof b & { id: string } =>
+                  typeof b.id === "string" && b.id.length > 0
+              )}
+              defaultValue={preferredBarcodeId}
+              workspacePreference={currentOrganization?.qrIdDisplayPreference}
             />
-          </FormRow>
+          </>
         ) : (
           <FormRow rowLabel={"Barcodes"} className="border-b-0">
             <UnlockBarcodesBanner />

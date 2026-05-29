@@ -8,7 +8,13 @@
  * Invoked from `.github/workflows/react-doctor.yml` after the doctor scan.
  *
  * Usage:
- *   node .github/scripts/react-doctor-pr-comment.mjs <diagnostics-dir>
+ *   node .github/scripts/react-doctor-pr-comment.mjs <diagnostics-dir> <exit-code>
+ *
+ * `<diagnostics-dir>` may be empty: react-doctor only writes a diagnostics
+ * directory when it has findings to record. The exit code (captured from the
+ * CLI via PIPESTATUS in the workflow) disambiguates:
+ *   - empty dir + exit 0       → clean scan, no findings
+ *   - empty dir + non-zero exit → the CLI itself failed
  */
 
 import fs from "node:fs";
@@ -21,11 +27,18 @@ const FOOTER =
   "diff-only view.</sub>";
 
 const diagDir = process.argv[2];
+const exitCode = process.argv[3];
 
 if (!diagDir) {
+  if (exitCode === "0") {
+    console.log(
+      `${HEADER}\n\n✅ No new findings on the files changed by this PR.\n\n${FOOTER}\n`
+    );
+    process.exit(0);
+  }
   console.log(
-    `${HEADER}\n\nNo diagnostics directory passed — scan may have failed. ` +
-      `Check the workflow logs.\n`
+    `${HEADER}\n\nNo diagnostics directory passed — scan may have failed ` +
+      `(CLI exit ${exitCode || "unknown"}). Check the workflow logs.\n`
   );
   process.exit(0);
 }

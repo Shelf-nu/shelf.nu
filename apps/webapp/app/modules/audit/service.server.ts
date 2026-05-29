@@ -654,6 +654,13 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Asset-code resolution: surface code data so the audit
+                // field worker can match the physical asset to the row.
+                // See `app/modules/barcode/display.ts`.
+                sequentialId: true,
+                preferredBarcodeId: true,
+                qrCodes: { take: 1, select: { id: true } },
+                barcodes: { select: { id: true, type: true, value: true } },
                 location: {
                   select: {
                     name: true,
@@ -997,6 +1004,19 @@ export async function getAssetsForAuditSession({
             name: { contains: searchTerm, mode: "insensitive" },
           },
         },
+        // Search by QR id and barcode values — audits are where field
+        // workers scan/read physical labels, so this is the most useful
+        // place to support searching by what's printed on the asset.
+        {
+          qrCodes: {
+            some: { id: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
+        {
+          barcodes: {
+            some: { value: { contains: searchTerm, mode: "insensitive" } },
+          },
+        },
       ];
     }
 
@@ -1009,6 +1029,13 @@ export async function getAssetsForAuditSession({
         mainImage: true,
         thumbnailImage: true,
         mainImageExpiration: true,
+        // Asset-code resolution fields. Audits are the strongest use case —
+        // a field worker matches the physical label to a row. See
+        // `app/modules/barcode/display.ts`.
+        sequentialId: true,
+        preferredBarcodeId: true,
+        qrCodes: { take: 1, select: { id: true } },
+        barcodes: { select: { id: true, type: true, value: true } },
         category: {
           select: {
             id: true,

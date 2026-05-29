@@ -3486,6 +3486,14 @@ export async function getBookings(params: {
               mainImage: true,
               thumbnailImage: true,
               mainImageExpiration: true,
+              // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+              // Surfaced by the BookingAssetsSidebar so the chip matches the
+              // simple-mode booking overview list and every other code-bearing
+              // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+              sequentialId: true,
+              preferredBarcodeId: true,
+              qrCodes: { take: 1, select: { id: true } },
+              barcodes: { select: { id: true, type: true, value: true } },
               category: {
                 select: {
                   id: true,
@@ -3865,10 +3873,20 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
-      assetsWhere.title = {
-        contains: search,
-        mode: "insensitive",
-      };
+      // Match the asset's title OR any of its codes (QR id, barcode value)
+      // so a field worker can find an asset in a booking by the same string
+      // that's printed on the physical label.
+      assetsWhere.OR = [
+        { title: { contains: search, mode: "insensitive" } },
+        {
+          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
+        },
+        {
+          barcodes: {
+            some: { value: { contains: search, mode: "insensitive" } },
+          },
+        },
+      ];
     }
 
     // if (status) {
