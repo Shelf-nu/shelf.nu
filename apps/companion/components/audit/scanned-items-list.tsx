@@ -49,7 +49,7 @@ export function ScannedItemsList({
           </Text>
           {hasEvidence && (
             <View style={styles.evidenceBadge}>
-              <Ionicons name="attach" size={12} color={colors.primary} />
+              <Ionicons name="attach" size={12} color={colors.muted} />
               <Text style={styles.evidenceCount}>{evidenceCount}</Text>
             </View>
           )}
@@ -139,7 +139,7 @@ const useStyles = createStyles((colors) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
-    backgroundColor: colors.primaryLight || "rgba(239, 104, 32, 0.1)",
+    backgroundColor: colors.borderLight,
     paddingHorizontal: spacing.xs,
     paddingVertical: 2,
     borderRadius: borderRadius.sm,
@@ -147,6 +147,6 @@ const useStyles = createStyles((colors) => ({
   evidenceCount: {
     fontSize: fontSize.xs,
     fontWeight: "600",
-    color: colors.primary,
+    color: colors.foregroundSecondary,
   },
 }));
