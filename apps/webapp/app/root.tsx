@@ -34,7 +34,6 @@ import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
-import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 
 export interface RootData {
@@ -63,6 +62,10 @@ export const meta: MetaFunction = () => [
   {
     title: "shelf.nu",
   },
+  // iOS Smart App Banner: Mobile Safari renders a native banner linking to the
+  // Shelf Companion App Store listing (id6765639874), or "Open" if installed.
+  // Apple-hosted, zero-maintenance — replaces the former custom PWA install modal.
+  { name: "apple-itunes-app", content: "app-id=6765639874" },
 ];
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
@@ -165,11 +168,9 @@ function App() {
       icon="tool"
     />
   ) : (
-    <PwaManagerProvider>
-      <AnimationProvider>
-        <Outlet />
-      </AnimationProvider>
-    </PwaManagerProvider>
+    <AnimationProvider>
+      <Outlet />
+    </AnimationProvider>
   );
 }
 
