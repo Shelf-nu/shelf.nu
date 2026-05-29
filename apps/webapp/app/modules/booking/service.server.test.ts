@@ -111,6 +111,18 @@ vitest.mock("~/database/db.server", () => ({
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       update: vitest.fn().mockResolvedValue({}),
     },
+    assetKit: {
+      // why: assertAssetKitsBelongToOrg (kit-slice cross-org guard) calls
+      // db.assetKit.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
+      // Echo the requested ids so the guard passes for happy-path tests;
+      // tests asserting a foreign kit id override per-case.
+      findMany: vitest.fn().mockImplementation((args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }),
+    },
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },

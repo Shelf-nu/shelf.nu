@@ -74,6 +74,7 @@ import {
 } from "~/utils/markdoc-wrappers";
 import {
   assertAssetsBelongToOrg,
+  assertAssetKitsBelongToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
@@ -4654,6 +4655,16 @@ export async function updateBookingAssets({
         });
       }
 
+      // Org-scope the kit-source discriminators. `kitSlices[].assetKitId`
+      // is request-supplied and written straight onto BookingAsset, so we
+      // must prove each AssetKit belongs to the caller's org (the asset
+      // ids were already validated above; this closes the cross-org gap
+      // for the kit ids).
+      await assertAssetKitsBelongToOrg(
+        { assetKitIds: slices.map((s) => s.assetKitId), organizationId },
+        tx
+      );
+
       // Standalone rows go through an upsert keyed on the
       // (bookingId, assetId) partial unique. Dedupe the standalone ids
       // since the upsert can't accept duplicate keys in one statement.
@@ -7472,6 +7483,22 @@ async function addScannedAssetsToBookingWithinTx(
   // member assets.
   const allScannedAssetIds = Array.from(
     new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
+  );
+
+  // Cross-org guards (request-supplied ids). The materialisation loop
+  // below silently skips assets it can't find in-org, and the
+  // `bookingAssets.create` would otherwise create rows for any globally-
+  // existing id (FK satisfied) — so prove BOTH the asset ids and the
+  // kit-slice assetKitIds belong to this org BEFORE any writes, throwing
+  // (not silently dropping) on a foreign id. Mirrors the count-guard
+  // `updateBookingAssets` performs.
+  await assertAssetsBelongToOrg(
+    { assetIds: allScannedAssetIds, organizationId },
+    tx
+  );
+  await assertAssetKitsBelongToOrg(
+    { assetKitIds: kitSlices.map((s) => s.assetKitId), organizationId },
+    tx
   );
 
   /**

@@ -76,6 +76,12 @@ export type OrgValidationTxClient = {
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
+  assetKit: {
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
+  };
 };
 
 /**
@@ -112,6 +118,52 @@ export async function assertAssetsBelongToOrg(
       title: "Invalid assets",
       message:
         "Some of the selected assets do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every `AssetKit` (kit-membership pivot) ID belongs to
+ * `organizationId`.
+ *
+ * Used by the booking kit-add paths: `kitSlices` carry an `assetKitId` (the
+ * kit-source discriminator) sourced from request/form input, which is written
+ * straight onto `BookingAsset.assetKitId`. Without this guard a user in Org A
+ * could attach Org B's `AssetKit.id` to their own booking row (cross-org
+ * reference). Dedupes first; a no-op for an empty list.
+ *
+ * @param params.assetKitIds - AssetKit IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertAssetKitsBelongToOrg(
+  {
+    assetKitIds,
+    organizationId,
+  }: { assetKitIds: string[]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (assetKitIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(assetKitIds)];
+
+  const found = await client.assetKit.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid kits",
+      message:
+        "Some of the selected kits do not exist in your workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,
