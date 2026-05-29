@@ -948,7 +948,7 @@ export default function PartialCheckinDrawer({
    */
   const scannedAssetIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const [key, item] of Object.entries(items)) {
+    for (const item of Object.values(items)) {
       if (!item) continue;
       if (item.type === "asset") {
         const id = assetIdForScannedKey(item as { data?: { id?: string } });
