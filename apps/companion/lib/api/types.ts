@@ -463,6 +463,15 @@ export type DashboardAudit = {
   expectedAssetCount: number;
   foundAssetCount: number;
   dueDate: string | null;
+  /**
+   * Number of users assigned; 0 = unassigned ("anyone can scan").
+   * Optional: older webapp builds (before this field shipped) omit it, so
+   * the client must tolerate its absence and hide ownership rather than
+   * render "undefined assigned" against a not-yet-deployed server.
+   */
+  assigneeCount?: number;
+  /** Whether the current user is among the assignees ("Assigned to you"). Optional — see `assigneeCount`. */
+  isAssignedToMe?: boolean;
 };
 
 export type Category = {

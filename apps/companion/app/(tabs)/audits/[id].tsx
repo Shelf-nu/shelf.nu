@@ -91,7 +91,6 @@ function AuditDetailContent() {
   );
   const [existingScans, setExistingScans] = useState<AuditScanData[]>([]);
   const [canScan, setCanScan] = useState(false);
-  const [canComplete, setCanComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -122,7 +121,6 @@ function AuditDetailContent() {
     setExpectedAssets(data.expectedAssets);
     setExistingScans(data.existingScans);
     setCanScan(data.canScan);
-    setCanComplete(data.canComplete);
 
     // Animate progress bar
     const progress =
@@ -245,6 +243,14 @@ function AuditDetailContent() {
       scanMap.set(scan.assetId, scan);
     }
 
+    // why: an expected asset that hasn't been scanned is "Pending" while the
+    // audit is still active (the field worker may yet find it) but becomes
+    // "Missing" once the audit is completed (it's a real discrepancy). This
+    // mirrors the unified web + companion vocabulary — "Missing" is reserved
+    // for completed audits, never shown mid-scan.
+    const notFoundStatus: AuditAssetStatus =
+      audit.status === "COMPLETED" ? "MISSING" : "PENDING";
+
     const items: DisplayAsset[] = [];
 
     // Expected assets
@@ -254,7 +260,7 @@ function AuditDetailContent() {
         id: asset.id,
         name: asset.name,
         mainImage: asset.thumbnailImage || asset.mainImage,
-        status: scan ? "FOUND" : "PENDING",
+        status: scan ? "FOUND" : notFoundStatus,
         isExpected: true,
         scannedAt: scan?.scannedAt || null,
         locationName: asset.locationName ?? null,
@@ -291,10 +297,9 @@ function AuditDetailContent() {
   const filteredAssets = useCallback((): DisplayAsset[] => {
     const all = displayAssets();
     if (assetFilter === "ALL") return all;
-    // MISSING = PENDING (not yet scanned)
-    if (assetFilter === "MISSING") {
-      return all.filter((a) => a.status === "PENDING");
-    }
+    // Statuses are now computed correctly per audit state (PENDING while
+    // active, MISSING once completed), so a direct match is unambiguous —
+    // no more Pending/Missing aliasing.
     return all.filter((a) => a.status === assetFilter);
   }, [displayAssets, assetFilter]);
 
@@ -449,11 +454,26 @@ function AuditDetailContent() {
   };
 
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
+  const isCompleted = audit.status === "COMPLETED";
   const progress =
     audit.expectedAssetCount > 0
       ? audit.foundAssetCount / audit.expectedAssetCount
       : 0;
   const progressPercent = Math.round(Math.min(progress, 1) * 100);
+  // Expected assets not yet accounted for: "pending" mid-audit, "missing"
+  // once completed (label switches with the audit state, see hero below).
+  const notFoundCount = audit.expectedAssetCount - audit.foundAssetCount;
+
+  // Context-aware asset filters: a live audit has Pending items (not yet
+  // Missing); a completed one has Missing items (no longer Pending). Showing
+  // both at once was the source of two filters resolving to the same rows.
+  const visibleFilters = ASSET_FILTERS.filter((f) =>
+    f.value === "MISSING"
+      ? isCompleted
+      : f.value === "PENDING"
+      ? isActive
+      : true
+  );
 
   const isOverdue =
     isActive && audit.dueDate && new Date(audit.dueDate) < new Date();
@@ -566,14 +586,31 @@ function AuditDetailContent() {
                   </View>
                 )}
 
-                {audit.assignments.length > 0 && (
-                  <View style={styles.infoRow}>
-                    <Ionicons
-                      name="people-outline"
-                      size={15}
-                      color={colors.muted}
-                    />
-                    <Text style={styles.infoLabel}>Assignees</Text>
+                {/*
+                  Ownership is always shown — including the unassigned case.
+                  An audit with no assignees is open for anyone to pick up;
+                  rendering nothing (the old behaviour) made that state
+                  invisible, which is exactly the confusion this redesign
+                  set out to fix.
+                */}
+                <View style={styles.infoRow}>
+                  <Ionicons
+                    name={
+                      audit.assignments.length > 0
+                        ? "people-outline"
+                        : "scan-circle-outline"
+                    }
+                    size={15}
+                    color={
+                      audit.assignments.length > 0
+                        ? colors.muted
+                        : colors.primary
+                    }
+                  />
+                  <Text style={styles.infoLabel}>
+                    {audit.assignments.length > 0 ? "Assigned" : "Open"}
+                  </Text>
+                  {audit.assignments.length > 0 ? (
                     <Text style={styles.infoValue} numberOfLines={1}>
                       {audit.assignments
                         .map(
@@ -584,8 +621,21 @@ function AuditDetailContent() {
                         )
                         .join(", ")}
                     </Text>
-                  </View>
-                )}
+                  ) : (
+                    <Text
+                      style={[
+                        styles.infoValue,
+                        // why: deeper `primaryText` for legibility — brand
+                        // `primary` orange fails WCAG on body text (3.1:1).
+                        // The leading icon keeps the brighter `primary`.
+                        { color: colors.primaryText, fontWeight: "600" },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Unassigned · anyone can scan
+                    </Text>
+                  )}
+                </View>
 
                 {audit.startedAt && (
                   <View style={styles.infoRow}>
@@ -617,58 +667,31 @@ function AuditDetailContent() {
               </View>
             </View>
 
-            {/* Stats grid 2×2 */}
-            <View style={styles.statsGrid}>
-              <View style={styles.statCard}>
-                <Ionicons name="list-outline" size={20} color={colors.muted} />
-                <Text style={styles.statNumber}>
-                  {audit.expectedAssetCount}
-                </Text>
-                <Text style={styles.statLabel}>Expected</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Ionicons
-                  name="checkmark-circle-outline"
-                  size={20}
-                  color={colors.success}
-                />
-                <Text style={[styles.statNumber, { color: colors.success }]}>
+            {/*
+              Progress hero — one number, one bar, one breakdown. Replaces
+              the old four stat boxes + separate progress card: every figure
+              that mattered (expected, found, pending/missing, unexpected) is
+              still here, but read in a single glance as "X of Y found".
+            */}
+            <View style={styles.heroCard}>
+              <View style={styles.heroHeadRow}>
+                <Text style={styles.heroCount}>
                   {audit.foundAssetCount}
+                  <Text style={styles.heroCountMuted}>
+                    {" "}
+                    of {audit.expectedAssetCount} found
+                  </Text>
                 </Text>
-                <Text style={styles.statLabel}>Found</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Ionicons
-                  name="close-circle-outline"
-                  size={20}
-                  color={colors.error}
-                />
-                <Text style={[styles.statNumber, { color: colors.error }]}>
-                  {audit.expectedAssetCount - audit.foundAssetCount}
-                </Text>
-                <Text style={styles.statLabel}>
-                  {audit.status === "COMPLETED" ? "Missing" : "Remaining"}
+                <Text
+                  style={[
+                    styles.heroPercent,
+                    progressPercent === 100 && { color: colors.success },
+                  ]}
+                >
+                  {progressPercent}%
                 </Text>
               </View>
-              <View style={styles.statCard}>
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={20}
-                  color={colors.warning}
-                />
-                <Text style={[styles.statNumber, { color: colors.warning }]}>
-                  {audit.unexpectedAssetCount}
-                </Text>
-                <Text style={styles.statLabel}>Unexpected</Text>
-              </View>
-            </View>
 
-            {/* Progress bar */}
-            <View style={styles.progressSection}>
-              <View style={styles.progressHeader}>
-                <Text style={styles.progressTitle}>Progress</Text>
-                <Text style={styles.progressPercent}>{progressPercent}%</Text>
-              </View>
               <View style={styles.progressTrack}>
                 <Animated.View
                   style={[
@@ -686,12 +709,37 @@ function AuditDetailContent() {
                   ]}
                 />
               </View>
-              <Text style={styles.progressLabel}>
-                {audit.foundAssetCount} of {audit.expectedAssetCount} found
-                {audit.unexpectedAssetCount > 0
-                  ? ` · +${audit.unexpectedAssetCount} unexpected`
-                  : ""}
-              </Text>
+
+              <View style={styles.heroBreakdown}>
+                <View style={styles.heroStat}>
+                  <View
+                    style={[
+                      styles.heroDot,
+                      {
+                        backgroundColor: isCompleted
+                          ? colors.error
+                          : colors.mutedLight,
+                      },
+                    ]}
+                  />
+                  <Text style={styles.heroStatText}>
+                    {notFoundCount} {isCompleted ? "missing" : "pending"}
+                  </Text>
+                </View>
+                {audit.unexpectedAssetCount > 0 ? (
+                  <View style={styles.heroStat}>
+                    <View
+                      style={[
+                        styles.heroDot,
+                        { backgroundColor: colors.warning },
+                      ]}
+                    />
+                    <Text style={styles.heroStatText}>
+                      {audit.unexpectedAssetCount} unexpected
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             </View>
 
             {/* Action buttons */}
@@ -719,7 +767,16 @@ function AuditDetailContent() {
               </TouchableOpacity>
             )}
 
-            {isActive && canComplete && (
+            {/*
+              why: gate on `isActive` (PENDING || ACTIVE), not the server's
+              `canComplete` flag — that flag is ACTIVE-only, which hid this
+              button on a fresh PENDING audit, leaving a field worker who
+              searched and found nothing with no action but "Start Scanning".
+              `completeAuditSession` already accepts a PENDING audit (it only
+              rejects COMPLETED/CANCELLED/ARCHIVED) and marks unscanned assets
+              MISSING — the server is the real gate, so this is pure UI.
+            */}
+            {isActive && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={handleCompleteAudit}
@@ -743,7 +800,7 @@ function AuditDetailContent() {
                 Assets ({displayAssets().length})
               </Text>
               <View style={styles.filterRow} accessibilityRole="tablist">
-                {ASSET_FILTERS.map((f) => (
+                {visibleFilters.map((f) => (
                   <TouchableOpacity
                     key={f.value}
                     style={[
@@ -904,55 +961,32 @@ const useStyles = createStyles((colors, shadows) => ({
     fontWeight: "500",
   },
 
-  // Stats grid
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  statCard: {
-    flex: 1,
-    minWidth: "45%",
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  statNumber: {
-    fontSize: fontSize.xxl,
-    fontWeight: "700",
-    color: colors.foreground,
-  },
-  statLabel: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
-    fontWeight: "500",
-  },
-
-  // Progress
-  progressSection: {
+  // Progress hero — single card replacing the old 4 stat boxes + bar
+  heroCard: {
     backgroundColor: colors.white,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    gap: spacing.sm,
+    gap: spacing.md,
   },
-  progressHeader: {
+  heroHeadRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "baseline",
   },
-  progressTitle: {
-    fontSize: fontSize.base,
-    fontWeight: "600",
+  heroCount: {
+    fontSize: fontSize.xxxl,
+    fontWeight: "700",
     color: colors.foreground,
   },
-  progressPercent: {
+  heroCountMuted: {
     fontSize: fontSize.md,
+    fontWeight: "500",
+    color: colors.muted,
+  },
+  heroPercent: {
+    fontSize: fontSize.lg,
     fontWeight: "700",
     color: colors.progressBar,
   },
@@ -966,9 +1000,25 @@ const useStyles = createStyles((colors, shadows) => ({
     height: 8,
     borderRadius: 4,
   },
-  progressLabel: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
+  heroBreakdown: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.lg,
+  },
+  heroStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  heroDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  heroStatText: {
+    fontSize: fontSize.sm,
+    color: colors.foregroundSecondary,
+    fontWeight: "500",
   },
 
   // Action buttons
