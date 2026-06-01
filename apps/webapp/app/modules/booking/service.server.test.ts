@@ -504,6 +504,89 @@ describe("partialCheckinBooking", () => {
     expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
   });
 
+  it("should complete the booking from partial check-in records when the final batch returns the last outstanding asset, even though every asset reads CHECKED_OUT globally (shared across overlapping bookings)", async () => {
+    expect.assertions(2);
+
+    // Reproduces the production bug. Assets are shared across overlapping
+    // bookings, so an asset returned for THIS booking can be CHECKED_OUT again
+    // by a later booking. Completion must therefore be decided from this
+    // booking's PartialBookingCheckin records (the per-booking source of truth
+    // the progress bar uses), NOT from the assets' global `status`.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+        { id: "asset-3", kitId: null },
+      ],
+    });
+
+    // asset-1 and asset-2 were already returned for this booking in earlier
+    // sessions (records exist); asset-3 is the last outstanding asset.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1", "asset-2"] },
+    ]);
+
+    // Every asset still reads CHECKED_OUT globally because other active
+    // bookings hold the same physical items. The old status-based completion
+    // check never matched here, stranding the booking OVERDUE.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-3", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    // Final scan returns the last outstanding asset for this booking.
+    const result = await partialCheckinBooking({
+      ...mockPartialCheckinParams,
+      assetIds: ["asset-3"],
+    });
+
+    // The booking is fully returned → it completes via the full check-in path,
+    // which does NOT record another partial check-in. Before the fix, the
+    // status-based early-exit and the `total - currentBatch` count both failed
+    // to recognise completion and left the booking incomplete.
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+    expect(result.isComplete).toBe(true);
+  });
+
+  it("should reject a batch containing assets not in the booking before taking the completion shortcut", async () => {
+    expect.assertions(2);
+
+    // A batch of [lastOutstandingAsset, unrelatedSameOrgAsset] satisfies the
+    // record-based completion check (it covers every outstanding asset), so
+    // membership MUST be validated first — otherwise the booking would complete
+    // and write notes about an asset that was never on it instead of 400ing.
+    // The mobile endpoint forwards raw assetIds, so this guard matters there.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // asset-1 already recorded → asset-2 is the only outstanding asset.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2", "asset-unrelated"],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Must not have completed or recorded anything.
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+  });
+
   it("should throw error when asset is not in booking", async () => {
     expect.assertions(1);
 
