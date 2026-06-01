@@ -2090,29 +2090,32 @@ export async function partialCheckinBooking({
         });
       });
 
-    // Early exit: If we're checking in all remaining CHECKED_OUT assets, do a complete check-in instead
-    // First, get the current status of all assets in the booking
-    const currentAssetStatuses = await db.asset.findMany({
-      where: {
-        id: { in: bookingFound.assets.map((a) => a.id) },
-        organizationId,
-      },
-      select: { id: true, status: true },
-    });
-
-    // Find assets that are still CHECKED_OUT (not yet checked in)
-    const checkedOutAssets = currentAssetStatuses.filter(
-      (asset) => asset.status === AssetStatus.CHECKED_OUT
-    );
-
-    const checkedOutAssetIds = new Set(checkedOutAssets.map((a) => a.id));
+    // Early exit: if this batch returns every asset still outstanding for THIS
+    // booking, run a complete check-in instead of recording another partial one.
+    //
+    // Completion is decided from this booking's PartialBookingCheckin records —
+    // NOT from the assets' global `status`. Assets are shared across overlapping
+    // bookings, so an asset that was returned for this booking can be
+    // CHECKED_OUT again by a later booking. Keying completion on global status
+    // therefore left the booking stuck ONGOING/OVERDUE even though every item
+    // was returned here (the original bug). The records are the per-booking
+    // source of truth and match what the check-in progress bar shows the user.
+    const alreadyCheckedInAssetIds = await getPartiallyCheckedInAssetIds(id);
+    const recordedAssetIdSet = new Set(alreadyCheckedInAssetIds);
     const providedAssetIds = new Set(assetIds);
 
-    // Check if we're checking in all remaining CHECKED_OUT assets
+    // Booking assets not yet covered by any partial check-in record.
+    const outstandingAssetIds = bookingFound.assets
+      .map((asset) => asset.id)
+      .filter((assetId) => !recordedAssetIdSet.has(assetId));
+
+    // If this batch covers every still-outstanding asset, the booking is fully
+    // returned → run the full check-in (which also cancels schedulers, sends the
+    // completion email, schedules auto-archive, and safely skips assets that are
+    // currently checked out by other active bookings).
     if (
-      checkedOutAssetIds.size > 0 &&
-      checkedOutAssetIds.size === providedAssetIds.size &&
-      [...checkedOutAssetIds].every((id) => providedAssetIds.has(id))
+      bookingFound.assets.length > 0 &&
+      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
     ) {
       // DON'T create PartialBookingCheckin record when doing complete check-in redirect
       // The checkinBooking function will handle the completion properly
@@ -2304,8 +2307,18 @@ export async function partialCheckinBooking({
         },
       });
 
-      const remainingCount =
-        updatedBookingForNote.assets.length - assetIds.length;
+      // Remaining = booking assets not covered by any partial check-in record
+      // (previous sessions + this batch). The old `total - thisBatch` ignored
+      // earlier sessions, so multi-session check-ins reported the wrong count
+      // and could never reach zero. Completion is normally handled by the
+      // record-based early-exit above; this stays consistent as a safety net.
+      const checkedInAfterThisBatch = new Set([
+        ...recordedAssetIdSet,
+        ...assetIds,
+      ]);
+      const remainingCount = updatedBookingForNote.assets.filter(
+        (asset) => !checkedInAfterThisBatch.has(asset.id)
+      ).length;
       const isCompletingBooking = remainingCount === 0;
 
       if (isCompletingBooking) {
