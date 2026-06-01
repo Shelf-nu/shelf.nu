@@ -553,6 +553,40 @@ describe("partialCheckinBooking", () => {
     expect(result.isComplete).toBe(true);
   });
 
+  it("should reject a batch containing assets not in the booking before taking the completion shortcut", async () => {
+    expect.assertions(2);
+
+    // A batch of [lastOutstandingAsset, unrelatedSameOrgAsset] satisfies the
+    // record-based completion check (it covers every outstanding asset), so
+    // membership MUST be validated first — otherwise the booking would complete
+    // and write notes about an asset that was never on it instead of 400ing.
+    // The mobile endpoint forwards raw assetIds, so this guard matters there.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // asset-1 already recorded → asset-2 is the only outstanding asset.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2", "asset-unrelated"],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Must not have completed or recorded anything.
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+  });
+
   it("should throw error when asset is not in booking", async () => {
     expect.assertions(1);
 

@@ -2090,6 +2090,29 @@ export async function partialCheckinBooking({
         });
       });
 
+    // Validate that all provided assetIds are actually in the booking BEFORE any
+    // completion shortcut. The early-exit below completes the booking when this
+    // batch covers all outstanding assets; without this guard a batch like
+    // [lastOutstandingAsset, unrelatedSameOrgAsset] would satisfy that check and
+    // complete the booking (writing notes about a non-booking asset) instead of
+    // returning a 400. This matters especially for the mobile endpoint, which
+    // forwards raw assetIds with none of the web drawer's client-side filtering.
+    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+    const invalidAssetIds = assetIds.filter(
+      (assetId) => !bookingAssetIds.has(assetId)
+    );
+
+    if (invalidAssetIds.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Some assets are not part of this booking: ${invalidAssetIds.join(
+          ", "
+        )}`,
+      });
+    }
+
     // Early exit: if this batch returns every asset still outstanding for THIS
     // booking, run a complete check-in instead of recording another partial one.
     //
@@ -2152,21 +2175,6 @@ export async function partialCheckinBooking({
         remainingAssetCount: 0,
         isComplete: true,
       };
-    }
-
-    // Validate that all provided assetIds are actually in the booking
-    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
-    const invalidAssetIds = assetIds.filter((id) => !bookingAssetIds.has(id));
-
-    if (invalidAssetIds.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        status: 400,
-        label,
-        message: `Some assets are not part of this booking: ${invalidAssetIds.join(
-          ", "
-        )}`,
-      });
     }
 
     // For kits: only update kit status if ALL assets of a kit are being checked in
