@@ -7,6 +7,8 @@ type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /** True when this scan exhausted its sync retries and is awaiting re-sync. */
+  syncFailed?: boolean;
 };
 
 type ScanQueueEntry = {
@@ -22,6 +24,12 @@ export type PersistedScanState = {
   savedAt: string;
   scannedItems: ScannedItem[];
   pendingQueue: ScanQueueEntry[];
+  /**
+   * Scans that exhausted their retries and must NOT be silently dropped.
+   * Persisted so they survive app kills and are re-queued on resume.
+   * Optional for backward-compat with sessions saved before this field existed.
+   */
+  failedQueue?: ScanQueueEntry[];
 };
 
 // ── Storage key ──────────────────────────────────────────
@@ -38,7 +46,8 @@ const storageKey = (auditId: string) => `${KEY_PREFIX}${auditId}`;
 export async function saveAuditScanState(
   auditId: string,
   scannedItems: ScannedItem[],
-  pendingQueue: ScanQueueEntry[]
+  pendingQueue: ScanQueueEntry[],
+  failedQueue: ScanQueueEntry[] = []
 ): Promise<void> {
   try {
     const state: PersistedScanState = {
@@ -47,6 +56,7 @@ export async function saveAuditScanState(
       savedAt: new Date().toISOString(),
       scannedItems,
       pendingQueue,
+      failedQueue,
     };
     await AsyncStorage.setItem(storageKey(auditId), JSON.stringify(state));
   } catch (e) {
@@ -96,19 +106,32 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
 
   return {
     /** Schedule a debounced save. */
-    save(scannedItems: ScannedItem[], pendingQueue: ScanQueueEntry[]) {
+    save(
+      scannedItems: ScannedItem[],
+      pendingQueue: ScanQueueEntry[],
+      failedQueue: ScanQueueEntry[] = []
+    ) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        saveAuditScanState(auditId, scannedItems, pendingQueue);
+        saveAuditScanState(auditId, scannedItems, pendingQueue, failedQueue);
         timer = null;
       }, delayMs);
     },
 
     /** Flush immediately (e.g., before unmount). Returns a promise. */
-    flush(scannedItems: ScannedItem[], pendingQueue: ScanQueueEntry[]) {
+    flush(
+      scannedItems: ScannedItem[],
+      pendingQueue: ScanQueueEntry[],
+      failedQueue: ScanQueueEntry[] = []
+    ) {
       if (timer) clearTimeout(timer);
       timer = null;
-      return saveAuditScanState(auditId, scannedItems, pendingQueue);
+      return saveAuditScanState(
+        auditId,
+        scannedItems,
+        pendingQueue,
+        failedQueue
+      );
     },
 
     /** Cancel any pending write without saving. */
