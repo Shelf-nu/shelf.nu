@@ -87,6 +87,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  buildBookingAssetsSearchOR,
   getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
@@ -3873,19 +3874,33 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
-      // Match the asset's title OR any of its codes (QR id, barcode value)
-      // so a field worker can find an asset in a booking by the same string
-      // that's printed on the physical label.
+      // Multi-field, comma-OR search across the booking's assets + kits.
+      const searchOR = buildBookingAssetsSearchOR(search);
+
+      // Whole-kit re-expansion: an asset-level match inside a kit should
+      // surface the ENTIRE kit, not just the matched asset. Find which kits
+      // contain a match, then pull their sibling assets in too. Scoped by
+      // booking membership only (not organizationId) so cross-org booking
+      // views keep working — the main findFirstOrThrow below authorizes
+      // access to the booking itself.
+      const matchedAssets = await db.asset.findMany({
+        where: {
+          bookings: { some: { id } },
+          OR: searchOR,
+        },
+        select: { id: true, kitId: true },
+      });
+      const matchedKitIds = [
+        ...new Set(
+          matchedAssets
+            .map((asset) => asset.kitId)
+            .filter((kitId): kitId is string => Boolean(kitId))
+        ),
+      ];
+
       assetsWhere.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        {
-          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
-        },
-        {
-          barcodes: {
-            some: { value: { contains: search, mode: "insensitive" } },
-          },
-        },
+        ...searchOR,
+        ...(matchedKitIds.length ? [{ kitId: { in: matchedKitIds } }] : []),
       ];
     }
 
