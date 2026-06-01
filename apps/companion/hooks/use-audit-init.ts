@@ -170,7 +170,12 @@ export function useAuditInit({
         // never re-submitted — and then marked MISSING on completion.
         const pendingQueue = persisted.pendingQueue || [];
         const failedQueue = persisted.failedQueue || [];
-        const queuedForSync = [...pendingQueue, ...failedQueue];
+        // Exclude anything the server already has: a crash after recordAuditScan
+        // succeeded but before the queue-removal snapshot persisted could leave a
+        // stale entry on disk; re-submitting it would double-record the scan.
+        const queuedForSync = [...pendingQueue, ...failedQueue].filter(
+          (entry) => !serverScannedIds.has(entry.assetId)
+        );
 
         if (recoveredItems.length > 0 || queuedForSync.length > 0) {
           // Show recovery dialog (don't block init)

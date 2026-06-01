@@ -151,7 +151,9 @@ export function useScanQueue({
       ...e,
       retryCount: 0,
     }));
-    failedQueueRef.current = [];
+    // Mutate in place — a pending debounced save holds this array reference,
+    // so reassigning it would let a later write repersist already-retried scans.
+    failedQueueRef.current.length = 0;
     scanQueueRef.current.push(...retrying);
     processQueue();
   }, [processQueue]);

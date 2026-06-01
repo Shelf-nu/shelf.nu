@@ -36,7 +36,7 @@ export function ScannedItemsList({
           accessibilityLabel={`${item.name}, ${
             item.isExpected ? "found" : "unexpected"
           }${hasEvidence ? `, ${evidenceCount} evidence items` : ""}${
-            syncFailed ? ", not synced, will retry" : ""
+            syncFailed ? ", not synced" : ""
           }. Tap to add notes or photos.`}
           accessibilityRole="button"
         >
