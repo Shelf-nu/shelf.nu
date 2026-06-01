@@ -19,6 +19,7 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
+  OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -3994,6 +3995,7 @@ export async function bulkDeleteAssets({
  */
 export async function bulkAssignCustody({
   userId,
+  role,
   assetIds,
   custodianId,
   custodianName,
@@ -4002,6 +4004,11 @@ export async function bulkAssignCustody({
   settings,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route.
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
@@ -4056,6 +4063,24 @@ export async function bulkAssignCustody({
         },
       }),
     ]);
+
+    // Self-service users may only assign custody to themselves. Enforced in the
+    // service so every caller (web + mobile) is covered; previously this lived
+    // only in the web route and the mobile routes bypassed it.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      custodianTeamMember?.user?.id !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetIds, custodianId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const assetsNotAvailable = assets.some(
       (asset) => asset.status !== "AVAILABLE"
@@ -4173,12 +4198,18 @@ export async function bulkAssignCustody({
  */
 export async function bulkReleaseCustody({
   userId,
+  role,
   assetIds,
   organizationId,
   currentSearchParams,
   settings,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route.
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
@@ -4228,6 +4259,24 @@ export async function bulkReleaseCustody({
         message:
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Self-service users may only release custody of assets assigned to them.
+    // Enforced in the service so every caller (web + mobile) is covered.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      assets.some((asset) => asset.custody?.custodian?.userId !== userId)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Self service user can only release custody of assets assigned to their user.",
+        additionalData: { userId, assetIds },
+        label: "Assets",
+        status: 403,
         shouldBeCaptured: false,
       });
     }

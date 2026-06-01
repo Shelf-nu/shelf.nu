@@ -13,7 +13,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -147,23 +147,14 @@ export const action = async ({
     });
     const custodyRecord = assetWithCustody.custody;
 
-    if (isSelfService) {
-      if (custodyRecord?.custodian?.userId !== user.id) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message:
-            "Self service user can only release custody of assets assigned to their user.",
-          additionalData: { userId, assetId },
-          label: "Assets",
-        });
-      }
-    }
-
-    // Pass activity event data to releaseCustody for atomic recording
+    // Pass activity event data to releaseCustody for atomic recording. The
+    // SELF_SERVICE self-restriction is enforced inside releaseCustody so web
+    // and mobile share one implementation.
     const asset = await releaseCustody({
       assetId,
       organizationId,
+      userId,
+      role,
       activityEvent: {
         actorUserId: userId,
         teamMemberId: custodyRecord?.custodian?.id,
