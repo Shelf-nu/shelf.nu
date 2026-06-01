@@ -570,8 +570,12 @@ function AuditScannerContent() {
     }
 
     // Server accepted completion — only now is it safe to drop the local
-    // recovery snapshot.
+    // recovery snapshot. Clear the in-memory queues too (in place): otherwise
+    // the unmount cleanup would see a non-empty failedQueue on navigate-back and
+    // re-flush a recovery snapshot for an audit that is already completed.
     debouncedSaverRef.current?.cancel();
+    scanQueueRef.current.length = 0;
+    failedQueueRef.current.length = 0;
     await clearAuditScanState(auditId);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -579,7 +583,15 @@ function AuditScannerContent() {
     Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
       { text: "OK", onPress: () => router.back() },
     ]);
-  }, [auditId, currentOrg, auditName, router, debouncedSaverRef]);
+  }, [
+    auditId,
+    currentOrg,
+    auditName,
+    router,
+    debouncedSaverRef,
+    scanQueueRef,
+    failedQueueRef,
+  ]);
 
   // Standard confirm: warns how many expected assets will be marked missing.
   const confirmAndComplete = useCallback(() => {
