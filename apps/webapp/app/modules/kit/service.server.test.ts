@@ -735,13 +735,21 @@ describe("deleteKit", () => {
       data: { status: AssetStatus.AVAILABLE },
     });
 
-    // Notes written for both assets, kit name inlined (no link — kit gone).
-    expect(createNotes).toHaveBeenCalledTimes(1);
-    const notesArg = (createNotes as ReturnType<typeof vitest.fn>).mock
+    // Notes written per asset (one row each) via `db.note.createMany`, kit
+    // name inlined (no link — kit gone). Per-asset content lets qty-tracked
+    // assets name their released unit count; these fixtures omit
+    // type/quantity so both fall back to the countless "custody" wording.
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+    const notesArg = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
       .calls[0][0];
-    expect(notesArg.assetIds).toEqual(["drill-1", "pens-1"]);
-    expect(notesArg.content).toContain("when kit");
-    expect(notesArg.content).toContain(mockKitData.name);
+    expect(notesArg.data.map((n: { assetId: string }) => n.assetId)).toEqual([
+      "drill-1",
+      "pens-1",
+    ]);
+    for (const note of notesArg.data) {
+      expect(note.content).toContain("when kit");
+      expect(note.content).toContain(mockKitData.name);
+    }
   });
 
   it("handles deletion errors by wrapping them in ShelfError", async () => {
@@ -884,9 +892,24 @@ describe("bulkDeleteKits", () => {
       data: { status: AssetStatus.AVAILABLE },
     });
 
-    // One note per in-custody kit (each note attributed to its
-    // custodian) — 2 calls total.
-    expect(createNotes).toHaveBeenCalledTimes(2);
+    // One `db.note.createMany` batch with a per-asset note row across both
+    // kits (2 rows total). Per-asset content lets each asset attribute its
+    // own custodian and — for qty-tracked assets — name its released units.
+    expect(db.note.createMany).toHaveBeenCalledTimes(1);
+    const bulkNotesArg = (db.note.createMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0];
+    expect(
+      bulkNotesArg.data.map((n: { assetId: string }) => n.assetId)
+    ).toEqual(["drill-1", "pen-1"]);
+    // Each note attributes the correct custodian to its kit.
+    const drillNote = bulkNotesArg.data.find(
+      (n: { assetId: string }) => n.assetId === "drill-1"
+    );
+    const penNote = bulkNotesArg.data.find(
+      (n: { assetId: string }) => n.assetId === "pen-1"
+    );
+    expect(drillNote.content).toContain("Camera Kit");
+    expect(penNote.content).toContain("Drone Kit");
   });
 
   it("should emit ASSET_KIT_CHANGED per asset across all deleted kits", async () => {
@@ -2065,12 +2088,14 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     const { recordEvents } = await import(
       "~/modules/activity-event/service.server"
     );
+    // INDIVIDUAL assets carry no `quantity` in the event meta (assetQtyMeta
+    // returns {} for them); only QUANTITY_TRACKED surface a unit count.
     expect(recordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           action: "CUSTODY_ASSIGNED",
           assetId: "asset-individual",
-          meta: expect.objectContaining({ viaKit: true, quantity: 1 }),
+          meta: { viaKit: true },
         }),
         expect.objectContaining({
           action: "CUSTODY_ASSIGNED",

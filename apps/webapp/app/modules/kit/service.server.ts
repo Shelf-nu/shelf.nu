@@ -26,6 +26,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
+import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -75,11 +76,7 @@ import {
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
-import {
-  createBulkKitChangeNotes,
-  createNote,
-  createNotes,
-} from "../note/service.server";
+import { createBulkKitChangeNotes, createNote } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -1178,7 +1175,18 @@ type KitForDeletion = {
   id: Kit["id"];
   name: Kit["name"];
   image: Kit["image"];
-  assets: Array<{ id: string; title: string }>;
+  // `type` + `unitOfMeasure` let us render the per-row unit count for
+  // QUANTITY_TRACKED assets in the release note ("custody of 50 units");
+  // the actual custody quantity is read from the inherited Custody rows
+  // below. `kitQuantity` is this kit's per-row AssetKit.quantity (NOT
+  // Asset.quantity) — surfaced in the cascade ASSET_KIT_CHANGED event meta.
+  assets: Array<{
+    id: string;
+    title: string;
+    type: AssetType;
+    unitOfMeasure: string | null;
+    kitQuantity: number;
+  }>;
   custody: {
     id: string;
     custodian: {
@@ -1252,6 +1260,12 @@ async function performKitDeletion({
     });
   }
 
+  // Per-asset units released by the kit-delete, sourced from the inherited
+  // Custody rows read inside the tx. Populated below; consumed by the
+  // release notes written after the tx (which only have `k.assets`, not the
+  // Custody rows, in scope). Empty for INDIVIDUAL-only deletes.
+  const releasedQtyByAssetId = new Map<string, number | null>();
+
   await db.$transaction(async (tx) => {
     const kitCustodyIds = inCustodyKits
       .map((k) => k.custody?.id)
@@ -1264,6 +1278,10 @@ async function performKitDeletion({
           assetId: true,
           teamMemberId: true,
           kitCustodyId: true,
+          // The units this kit moved into custody — drives the
+          // qty-tracked unit count in both the CUSTODY_RELEASED event
+          // meta and the release note below.
+          quantity: true,
         },
       });
 
@@ -1274,9 +1292,22 @@ async function performKitDeletion({
           inCustodyKits.map((k) => [k.custody!.id, k])
         );
 
+        // Asset shape (type / unitOfMeasure) for the qty-tracked unit count.
+        // The Custody rows only carry `assetId`, so look the asset up here.
+        const assetById = new Map(
+          kits.flatMap((k) => k.assets).map((a) => [a.id, a])
+        );
+
+        // Record the released quantity per asset so the post-tx note can
+        // name "custody of 50 units" without re-reading the Custody rows.
+        for (const row of inheritedCustodyRows) {
+          releasedQtyByAssetId.set(row.assetId, row.quantity);
+        }
+
         await recordEvents(
           inheritedCustodyRows.map((row) => {
             const sourceKit = kitByKitCustodyId.get(row.kitCustodyId!);
+            const asset = assetById.get(row.assetId);
             return {
               organizationId,
               actorUserId: userId,
@@ -1288,7 +1319,11 @@ async function performKitDeletion({
               teamMemberId: row.teamMemberId,
               targetUserId:
                 sourceKit?.custody?.custodian?.user?.id ?? undefined,
-              meta: { viaKit: true, viaKitDelete: true },
+              meta: {
+                viaKit: true,
+                viaKitDelete: true,
+                ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
+              },
             };
           }),
           tx
@@ -1303,15 +1338,23 @@ async function performKitDeletion({
     // inline in both `deleteKit` and `bulkDeleteKits`; the shared
     // helper deduplicates that.
     const kitByAssetId = new Map<string, KitForDeletion>();
+    // Asset shape (type) + the per-row AssetKit.quantity this asset held in
+    // the kit being deleted — both keyed by id for the cascade event meta.
+    const assetForEventById = new Map<
+      string,
+      KitForDeletion["assets"][number]
+    >();
     for (const k of kits) {
       for (const a of k.assets) {
         kitByAssetId.set(a.id, k);
+        assetForEventById.set(a.id, a);
       }
     }
     if (allAssetIds.length > 0) {
       await recordEvents(
         allAssetIds.map((assetId) => {
           const sourceKit = kitByAssetId.get(assetId);
+          const asset = assetForEventById.get(assetId);
           return {
             organizationId,
             actorUserId: userId,
@@ -1323,6 +1366,9 @@ async function performKitDeletion({
             field: "kitId",
             fromValue: sourceKit?.id ?? null,
             toValue: null,
+            // Qty-tracked: the per-row AssetKit.quantity held in the deleted
+            // kit (NOT Asset.quantity); {} for INDIVIDUAL / unknown asset.
+            meta: asset ? { ...assetQtyMeta(asset, asset.kitQuantity) } : {},
           };
         }),
         tx
@@ -1354,22 +1400,34 @@ async function performKitDeletion({
   });
 
   if (inCustodyKits.length > 0) {
-    await Promise.all(
-      inCustodyKits
-        .filter((k) => k.assets.length > 0)
-        .map((k) => {
-          const custodianDisplay = k.custody?.custodian
-            ? wrapCustodianForNote({ teamMember: k.custody.custodian })
-            : "**Unknown Custodian**";
-          return createNotes({
-            content: `${actorLink} released ${custodianDisplay}'s custody when kit **${k.name.trim()}** was deleted.`,
-            type: "UPDATE",
+    // One note per asset (not one shared string per kit): qty-tracked assets
+    // each name their own released unit count ("custody of 50 units"), so the
+    // content differs per row. INDIVIDUAL assets keep the exact prior wording.
+    // why: org-scoping is implicit — `inCustodyKits`/`k.assets` are derived
+    // from the org-scoped kit reads at the call sites, never request input.
+    const noteData = inCustodyKits
+      .filter((k) => k.assets.length > 0)
+      .flatMap((k) => {
+        const custodianDisplay = k.custody?.custodian
+          ? wrapCustodianForNote({ teamMember: k.custody.custodian })
+          : "**Unknown Custodian**";
+        return k.assets.map((asset) => {
+          const count = formatUnitCount(
+            asset,
+            releasedQtyByAssetId.get(asset.id)
+          );
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
+          return {
+            content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} when kit **${k.name.trim()}** was deleted.`,
+            type: "UPDATE" as const,
             userId,
-            assetIds: k.assets.map((a) => a.id),
-            organizationId,
-          });
-        })
-    );
+            assetId: asset.id,
+          };
+        });
+      });
+    if (noteData.length > 0) {
+      await db.note.createMany({ data: noteData });
+    }
   }
 
   const kitWithImages = kits.filter((k) => !!k.image);
@@ -1402,7 +1460,20 @@ export async function deleteKit({
         name: true,
         image: true,
         assetKits: {
-          select: { asset: { select: { id: true, title: true } } },
+          // type + unitOfMeasure feed the qty-tracked unit count in the
+          // kit-deletion release note (see performKitDeletion); quantity is
+          // this kit's per-row AssetKit.quantity for the cascade event meta.
+          select: {
+            quantity: true,
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                unitOfMeasure: true,
+              },
+            },
+          },
         },
         custody: {
           select: {
@@ -1431,10 +1502,14 @@ export async function deleteKit({
     });
 
     // Flatten pivot rows into the in-memory `assets` shape that
-    // `performKitDeletion` consumes.
+    // `performKitDeletion` consumes. `kitQuantity` carries the per-row
+    // AssetKit.quantity (NOT Asset.quantity) for the cascade event meta.
     const kit = {
       ...kitRow,
-      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+      assets: (kitRow.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kitQuantity: ak.quantity,
+      })),
     };
 
     await performKitDeletion({
@@ -1510,7 +1585,19 @@ export async function releaseCustody({
           id: true,
           name: true,
           assetKits: {
-            select: { asset: { select: { id: true, title: true } } },
+            // type + unitOfMeasure power the qty-tracked unit count in the
+            // release note ("custody of 50 units"); the count itself comes
+            // from the inherited Custody rows captured inside the tx.
+            select: {
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  type: true,
+                  unitOfMeasure: true,
+                },
+              },
+            },
           },
           createdBy: {
             select: {
@@ -1555,6 +1642,11 @@ export async function releaseCustody({
       : "**Unknown Custodian**";
     const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
 
+    // Per-asset units released, populated inside the tx from the inherited
+    // Custody rows; consumed by the post-tx note (which has only `kit.assets`,
+    // not the Custody rows, in scope). Empty for INDIVIDUAL-only kits.
+    const releasedQtyByAssetId = new Map<string, number | null>();
+
     // Use transaction for atomicity - prevents orphaned custody records on partial failure
     // Activity events must be inside to ensure audit trail consistency
     await db.$transaction(async (tx) => {
@@ -1570,26 +1662,42 @@ export async function releaseCustody({
               assetId: true,
               teamMemberId: true,
               kitCustodyId: true,
+              // Units this kit released — drives the qty-tracked count in the
+              // CUSTODY_RELEASED event meta + the release note below.
+              quantity: true,
             },
           })
         : [];
 
+      // Asset shape (type / unitOfMeasure) keyed by id, for the unit count.
+      const assetById = new Map(kit.assets.map((a) => [a.id, a]));
+
       // Activity events emitted FIRST — recordEvents runs inside the tx so
       // they roll back atomically if the kit-update below fails.
       if (inheritedCustodyRows.length > 0) {
+        // Record released units per asset so the post-tx note can name them.
+        for (const row of inheritedCustodyRows) {
+          releasedQtyByAssetId.set(row.assetId, row.quantity);
+        }
         await recordEvents(
-          inheritedCustodyRows.map((row) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "CUSTODY_RELEASED",
-            entityType: "ASSET",
-            entityId: row.assetId,
-            assetId: row.assetId,
-            kitId: kit.id,
-            teamMemberId: row.teamMemberId,
-            targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
-            meta: { viaKit: true },
-          })),
+          inheritedCustodyRows.map((row) => {
+            const asset = assetById.get(row.assetId);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: kit.id,
+              teamMemberId: row.teamMemberId,
+              targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+              meta: {
+                viaKit: true,
+                ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
+              },
+            };
+          }),
           tx
         );
       }
@@ -1626,16 +1734,25 @@ export async function releaseCustody({
       }
     });
 
-    // Notes can be created outside transaction (not critical for consistency)
-    await createNotes({
-      content: `${actorLink} released ${custodianDisplay}'s custody via kit: ${kitLink}.`,
-      type: "UPDATE",
-      userId,
-      assetIds: kit.assets.map((asset) => asset.id),
-      // why: notes target this kit's assets — scope to the kit's org so
-      // they can only be written against same-tenant assets
-      organizationId,
+    // Notes can be created outside transaction (not critical for consistency).
+    // One note per asset (not a shared string): qty-tracked assets each name
+    // their own released unit count ("custody of 50 units"); INDIVIDUAL assets
+    // keep the exact prior wording.
+    // why: notes target this kit's org-scoped assets — same-tenant by
+    // construction (kit was loaded with `organizationId` above).
+    const releaseNoteData = kit.assets.map((asset) => {
+      const count = formatUnitCount(asset, releasedQtyByAssetId.get(asset.id));
+      const custodyPhrase = count ? `custody of ${count}` : "custody";
+      return {
+        content: `${actorLink} released ${custodianDisplay}'s ${custodyPhrase} via kit: ${kitLink}.`,
+        type: "UPDATE" as const,
+        userId,
+        assetId: asset.id,
+      };
     });
+    if (releaseNoteData.length > 0) {
+      await db.note.createMany({ data: releaseNoteData });
+    }
 
     return kit;
   } catch (cause) {
@@ -1835,7 +1952,20 @@ export async function bulkDeleteKits({
         name: true,
         image: true,
         assetKits: {
-          select: { asset: { select: { id: true, title: true } } },
+          // type + unitOfMeasure feed the qty-tracked unit count in the
+          // kit-deletion release note (see performKitDeletion); quantity is
+          // this kit's per-row AssetKit.quantity for the cascade event meta.
+          select: {
+            quantity: true,
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                unitOfMeasure: true,
+              },
+            },
+          },
         },
         custody: {
           select: {
@@ -1868,10 +1998,15 @@ export async function bulkDeleteKits({
     // ASSET_KIT_CHANGED emission for the cascade unkit inside
     // `bulkDeleteKits` — on our branch the equivalent emission lives in
     // `performKitDeletion` so single + bulk paths share one
-    // implementation (see the recordEvents call there).
+    // implementation (see the recordEvents call there). `kitQuantity`
+    // carries the per-row AssetKit.quantity (NOT Asset.quantity) for the
+    // cascade event meta.
     const kits = kitRows.map((k) => ({
       ...k,
-      assets: (k.assetKits ?? []).map((ak) => ak.asset),
+      assets: (k.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kitQuantity: ak.quantity,
+      })),
     }));
 
     await performKitDeletion({
@@ -1937,6 +2072,7 @@ export async function bulkAssignKitCustody({
                   status: true,
                   type: true,
                   quantity: true,
+                  unitOfMeasure: true,
                 },
               },
             },
@@ -2073,6 +2209,24 @@ export async function bulkAssignKitCustody({
         await tx.custody.createMany({ data: inheritData });
       }
 
+      // Per-(kit-custody, asset) inherited quantity — the units this kit
+      // actually moved into custody (kit slice capped by free pool), NOT the
+      // asset's total. Drives the qty-tracked unit count in the note + event.
+      const inheritedQtyByKey = new Map(
+        inheritData.map((row) => [
+          `${row.kitCustodyId}:${row.assetId}`,
+          row.quantity ?? 0,
+        ])
+      );
+      const inheritedQtyFor = (asset: { id: string; kit?: { id: string } }) => {
+        const kitCustodyId = asset.kit
+          ? kitCustodyByKitId.get(asset.kit.id)
+          : undefined;
+        return kitCustodyId
+          ? inheritedQtyByKey.get(`${kitCustodyId}:${asset.id}`)
+          : undefined;
+      };
+
       /** Updating status of all assets of kits */
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assets are derived from `kits` (kit.assets) loaded by the org-scoped findMany above; not from request input
@@ -2094,8 +2248,12 @@ export async function bulkAssignKitCustody({
           const kitLink = asset.kit
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
+          // For qty-tracked assets, name the unit count actually moved into
+          // custody ("custody of 50 units"); INDIVIDUAL phrasing is unchanged.
+          const count = formatUnitCount(asset, inheritedQtyFor(asset));
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actor} granted ${custodianDisplay} custody via kit assignment ${kitLink}.`,
+            content: `${actor} granted ${custodianDisplay} ${custodyPhrase} via kit assignment ${kitLink}.`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -2119,10 +2277,7 @@ export async function bulkAssignKitCustody({
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
           meta: {
             viaKit: true,
-            quantity:
-              asset.type === AssetType.QUANTITY_TRACKED
-                ? asset.quantity ?? 1
-                : 1,
+            ...assetQtyMeta(asset, inheritedQtyFor(asset)),
           },
         })),
         tx
@@ -2191,6 +2346,11 @@ export async function bulkReleaseKitCustody({
                   id: true,
                   status: true,
                   title: true,
+                  // type + unitOfMeasure power the qty-tracked unit count in
+                  // the release note ("custody of 50 units"); the count comes
+                  // from the released Custody rows captured in the tx below.
+                  type: true,
+                  unitOfMeasure: true,
                   custody: { select: { id: true } },
                 },
               },
@@ -2256,6 +2416,9 @@ export async function bulkReleaseKitCustody({
                 assetId: true,
                 teamMemberId: true,
                 kitCustodyId: true,
+                // Units this kit released — drives the qty-tracked count in
+                // the CUSTODY_RELEASED event meta + the release note below.
+                quantity: true,
               },
             })
           : [];
@@ -2267,25 +2430,38 @@ export async function bulkReleaseKitCustody({
         kitCustodyRows.map((kc) => [kc.id, kc.kitId])
       );
 
+      // Asset shape (type / unitOfMeasure) and released-quantity per asset,
+      // keyed by id, for the qty-tracked unit count in the event + note.
+      const assetById = new Map(allAssetsOfAllKits.map((a) => [a.id, a]));
+      const releasedQtyByAssetId = new Map(
+        releasedCustodyRows.map((row) => [row.assetId, row.quantity])
+      );
+
       // Activity events emitted FIRST so they roll back atomically with the
       // mutation if anything below fails. Cascade-driven deletes happen
       // after this point.
       if (releasedCustodyRows.length > 0) {
         await recordEvents(
-          releasedCustodyRows.map((row) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "CUSTODY_RELEASED" as const,
-            entityType: "ASSET" as const,
-            entityId: row.assetId,
-            assetId: row.assetId,
-            kitId: row.kitCustodyId
-              ? kitIdByKitCustodyId.get(row.kitCustodyId)
-              : undefined,
-            teamMemberId: row.teamMemberId,
-            targetUserId: custodian?.user?.id ?? undefined,
-            meta: { viaKit: true },
-          })),
+          releasedCustodyRows.map((row) => {
+            const asset = assetById.get(row.assetId);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: row.kitCustodyId
+                ? kitIdByKitCustodyId.get(row.kitCustodyId)
+                : undefined,
+              teamMemberId: row.teamMemberId,
+              targetUserId: custodian?.user?.id ?? undefined,
+              meta: {
+                viaKit: true,
+                ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
+              },
+            };
+          }),
           tx
         );
       }
@@ -2344,8 +2520,15 @@ export async function bulkReleaseKitCustody({
           const kitLink = asset.kit
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
+          // qty-tracked assets name the units released ("custody of 50
+          // units"); INDIVIDUAL phrasing is unchanged.
+          const count = formatUnitCount(
+            asset,
+            releasedQtyByAssetId.get(asset.id)
+          );
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
           return {
-            content: `${actor} released ${custodianDisplay}'s custody via kit assignment ${kitLink}.`,
+            content: `${actor} released ${custodianDisplay}'s ${custodyPhrase} via kit assignment ${kitLink}.`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -2645,7 +2828,11 @@ export async function updateKitLocation({
   try {
     // Get kit with its assets first. Read each asset's placement from
     // the AssetLocation pivot; pull `type` and `quantity` so the cascade
-    // can write a type-aware quantity into the new pivot row.
+    // can write a type-aware quantity into the new pivot row. Also pull
+    // `unitOfMeasure` (qty-tracked unit label) and the per-row
+    // `AssetKit.quantity` (the slice this kit holds — copied into the
+    // kit-driven AssetLocation row) so the cascade note/event can name the
+    // affected unit count.
     const kitRow = await db.kit.findUnique({
       where: { id, organizationId },
       select: {
@@ -2653,12 +2840,14 @@ export async function updateKitLocation({
         name: true,
         assetKits: {
           select: {
+            quantity: true,
             asset: {
               select: {
                 id: true,
                 title: true,
                 type: true,
                 quantity: true,
+                unitOfMeasure: true,
                 assetLocations: {
                   select: { location: { select: { id: true, name: true } } },
                 },
@@ -2679,9 +2868,15 @@ export async function updateKitLocation({
     }
 
     // Flatten pivot rows into the in-memory `assets` shape used below.
+    // `kitQuantity` is this kit's per-row `AssetKit.quantity` (NOT the
+    // asset's full pool) — the slice cascaded into the kit-driven location
+    // row, surfaced in the per-asset cascade note/event count.
     const kit = {
       ...kitRow,
-      assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
+      assets: (kitRow.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kitQuantity: ak.quantity,
+      })),
     };
 
     const assetIds = kit.assets.map((asset) => asset.id);
@@ -2753,7 +2948,9 @@ export async function updateKitLocation({
               field: "locationId",
               fromValue: getPrimaryLocation(asset)?.id ?? null,
               toValue: newLocationId,
-              meta: { viaKit: true },
+              // `meta.quantity` (qty-tracked only) = the per-row
+              // `AssetKit.quantity` cascaded into the kit-driven location row.
+              meta: { viaKit: true, ...assetQtyMeta(asset, asset.kitQuantity) },
             })),
             tx
           );
@@ -2786,6 +2983,11 @@ export async function updateKitLocation({
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
                 isRemoving: false,
+                // Qty-tracked cascade names the kit's per-row slice
+                // ("placed 50 units … via parent kit assignment").
+                type: asset.type,
+                unitOfMeasure: asset.unitOfMeasure,
+                quantity: asset.kitQuantity,
               }),
               type: "UPDATE",
               userId,
@@ -2846,7 +3048,9 @@ export async function updateKitLocation({
               field: "locationId",
               fromValue: currentLocationId,
               toValue: null,
-              meta: { viaKit: true },
+              // `meta.quantity` (qty-tracked only) = the per-row
+              // `AssetKit.quantity` removed with the kit-driven location row.
+              meta: { viaKit: true, ...assetQtyMeta(asset, asset.kitQuantity) },
             })),
             tx
           );
@@ -2882,6 +3086,11 @@ export async function updateKitLocation({
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
                 isRemoving: true,
+                // Qty-tracked cascade names the kit's per-row slice
+                // ("removed 50 units … via parent kit removal").
+                type: asset.type,
+                unitOfMeasure: asset.unitOfMeasure,
+                quantity: asset.kitQuantity,
               }),
               type: "UPDATE",
               userId,
@@ -2930,7 +3139,9 @@ export async function bulkUpdateKitLocation({
     // Get kits with their assets before updating. Read each asset's
     // placement from the AssetLocation pivot and pull `type` + `quantity`
     // so the cascade writes type-aware rows; flatten back into a
-    // `.assets` shape downstream.
+    // `.assets` shape downstream. `unitOfMeasure` + the per-row
+    // `AssetKit.quantity` let the cascade note/event surface the affected
+    // unit count for qty-tracked assets.
     const kitsWithAssetsRows = await db.kit.findMany({
       where,
       select: {
@@ -2940,12 +3151,14 @@ export async function bulkUpdateKitLocation({
         location: { select: { id: true, name: true } },
         assetKits: {
           select: {
+            quantity: true,
             asset: {
               select: {
                 id: true,
                 title: true,
                 type: true,
                 quantity: true,
+                unitOfMeasure: true,
                 assetLocations: {
                   select: { location: { select: { id: true, name: true } } },
                 },
@@ -2957,10 +3170,15 @@ export async function bulkUpdateKitLocation({
     });
 
     // Flatten pivot rows back into a kit-shaped `.assets` array so the
-    // rest of this function reads as it did pre-pivot.
+    // rest of this function reads as it did pre-pivot. `kitQuantity` is the
+    // per-row `AssetKit.quantity` (this kit's slice, copied into the
+    // kit-driven location row) — NOT the asset's full pool.
     const kitsWithAssets = kitsWithAssetsRows.map((kit) => ({
       ...kit,
-      assets: (kit.assetKits ?? []).map((ak) => ak.asset),
+      assets: (kit.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kitQuantity: ak.quantity,
+      })),
     }));
 
     const actualKitIds = kitsWithAssets.map((kit) => kit.id);
@@ -3043,7 +3261,9 @@ export async function bulkUpdateKitLocation({
               field: "locationId",
               fromValue: getPrimaryLocation(asset)?.id ?? null,
               toValue: newLocationId,
-              meta: { viaKit: true },
+              // `meta.quantity` (qty-tracked only) = the per-row
+              // `AssetKit.quantity` cascaded into the kit-driven location row.
+              meta: { viaKit: true, ...assetQtyMeta(asset, asset.kitQuantity) },
             })),
             tx
           );
@@ -3076,6 +3296,10 @@ export async function bulkUpdateKitLocation({
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
                 isRemoving: false,
+                // Qty-tracked cascade names the kit's per-row slice.
+                type: asset.type,
+                unitOfMeasure: asset.unitOfMeasure,
+                quantity: asset.kitQuantity,
               }),
               type: "UPDATE",
               userId,
@@ -3124,7 +3348,9 @@ export async function bulkUpdateKitLocation({
               field: "locationId",
               fromValue: getPrimaryLocation(asset)!.id,
               toValue: null,
-              meta: { viaKit: true },
+              // `meta.quantity` (qty-tracked only) = the per-row
+              // `AssetKit.quantity` removed with the kit-driven location row.
+              meta: { viaKit: true, ...assetQtyMeta(asset, asset.kitQuantity) },
             })),
             tx
           );
@@ -3153,6 +3379,10 @@ export async function bulkUpdateKitLocation({
                 firstName: user?.firstName ?? "",
                 lastName: user?.lastName ?? "",
                 isRemoving: true,
+                // Qty-tracked cascade names the kit's per-row slice.
+                type: asset.type,
+                unitOfMeasure: asset.unitOfMeasure,
+                quantity: asset.kitQuantity,
               }),
               type: "UPDATE",
               userId,
@@ -3331,10 +3561,18 @@ export async function updateKitAssets({
           assetKits: {
             select: {
               kitId: true,
+              // This kit's per-row slice — surfaced in the membership-remove
+              // note + ASSET_KIT_CHANGED event ("removed 50 units from ...").
+              // This is AssetKit.quantity, NOT Asset.quantity.
+              quantity: true,
               asset: {
                 select: {
                   id: true,
                   title: true,
+                  // type + unitOfMeasure label the qty-tracked unit count in
+                  // the membership-remove custody-release note.
+                  type: true,
+                  unitOfMeasure: true,
                   assetKits: { select: { kitId: true } },
                   bookingAssets: {
                     include: {
@@ -3380,10 +3618,16 @@ export async function updateKitAssets({
       });
 
     // Flatten the AssetKit pivot rows back into a list of assets so the
-    // rest of this function reads the same way it did pre-pivot.
+    // rest of this function reads the same way it did pre-pivot. We carry
+    // each row's `AssetKit.quantity` as `kitQuantity` onto the asset so the
+    // remove note + event can name the slice held in THIS kit (NOT the
+    // asset's full pool).
     const kit = {
       ...kitWithRelations,
-      assets: (kitWithRelations.assetKits ?? []).map((ak) => ak.asset),
+      assets: (kitWithRelations.assetKits ?? []).map((ak) => ({
+        ...ak.asset,
+        kitQuantity: ak.quantity,
+      })),
     };
 
     const kitCustodianDisplay = kit.custody?.custodian
@@ -3438,6 +3682,9 @@ export async function updateKitAssets({
           title: true,
           type: true,
           quantity: true,
+          // unitOfMeasure labels the qty-tracked unit count in the custody
+          // grant/release notes ("custody of 50 boxes").
+          unitOfMeasure: true,
           // Pull all of the asset's AssetKit rows. Pre-polish there was at
           // most one (the @@unique held); post-polish a QUANTITY_TRACKED
           // asset can be in multiple kits. We need:
@@ -3478,6 +3725,24 @@ export async function updateKitAssets({
       (asset) =>
         !kit.assets.some((existingAsset) => existingAsset.id === asset.id)
     );
+
+    /**
+     * The `AssetKit.quantity` each newly-added asset will hold IN THIS KIT
+     * once its pivot row is created. Same derivation as the `createMany`
+     * below (submitted picker qty for QUANTITY_TRACKED, falling back to the
+     * asset's full pool; always 1 for INDIVIDUAL) — extracted so the add
+     * note + ASSET_KIT_CHANGED event surface the same per-kit count without
+     * re-reading the pivot. This is the per-row AssetKit.quantity, NOT
+     * Asset.quantity.
+     */
+    const addedAssetKitQuantity = (asset: {
+      id: string;
+      type: AssetType;
+      quantity: number | null;
+    }): number =>
+      asset.type === AssetType.QUANTITY_TRACKED
+        ? Math.max(1, assetQuantities[asset.id] ?? asset.quantity ?? 1)
+        : 1;
 
     /**
      * Detect existing-in-kit assets whose submitted quantity differs from
@@ -3723,19 +3988,12 @@ export async function updateKitAssets({
       // observable change until the picker is wired up.
       if (newlyAddedAssets.length > 0) {
         await tx.assetKit.createMany({
-          data: newlyAddedAssets.map((asset) => {
-            const submitted = assetQuantities[asset.id];
-            const quantity =
-              asset.type === AssetType.QUANTITY_TRACKED
-                ? Math.max(1, submitted ?? asset.quantity ?? 1)
-                : 1;
-            return {
-              assetId: asset.id,
-              kitId: kit.id,
-              organizationId,
-              quantity,
-            };
-          }),
+          data: newlyAddedAssets.map((asset) => ({
+            assetId: asset.id,
+            kitId: kit.id,
+            organizationId,
+            quantity: addedAssetKitQuantity(asset),
+          })),
         });
       }
 
@@ -3938,6 +4196,12 @@ export async function updateKitAssets({
     const newlyAddedAssetsForNotes = newlyAddedAssets.map((asset) => ({
       id: asset.id,
       title: asset.title,
+      // Qty-tracked add note count. `quantity` is the per-row
+      // AssetKit.quantity this asset will hold in THIS kit (same value the
+      // pivot createMany wrote), not Asset.quantity.
+      type: asset.type,
+      unitOfMeasure: asset.unitOfMeasure,
+      quantity: addedAssetKitQuantity(asset),
       kit: asset.assetKits[0]?.kitId
         ? // For freshly-attached assets we don't have the source kit's
           // name in scope; the note helper's `currentKit` path only
@@ -3950,6 +4214,12 @@ export async function updateKitAssets({
       (asset) => ({
         id: asset.id,
         title: asset.title,
+        // Qty-tracked remove note count. `kitQuantity` is the per-row
+        // AssetKit.quantity this asset held in THIS kit (captured at fetch
+        // time, before the pivot row was deleted), not Asset.quantity.
+        type: asset.type,
+        unitOfMeasure: asset.unitOfMeasure,
+        quantity: asset.kitQuantity,
         // Removed assets came from `kit.assets`, which itself was
         // flattened off `assetKits` for this kit — so the source kit
         // is the parent kit we're editing.
@@ -3980,6 +4250,9 @@ export async function updateKitAssets({
         // has its kit-id in `assetKits[0].kitId`.
         fromValue: asset.assetKits[0]?.kitId ?? null,
         toValue: kit.id,
+        // Qty-tracked: record the per-row AssetKit.quantity this asset now
+        // holds in the kit (same value the pivot createMany wrote).
+        meta: { ...assetQtyMeta(asset, addedAssetKitQuantity(asset)) },
       })),
       ...(addOnly ? [] : removedAssets).map((asset) => ({
         organizationId,
@@ -3994,6 +4267,9 @@ export async function updateKitAssets({
         field: "kitId",
         fromValue: kit.id,
         toValue: null,
+        // Qty-tracked: record the per-row AssetKit.quantity this asset held
+        // in the kit before its pivot row was deleted.
+        meta: { ...assetQtyMeta(asset, asset.kitQuantity) },
       })),
     ];
     if (kitChangeEvents.length > 0) {
@@ -4029,7 +4305,13 @@ export async function updateKitAssets({
           field: "locationId",
           fromValue: null,
           toValue: kitLocationId,
-          meta: { viaKit: true },
+          // `meta.quantity` (qty-tracked only) = the per-row
+          // `AssetKit.quantity` written into the new kit-driven location row
+          // (matches the value passed to `assetLocation.createMany` above).
+          meta: {
+            viaKit: true,
+            ...assetQtyMeta(asset, addedAssetKitQuantity(asset)),
+          },
         }))
       );
 
@@ -4054,6 +4336,12 @@ export async function updateKitAssets({
               firstName: noteUser?.firstName ?? "",
               lastName: noteUser?.lastName ?? "",
               isRemoving: false,
+              // Qty-tracked cascade names the kit's per-row slice this
+              // asset now holds in the kit (= the value written to the
+              // kit-driven AssetLocation row).
+              type: asset.type,
+              unitOfMeasure: asset.unitOfMeasure,
+              quantity: addedAssetKitQuantity(asset),
             }),
             type: "UPDATE",
             userId,
@@ -4096,7 +4384,9 @@ export async function updateKitAssets({
       // kit-allocated row never over-allocates the asset's pool. See
       // `buildKitCustodyInheritData`. Must run inside the tx — its read of
       // existing custody must see rows written earlier in this tx.
-      const inheritedAssetIds = await db.$transaction(async (tx) => {
+      // Returns the inherited Custody rows ({ assetId, quantity }) so the
+      // post-tx note can name the per-asset unit count without re-reading.
+      const inheritedRows = await db.$transaction(async (tx) => {
         const inheritData = await buildKitCustodyInheritData({
           tx,
           kitId: kit.id,
@@ -4115,7 +4405,10 @@ export async function updateKitAssets({
           data: { status: AssetStatus.IN_CUSTODY },
         });
 
-        // Activity events — one CUSTODY_ASSIGNED per asset that inherited custody.
+        // Activity events — one CUSTODY_ASSIGNED per asset that inherited
+        // custody. `meta.quantity` is the per-row count `buildKitCustodyInheritData`
+        // already computed (the asset's real slice for qty-tracked, 1 for
+        // INDIVIDUAL), so the event meta is left exactly as before.
         await recordEvents(
           inheritData.map((row) => ({
             organizationId,
@@ -4131,23 +4424,35 @@ export async function updateKitAssets({
           })),
           tx
         );
-        return inheritedIds;
+        return inheritData.map((row) => ({
+          assetId: row.assetId,
+          quantity: row.quantity,
+        }));
       });
 
       // Create notes only for assets that actually received an inherited
       // custody row. Fully operator-allocated qty-tracked assets are skipped
       // (no kit-custody row → no "granted custody" note for that asset).
-      if (inheritedAssetIds.length > 0) {
+      if (inheritedRows.length > 0) {
         const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
-        await createNotes({
-          content: `${actor} granted ${custodianDisplay} custody.`,
-          type: NoteType.UPDATE,
-          userId,
-          assetIds: inheritedAssetIds,
-          // why: assets resolved scoped to organizationId for this kit —
-          // pass the org so the notes are validated against same-tenant assets.
-          organizationId,
+        // Asset shape (type / unitOfMeasure) keyed by id, for the unit count.
+        const assetById = new Map(allAssetsForKit.map((a) => [a.id, a]));
+        // One note per inheriting asset: qty-tracked assets name the granted
+        // units ("custody of 50 units"); INDIVIDUAL phrasing stays unchanged.
+        // why: assets resolved scoped to organizationId for this kit, so the
+        // note writes target same-tenant assets only.
+        const grantNoteData = inheritedRows.map((row) => {
+          const asset = assetById.get(row.assetId);
+          const count = asset ? formatUnitCount(asset, row.quantity) : null;
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
+          return {
+            content: `${actor} granted ${custodianDisplay} ${custodyPhrase}.`,
+            type: NoteType.UPDATE,
+            userId,
+            assetId: row.assetId,
+          };
         });
+        await db.note.createMany({ data: grantNoteData });
       }
     }
 
@@ -4251,6 +4556,13 @@ export async function updateKitAssets({
       // multi-custodian qty-tracked rows.
       const kitCustodyId = kit.custody.id;
 
+      // Asset shape (type / unitOfMeasure) keyed by id, for the unit count.
+      const assetById = new Map(removedAssets.map((a) => [a.id, a]));
+      // Per-asset released units, populated inside the tx from the kit-
+      // allocated Custody rows; consumed by the post-tx note. Assets with no
+      // kit-custody row stay absent → no count → unchanged "custody" wording.
+      const releasedQtyByAssetId = new Map<string, number | null>();
+
       // Use transaction for atomicity - prevents orphaned custody records.
       // Filter the deleteMany by `kitCustodyId` so only kit-allocated rows
       // are removed. Operator-assigned per-unit custody on the same asset
@@ -4259,23 +4571,33 @@ export async function updateKitAssets({
         // Capture the kit-allocated rows before deletion to emit events.
         const removedKitCustodyRows = await tx.custody.findMany({
           where: { assetId: { in: assetIds }, kitCustodyId },
-          select: { assetId: true, teamMemberId: true },
+          // quantity → qty-tracked unit count in the event meta + note.
+          select: { assetId: true, teamMemberId: true, quantity: true },
         });
 
         if (removedKitCustodyRows.length > 0) {
+          for (const row of removedKitCustodyRows) {
+            releasedQtyByAssetId.set(row.assetId, row.quantity);
+          }
           await recordEvents(
-            removedKitCustodyRows.map((row) => ({
-              organizationId,
-              actorUserId: userId,
-              action: "CUSTODY_RELEASED" as const,
-              entityType: "ASSET" as const,
-              entityId: row.assetId,
-              assetId: row.assetId,
-              kitId: kit.id,
-              teamMemberId: row.teamMemberId,
-              targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
-              meta: { viaKit: true },
-            })),
+            removedKitCustodyRows.map((row) => {
+              const asset = assetById.get(row.assetId);
+              return {
+                organizationId,
+                actorUserId: userId,
+                action: "CUSTODY_RELEASED" as const,
+                entityType: "ASSET" as const,
+                entityId: row.assetId,
+                assetId: row.assetId,
+                kitId: kit.id,
+                teamMemberId: row.teamMemberId,
+                targetUserId: kit.custody?.custodian?.user?.id ?? undefined,
+                meta: {
+                  viaKit: true,
+                  ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
+                },
+              };
+            }),
             tx
           );
         }
@@ -4307,16 +4629,28 @@ export async function updateKitAssets({
         }
       });
 
-      // Notes can be created outside transaction (not critical for consistency)
-      await createNotes({
-        content: `${actor} released ${custodianDisplay}'s custody.`,
-        type: NoteType.UPDATE,
-        userId,
-        assetIds,
-        // why: assetIds derived from this kit's assets (loaded scoped to
-        // organizationId) — pass the org so notes target same-tenant assets
-        organizationId,
+      // Notes can be created outside transaction (not critical for consistency).
+      // One note per removed asset: qty-tracked assets that had kit custody
+      // name the released units ("custody of 50 units"); assets without a
+      // kit-custody row (and all INDIVIDUAL assets) keep the prior wording.
+      // why: assetIds derived from this kit's org-scoped assets — same-tenant
+      // by construction.
+      const releaseNoteData = removedAssets.map((asset) => {
+        const count = formatUnitCount(
+          asset,
+          releasedQtyByAssetId.get(asset.id)
+        );
+        const custodyPhrase = count ? `custody of ${count}` : "custody";
+        return {
+          content: `${actor} released ${custodianDisplay}'s ${custodyPhrase}.`,
+          type: NoteType.UPDATE,
+          userId,
+          assetId: asset.id,
+        };
       });
+      if (releaseNoteData.length > 0) {
+        await db.note.createMany({ data: releaseNoteData });
+      }
     }
 
     /**
@@ -4459,8 +4793,16 @@ export async function bulkRemoveAssetsFromKits({
       select: {
         id: true,
         title: true,
+        // type + unitOfMeasure label the qty-tracked unit count in the
+        // custody-release note ("custody of 50 units").
+        type: true,
+        unitOfMeasure: true,
         assetKits: {
           select: {
+            // This kit's per-row slice — surfaced in the cascade
+            // ASSET_KIT_CHANGED event meta ("removed 50 units"). This is
+            // AssetKit.quantity, NOT Asset.quantity.
+            quantity: true,
             kit: {
               select: {
                 id: true,
@@ -4475,6 +4817,9 @@ export async function bulkRemoveAssetsFromKits({
             id: true,
             teamMemberId: true,
             kitCustodyId: true,
+            // quantity → qty-tracked unit count in the CUSTODY_RELEASED
+            // event meta + the release note below.
+            quantity: true,
             custodian: {
               select: {
                 id: true,
@@ -4500,6 +4845,10 @@ export async function bulkRemoveAssetsFromKits({
       // `kit` directly and omit the `assetKits` array entirely; this avoids a
       // TypeError reading [0] of undefined for those rows.
       kit: asset.assetKits?.[0]?.kit ?? null,
+      // Per-row AssetKit.quantity this asset held in the kit being detached
+      // (NOT Asset.quantity) — drives the qty-tracked count in the cascade
+      // ASSET_KIT_CHANGED event meta. `null` for the legacy-mock rows above.
+      kitQuantity: asset.assetKits?.[0]?.quantity ?? null,
     }));
 
     // Collect AssetKit ids being deleted across the bulk removal
@@ -4539,26 +4888,41 @@ export async function bulkRemoveAssetsFromKits({
               kitId: asset.kit?.id,
               teamMemberId: c.teamMemberId,
               targetUserId: c.custodian?.user?.id,
+              // Units this row releases — drives the qty-tracked count.
+              quantity: c.quantity,
             }));
         }
+      );
+
+      // Asset shape (type / unitOfMeasure) and released-quantity per asset,
+      // keyed by id, for the qty-tracked unit count in the event + note.
+      const assetById = new Map(assets.map((a) => [a.id, a]));
+      const releasedQtyByAssetId = new Map(
+        kitAllocatedCustodyToDelete.map((row) => [row.assetId, row.quantity])
       );
 
       if (kitAllocatedCustodyToDelete.length > 0) {
         // Emit CUSTODY_RELEASED events BEFORE deletion so they roll back
         // atomically with the mutation if anything fails.
         await recordEvents(
-          kitAllocatedCustodyToDelete.map((row) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "CUSTODY_RELEASED" as const,
-            entityType: "ASSET" as const,
-            entityId: row.assetId,
-            assetId: row.assetId,
-            kitId: row.kitId ?? undefined,
-            teamMemberId: row.teamMemberId,
-            targetUserId: row.targetUserId ?? undefined,
-            meta: { viaKit: true },
-          })),
+          kitAllocatedCustodyToDelete.map((row) => {
+            const asset = assetById.get(row.assetId);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "CUSTODY_RELEASED" as const,
+              entityType: "ASSET" as const,
+              entityId: row.assetId,
+              assetId: row.assetId,
+              kitId: row.kitId ?? undefined,
+              teamMemberId: row.teamMemberId,
+              targetUserId: row.targetUserId ?? undefined,
+              meta: {
+                viaKit: true,
+                ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
+              },
+            };
+          }),
           tx
         );
 
@@ -4630,8 +4994,15 @@ export async function bulkRemoveAssetsFromKits({
                   teamMember: primaryCustody.custodian,
                 })
               : "**Unknown Custodian**";
+            // qty-tracked assets name the units released ("custody of 50
+            // units"); INDIVIDUAL phrasing is unchanged.
+            const count = formatUnitCount(
+              asset,
+              releasedQtyByAssetId.get(asset.id)
+            );
+            const custodyPhrase = count ? `custody of ${count}` : "custody";
             return {
-              content: `${actor} released ${custodianDisplay}'s custody.`,
+              content: `${actor} released ${custodianDisplay}'s ${custodyPhrase}.`,
               type: "UPDATE",
               userId,
               assetId: asset.id,
@@ -4673,6 +5044,9 @@ export async function bulkRemoveAssetsFromKits({
             field: "kitId",
             fromValue: asset.kit!.id,
             toValue: null,
+            // Qty-tracked: the per-row AssetKit.quantity this asset held in
+            // the detached kit (NOT Asset.quantity); {} for INDIVIDUAL.
+            meta: { ...assetQtyMeta(asset, asset.kitQuantity) },
           })),
           tx
         );

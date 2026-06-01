@@ -36,6 +36,7 @@ import {
   computeBookingAvailableQuantity,
   createConsumptionLog,
 } from "~/modules/consumption-log/service.server";
+import { assetQtyMeta } from "~/utils/asset-quantity";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -62,6 +63,7 @@ import {
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
+  wrapAssetWithCountForNote,
   wrapDateForNote,
   wrapKitsForNote,
   wrapKitsWithDataForNote,
@@ -580,17 +582,35 @@ export async function createBooking({
       );
 
       // One BOOKING_ASSETS_ADDED event per asset attached at creation.
+      // Look up `type`/`unitOfMeasure` so the event meta carries
+      // `quantity` for QUANTITY_TRACKED assets (no-op for INDIVIDUAL).
+      // BookingAsset.quantity is the schema default (1) on this path —
+      // `createBooking` accepts no per-asset quantity input.
       if (assetIds.length > 0) {
-        await recordEvents(
-          assetIds.map((assetId) => ({
+        const assetTypes = await tx.asset.findMany({
+          where: {
+            id: { in: assetIds },
             organizationId: booking.organizationId,
-            actorUserId: booking.creatorId,
-            action: "BOOKING_ASSETS_ADDED",
-            entityType: "BOOKING",
-            entityId: created.id,
-            bookingId: created.id,
-            assetId,
-          })),
+          },
+          select: { id: true, type: true, unitOfMeasure: true },
+        });
+        const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
+
+        await recordEvents(
+          assetIds.map((assetId) => {
+            const asset = assetTypeById.get(assetId);
+            return {
+              organizationId: booking.organizationId,
+              actorUserId: booking.creatorId,
+              action: "BOOKING_ASSETS_ADDED" as const,
+              entityType: "BOOKING" as const,
+              entityId: created.id,
+              bookingId: created.id,
+              assetId,
+              // Default BookingAsset.quantity on create = 1 (schema default).
+              meta: asset ? assetQtyMeta(asset, 1) : {},
+            };
+          }),
           tx
         );
       }
@@ -1951,6 +1971,26 @@ export async function checkoutBooking({
       new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id))
     );
 
+    // Per-asset booked quantity (sum across all BookingAsset rows for the
+    // same asset on this booking) — feeds `meta.quantity` on the dedup'd
+    // BOOKING_CHECKED_OUT events below. No-op for INDIVIDUAL via
+    // assetQtyMeta.
+    const checkedOutQtyByAssetId = new Map<string, number>();
+    const checkedOutAssetById = new Map<
+      string,
+      { type: AssetType; unitOfMeasure: string | null }
+    >();
+    for (const ba of bookingFound.bookingAssets) {
+      checkedOutQtyByAssetId.set(
+        ba.asset.id,
+        (checkedOutQtyByAssetId.get(ba.asset.id) ?? 0) + ba.quantity
+      );
+      checkedOutAssetById.set(ba.asset.id, {
+        type: ba.asset.type,
+        unitOfMeasure: ba.asset.unitOfMeasure,
+      });
+    }
+
     await db.$transaction(
       async (tx) => {
         await checkoutBookingWritesWithinTx(tx, {
@@ -1969,18 +2009,25 @@ export async function checkoutBooking({
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
         // booking. Map through the deduped asset ids so a multi-row asset
-        // doesn't produce duplicate events.
+        // doesn't produce duplicate events. `meta.quantity` is the SUM of
+        // per-row BookingAsset.quantity across all slices of that asset
+        // (qty-tracked only; no-op for INDIVIDUAL).
         if (uniqueCheckedOutAssetIds.length > 0) {
           await recordEvents(
-            uniqueCheckedOutAssetIds.map((assetId) => ({
-              organizationId,
-              actorUserId: userId ?? null,
-              action: "BOOKING_CHECKED_OUT",
-              entityType: "BOOKING",
-              entityId: bookingFound.id,
-              bookingId: bookingFound.id,
-              assetId,
-            })),
+            uniqueCheckedOutAssetIds.map((assetId) => {
+              const asset = checkedOutAssetById.get(assetId);
+              const totalQty = checkedOutQtyByAssetId.get(assetId);
+              return {
+                organizationId,
+                actorUserId: userId ?? null,
+                action: "BOOKING_CHECKED_OUT" as const,
+                entityType: "BOOKING" as const,
+                entityId: bookingFound.id,
+                bookingId: bookingFound.id,
+                assetId,
+                meta: asset ? assetQtyMeta(asset, totalQty) : {},
+              };
+            }),
             tx
           );
         }
@@ -2282,7 +2329,14 @@ export async function fulfilModelRequestsAndCheckout({
           select: {
             quantity: true,
             asset: {
-              select: { id: true, title: true, type: true },
+              // `unitOfMeasure` is widened so per-row BOOKING_CHECKED_OUT
+              // events can carry `meta.quantity` via assetQtyMeta.
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                unitOfMeasure: true,
+              },
             },
           },
         });
@@ -2325,15 +2379,19 @@ export async function fulfilModelRequestsAndCheckout({
          * CHECKED_OUT".
          */
         if (allBookingAssetIds.length > 0) {
+          // One event per BookingAsset ROW (not deduped). For multi-row
+          // qty-tracked, each event carries that row's own quantity in
+          // `meta.quantity` (no-op for INDIVIDUAL).
           await recordEvents(
-            allBookingAssetIds.map((assetId) => ({
+            postScanBookingAssets.map((ba) => ({
               organizationId,
               actorUserId: userId,
               action: "BOOKING_CHECKED_OUT" as const,
               entityType: "BOOKING" as const,
               entityId: bookingId,
               bookingId,
-              assetId,
+              assetId: ba.asset.id,
+              meta: assetQtyMeta(ba.asset, ba.quantity),
             })),
             tx
           );
@@ -2792,11 +2850,20 @@ export async function checkinBooking({
         where: { id, organizationId },
         include: {
           bookingAssets: {
-            include: {
+            // `quantity` + `unitOfMeasure` widen the select so the per-row
+            // BOOKING_CHECKED_IN events below can attach `meta.quantity`
+            // for QUANTITY_TRACKED assets (no-op for INDIVIDUAL).
+            // `id` + `assetId` feed the per-slice qty-tracked check-in
+            // bookkeeping below (see `qtyTrackedSlices`).
+            select: {
+              id: true,
+              assetId: true,
+              quantity: true,
               asset: {
                 select: {
                   id: true,
                   type: true,
+                  unitOfMeasure: true,
                   consumptionType: true,
                   title: true,
                   assetKits: { select: { kitId: true } },
@@ -3320,19 +3387,22 @@ export async function checkinBooking({
           }
         }
 
-        // Activity events — one BOOKING_CHECKED_IN per asset, inside the tx.
-        // Must be atomic with booking status update for audit trail consistency.
-        // Walk the `bookingAssets` pivot to reach each asset.
+        // Activity events — one BOOKING_CHECKED_IN per BookingAsset ROW,
+        // inside the tx. Must be atomic with booking status update for
+        // audit trail consistency. Walk the `bookingAssets` pivot to
+        // reach each asset; per-row `meta.quantity` is sourced from the
+        // pivot row (qty-tracked only via assetQtyMeta).
         if (bookingFound.bookingAssets.length > 0) {
           await recordEvents(
             bookingFound.bookingAssets.map((ba) => ({
               organizationId,
               actorUserId: userId ?? null,
-              action: "BOOKING_CHECKED_IN",
-              entityType: "BOOKING",
+              action: "BOOKING_CHECKED_IN" as const,
+              entityType: "BOOKING" as const,
               entityId: bookingFound.id,
               bookingId: bookingFound.id,
               assetId: ba.asset.id,
+              meta: assetQtyMeta(ba.asset, ba.quantity),
             })),
             tx
           );
@@ -4748,17 +4818,50 @@ export async function updateBookingAssets({
       // Must be atomic with asset addition for audit trail consistency.
       // Use the deduped union of standalone + kit-driven assets so a
       // kit-only add still records events for its member assets.
+      // `meta.quantity` (qty-tracked only) sums the standalone qty (from
+      // `quantities` map, default 1) plus every kit-driven slice qty for
+      // the same asset on this call — mirrors the actual booked count
+      // even when the same asset is added both standalone and via N kits.
       if (addedAssetIds.length > 0) {
+        const assetTypeRows = await tx.asset.findMany({
+          where: { id: { in: addedAssetIds }, organizationId },
+          select: { id: true, type: true, unitOfMeasure: true },
+        });
+        const assetTypeById = new Map(assetTypeRows.map((a) => [a.id, a]));
+
+        // Sum the booked quantity per asset across all rows this call
+        // is responsible for. Standalone defaults to 1 when missing
+        // from `quantities` — mirrors the SQL upsert default above.
+        const addedQtyByAssetId = new Map<string, number>();
+        for (const sid of standaloneAssetIds) {
+          addedQtyByAssetId.set(
+            sid,
+            (addedQtyByAssetId.get(sid) ?? 0) + (quantities?.[sid] ?? 1)
+          );
+        }
+        for (const slice of slices) {
+          addedQtyByAssetId.set(
+            slice.assetId,
+            (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+          );
+        }
+
         await recordEvents(
-          addedAssetIds.map((assetId) => ({
-            organizationId,
-            actorUserId: userId ?? null,
-            action: "BOOKING_ASSETS_ADDED",
-            entityType: "BOOKING",
-            entityId: b.id,
-            bookingId: b.id,
-            assetId,
-          })),
+          addedAssetIds.map((assetId) => {
+            const asset = assetTypeById.get(assetId);
+            return {
+              organizationId,
+              actorUserId: userId ?? null,
+              action: "BOOKING_ASSETS_ADDED" as const,
+              entityType: "BOOKING" as const,
+              entityId: b.id,
+              bookingId: b.id,
+              assetId,
+              meta: asset
+                ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
+                : {},
+            };
+          }),
           tx
         );
       }
@@ -4773,12 +4876,33 @@ export async function updateBookingAssets({
     // so we log failures instead of throwing to prevent false error reports.
     if (!kitIds || kitIds.length === 0) {
       try {
+        // Widen the select to type+unitOfMeasure so the single-asset
+        // branch can prefix a unit count ("added 50 units of Pens to
+        // the booking"). The multi-asset summary uses
+        // `wrapAssetsWithDataForNote`'s popover unchanged.
         const assets = await db.asset.findMany({
           where: { id: { in: addedAssetIds }, organizationId },
-          select: { id: true, title: true },
+          select: {
+            id: true,
+            title: true,
+            type: true,
+            unitOfMeasure: true,
+          },
         });
 
-        const assetContent = wrapAssetsWithDataForNote(assets, "added");
+        // why: out of this rule — multi-asset popover, per-asset qty deferred.
+        // Single-asset path uses wrapAssetWithCountForNote so qty-tracked
+        // shows "N units of {asset}"; INDIVIDUAL is byte-for-byte unchanged.
+        // Falls back to the popover when the single-asset metadata is
+        // missing (title/type), so callers with minimal asset shapes
+        // don't crash.
+        const assetContent =
+          assets.length === 1 && assets[0].title && assets[0].type
+            ? wrapAssetWithCountForNote(
+                assets[0],
+                quantities?.[assets[0].id] ?? 1
+              )
+            : wrapAssetsWithDataForNote(assets, "added");
 
         if (userId) {
           const user = await getUserByID(userId, {
@@ -5955,11 +6079,43 @@ export async function removeAssets({
      * Wrapped in a single transaction with the `bookingAsset.deleteMany`
      * so we don't end up with half-reverted state on failure.
      */
+    // Captured inside the tx pre-delete so the per-asset
+    // BOOKING_ASSETS_REMOVED event meta + asset-timeline note can
+    // report the actual booked-row quantity that just disappeared.
+    // Lives outside the tx scope so the post-commit consumers below
+    // can read it.
+    const removedQtyByAssetId = new Map<string, number>();
+    const removedAssetMeta = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        type: AssetType;
+        unitOfMeasure: string | null;
+      }
+    >();
+
     await db.$transaction(async (tx) => {
       const removedAssets = await tx.asset.findMany({
         where: { id: { in: assetIds }, organizationId },
-        select: { id: true, assetModelId: true },
+        select: {
+          id: true,
+          assetModelId: true,
+          // type + title + unitOfMeasure feed the per-asset note
+          // phrasing ("removed 50 units of {asset}") + the event meta.
+          title: true,
+          type: true,
+          unitOfMeasure: true,
+        },
       });
+      for (const a of removedAssets) {
+        removedAssetMeta.set(a.id, {
+          id: a.id,
+          title: a.title,
+          type: a.type,
+          unitOfMeasure: a.unitOfMeasure,
+        });
+      }
 
       // When the caller is the manage-kits flow removing one or more
       // kits, scope the deletion to the kit-driven BookingAsset rows for
@@ -5971,24 +6127,38 @@ export async function removeAssets({
       // When `kitIds` is empty, the call comes from the manage-assets
       // picker or asset-bulk remove flow, where the intent is to remove
       // ALL slices of the asset from the booking (legacy behaviour).
+      let rowsToDeleteWhere: Prisma.BookingAssetWhereInput;
       if (kitIds.length > 0) {
         const kitDrivenAssetKitIds = await tx.assetKit.findMany({
           where: { kitId: { in: kitIds }, assetId: { in: assetIds } },
           select: { id: true },
         });
-        await tx.bookingAsset.deleteMany({
-          where: {
-            bookingId: id,
-            assetKitId: {
-              in: kitDrivenAssetKitIds.map((ak: { id: string }) => ak.id),
-            },
+        rowsToDeleteWhere = {
+          bookingId: id,
+          assetKitId: {
+            in: kitDrivenAssetKitIds.map((ak: { id: string }) => ak.id),
           },
-        });
+        };
       } else {
-        await tx.bookingAsset.deleteMany({
-          where: { bookingId: id, assetId: { in: assetIds } },
-        });
+        rowsToDeleteWhere = { bookingId: id, assetId: { in: assetIds } };
       }
+
+      // Snapshot the BookingAsset rows about to be deleted so per-asset
+      // qty can be summed for the activity events + asset-timeline notes
+      // emitted post-commit below. After `deleteMany` runs, those rows
+      // are gone and we'd lose the count.
+      const rowsBeingDeleted = await tx.bookingAsset.findMany({
+        where: rowsToDeleteWhere,
+        select: { assetId: true, quantity: true },
+      });
+      for (const row of rowsBeingDeleted) {
+        removedQtyByAssetId.set(
+          row.assetId,
+          (removedQtyByAssetId.get(row.assetId) ?? 0) + row.quantity
+        );
+      }
+
+      await tx.bookingAsset.deleteMany({ where: rowsToDeleteWhere });
 
       // Count removals per assetModelId so we decrement each request
       // in one update rather than N.
@@ -6075,30 +6245,68 @@ export async function removeAssets({
     const userForNotes = { firstName, lastName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
-    await createNotes({
-      content: `${wrapUserLinkForNote(
-        userForNotes
-      )} removed assets from ${bookingLink}.`,
-      type: "UPDATE",
-      userId,
-      assetIds,
-      organizationId,
+    // Asset-timeline note — one row per asset. Previously every asset
+    // shared the same "removed assets from {booking}" string via
+    // createNotes (one content for N ids); now qty-tracked rows surface
+    // the removed unit count ("removed 50 units of {asset} from
+    // {booking}") while INDIVIDUAL keeps the legacy phrasing
+    // byte-for-byte. why: content now differs per asset, so a single
+    // shared `createNotes({assetIds: […]})` call no longer fits — we
+    // flatMap one note per asset instead.
+    const removalNoteData = assetIds.map((assetId) => {
+      const assetForNote = removedAssetMeta.get(assetId);
+      const removedQty = removedQtyByAssetId.get(assetId);
+      // Only switch to the qty-aware per-asset phrasing when we have the
+      // full asset shape (title + type). Otherwise fall back to the
+      // legacy "removed assets from {booking}" wording so nothing
+      // regresses if the asset metadata fetch returns only ids.
+      if (assetForNote?.title && assetForNote.type) {
+        const assetMarkup = wrapAssetWithCountForNote(assetForNote, removedQty);
+        return {
+          content: `${wrapUserLinkForNote(
+            userForNotes
+          )} removed ${assetMarkup} from ${bookingLink}.`,
+          assetId,
+        };
+      }
+      return {
+        content: `${wrapUserLinkForNote(
+          userForNotes
+        )} removed assets from ${bookingLink}.`,
+        assetId,
+      };
     });
+    for (const note of removalNoteData) {
+      await createNotes({
+        content: note.content,
+        type: "UPDATE",
+        userId,
+        assetIds: [note.assetId],
+        organizationId,
+      });
+    }
 
     // Activity events — one BOOKING_ASSETS_REMOVED per asset detached.
     // Best-effort: don't fail the removal if event recording fails.
+    // `meta.quantity` is the sum of BookingAsset.quantity from rows
+    // dropped for that asset on this call (qty-tracked only).
     if (assetIds.length > 0) {
       try {
         await recordEvents(
-          assetIds.map((assetId) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "BOOKING_ASSETS_REMOVED",
-            entityType: "BOOKING",
-            entityId: booking.id,
-            bookingId: booking.id,
-            assetId,
-          }))
+          assetIds.map((assetId) => {
+            const asset = removedAssetMeta.get(assetId);
+            const removedQty = removedQtyByAssetId.get(assetId);
+            return {
+              organizationId,
+              actorUserId: userId,
+              action: "BOOKING_ASSETS_REMOVED" as const,
+              entityType: "BOOKING" as const,
+              entityId: booking.id,
+              bookingId: booking.id,
+              assetId,
+              meta: asset ? assetQtyMeta(asset, removedQty) : {},
+            };
+          })
         );
       } catch (err) {
         Logger.error(
@@ -6115,6 +6323,9 @@ export async function removeAssets({
     // BOOKING ACTIVITY LOG: Log removal activity
     // Creates system note when assets/kits are removed from a booking
     // Handles three cases: kits only, assets only, or both combined
+    // why: out of this rule — multi-asset popover, per-asset qty deferred.
+    // These are the booking-level summary notes (wrapAssets/Kits popover);
+    // the per-asset qty already surfaces on the asset-timeline notes above.
     const hasKits = kitIds && kitIds.length > 0;
     // Check if we have standalone assets (not belonging to kits being removed)
     const hasAssets = assets && assets.length > 0;
@@ -7258,11 +7469,18 @@ async function createNotesForScannedAssetsAndKits({
   organizationId: string;
   userId: string;
 }) {
-  // Fetch assets and kits in parallel for better performance
-  const [assets, kits] = await Promise.all([
+  // Fetch assets and kits in parallel for better performance.
+  // type+unitOfMeasure widen the select so per-asset notes can prefix
+  // a qty-tracked unit count via wrapAssetWithCountForNote.
+  const [assets, kits, bookedRows] = await Promise.all([
     db.asset.findMany({
       where: { id: { in: assetIds }, organizationId },
-      select: { id: true, title: true },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        unitOfMeasure: true,
+      },
     }),
     kitIds.length > 0
       ? db.kit.findMany({
@@ -7274,7 +7492,28 @@ async function createNotesForScannedAssetsAndKits({
           },
         })
       : Promise.resolve([]),
+    // Snapshot the BookingAsset rows that were just persisted for this
+    // call's asset ids — used to source per-asset booked quantity for
+    // the asset-timeline notes below (sum across slices for the same
+    // asset on this booking).
+    assetIds.length > 0
+      ? db.bookingAsset.findMany({
+          where: { bookingId: booking.id, assetId: { in: assetIds } },
+          select: { assetId: true, quantity: true },
+        })
+      : Promise.resolve([] as Array<{ assetId: string; quantity: number }>),
   ]);
+
+  // Per-asset booked quantity (sum across all matching slices). Feeds the
+  // qty-tracked "added N units of {asset}" phrasing; INDIVIDUAL is unchanged.
+  const bookedQtyByAssetId = new Map<string, number>();
+  for (const row of bookedRows) {
+    bookedQtyByAssetId.set(
+      row.assetId,
+      (bookedQtyByAssetId.get(row.assetId) ?? 0) + row.quantity
+    );
+  }
+  const assetById = new Map(assets.map((a) => [a.id, a]));
 
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
@@ -7306,6 +7545,9 @@ async function createNotesForScannedAssetsAndKits({
   };
 
   // Create booking notes
+  // why: out of this rule — multi-asset popover, per-asset qty deferred.
+  // These booking-level summary notes use the popover; per-asset qty
+  // surfaces on the asset-timeline notes below.
   const hasKits = kits.length > 0;
   const hasAssets = standaloneAssets.length > 0;
 
@@ -7358,20 +7600,41 @@ async function createNotesForScannedAssetsAndKits({
   const standaloneAssetIdsSet = new Set(standaloneAssetIds);
   const kitAssetIds = assetIds.filter((id) => !standaloneAssetIdsSet.has(id));
 
-  // Create notes for standalone assets
+  // Create notes for standalone assets — one per asset so qty-tracked
+  // can carry its own unit count ("added 50 units of {asset} to
+  // {booking}"). INDIVIDUAL renders the bare asset link, so the legacy
+  // "added asset to {booking}" wording is preserved byte-for-byte.
   if (standaloneAssetIds.length > 0) {
-    await createNotes({
-      content: `${wrapUserLinkForNote(
-        userForNotes
-      )} added asset to ${bookingLink}.`,
-      type: "UPDATE",
-      userId,
-      assetIds: standaloneAssetIds,
-      organizationId,
-    });
+    for (const assetId of standaloneAssetIds) {
+      const asset = assetById.get(assetId);
+      const qty = bookedQtyByAssetId.get(assetId);
+      // Only switch to the qty-aware phrasing when we have title+type;
+      // otherwise fall back to the legacy "added asset to {booking}" so
+      // the byte-for-byte INDIVIDUAL contract is preserved when the
+      // asset metadata fetch returns only ids.
+      const content =
+        asset?.title && asset?.type
+          ? `${wrapUserLinkForNote(
+              userForNotes
+            )} added ${wrapAssetWithCountForNote(
+              asset,
+              qty
+            )} to ${bookingLink}.`
+          : `${wrapUserLinkForNote(
+              userForNotes
+            )} added asset to ${bookingLink}.`;
+      await createNotes({
+        content,
+        type: "UPDATE",
+        userId,
+        assetIds: [assetId],
+        organizationId,
+      });
+    }
   }
 
-  // Create notes for assets added via kits (grouped by kit)
+  // Create notes for assets added via kits (grouped by kit; one note per
+  // asset so qty-tracked rows can prefix their unit count).
   if (kitAssetIds.length > 0) {
     // Group asset IDs by kit name
     const assetsByKit = new Map<string, string[]>();
@@ -7390,15 +7653,29 @@ async function createNotesForScannedAssetsAndKits({
       const kit = kits.find((k) => k.name === kitName);
       if (kit) {
         const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
-        await createNotes({
-          content: `${wrapUserLinkForNote(
-            userForNotes
-          )} added asset via ${kitLink} to ${bookingLink}.`,
-          type: "UPDATE",
-          userId,
-          assetIds: kitAssetIds,
-          organizationId,
-        });
+        for (const assetId of kitAssetIds) {
+          const asset = assetById.get(assetId);
+          const qty = bookedQtyByAssetId.get(assetId);
+          // Same fallback guard as the standalone branch above.
+          const content =
+            asset?.title && asset?.type
+              ? `${wrapUserLinkForNote(
+                  userForNotes
+                )} added ${wrapAssetWithCountForNote(
+                  asset,
+                  qty
+                )} via ${kitLink} to ${bookingLink}.`
+              : `${wrapUserLinkForNote(
+                  userForNotes
+                )} added asset via ${kitLink} to ${bookingLink}.`;
+          await createNotes({
+            content,
+            type: "UPDATE",
+            userId,
+            assetIds: [assetId],
+            organizationId,
+          });
+        }
       }
     }
   }
@@ -7520,7 +7797,13 @@ async function addScannedAssetsToBookingWithinTx(
    */
   // Shape pinned explicitly because `tx` is typed `any` (extended Prisma
   // client tx type is incompatible with `Prisma.TransactionClient`).
-  type ScannedAssetMeta = Pick<Asset, "id" | "title" | "type" | "assetModelId">;
+  // `unitOfMeasure` widens the select so BOOKING_ASSETS_ADDED events
+  // emitted below can carry `meta.quantity` for QUANTITY_TRACKED assets
+  // (no-op for INDIVIDUAL).
+  type ScannedAssetMeta = Pick<
+    Asset,
+    "id" | "title" | "type" | "assetModelId" | "unitOfMeasure"
+  >;
   const scannedAssetsMeta: ScannedAssetMeta[] =
     allScannedAssetIds.length > 0
       ? await tx.asset.findMany({
@@ -7530,6 +7813,7 @@ async function addScannedAssetsToBookingWithinTx(
             title: true,
             type: true,
             assetModelId: true,
+            unitOfMeasure: true,
           },
         })
       : [];
@@ -7614,18 +7898,43 @@ async function addScannedAssetsToBookingWithinTx(
    * scanner-driven path produces the same audit-trail rows as the
    * manage-assets dialog. Inside the tx — rolls back together with
    * the BookingAsset row creates above. One event per distinct asset.
+   * `meta.quantity` (qty-tracked only) sums the standalone scan qty
+   * (from `quantities` map, default 1) plus every kit-driven slice qty
+   * for the same asset created on this call.
    */
   if (allScannedAssetIds.length > 0) {
+    const addedQtyByAssetId = new Map<string, number>();
+    for (const sid of assetIds) {
+      addedQtyByAssetId.set(
+        sid,
+        (addedQtyByAssetId.get(sid) ?? 0) + (quantities[sid] ?? 1)
+      );
+    }
+    for (const slice of kitSlices) {
+      const sliceQty =
+        slice.quantity ?? assetKitQtyById.get(slice.assetKitId) ?? 1;
+      addedQtyByAssetId.set(
+        slice.assetId,
+        (addedQtyByAssetId.get(slice.assetId) ?? 0) + sliceQty
+      );
+    }
+
     await recordEvents(
-      allScannedAssetIds.map((assetId) => ({
-        organizationId,
-        actorUserId: userId,
-        action: "BOOKING_ASSETS_ADDED" as const,
-        entityType: "BOOKING" as const,
-        entityId: bookingId,
-        bookingId,
-        assetId,
-      })),
+      allScannedAssetIds.map((assetId) => {
+        const asset = scannedAssetsMetaById.get(assetId);
+        return {
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_ASSETS_ADDED" as const,
+          entityType: "BOOKING" as const,
+          entityId: bookingId,
+          bookingId,
+          assetId,
+          meta: asset
+            ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
+            : {},
+        };
+      }),
       tx
     );
   }
@@ -8101,17 +8410,21 @@ export async function duplicateBooking({
         tx
       );
 
-      // One BOOKING_ASSETS_ADDED event per copied asset.
+      // One BOOKING_ASSETS_ADDED event per copied BookingAsset row.
+      // Per-row `meta.quantity` (qty-tracked only) sourced from the
+      // duplicated row's own quantity — multi-row qty-tracked yields
+      // one event per slice, each carrying that slice's count.
       if (duplicatedAssetIds.length > 0) {
         await recordEvents(
-          duplicatedAssetIds.map((assetId) => ({
+          bookingToDuplicate.bookingAssets.map((ba) => ({
             organizationId,
             actorUserId: userId,
             action: "BOOKING_ASSETS_ADDED" as const,
             entityType: "BOOKING" as const,
             entityId: created.id,
             bookingId: created.id,
-            assetId,
+            assetId: ba.assetId,
+            meta: assetQtyMeta(ba.asset, ba.quantity),
           })),
           tx
         );

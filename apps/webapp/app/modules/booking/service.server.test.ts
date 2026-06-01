@@ -9,6 +9,7 @@ import {
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
@@ -5760,6 +5761,208 @@ describe("addScannedAssetsToBooking", () => {
         }),
       ]),
       expect.anything()
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase 4e Commit 4 — Booking axis: qty-tracked notes + event meta            */
+/*                                                                            */
+/* QUANTITY_TRACKED assets surface the per-row BookingAsset.quantity on the   */
+/* booking-side notes ("N units of {asset}") and on the per-asset event meta. */
+/* INDIVIDUAL phrasing + events stay byte-for-byte unchanged.                 */
+/* -------------------------------------------------------------------------- */
+
+describe("booking notes + events — qty-tracked axis", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    // Default echo mock used by the org-validation guards.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id }))
+    );
+  });
+
+  it("updateBookingAssets — qty-tracked single-asset note prefixes the unit count + event meta carries quantity", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-qty",
+      name: "Qty Booking",
+      status: BookingStatus.DRAFT,
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    // Two findMany calls inside updateBookingAssets: the org-validation
+    // call (`select: { id }`) and the event-meta lookup
+    // (`select: { id, type, unitOfMeasure }`), then the note-side
+    // lookup (`select: { id, title, type, unitOfMeasure }`). The same
+    // mock implementation handles all three by echoing the full asset
+    // shape — guards check `length`, the others read the extra fields.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({
+          id,
+          title: "Pens",
+          type: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: "boxes",
+        }))
+    );
+
+    await updateBookingAssets({
+      id: "booking-qty",
+      organizationId: "org-1",
+      assetIds: ["asset-pens"],
+      userId: "user-1",
+      quantities: { "asset-pens": 50 },
+    });
+
+    // Per-asset event carries `meta.quantity = 50`.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          assetId: "asset-pens",
+          bookingId: "booking-qty",
+          meta: { quantity: 50 },
+        }),
+      ]),
+      expect.anything()
+    );
+
+    // Booking-level summary note prefixes "50 boxes of {asset link}".
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-qty",
+        organizationId: "org-1",
+        content: expect.stringContaining("added 50 boxes of"),
+      })
+    );
+  });
+
+  it("updateBookingAssets — INDIVIDUAL single-asset note keeps legacy phrasing + event meta omits quantity", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-ind",
+      name: "Ind Booking",
+      status: BookingStatus.DRAFT,
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({
+          id,
+          title: "Camera",
+          type: AssetType.INDIVIDUAL,
+          unitOfMeasure: null,
+        }))
+    );
+
+    await updateBookingAssets({
+      id: "booking-ind",
+      organizationId: "org-1",
+      assetIds: ["asset-camera"],
+      userId: "user-1",
+    });
+
+    // No `meta.quantity` for INDIVIDUAL — assetQtyMeta returns `{}`.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_ADDED",
+          assetId: "asset-camera",
+          bookingId: "booking-ind",
+          meta: {},
+        }),
+      ]),
+      expect.anything()
+    );
+
+    // Legacy phrasing — bare asset link, no "N units of" prefix.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-ind",
+        organizationId: "org-1",
+        content: expect.stringMatching(
+          /added \{% link to="\/assets\/asset-camera" text="Camera" \/%\} to the booking\.$/
+        ),
+      })
+    );
+  });
+
+  it("removeAssets — qty-tracked event meta + asset-timeline note surface the removed quantity", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      assetIds: ["asset-pens"],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+
+    // Snapshot of the BookingAsset rows about to be deleted — used by
+    // removeAssets to source per-asset removed quantity.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      { assetId: "asset-pens", quantity: 80 },
+    ]);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    // Asset metadata read inside the removal tx — provide the full shape
+    // so the qty-aware per-asset phrasing kicks in.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({
+          id,
+          assetModelId: null,
+          title: "Pens",
+          type: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: null,
+        }))
+    );
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Per-asset event carries `meta.quantity = 80`.
+    expect(activityEventService.recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_REMOVED",
+          assetId: "asset-pens",
+          bookingId: "booking-1",
+          meta: { quantity: 80 },
+        }),
+      ])
+    );
+
+    // Asset-timeline note phrasing: "removed 80 units of {asset} from {booking}".
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["asset-pens"],
+        organizationId: "org-1",
+        type: "UPDATE",
+        content: expect.stringContaining("removed 80 units of"),
+      })
     );
   });
 });

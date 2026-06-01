@@ -64,6 +64,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { assetQtyMeta } from "~/utils/asset-quantity";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -101,6 +102,7 @@ import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
   wrapAssetsWithDataForNote,
+  wrapAssetWithCountForNote,
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
@@ -1912,6 +1914,14 @@ export async function updateAsset({
       }
     }
 
+    // The per-row `AssetLocation.quantity` affected by this placement edit,
+    // used to label the qty-tracked location note/event ("placed 50 units").
+    // For a placement it's the qty written to the new pivot row; for a
+    // removal it's the MANUAL row qty dropped (read pre-delete from the
+    // captured `assetLocations`). Captured inside the tx so the removal qty
+    // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
+    let locationChangeQuantity: number | null = null;
+
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
@@ -1928,6 +1938,21 @@ export async function updateAsset({
       });
 
       if (shouldUpdatePlacement) {
+        if (newLocationId) {
+          locationChangeQuantity = resolveNewLocationQuantity(
+            updated,
+            newLocationQuantity
+          );
+        } else {
+          // Removal: name the manual row being dropped at the prior
+          // location. `updated.assetLocations` is the pre-delete snapshot.
+          locationChangeQuantity =
+            updated.assetLocations.find(
+              (al) =>
+                al.locationId === currentLocationId && al.assetKitId == null
+            )?.quantity ?? null;
+        }
+
         // Clear existing MANUAL primary placement(s) first. Kit-driven
         // rows (`assetKitId IS NOT NULL`) are owned by the kit's flow
         // and stay untouched — the user editing the asset-overview
@@ -2115,6 +2140,12 @@ export async function updateAsset({
         userId,
         organizationId,
         isRemoving: newLocationId === null,
+        // Qty-tracked: name the units placed / moved / removed at this
+        // location (sourced from the affected pivot row). INDIVIDUAL keeps
+        // the original phrasing via `formatUnitCount`.
+        type: asset.type,
+        unitOfMeasure: asset.unitOfMeasure,
+        quantity: locationChangeQuantity,
       });
 
       // Activity event for the asset-level location change.
@@ -2129,6 +2160,9 @@ export async function updateAsset({
         field: "locationId",
         fromValue: currentLocation?.id ?? null,
         toValue: newLocation?.id ?? null,
+        // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
+        // INDIVIDUAL.
+        meta: assetQtyMeta(asset, locationChangeQuantity),
       });
 
       // Create location activity notes
@@ -2137,14 +2171,25 @@ export async function updateAsset({
         firstName: user.firstName,
         lastName: user.lastName,
       });
-      const assetData = [{ id: asset.id, title: asset.title }];
+      // Single-asset location-timeline note. `wrapAssetWithCountForNote`
+      // prefixes the qty-tracked unit count ("50 units of {asset}");
+      // INDIVIDUAL renders the bare link, so phrasing is unchanged.
+      const assetForCount = {
+        id: asset.id,
+        title: asset.title,
+        type: asset.type,
+        unitOfMeasure: asset.unitOfMeasure,
+      };
 
       if (newLocation) {
         const newLocLink = wrapLinkForNote(
           `/locations/${newLocation.id}`,
           newLocation.name
         );
-        const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+        const assetMarkup = wrapAssetWithCountForNote(
+          assetForCount,
+          locationChangeQuantity
+        );
         const movedFrom = currentLocation
           ? ` Moved from ${wrapLinkForNote(
               `/locations/${currentLocation.id}`,
@@ -2163,7 +2208,10 @@ export async function updateAsset({
           `/locations/${currentLocation.id}`,
           currentLocation.name
         );
-        const assetMarkup = wrapAssetsWithDataForNote(assetData, "removed");
+        const assetMarkup = wrapAssetWithCountForNote(
+          assetForCount,
+          locationChangeQuantity
+        );
         const movedTo = newLocation
           ? ` Moved to ${wrapLinkForNote(
               `/locations/${newLocation.id}`,
@@ -2735,8 +2783,10 @@ export async function replaceAssetPlacements({
 
       // Activity events — one ASSET_LOCATION_CHANGED per net add /
       // remove. Qty-only edits don't emit an event today (deliberate
-      // gap; Phase 4e will add quantity-aware notes). Mirrors the
-      // `updateLocationAssets` event pattern.
+      // gap). Mirrors the `updateLocationAssets` event pattern.
+      // `meta.quantity` carries the per-row placement qty (this is the
+      // QUANTITY_TRACKED multi-placement editor, so the count is
+      // always meaningful here); `assetQtyMeta` no-ops for INDIVIDUAL.
       const events: Parameters<typeof recordEvents>[0] = [
         ...toCreate.map((p) => ({
           organizationId,
@@ -2749,6 +2799,7 @@ export async function replaceAssetPlacements({
           field: "locationId",
           fromValue: null,
           toValue: p.locationId,
+          meta: assetQtyMeta(asset, p.quantity),
         })),
         ...toDelete.map((al) => ({
           organizationId,
@@ -2760,6 +2811,7 @@ export async function replaceAssetPlacements({
           field: "locationId",
           fromValue: al.locationId,
           toValue: null,
+          meta: assetQtyMeta(asset, al.quantity),
         })),
       ];
       if (events.length > 0) {
@@ -4836,6 +4888,9 @@ export async function bulkCheckOutAssets({
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
         : `**${custodianName.trim()}**`;
 
+      // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
+      // above (they have no Custody.quantity in this path), so no unit count
+      // is surfaced here. Qty-tracked grants go through `checkOutQuantity`.
       await tx.note.createMany({
         data: assets.map((asset) => ({
           content: `${actor} granted ${custodianDisplay} custody.`,
@@ -4846,6 +4901,8 @@ export async function bulkCheckOutAssets({
       });
 
       // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      // why: individual-only (qty-tracked filtered out above), so no
+      // meta.quantity — the qty-tracked path is `checkOutQuantity`.
       await recordEvents(
         assets.map((asset) => ({
           organizationId,
@@ -5015,6 +5072,9 @@ export async function bulkCheckInAssets({
       });
 
       /** Creating notes for the assets */
+      // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
+      // above (they have no Custody.quantity in this path), so no unit count
+      // is surfaced here. Qty-tracked releases go through the per-unit path.
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
@@ -5037,6 +5097,8 @@ export async function bulkCheckInAssets({
       // Phase 2 turned `Asset.custody` into a `Custody[]` array, so we
       // use the same `getPrimaryCustody` helper as the note above to pick
       // a representative custodian for the event.
+      // why: individual-only (qty-tracked filtered out above), so no
+      // meta.quantity — the qty-tracked release path is per-unit.
       await recordEvents(
         assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
@@ -5235,7 +5297,15 @@ export async function bulkUpdateAssetLocation({
           });
         }
 
-        /** Creating notes for the assets */
+        /**
+         * Creating notes for the assets.
+         *
+         * why: `assetsToUpdate` is derived from `nonQtyTracked` — this bulk
+         * path filters out QUANTITY_TRACKED assets entirely (see the
+         * `nonQtyTracked` filter above; they must manage placements per-row
+         * with a quantity). So these notes/events are INDIVIDUAL-only and
+         * intentionally carry no unit count.
+         */
         await tx.note.createMany({
           data: assetsToUpdate.map((asset) => {
             const isRemoving = !newLocationId;
@@ -5258,7 +5328,9 @@ export async function bulkUpdateAssetLocation({
           }),
         });
 
-        // Activity events — one ASSET_LOCATION_CHANGED per asset, inside the tx.
+        // Activity events — one ASSET_LOCATION_CHANGED per asset, inside the
+        // tx. INDIVIDUAL-only (qty-tracked filtered out above), so no
+        // `meta.quantity`.
         await recordEvents(
           assetsToUpdate.map((asset) => ({
             organizationId,

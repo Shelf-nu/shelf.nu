@@ -840,7 +840,18 @@ Available pool for new claims is the same Phase 2 formula: `Asset.quantity − s
 - **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
 - **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. The verification scaffold (`TESTING-REPORTS.md` at the worktree root) is ready to run once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).
 
-**Phase 4e — Quantity-aware notes + activity-feed audit**
+**Phase 4e — Quantity-aware notes + activity events — DONE (2026-05-31)**
+
+Per-axis sweep complete on `feat-quantities`. System notes + `ActivityEvent.meta`
+now surface unit counts for QUANTITY_TRACKED assets across custody (kit-cascade),
+kit-membership, location (single + multi-placement + kit-cascade), and booking
+(add / remove / scan / checkout / check-in). INDIVIDUAL phrasing + event meta
+byte-for-byte unchanged. Quantity always sourced from the PIVOT row
+(`Custody.quantity` / `AssetKit.quantity` / `AssetLocation.quantity` /
+`BookingAsset.quantity`), never `Asset.quantity`. No new `ActivityAction` enum
+values — events get richer `meta` only. Manual test plan: `TESTING-PHASE-4E.md`.
+
+**Original scope (for reference):**
 
 Cross-cutting polish. Today every UPDATE-type note and every
 `ActivityEvent.meta` rendering path treats qty-tracked actions as if the

@@ -9,7 +9,7 @@ import type {
   Tag,
   User,
 } from "@prisma/client";
-import type { ConsumptionType } from "@prisma/client";
+import type { AssetType, ConsumptionType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   buildCategoryChangeNote,
@@ -23,6 +23,7 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
@@ -158,10 +159,19 @@ export async function deleteNote({
  * 1:1 relation, so callers flatten the pivot themselves and attach a
  * `kit: { id, name } | null` synthetic field per row. This helper only
  * needs the minimal fields it reads from that shape.
+ *
+ * `type` + `unitOfMeasure` + `quantity` drive the qty-tracked unit count
+ * in the add/remove note ("added 50 units to Camera Kit"). `quantity` is
+ * the per-row `AssetKit.quantity` for THIS kit (the slice held in the kit
+ * being changed), NOT `Asset.quantity` — the caller supplies it.
  */
 type AssetForKitChangeNote = {
   id: Asset["id"];
   title: Asset["title"];
+  type: AssetType;
+  unitOfMeasure?: string | null;
+  /** The asset's `AssetKit.quantity` for the kit being changed. */
+  quantity?: number | null;
   kit: Pick<Kit, "id" | "name"> | null;
 };
 
@@ -210,6 +220,12 @@ export async function createBulkKitChangeNotes({
           userId,
           organizationId,
           isRemoving: isAssetRemoved,
+          // Qty-tracked unit count for the add/remove phrasing. `quantity`
+          // is this asset's per-row AssetKit.quantity for the kit being
+          // changed (supplied by the caller), not Asset.quantity.
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: asset.quantity,
         });
       }
     }
@@ -236,6 +252,9 @@ export async function createKitChangeNote({
   userId,
   organizationId,
   isRemoving,
+  type,
+  unitOfMeasure,
+  quantity,
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
   newKit: Pick<Kit, "id" | "name"> | null;
@@ -246,6 +265,16 @@ export async function createKitChangeNote({
   /** Caller's validated org — propagated to the note's asset ownership check */
   organizationId: string;
   isRemoving: boolean;
+  /** Asset type — decides whether a qty-tracked unit count applies. */
+  type: AssetType;
+  /** Labels the count ("units" / "boxes"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /**
+   * Per-row `AssetKit.quantity` for the kit being changed (NOT
+   * `Asset.quantity`). Surfaced in the add/remove phrasing for
+   * QUANTITY_TRACKED assets; ignored for INDIVIDUAL.
+   */
+  quantity?: number | null;
 }) {
   try {
     const userLink = wrapUserLinkForNote({
@@ -253,6 +282,10 @@ export async function createKitChangeNote({
       firstName,
       lastName,
     });
+    // Qty-tracked unit label ("50 units") for this kit's slice, or null
+    // for INDIVIDUAL / missing quantity — in which case we keep the
+    // original countless phrasing ("added asset to ...").
+    const count = formatUnitCount({ type, unitOfMeasure }, quantity);
     let message = "";
 
     /** User is changing from kit to another */
@@ -274,7 +307,11 @@ export async function createKitChangeNote({
         { id: newKit.id, name: newKit.name.trim() },
         "added"
       );
-      message = `${userLink} added asset to ${newKitLink}.`;
+      // Qty-tracked: name the units added ("added 50 units to Camera Kit");
+      // INDIVIDUAL keeps the original "added asset to ..." wording.
+      message = count
+        ? `${userLink} added ${count} to ${newKitLink}.`
+        : `${userLink} added asset to ${newKitLink}.`;
     }
 
     /** User is removing the asset from kit */
@@ -284,7 +321,11 @@ export async function createKitChangeNote({
           { id: currentKit.id, name: currentKit.name.trim() },
           "removed"
         );
-        message = `${userLink} removed asset from ${currentKitLink}.`;
+        // Qty-tracked: name the units removed ("removed 50 units from
+        // Camera Kit"); INDIVIDUAL keeps "removed asset from ...".
+        message = count
+          ? `${userLink} removed ${count} from ${currentKitLink}.`
+          : `${userLink} removed asset from ${currentKitLink}.`;
       } else {
         message = `${userLink} removed asset from a kit.`;
       }

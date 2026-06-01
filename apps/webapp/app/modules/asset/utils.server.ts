@@ -1,6 +1,7 @@
 import type {
   Asset,
   AssetStatus,
+  AssetType,
   Location,
   Prisma,
   CustomFieldType,
@@ -9,6 +10,7 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
@@ -16,6 +18,26 @@ import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
+/**
+ * Builds the per-asset system-note text for a location set / move / removal.
+ *
+ * For a QUANTITY_TRACKED asset the phrasing names the affected unit count
+ * sourced from the `AssetLocation` pivot row ("placed 50 units at …" /
+ * "moved 50 units from … to …" / "removed 50 units from …"). INDIVIDUAL
+ * assets — and any caller that omits the quantity fields — keep the exact
+ * original countless phrasing, byte-for-byte.
+ *
+ * @param currentLocation - The asset's prior placement (for moves / removals)
+ * @param newLocation - The asset's new placement (for sets / moves)
+ * @param userId - Acting user id (for the actor link)
+ * @param firstName - Acting user's first name
+ * @param lastName - Acting user's last name
+ * @param isRemoving - When true, render the removal phrasing
+ * @param type - Asset type; only QUANTITY_TRACKED gets a unit count
+ * @param unitOfMeasure - Optional unit label ("boxes", defaults to "units")
+ * @param quantity - The affected `AssetLocation.quantity` (NOT `Asset.quantity`)
+ * @returns Markdoc-formatted note content string
+ */
 export function getLocationUpdateNoteContent({
   currentLocation,
   newLocation,
@@ -24,6 +46,9 @@ export function getLocationUpdateNoteContent({
   lastName,
 
   isRemoving,
+  type,
+  unitOfMeasure,
+  quantity,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
   newLocation?: Pick<Location, "id" | "name"> | null;
@@ -31,12 +56,25 @@ export function getLocationUpdateNoteContent({
   firstName: string;
   lastName: string;
   isRemoving?: boolean;
+  /** Asset type — only QUANTITY_TRACKED triggers the unit-count phrasing. */
+  type?: AssetType;
+  /** Unit label for the count (e.g. "boxes"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /**
+   * The affected per-row `AssetLocation.quantity` (units placed / moved /
+   * removed at this location) — NOT the asset's full `Asset.quantity`.
+   */
+  quantity?: number | null;
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
     firstName,
     lastName,
   });
+
+  // `null` for INDIVIDUAL / missing qty — keeps the original phrasing.
+  const count =
+    type != null ? formatUnitCount({ type, unitOfMeasure }, quantity) : null;
 
   let message = "";
   if (currentLocation && newLocation) {
@@ -48,7 +86,9 @@ export function getLocationUpdateNoteContent({
       `/locations/${newLocation.id}`,
       newLocation.name.trim()
     );
-    message = `${userLink} updated the location from ${currentLocationLink} to ${newLocationLink}.`; // updating location
+    message = count
+      ? `${userLink} moved ${count} from ${currentLocationLink} to ${newLocationLink}.`
+      : `${userLink} updated the location from ${currentLocationLink} to ${newLocationLink}.`; // updating location
   }
 
   if (newLocation && !currentLocation) {
@@ -56,7 +96,9 @@ export function getLocationUpdateNoteContent({
       `/locations/${newLocation.id}`,
       newLocation.name.trim()
     );
-    message = `${userLink} set the location to ${newLocationLink}.`; // setting to first location
+    message = count
+      ? `${userLink} placed ${count} at ${newLocationLink}.`
+      : `${userLink} set the location to ${newLocationLink}.`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
@@ -64,7 +106,9 @@ export function getLocationUpdateNoteContent({
       `/locations/${currentLocation?.id}`,
       currentLocation?.name.trim() || ""
     );
-    message = `${userLink} removed the asset from location ${currentLocationLink}.`; // removing location
+    message = count
+      ? `${userLink} removed ${count} from ${currentLocationLink}.`
+      : `${userLink} removed the asset from location ${currentLocationLink}.`; // removing location
   }
 
   return message;
@@ -408,6 +452,17 @@ export function detectCustomFieldChanges(
   return changes;
 }
 
+/**
+ * Builds the per-asset system-note text for a location change cascaded from a
+ * parent kit assignment / removal. Delegates the base phrasing (including the
+ * QUANTITY_TRACKED unit count, when the qty fields are supplied) to
+ * {@link getLocationUpdateNoteContent}, then appends the kit-cascade suffix.
+ *
+ * @param quantity - The affected per-row `AssetLocation.quantity` (= the
+ *   `AssetKit.quantity` the kit's cascade wrote into the pivot row), NOT
+ *   `Asset.quantity`
+ * @see {@link getLocationUpdateNoteContent} for the base-phrase parameters.
+ */
 export function getKitLocationUpdateNoteContent({
   currentLocation,
   newLocation,
@@ -415,6 +470,9 @@ export function getKitLocationUpdateNoteContent({
   firstName,
   lastName,
   isRemoving,
+  type,
+  unitOfMeasure,
+  quantity,
 }: {
   currentLocation?: Pick<Location, "id" | "name"> | null;
   newLocation?: Pick<Location, "id" | "name"> | null;
@@ -422,6 +480,12 @@ export function getKitLocationUpdateNoteContent({
   firstName: string;
   lastName: string;
   isRemoving?: boolean;
+  /** Asset type — only QUANTITY_TRACKED triggers the unit-count phrasing. */
+  type?: AssetType;
+  /** Unit label for the count (e.g. "boxes"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /** The affected `AssetLocation.quantity`, NOT `Asset.quantity`. */
+  quantity?: number | null;
 }) {
   const baseMessage = getLocationUpdateNoteContent({
     currentLocation,
@@ -430,6 +494,9 @@ export function getKitLocationUpdateNoteContent({
     firstName,
     lastName,
     isRemoving,
+    type,
+    unitOfMeasure,
+    quantity,
   });
 
   if (isRemoving) {

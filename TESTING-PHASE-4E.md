@@ -1,0 +1,313 @@
+# Phase 4e — Quantity-aware notes + activity events: Manual Testing Plan
+
+Phase 4e is a cross-cutting **content sweep**: every system note (Note / BookingNote / LocationNote of type `UPDATE`) and every `ActivityEvent.meta` that fires for a `QUANTITY_TRACKED` asset must surface the affected unit count, sourced from the per-row **pivot** quantity (`Custody.quantity` / `AssetKit.quantity` / `AssetLocation.quantity` / `BookingAsset.quantity`) — never `Asset.quantity` (the total).
+
+INDIVIDUAL-asset notes + events stay **byte-for-byte unchanged** — every phrasing change is gated on `formatUnitCount` returning non-null (qty-tracked only). The events use `assetQtyMeta` which is a no-op spread for INDIVIDUAL (meta gets no `quantity` key).
+
+> **House style.** The unit-count helper renders `"50 units"` (or `"50 boxes"` etc. when `Asset.unitOfMeasure` is set). Notes embed it as `"… N units of {asset link} …"` for per-asset booking/scan notes and as a phrasing-specific verb for the others (`"placed 50 units at L"`, `"granted X custody of 50 units …"`).
+
+> **Highest-risk areas, watch closely:**
+>
+> 1. **Per-(asset, kit/location) quantity sourcing.** Notes that fan out across many assets (kit assign/release, kit deletion, location bulk) must read each asset's own pivot quantity, not the asset total. A wrong number is silent — only visible in the rendered note.
+> 2. **Bulk note client (tx vs db).** The kit-cascade custody sites that previously used `createNotes` (global `db`) now use either `tx.note.createMany` or `db.note.createMany` — the choice preserves each site's original transaction boundary. A misplaced `db.note` inside a tx that rolls back would orphan the notes.
+> 3. **Multi-asset summary popovers** (`{% assets_list %}` / `{% kits_list %}`) are **deliberately unchanged** — they render "N assets" with an interactive popover and don't carry per-asset counts. Each such site has a one-line `// why: out of this rule — multi-asset popover, per-asset qty deferred` comment.
+> 4. **INDIVIDUAL regression.** Every conditional should reduce to the original wording when `count === null`. The §5 walkthrough verifies this end-to-end.
+> 5. **Reports forward-compat.** No report currently reads `meta.quantity` (verified before the sweep), but the contract going forward is: `meta.quantity` present ⇒ qty-tracked unit count; absent ⇒ INDIVIDUAL or "whole asset" (count as 1).
+
+## Prerequisites
+
+- [ ] `pnpm webapp:validate` green at **≥ 2379** tests, lint + typecheck clean.
+- [ ] Dev server up.
+- [ ] Workspace data:
+  - [ ] **Asset A — INDIVIDUAL** (e.g. "Camera"), `unitOfMeasure = null`.
+  - [ ] **Asset B — QUANTITY_TRACKED** with `quantity = 80`, `unitOfMeasure = null` (renders as "units") — e.g. "Pens".
+  - [ ] **Asset C — QUANTITY_TRACKED** with `quantity = 50`, `unitOfMeasure = "boxes"` — e.g. "Markers" — proves the label is sourced from `unitOfMeasure`.
+  - [ ] **Kit K1** (empty, AVAILABLE).
+  - [ ] **Kit K2** (empty, AVAILABLE) — for the cross-kit move case.
+  - [ ] **Location L1** + **Location L2** + **Location L3**.
+  - [ ] A team member (you).
+- [ ] Browser console open. Have the MCP / `pnpm` shell ready for `execute_sql` checks of `Note.content`, `BookingNote.content`, and `ActivityEvent.meta`.
+
+---
+
+## §0 Helper unit-test sanity
+
+The four-axis sweep all funnels through three pure helpers; if these are broken nothing else can be right.
+
+- [ ] `pnpm webapp:test -- --run app/utils/asset-quantity.test.ts` → **11 tests pass**.
+- [ ] Spot-check: `formatUnitCount({type:"QUANTITY_TRACKED",unitOfMeasure:null}, 50)` returns `"50 units"`; with `unitOfMeasure:"boxes"` → `"50 boxes"`; INDIVIDUAL or null/0/negative qty → `null`.
+- [ ] Spot-check: `assetQtyMeta` returns `{quantity:50}` for qty-tracked positive qty, `{}` otherwise (INDIVIDUAL, null, 0).
+
+---
+
+## §1 Custody axis — kit-cascade
+
+Custody changes for qty-tracked assets are driven by the **kit-cascade** paths (assigning/releasing kit custody, deleting a kit, updating kit membership). The direct quantity-custody dialog (`checkOutQuantity` + qty release) writes NO note by design — it writes a `ConsumptionLog` + an event that already carries `quantity`, so it's untouched by 4e.
+
+### §1.1 Bulk-assign kit custody (kit holding qty-tracked assets)
+
+1. Add Asset B (Pens, 80) to Kit K1 with `AssetKit.quantity = 50`.
+2. Assign Kit K1 custody to yourself via the kits index "Assign custody" bulk action (or the per-kit detail page).
+3. Open Asset B's overview → Activity tab.
+
+- [ ] Note reads: **`You granted Self Service's custody of 50 units via kit assignment Kit K1.`**
+- [ ] MCP: `SELECT content FROM "Note" WHERE "assetId"='<B-id>' ORDER BY "createdAt" DESC LIMIT 1;` — markdown shows `custody of 50 units via kit assignment {% link ... text="Kit K1" /%}`.
+- [ ] MCP: `SELECT meta FROM "ActivityEvent" WHERE "assetId"='<B-id>' AND action='CUSTODY_ASSIGNED' ORDER BY "createdAt" DESC LIMIT 1;` → `meta.quantity = 50` AND `meta.viaKit = true`.
+- [ ] Asset C with `unitOfMeasure="boxes"` and `AssetKit.quantity = 30`: note reads `custody of 30 boxes via kit assignment …` (proves unitOfMeasure plumbing).
+
+### §1.2 Bulk-release kit custody
+
+Continuing from §1.1: release Kit K1 custody (kits index bulk "Release custody", or the kit page).
+
+- [ ] Asset B note: **`You released Self Service's custody of 50 units via kit assignment Kit K1.`**
+- [ ] MCP: latest `ActivityEvent` for Asset B `CUSTODY_RELEASED` → `meta.quantity = 50`, `meta.viaKit = true`.
+
+### §1.3 Kit deletion releases custody
+
+1. Re-assign Kit K1 custody (B = 50). Then delete Kit K1.
+
+- [ ] Asset B note: **`You released Self Service's custody of 50 units when kit Kit K1 was deleted.`**
+- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
+
+### §1.4 Updating kit membership cascades custody
+
+1. Recreate Kit K1 with Asset B (qty = 50) and assign it to yourself.
+2. Edit Kit K1 in the kit picker → add Asset C (qty = 30). Save.
+
+- [ ] Asset C note: **`You granted Self Service custody of 30 boxes.`**
+- [ ] Event: `CUSTODY_ASSIGNED`, `meta.quantity = 30`.
+
+3. Edit Kit K1 in the picker → remove Asset C. Save.
+
+- [ ] Asset C note: **`You released Self Service's custody of 30 boxes.`**
+- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 30`.
+
+### §1.5 Bulk-remove assets from kits (bulk action)
+
+1. Asset B in Kit K1 with custody (qty = 50). Use the assets-index "Remove from kit" bulk action.
+
+- [ ] Note: **`You released Self Service's custody of 50 units.`**
+- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
+
+### §1.6 Direct bulk grant / release (asset-index bulk "Give custody" / "Release custody")
+
+These paths reject all-qty-tracked selections and filter qty-tracked out of mixed selections — so the note + event for the surviving INDIVIDUAL rows must be **unchanged** ("granted/released custody.", no count, no `meta.quantity`).
+
+- [ ] Mixed selection (Asset A + Asset B): perform bulk give-custody. UI says X qty-tracked were skipped.
+- [ ] Asset A's note: **`You granted ...'s custody.`** — no count.
+- [ ] Asset A's `CUSTODY_ASSIGNED` event has **no** `meta.quantity` key (or `meta = {}`).
+
+---
+
+## §2 Kit-membership axis — add / remove / cross-kit move
+
+These are notes on the asset's timeline when its kit membership changes (from the kits manage-assets picker).
+
+### §2.1 Add qty-tracked asset to a kit
+
+1. Open Kit K1 → Manage assets → add Asset B with quantity = 50 → save.
+
+- [ ] Asset B note: **`You added 50 units to {Kit K1 link}.`** (NOT "added asset to …")
+- [ ] Asset C added at qty = 30: **`You added 30 boxes to …`**.
+- [ ] MCP: `ActivityEvent` for Asset B, `ASSET_KIT_CHANGED`, `field='kitId'`, `toValue=<K1-id>`, `meta.quantity = 50`.
+
+### §2.2 Remove qty-tracked asset from a kit
+
+Continuing: remove Asset B from Kit K1.
+
+- [ ] Note: **`You removed 50 units from {Kit K1 link}.`**
+- [ ] Event `meta.quantity = 50`.
+
+### §2.3 Cross-kit move (deliberately unchanged phrasing)
+
+Add Asset B (qty=40) to Kit K1, then via the kit picker move it to Kit K2.
+
+- [ ] Note: **`You changed kit  from {K1} to {K2}.`** — keeps the original wording (no count); double-space preserved as-is. This is intentional: moves keep identical qty on both sides; the spec leaves the move case alone.
+- [ ] Events: one `ASSET_KIT_CHANGED` per direction with `meta.quantity = 40`.
+
+---
+
+## §3 Location axis — single / multi / bulk / kit-cascade
+
+Location is the most surface-rich axis (4 builders + 11 events). Qty-tracked assets are placed across multiple `AssetLocation` rows; INDIVIDUAL assets are single-row.
+
+### §3.1 Single-location dialog (asset overview "Update location")
+
+1. Asset B → overview → "Update location" → set L1, quantity = 40 → save.
+
+- [ ] Note: **`You placed 40 units at {L1 link}.`**
+- [ ] Event: `ASSET_LOCATION_CHANGED`, `meta.quantity = 40`.
+
+2. Re-open the dialog → change to L2, qty = 40.
+
+- [ ] Note: **`You moved 40 units from {L1} to {L2}.`**
+- [ ] Event meta has `quantity = 40`.
+
+3. Re-open → remove the location.
+
+- [ ] Note: **`You removed 40 units from {L2}.`**
+- [ ] Event `meta.quantity = 40`.
+
+### §3.2 Multi-placement editor (manage-placements)
+
+1. Asset C (qty 50) → overview → "Manage placements" → add a row L1=20 + a row L2=30 → save.
+
+- [ ] **No per-edit Note is written by manage-placements** (by design — replace-set semantics).
+- [ ] MCP: two `ASSET_LOCATION_CHANGED` events (placed) with `meta.quantity = 20` and `30` respectively.
+
+2. Re-open manage-placements → reduce L1 to 5, L2 stays 30 → save.
+
+- [ ] One removed event (`meta.quantity = 15` for the removed delta) OR (replace semantics may emit one removed + one created — accept whichever the diff produces, as long as the quantities add up correctly).
+
+3. Remove the L1 row entirely → save.
+
+- [ ] Removed event `meta.quantity = 5`.
+
+### §3.3 Bulk location editor (location detail "Manage assets")
+
+1. Location L3 → Manage assets → add Asset A (INDIVIDUAL) + Asset B (qty=10) → save.
+
+- [ ] Asset B note: **`You placed 10 units at {L3 link}.`** (per-asset note).
+- [ ] Asset A note: **`You set the location to {L3 link}.`** (INDIVIDUAL, unchanged wording).
+- [ ] Multi-asset summary note on the same write: `… added [N assets] to L3 …` — popover, qty count not inlined (out of scope, deliberate). Note that this summary note's wording is preserved.
+
+2. Remove Asset B from L3.
+
+- [ ] Asset B note: **`You removed 10 units from {L3}.`**
+
+### §3.4 Bulk update-location (asset-index bulk action)
+
+The asset-index bulk "Update location" filters qty-tracked out of the selection — same pattern as bulk custody.
+
+- [ ] Bulk-select Asset A + Asset B → bulk Update location → L1. UI warns/skip qty-tracked.
+- [ ] Asset A note: **`You set the location to {L1 link}.`** — unchanged.
+- [ ] Asset B (qty-tracked) is **skipped** — no note appears.
+
+### §3.5 Kit-cascade location (adding asset to a kit that has a location)
+
+1. Set Kit K1's location to L1 (kit page).
+2. Add Asset C (qty=50) to Kit K1 with `AssetKit.quantity = 50`.
+
+- [ ] Asset C location note: **`You placed 50 boxes at {L1 link}. via parent kit assignment.`** — kit-cascade variant of the placed phrasing. (If `currentLocation` differed the wording is the "moved" variant + cascade suffix.)
+- [ ] `ASSET_LOCATION_CHANGED` event for Asset C → `meta.viaKit = true`, `meta.quantity = 50`.
+
+3. Remove Asset C from Kit K1.
+
+- [ ] Asset C location note: **`You removed 50 boxes from {L1 link}. via parent kit removal.`**
+- [ ] Event `meta.quantity = 50`, `meta.viaKit = true`.
+
+---
+
+## §4 Booking axis — add / remove / checkout / check-in / scan / duplicate
+
+The dispositions note (`buildQtyPerAssetFragment`, "dispositioned quantity-tracked assets: …") and the partial-checkin `qtyTail` notes were already qty-aware (Phase 3c) and are NOT touched by 4e. The 4e changes are the per-asset booking-side notes + the `BOOKING_*` event meta.
+
+### §4.1 Add a qty-tracked asset to a booking (manage-assets picker)
+
+1. Create a DRAFT booking. Add Asset B with quantity = 50 → save.
+
+- [ ] BookingNote (booking timeline): **`You added 50 units of {B link} to the booking.`** (single-asset path).
+- [ ] Asset B's own timeline (asset notes): **`You added 50 units of {B link} to {booking link}.`**
+- [ ] MCP: `ActivityEvent` action `BOOKING_ASSETS_ADDED` for Asset B → `meta.quantity = 50`.
+- [ ] Multi-asset selection (Asset A + Asset B + Asset C): the booking-level summary note is the popover ("added 3 assets to the booking") — **deliberately unchanged**. Per-asset notes on each asset's timeline still carry per-asset counts where qty-tracked.
+
+### §4.2 Remove a qty-tracked asset from a booking
+
+Continuing: remove Asset B from the booking.
+
+- [ ] Asset B's timeline: **`You removed 50 units of {B link} from {booking link}.`** (per-asset).
+- [ ] Booking timeline summary: popover, unchanged.
+- [ ] Event `BOOKING_ASSETS_REMOVED`, `meta.quantity = 50`.
+
+### §4.3 Add via kit (kit picker on a booking)
+
+1. Booking → manage kits → add Kit K1 (which contains Asset B at AssetKit.quantity = 50).
+
+- [ ] Asset B timeline: **`You added 50 units of {B link} via {Kit K1 link} to {booking link}.`**
+- [ ] Event `BOOKING_ASSETS_ADDED`, `meta.quantity = 50`.
+
+### §4.4 Scan-to-add (scanner)
+
+1. New booking → scan Asset B's QR (or barcode) → finalize.
+
+- [ ] Per-asset note (Asset B timeline): **`You added 50 units of {B link} to {booking link}.`** (if you set the scan picker's qty to 50) or the BookingAsset.quantity actually written (default 1 if scanner doesn't ask).
+- [ ] Event meta reflects the BookingAsset row qty written by the scan path.
+
+### §4.5 Check-out
+
+Check the booking out (Reserved → Ongoing).
+
+- [ ] BookingNote for status change is the existing template + each `BOOKING_CHECKED_OUT` event for a qty-tracked row carries `meta.quantity` = the sum of that asset's BookingAsset rows.
+
+### §4.6 Check-in (full)
+
+1. Check the booking back in.
+
+- [ ] `BOOKING_CHECKED_IN` events for qty-tracked rows carry `meta.quantity` = the per-row quantity.
+
+### §4.7 Duplicate booking
+
+Duplicate a multi-row booking (qty-tracked asset across two BookingAsset rows — e.g. one standalone, one kit-driven).
+
+- [ ] `BOOKING_ASSETS_ADDED` events on the duplicate each carry `meta.quantity` = the source row's quantity (multi-row preserved).
+
+---
+
+## §5 INDIVIDUAL regression — phrasing must be byte-for-byte unchanged
+
+For every axis above, repeat the smallest test using Asset A (INDIVIDUAL) and assert the **exact** legacy wording.
+
+| Axis                            | Action                            | Expected note (exact match)                                         |
+| ------------------------------- | --------------------------------- | ------------------------------------------------------------------- |
+| Custody — kit assign            | Assign kit holding Asset A        | `You granted Self Service custody via kit assignment {K1}.`         |
+| Custody — kit release           | Release the kit                   | `You released Self Service's custody via kit assignment {K1}.`      |
+| Custody — kit delete            | Delete the kit                    | `You released Self Service's custody when kit K1 was deleted.`      |
+| Custody — kit membership add    | Pick a member into kit-in-custody | `You granted Self Service custody.`                                 |
+| Custody — kit membership remove | Remove member from kit-in-custody | `You released Self Service's custody.`                              |
+| Custody — bulk grant            | Bulk give-custody                 | `You granted ...'s custody.`                                        |
+| Custody — bulk release          | Bulk release-custody              | `You released ...'s custody.`                                       |
+| Kit — add                       | Add Asset A to kit                | `You added asset to {K1}.`                                          |
+| Kit — remove                    | Remove Asset A from kit           | `You removed asset from {K1}.`                                      |
+| Kit — move                      | Move Asset A K1→K2                | `You changed kit  from {K1} to {K2}.`                               |
+| Location — set                  | Set Asset A to L1                 | `You set the location to {L1}.`                                     |
+| Location — update               | Change A from L1→L2               | `You updated the location from {L1} to {L2}.`                       |
+| Location — remove               | Clear A's location                | `You removed the asset from location {L1}.`                         |
+| Location — kit cascade add      | Asset A added to kit with L1      | `You set the location to {L1}. via parent kit assignment.`          |
+| Location — kit cascade remove   | Asset A removed from kit with L1  | `You removed the asset from location {L1}. via parent kit removal.` |
+| Booking — add (per-asset)       | Add Asset A to booking            | `You added asset to {booking link}.`                                |
+| Booking — add via kit           | Add via Kit K1                    | `You added asset via {K1} to {booking link}.`                       |
+| Booking — remove (per-asset)    | Remove Asset A                    | `You removed {A link} from {booking link}.`                         |
+
+- [ ] Spot-check each row using MCP `SELECT content FROM "Note" WHERE assetId='<A-id>' ORDER BY "createdAt" DESC LIMIT 1;`.
+- [ ] MCP: `SELECT meta FROM "ActivityEvent" WHERE assetId='<A-id>' AND action IN ('CUSTODY_ASSIGNED','CUSTODY_RELEASED','ASSET_KIT_CHANGED','ASSET_LOCATION_CHANGED','BOOKING_ASSETS_ADDED','BOOKING_ASSETS_REMOVED') ORDER BY "createdAt" DESC LIMIT 10;` — none of these should include a `quantity` key (or `meta` is `{}` / only carries `viaKit`).
+
+---
+
+## §6 Deliberately-unchanged multi-asset popovers
+
+Phase 4e explicitly leaves the interactive `assets_list` / `kits_list` Markdoc popovers alone (per-asset qty isn't a useful inlining there). Verify they still render correctly with multiple assets — no regression.
+
+- [ ] Bulk-location editor with 3+ mixed assets: the location summary note still shows `… added [3 assets popover] to L1 …`. Hovering the popover reveals all 3 names.
+- [ ] Booking with 3+ added assets at once: booking timeline note shows `… added [3 assets popover] to the booking.` popover works.
+- [ ] Kit picker adding 3+ assets at once: each per-asset note carries its own qty count; the picker doesn't produce a summary note.
+- [ ] Asset-index bulk "Remove from kit" with 3+ qty-tracked assets: per-asset notes each show their own count.
+
+---
+
+## §7 Final validation
+
+- [ ] `pnpm webapp:validate` green at **≥ 2380** tests (+11 from C0's asset-quantity tests, +1 from C2's qty-tracked kit note test, +14 from C3's location builder tests, +3 from C4's qty booking tests).
+- [ ] `git diff --stat` shows only the expected files (asset-quantity.ts/.test.ts, markdoc-wrappers.ts, asset/utils.server.ts/.test.ts, note/service.server.ts/.test.ts, kit/service.server.ts/.test.ts, asset/service.server.ts, location/service.server.ts, booking/service.server.ts/.test.ts).
+- [ ] No `recordEvent` site has a `quantity` key on `meta` for INDIVIDUAL assets (verified by the contract of `assetQtyMeta`).
+- [ ] CLAUDE-CONTEXT.md updated with the 4e completion summary.
+- [ ] PRD `docs/proposals/quantitative-assets.md` Phase 4e bullet flipped to done.
+
+---
+
+## Known intentional deviations (not bugs)
+
+- **Multi-asset `{% assets_list %}` / `{% kits_list %}` popovers** don't carry per-asset counts. Each such site has a `// why: out of this rule — multi-asset popover, per-asset qty deferred` comment. If we ever build a "per-asset qty popover" variant, this is where to wire it.
+- **`bulkUpdateAssetLocation`** (asset-index bulk update location) skips qty-tracked assets entirely (same as bulk custody) — its note/event stay individual-only by construction.
+- **`createBooking` event** uses `quantity = 1` because the create path doesn't take per-asset quantities; each `BookingAsset` is created with the schema default `quantity = 1`. The user can edit later via the manage-assets picker (which fires a `BOOKING_ASSETS_ADDED` event with the right qty).
+- **Cross-kit move note** keeps the existing `changed kit  from A to B.` wording (with the historical double-space) — moves keep identical qty on both sides; counting them would just add noise.
+- **Direct quantity-custody dialog** (`checkOutQuantity` + qty release) writes a `ConsumptionLog` and an event (already qty-aware), no `Note` — by design.

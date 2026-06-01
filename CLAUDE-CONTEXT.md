@@ -1561,7 +1561,94 @@ Two options were considered at follow-up time:
 Either way, the asset overview / booking sidebar needs a UX cue: the
 qty for a kit-included asset is locked because the kit owns it.
 
-#### Phase 4e — Quantity-aware notes + activity-feed audit
+#### Phase 4e — Quantity-aware notes + activity events (2026-05-31) — COMPLETE, UNCOMMITTED
+
+**Done in five chunks (C0–C4) on `feat-quantities`:**
+
+- **C0 — shared helpers + tests.** `app/utils/asset-quantity.ts` —
+  `formatUnitCount(asset, qty)` → `"50 units"` for QUANTITY_TRACKED
+  (using `Asset.unitOfMeasure ?? "units"`), `null` for INDIVIDUAL or
+  missing qty; `assetQtyMeta(asset, qty)` → `{ quantity }` for
+  qty-tracked positive qty (spread into existing `recordEvent` `meta`),
+  `{}` otherwise so INDIVIDUAL event meta stays clean. Plus
+  `wrapAssetWithCountForNote(asset, qty)` in `markdoc-wrappers.ts`
+  composing `"N units of {asset link}"` for the common single-asset
+  per-asset-note case. 11 unit tests.
+- **C1 — Custody axis.** Kit-cascade custody notes (7 sites in
+  `kit/service.server.ts`: `performKitDeletion`, `releaseCustody`,
+  `bulkAssignKitCustody`, `bulkReleaseKitCustody`, `updateKitAssets`
+  add + remove, `bulkRemoveAssetsFromKits`) now render
+  `"granted/released ${custodian} custody of N units …"` for qty-tracked,
+  byte-for-byte unchanged for INDIVIDUAL. Per-(asset, kitCustody)
+  quantity map built from the inherited / released `Custody` rows
+  (NOT `Asset.quantity`). `CUSTODY_ASSIGNED/RELEASED` events get
+  `meta.quantity` via `assetQtyMeta`. The asset-index bulk
+  give/release-custody paths filter qty-tracked out upstream
+  (individual-only by construction, `// why:` comments at the sites).
+  The direct quantity-custody dialog (`checkOutQuantity` + qty release)
+  writes a `ConsumptionLog` + event (already qty-aware), no `Note` —
+  untouched.
+- **C2 — Kit-membership axis.** `createBulkKitChangeNotes` /
+  `createKitChangeNote` (`note/service.server.ts`) take `type`,
+  `unitOfMeasure`, `quantity` per asset; render
+  `"added N units to {kit}"` / `"removed N units from {kit}"` for
+  qty-tracked (INDIVIDUAL keeps `added asset to …`). Move case
+  (cross-kit) deliberately untouched — moves keep identical qty on
+  both sides; counting them would just add noise. `updateKitAssets`
+  caller widens its asset/`assetKits` select with `quantity` +
+  `unitOfMeasure` and attaches per-asset `kitQuantity`. Four
+  `ASSET_KIT_CHANGED` event sites (`kit/service.server.ts:1354`/
+  `4140`/`4154`/`4910`) get `meta.quantity = AssetKit.quantity`.
+- **C3 — Location axis.** `getLocationUpdateNoteContent` +
+  `getKitLocationUpdateNoteContent` (`asset/utils.server.ts`) take
+  `type`/`unitOfMeasure`/`quantity` and render
+  `"placed N units at L"` / `"moved N units from A to B"` /
+  `"removed N units from L"` (kit-cascade suffixes preserved).
+  Threaded through `createLocationChangeNote` /
+  `createBulkLocationChangeNotes` (`location/service.server.ts`), the
+  `updateAsset` single-location dialog path, and the kit-cascade
+  location writers in `kit/service.server.ts`. 11
+  `ASSET_LOCATION_CHANGED` event sites get `meta.quantity` from
+  `AssetLocation.quantity`. `replaceAssetPlacements` writes NO notes
+  by design (replace-set semantics) — events only.
+  `bulkUpdateAssetLocation` filters qty-tracked out (individual-only,
+  `// why:` comment). 14 new unit tests in `utils.server.test.ts`.
+- **C4 — Booking axis.** Per-asset booking notes (asset-add,
+  asset-remove, scan-add standalone/kit-driven) use
+  `wrapAssetWithCountForNote` for qty-tracked → `"added 50 units of
+{asset} to {booking link}"`; INDIVIDUAL preserves
+  `"added asset to {bookingLink}"`. 8 `BOOKING_*` event sites
+  (`booking/service.server.ts:588`/`2028`/`2394`/`3405`/`4861`/`6307`/
+  `7934`/`8427`) get `meta.quantity` from `BookingAsset.quantity`
+  (per-row; multi-row qty-tracked per Polish-7b stays correct). The
+  multi-asset booking-level summary popovers (`{% assets_list %}` /
+  `{% kits_list %}`) are deliberately unchanged — per-asset qty isn't
+  inline-renderable there; `// why:` comments at each site. The
+  dispositions note (`buildQtyPerAssetFragment` ~3570) and the
+  partial-checkin `qtyTail` notes (Phase 3c) were already qty-aware
+  and untouched.
+
+**Shared rules used throughout:**
+quantity always sourced from the PIVOT row
+(`Custody.quantity` / `AssetKit.quantity` / `AssetLocation.quantity` /
+`BookingAsset.quantity`) — NEVER `Asset.quantity`; INDIVIDUAL phrasing
+
+- event meta byte-for-byte unchanged (helpers no-op for it);
+  multi-asset `{% assets_list %}` / `{% kits_list %}` popovers are
+  out-of-scope (per-asset qty would need a component change — deferred);
+  no new `ActivityAction` enum values — events get richer meta only.
+
+**Verification:** `pnpm webapp:validate` green at **2382 / 2382** tests
+(+28 from 4e: 11 helper + 14 location builder + 3 booking + a kit-qty
+case). Detailed manual walk-through: `TESTING-PHASE-4E.md` at the
+worktree root.
+
+**Reports forward-compat note:** no report currently reads
+`meta.quantity` (audited before the sweep). Contract going forward:
+`meta.quantity` present ⇒ qty-tracked unit count; absent ⇒
+INDIVIDUAL / "whole asset" (treat as 1 when aggregating).
+
+#### Phase 4e — Quantity-aware notes + activity-feed audit (original scope)
 
 Cross-cutting polish. Today every UPDATE-type note + `ActivityEvent.meta`
 rendering path treats qty-tracked actions as if the whole asset row

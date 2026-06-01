@@ -11,6 +11,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
@@ -1485,6 +1486,9 @@ export async function createLocationChangeNote({
   userId,
   isRemoving,
   organizationId,
+  type,
+  unitOfMeasure,
+  quantity,
 }: {
   currentLocation: Pick<Location, "id" | "name"> | null;
   newLocation: Pick<Location, "id" | "name"> | null;
@@ -1494,6 +1498,15 @@ export async function createLocationChangeNote({
   userId: User["id"];
   isRemoving: boolean;
   organizationId: string;
+  /** Asset type — only QUANTITY_TRACKED gets the "N units" phrasing. */
+  type?: AssetType;
+  /** Unit label for the count; defaults to "units". */
+  unitOfMeasure?: string | null;
+  /**
+   * The affected per-row `AssetLocation.quantity` (units placed / moved /
+   * removed at this location) — NOT `Asset.quantity`.
+   */
+  quantity?: number | null;
 }) {
   try {
     const message = getLocationUpdateNoteContent({
@@ -1503,6 +1516,9 @@ export async function createLocationChangeNote({
       firstName,
       lastName,
       isRemoving,
+      type,
+      unitOfMeasure,
+      quantity,
     });
 
     await createNote({
@@ -1532,17 +1548,29 @@ async function createBulkLocationChangeNotes({
   userId,
   location,
   organizationId,
+  assetQuantities = {},
 }: {
   // Assets have no direct `Asset.location` relation; placement is read
   // through the `AssetLocation` pivot. We surface the pivot's location
   // via `assetLocations.select.location` and read the primary placement
   // with `getPrimaryLocation` in the body below.
+  //
+  // `type` + `unitOfMeasure` drive the QUANTITY_TRACKED unit-count phrasing
+  // in the per-asset note; the full pivot rows (`quantity` + `assetKitId` +
+  // `locationId`) let us read the manual-row qty being removed at THIS
+  // location without a second fetch.
   modifiedAssets: Prisma.AssetGetPayload<{
     select: {
       title: true;
       id: true;
+      type: true;
+      quantity: true;
+      unitOfMeasure: true;
       assetLocations: {
         select: {
+          locationId: true;
+          quantity: true;
+          assetKitId: true;
           location: {
             select: {
               name: true;
@@ -1567,6 +1595,14 @@ async function createBulkLocationChangeNotes({
   location: Pick<Location, "id" | "name">;
   /** Caller's validated org — forwarded to each per-asset note for the IDOR guard */
   organizationId: string;
+  /**
+   * Per-asset submitted quantities from the location picker. Used to label
+   * the QUANTITY_TRACKED unit count in the "placed N units" note. Mirrors
+   * the createMany derivation in `updateLocationAssets`
+   * (`assetQuantities[id] ?? Asset.quantity ?? 1`). Defaults to `{}` so
+   * back-compat callers (mobile API) fall back to the asset's full pool.
+   */
+  assetQuantities?: Record<string, number>;
 }) {
   try {
     const user = await db.user
@@ -1603,6 +1639,18 @@ async function createBulkLocationChangeNotes({
         : null;
 
       if (isNew || isRemoving) {
+        // Affected per-row `AssetLocation.quantity` for the note count.
+        // ADD: the qty written to the new pivot row (submitted picker value,
+        // falling back to the asset's full pool) — mirrors the createMany in
+        // `updateLocationAssets`. REMOVE: the MANUAL row qty dropped at THIS
+        // location (kit-driven rows aren't touched by this flow). `null` for
+        // INDIVIDUAL keeps the original phrasing via `formatUnitCount`.
+        const affectedQuantity = isRemoving
+          ? asset.assetLocations.find(
+              (al) => al.locationId === location.id && al.assetKitId == null
+            )?.quantity ?? null
+          : assetQuantities[asset.id] ?? asset.quantity ?? null;
+
         await createLocationChangeNote({
           currentLocation,
           newLocation,
@@ -1614,6 +1662,9 @@ async function createBulkLocationChangeNotes({
           // why: forward the caller's org so each per-asset note is
           // validated against the asset's true org (cross-org IDOR guard)
           organizationId,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: affectedQuantity,
         });
 
         if (isNew && newLocation) {
@@ -1626,7 +1677,12 @@ async function createBulkLocationChangeNotes({
       }
     }
 
-    // Create summary notes on the location's activity log
+    // Create summary notes on the location's activity log.
+    // why: out of this rule — multi-asset popover, per-asset qty deferred.
+    // The `buildAssetListMarkup` summary renders MANY assets in one
+    // interactive chip; inlining per-asset unit counts here is the same
+    // limitation as the assets_list popover. Per-asset counts land on the
+    // individual asset notes above.
     const userLink = wrapUserLinkForNote({
       id: userId,
       firstName: user.firstName,
@@ -1894,6 +1950,10 @@ export async function updateLocationAssets({
           id: true,
           type: true,
           quantity: true,
+          // Labels the qty-tracked unit count in the per-asset location note
+          // ("placed 50 boxes at …"). Selected here so the note builder
+          // doesn't need a second fetch.
+          unitOfMeasure: true,
           assetLocations: {
             select: {
               locationId: true,
@@ -2170,6 +2230,10 @@ export async function updateLocationAssets({
         });
       }
 
+      // Asset lookup so each event can attach `meta.quantity` (qty-tracked
+      // only) sourced from the per-row `AssetLocation.quantity` it touched.
+      const assetById = new Map(modifiedAssets.map((a) => [a.id, a]));
+
       // Activity events — one ASSET_LOCATION_CHANGED per affected
       // asset, inside tx. For cross-location-moved INDIVIDUALs the
       // `fromValue` is the prior location id (not null) so reports
@@ -2177,6 +2241,11 @@ export async function updateLocationAssets({
       const locEvents: Parameters<typeof recordEvents>[0] = [
         ...actuallyNewAssetIds.map((assetId) => {
           const movedFrom = movedIndividualPriorLocations.get(assetId);
+          const asset = assetById.get(assetId);
+          // Placed qty = the value written to the new pivot row (mirrors the
+          // createMany above). `assetQtyMeta` no-ops for INDIVIDUAL.
+          const placedQty =
+            assetQuantities[assetId] ?? asset?.quantity ?? undefined;
           return {
             organizationId,
             actorUserId: userId,
@@ -2188,19 +2257,28 @@ export async function updateLocationAssets({
             field: "locationId",
             fromValue: movedFrom?.id ?? null,
             toValue: locationId,
+            ...(asset ? { meta: assetQtyMeta(asset, placedQty) } : {}),
           };
         }),
-        ...removedAssetIds.map((assetId) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_LOCATION_CHANGED" as const,
-          entityType: "ASSET" as const,
-          entityId: assetId,
-          assetId,
-          field: "locationId",
-          fromValue: locationId,
-          toValue: null,
-        })),
+        ...removedAssetIds.map((assetId) => {
+          const asset = assetById.get(assetId);
+          // Removed qty = the MANUAL pivot row dropped at THIS location.
+          const removedQty = asset?.assetLocations.find(
+            (al) => al.locationId === locationId && al.assetKitId == null
+          )?.quantity;
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            field: "locationId",
+            fromValue: locationId,
+            toValue: null,
+            ...(asset ? { meta: assetQtyMeta(asset, removedQty) } : {}),
+          };
+        }),
       ];
       if (locEvents.length > 0) {
         await recordEvents(locEvents, tx);
@@ -2217,6 +2295,9 @@ export async function updateLocationAssets({
       // why: assets were loaded scoped to organizationId — forward it so
       // each per-asset note is validated against the asset's true org
       organizationId,
+      // Per-asset picker qty so the qty-tracked "placed N units" note count
+      // matches the value written to the pivot row.
+      assetQuantities,
     });
   } catch (cause) {
     if (isLikeShelfError(cause)) {
