@@ -1,12 +1,22 @@
 import { AssetStatus, KitStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
 
+/**
+ * Minimal asset shape these booking-context helpers need: an `id` and a raw
+ * `status` string. The index signature lets callers pass richer asset objects
+ * (e.g. Prisma rows) without widening every call site.
+ */
 export type AssetWithStatus = {
   id: string;
   status: string;
   [key: string]: any;
 };
 
+/**
+ * Minimal kit shape these helpers need: an `id`, a raw `status`, and optionally
+ * its member assets (used to roll a kit's status up from its assets). The index
+ * signature allows passing richer kit objects without widening call sites.
+ */
 export type KitWithStatus = {
   id: string;
   status: string;
@@ -14,7 +24,18 @@ export type KitWithStatus = {
   [key: string]: any;
 };
 
+/**
+ * Asset status as surfaced in a booking context: the persisted {@link AssetStatus}
+ * plus the synthetic `"PARTIALLY_CHECKED_IN"` state, which only exists relative
+ * to a specific booking and is never stored on the asset itself.
+ */
 export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
+
+/**
+ * Kit status as surfaced in a booking context: the persisted {@link KitStatus}
+ * plus the synthetic `"PARTIALLY_CHECKED_IN"` state (all member assets checked
+ * in while the booking is still active). Not stored on the kit itself.
+ */
 export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
 
 /**
@@ -82,6 +103,61 @@ export function isAssetPartiallyCheckedIn(
 
   // Only consider as "partially checked in" for active & finished bookings
   return ["ONGOING", "OVERDUE", "COMPLETE", "ARCHIVED"].includes(bookingStatus);
+}
+
+/**
+ * Human-readable check-in label for a single booking asset, for use in the
+ * bookings CSV export.
+ *
+ * Mirrors the partial check-in semantics used across the booking UI
+ * ({@link getBookingContextAssetStatus}, {@link calculatePartialCheckinProgress})
+ * but flattens them to the three plain-text tokens an export consumer needs:
+ *
+ * - `"Checked in"`  — the asset has been returned. True when the booking is in
+ *   a final state (COMPLETE/ARCHIVED, where every asset is returned by
+ *   definition) OR when the asset appears in the booking's partial check-ins
+ *   while the booking is still ONGOING/OVERDUE.
+ * - `"Checked out"` — the booking is active (ONGOING/OVERDUE) and the asset has
+ *   not yet been checked in.
+ * - `""` (blank)    — check-in status does not apply. Covers DRAFT/RESERVED
+ *   (nothing was ever checked out) and CANCELLED. CANCELLED is deliberately
+ *   blank rather than labeled: `cancelBooking` returns assets to AVAILABLE only
+ *   when cancelling from ONGOING/OVERDUE, but a RESERVED→CANCELLED booking never
+ *   checked its assets out — and both collapse to the same `CANCELLED` status
+ *   here, so we cannot tell them apart from status alone. Any affirmative label
+ *   would be wrong for one path; blank is the only non-misleading value. The
+ *   booking-level `Status`/rollup columns still show "Cancelled" and `0 / N`.
+ *
+ * The tokens are deliberately exact and status-agnostic so a downstream script
+ * (e.g. a reminder workflow) can filter to "Checked out" across both
+ * Checked-Out and Overdue bookings without parsing prose. A blank CANCELLED row
+ * correctly yields no reminder (it won't match a "Checked out" filter).
+ *
+ * @param assetId - The asset whose label to resolve
+ * @param checkedInAssetIds - Set of asset IDs partially checked in for the booking
+ * @param bookingStatus - The parent booking's status (BookingStatus value)
+ * @returns The export label: "Checked in", "Checked out", or "" when N/A
+ */
+export function getBookingAssetCheckinLabel(
+  assetId: string,
+  checkedInAssetIds: Set<string>,
+  bookingStatus: string
+): "Checked in" | "Checked out" | "" {
+  // Final booking states: every asset is returned by definition.
+  if (["COMPLETE", "ARCHIVED"].includes(bookingStatus)) {
+    return "Checked in";
+  }
+
+  // Active states: distinguish returned vs still-out per asset.
+  if (["ONGOING", "OVERDUE"].includes(bookingStatus)) {
+    return checkedInAssetIds.has(assetId) ? "Checked in" : "Checked out";
+  }
+
+  // DRAFT / RESERVED — nothing was ever checked out.
+  // CANCELLED — ambiguous (could be RESERVED→CANCELLED, never out, or
+  // ONGOING/OVERDUE→CANCELLED, returned on cancel); blank is the only
+  // non-misleading value since status alone can't distinguish them. See JSDoc.
+  return "";
 }
 
 /**
