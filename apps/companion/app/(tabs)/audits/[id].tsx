@@ -110,6 +110,7 @@ function AuditDetailContent() {
   );
   const [existingScans, setExistingScans] = useState<AuditScanData[]>([]);
   const [canScan, setCanScan] = useState(false);
+  const [canComplete, setCanComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -153,6 +154,7 @@ function AuditDetailContent() {
     setExpectedAssets(data.expectedAssets);
     setExistingScans(data.existingScans);
     setCanScan(data.canScan);
+    setCanComplete(data.canComplete);
 
     // Animate progress bar
     const progress =
@@ -798,15 +800,15 @@ function AuditDetailContent() {
             )}
 
             {/*
-              why: gate on `isActive` (PENDING || ACTIVE), not the server's
-              `canComplete` flag — that flag is ACTIVE-only, which hid this
-              button on a fresh PENDING audit, leaving a field worker who
-              searched and found nothing with no action but "Start Scanning".
-              `completeAuditSession` already accepts a PENDING audit (it only
-              rejects COMPLETED/CANCELLED/ARCHIVED) and marks unscanned assets
-              MISSING — the server is the real gate, so this is pure UI.
+              `canComplete` is now authoritative: the detail endpoint returns
+              true only when the audit is PENDING/ACTIVE *and* the caller is
+              eligible to complete it (an assignee, or an admin/owner when the
+              audit is unassigned) — matching requireAuditAssignee in
+              audits.complete.ts. So this both fixes the original "hidden on a
+              fresh PENDING audit" bug and avoids showing a CTA that 403s on
+              someone else's audit in the all-workspace list.
             */}
-            {isActive && (
+            {isActive && canComplete && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={handleCompleteAudit}
