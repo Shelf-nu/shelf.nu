@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -46,6 +46,25 @@ const ASSET_FILTERS = [
 ] as const;
 
 type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
+
+/**
+ * Whether an asset-status filter is meaningful for an audit in the given
+ * session status. A live (PENDING/ACTIVE) audit has Pending items but no
+ * Missing ones; a COMPLETED audit is the reverse. Shared by the filter pills
+ * and the effect that resets a now-hidden selection so the two never drift.
+ *
+ * @param value - the filter being considered
+ * @param status - the audit session status
+ * @returns true if the filter should be shown / is a valid selection
+ */
+function isAssetFilterVisible(
+  value: AssetFilterValue,
+  status: string
+): boolean {
+  const active = status === "PENDING" || status === "ACTIVE";
+  const completed = status === "COMPLETED";
+  return value === "MISSING" ? completed : value === "PENDING" ? active : true;
+}
 
 // ── Combined asset type for display ─────────────────────
 
@@ -96,6 +115,19 @@ function AuditDetailContent() {
   const [isActioning, setIsActioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilterValue>("ALL");
+
+  // why: when the audit's status changes while this screen is open — it
+  // completes (here, or via another user + a focus refetch) or re-activates —
+  // a previously-selected filter can vanish from the pills (PENDING drops on
+  // completion, MISSING on re-activation). Left as-is, `filteredAssets()` then
+  // matches a status that no longer exists and shows an empty list with no
+  // active tab. Snap the selection back to "All" so it's always a visible
+  // pill. (Codex review, PR #2583.)
+  useEffect(() => {
+    if (audit && !isAssetFilterVisible(assetFilter, audit.status)) {
+      setAssetFilter("ALL");
+    }
+  }, [audit, assetFilter]);
 
   // Progress bar animation
   const reduceMotion = useReducedMotion();
@@ -467,12 +499,10 @@ function AuditDetailContent() {
   // Context-aware asset filters: a live audit has Pending items (not yet
   // Missing); a completed one has Missing items (no longer Pending). Showing
   // both at once was the source of two filters resolving to the same rows.
+  // Shares `isAssetFilterVisible` with the reset effect above so the pills and
+  // the selection-guard can never disagree.
   const visibleFilters = ASSET_FILTERS.filter((f) =>
-    f.value === "MISSING"
-      ? isCompleted
-      : f.value === "PENDING"
-      ? isActive
-      : true
+    isAssetFilterVisible(f.value, audit.status)
   );
 
   const isOverdue =
