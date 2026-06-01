@@ -1648,6 +1648,27 @@ worktree root.
 `meta.quantity` present ⇒ qty-tracked unit count; absent ⇒
 INDIVIDUAL / "whole asset" (treat as 1 when aggregating).
 
+**Hex security follow-up (2026-06-01):** `unitOfMeasure` is the only
+user-controlled string the 4e sweep interpolates into Markdoc-rendered
+note content (`Note.content` is parsed by `MarkdownViewer` → `Markdoc`
+on the client, and by `sanitizeNoteContent` for CSV / audit-PDF). Without
+guards a label like `{% link to="/login" text="Click" /%}` would render
+as a Shelf-styled link inside every qty-tracked system note for that
+asset — credible audit-log spoof / phishing. Patched in two layers:
+
+- **Output:** new `sanitizeUnitOfMeasureLabel(value)` in
+  `app/utils/asset-quantity.ts` strips `{`, `%`, `}` from the label;
+  used by `formatUnitCount` (every Phase 4e note site) and by
+  `createAssetQuantityChangeNote`'s `unit of measure from **X** to
+**Y**` interpolation.
+- **Input:** `NewAssetFormSchema.unitOfMeasure` rejects values
+  containing `{%` or `%}` via a Zod refinement
+  (`apps/webapp/app/components/assets/form.tsx`).
+
++6 tests (2 in `asset-quantity.test.ts` covering strip + new helper
+describe block, 4 in `form.test.ts` covering refinement accept/reject
+cases). Validate green at **2388 / 2388**.
+
 #### Phase 4e — Quantity-aware notes + activity-feed audit (original scope)
 
 Cross-cutting polish. Today every UPDATE-type note + `ActivityEvent.meta`

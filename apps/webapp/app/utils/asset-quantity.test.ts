@@ -10,7 +10,11 @@
  */
 import { AssetType } from "@prisma/client";
 
-import { assetQtyMeta, formatUnitCount } from "./asset-quantity";
+import {
+  assetQtyMeta,
+  formatUnitCount,
+  sanitizeUnitOfMeasureLabel,
+} from "./asset-quantity";
 import { wrapAssetWithCountForNote } from "./markdoc-wrappers";
 
 const qty = (unitOfMeasure?: string | null) => ({
@@ -33,6 +37,15 @@ describe("formatUnitCount", () => {
     expect(formatUnitCount(qty(""), 7)).toBe("7 units");
   });
 
+  it("strips Markdoc tag characters so labels can't inject custom tags into notes", () => {
+    // why: even though residual `/` survives the strip, no `{%` remains, so
+    // Markdoc can't parse this as a tag — verifying the injection vector is dead.
+    expect(
+      formatUnitCount(qty('{% link to="/login" text="Click" /%}'), 5)
+    ).toBe('5 link to="/login" text="Click" /');
+    expect(formatUnitCount(qty("{%}"), 5)).toBe("5 units");
+  });
+
   it("returns null for INDIVIDUAL assets regardless of quantity", () => {
     expect(formatUnitCount(individual, 50)).toBeNull();
   });
@@ -42,6 +55,22 @@ describe("formatUnitCount", () => {
     expect(formatUnitCount(qty(), undefined)).toBeNull();
     expect(formatUnitCount(qty(), 0)).toBeNull();
     expect(formatUnitCount(qty(), -3)).toBeNull();
+  });
+});
+
+describe("sanitizeUnitOfMeasureLabel", () => {
+  it("returns the trimmed label when it contains no tag characters", () => {
+    expect(sanitizeUnitOfMeasureLabel("  boxes  ")).toBe("boxes");
+  });
+
+  it("strips `{`, `%`, `}` so Markdoc tags can't survive into rendered notes", () => {
+    expect(sanitizeUnitOfMeasureLabel("{% link /%}")).toBe("link /");
+    expect(sanitizeUnitOfMeasureLabel("{%}")).toBe("");
+  });
+
+  it("returns '' for null/undefined input", () => {
+    expect(sanitizeUnitOfMeasureLabel(null)).toBe("");
+    expect(sanitizeUnitOfMeasureLabel(undefined)).toBe("");
   });
 });
 

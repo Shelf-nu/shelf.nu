@@ -23,6 +23,26 @@ export type AssetForUnitCount = {
 };
 
 /**
+ * Strips characters that could begin a Markdoc tag (`{`, `%`, `}`) from a
+ * user-supplied label before it is embedded into Markdoc-rendered note
+ * content. `unitOfMeasure` is the only user-controlled string interpolated
+ * into system notes, and notes are rendered through Markdoc both on the
+ * client (`MarkdownViewer`) and the CSV / PDF sanitiser — so a value like
+ * `{% link to="/login" text="…" /%}` would otherwise turn every qty-tracked
+ * system note about that asset into an attacker-styled badge / link.
+ *
+ * Real unit labels ("kg", "boxes", "pcs", "lbs") never contain these
+ * characters, so the strip is lossless for legitimate input. Defence in
+ * depth — the same characters are also rejected by the form-level Zod
+ * refinement.
+ */
+export function sanitizeUnitOfMeasureLabel(
+  value: string | null | undefined
+): string {
+  return (value ?? "").replace(/[{%}]/g, "").trim();
+}
+
+/**
  * Formats a per-row unit count for a quantity-tracked asset, e.g. `"50 units"`
  * or `"50 boxes"` (using the asset's `unitOfMeasure`, defaulting to "units").
  *
@@ -42,7 +62,7 @@ export function formatUnitCount(
   if (asset.type !== AssetType.QUANTITY_TRACKED) return null;
   if (quantity == null || quantity <= 0) return null;
 
-  const label = asset.unitOfMeasure?.trim() || "units";
+  const label = sanitizeUnitOfMeasureLabel(asset.unitOfMeasure) || "units";
   return `${quantity} ${label}`;
 }
 

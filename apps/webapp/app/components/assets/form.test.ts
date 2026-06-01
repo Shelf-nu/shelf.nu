@@ -103,6 +103,42 @@ describe("NewAssetFormSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("rejects unitOfMeasure containing Markdoc tag syntax", () => {
+    const open = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      unitOfMeasure: '{% link to="/login" text="Click" /%}',
+    });
+    expect(open.success).toBe(false);
+
+    const partialOpen = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      unitOfMeasure: "boxes {% ",
+    });
+    expect(partialOpen.success).toBe(false);
+
+    const partialClose = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      unitOfMeasure: "boxes %}",
+    });
+    expect(partialClose.success).toBe(false);
+  });
+
+  it("accepts unitOfMeasure with stray `{` or `}` only (not the `{%` pair)", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      unitOfMeasure: "boxes { count }",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("allows INDIVIDUAL type without quantity fields", () => {
     const result = NewAssetFormSchema.safeParse({
       ...baseValidData,

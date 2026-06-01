@@ -129,7 +129,13 @@ export const NewAssetFormSchema = z.object({
       errorMap: () => ({ message: "Please select a consumption type" }),
     })
     .optional(),
-  unitOfMeasure: z.string().optional(),
+  unitOfMeasure: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || !/{%|%}/.test(v),
+      "Unit of measure may not contain Markdoc syntax (`{%` / `%}`)"
+    ),
 });
 
 /** Pass props of the values to be used as default for the form fields */

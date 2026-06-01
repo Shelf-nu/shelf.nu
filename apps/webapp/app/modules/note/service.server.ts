@@ -23,7 +23,10 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
-import { formatUnitCount } from "~/utils/asset-quantity";
+import {
+  formatUnitCount,
+  sanitizeUnitOfMeasureLabel,
+} from "~/utils/asset-quantity";
 import { ShelfError } from "~/utils/error";
 import {
   wrapKitsWithDataForNote,
@@ -779,11 +782,9 @@ export async function createAssetQuantityChangeNote({
     newUnitOfMeasure !== undefined &&
     (previousUnitOfMeasure ?? null) !== (newUnitOfMeasure ?? null)
   ) {
-    changes.push(
-      `unit of measure from **${previousUnitOfMeasure || "—"}** to **${
-        newUnitOfMeasure || "—"
-      }**`
-    );
+    const prevLabel = sanitizeUnitOfMeasureLabel(previousUnitOfMeasure) || "—";
+    const nextLabel = sanitizeUnitOfMeasureLabel(newUnitOfMeasure) || "—";
+    changes.push(`unit of measure from **${prevLabel}** to **${nextLabel}**`);
   }
 
   if (changes.length === 0) return;
