@@ -1561,7 +1561,7 @@ Two options were considered at follow-up time:
 Either way, the asset overview / booking sidebar needs a UX cue: the
 qty for a kit-included asset is locked because the kit owns it.
 
-#### Phase 4e — Quantity-aware notes + activity events (2026-05-31) — COMPLETE, UNCOMMITTED
+#### Phase 4e — Quantity-aware notes + activity events (2026-05-31) — COMMITTED (`f07abe29d`)
 
 **Done in five chunks (C0–C4) on `feat-quantities`:**
 
