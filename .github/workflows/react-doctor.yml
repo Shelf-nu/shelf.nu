@@ -1,6 +1,8 @@
 name: 🩺 React Doctor
 
-# Runs on every PR that touches webapp source. Two outcomes:
+# Runs on every PR that touches webapp OR companion source. The job fans out
+# over both apps via a matrix; each app is scanned independently and gets its
+# own sticky PR comment. Two outcomes per app:
 #   1. Always posts (or updates) a sticky PR comment summarising findings on
 #      the files changed by this PR.
 #   2. Fails the check if NEW errors are introduced — warnings stay advisory.
@@ -11,6 +13,9 @@ on:
       - "apps/webapp/**/*.ts"
       - "apps/webapp/**/*.tsx"
       - "apps/webapp/package.json"
+      - "apps/companion/**/*.ts"
+      - "apps/companion/**/*.tsx"
+      - "apps/companion/package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/react-doctor.yml"
       - ".github/scripts/react-doctor-pr-comment.mjs"
@@ -26,11 +31,21 @@ jobs:
 
   doctor:
     needs: authorize
-    name: 🩺 React Doctor
+    name: 🩺 React Doctor (${{ matrix.app.name }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    strategy:
+      # Scan each app independently — a failure on one app must not cancel the
+      # other's scan or its PR comment.
+      fail-fast: false
+      matrix:
+        app:
+          - name: webapp
+            dir: apps/webapp
+          - name: companion
+            dir: apps/companion
     steps:
       - name: 🛑 Cancel previous runs
         uses: styfle/cancel-workflow-action@0.11.0
@@ -63,7 +78,7 @@ jobs:
 
       - name: 🩺 Run react-doctor (diff vs base)
         id: doctor
-        working-directory: apps/webapp
+        working-directory: ${{ matrix.app.dir }}
         # Notes:
         #   --diff origin/<base>     — only files changed vs the PR target
         #   --no-dead-code           — knip findings are out of scope here
@@ -97,9 +112,12 @@ jobs:
         env:
           DIAG_PATH: ${{ steps.doctor.outputs.diag_path }}
           EXIT_CODE: ${{ steps.doctor.outputs.exit_code }}
+          # react-doctor emits file paths relative to the scanned dir, so the
+          # comment builder needs the app dir to render repo-root-relative links.
+          PATH_PREFIX: ${{ matrix.app.dir }}/
         run: |
           node .github/scripts/react-doctor-pr-comment.mjs \
-            "$DIAG_PATH" "$EXIT_CODE" \
+            "$DIAG_PATH" "$EXIT_CODE" "$PATH_PREFIX" \
             > "$RUNNER_TEMP/comment.md"
           echo "--- comment preview ---"
           cat "$RUNNER_TEMP/comment.md"
@@ -108,7 +126,9 @@ jobs:
         if: always()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: react-doctor
+          # Per-app header so the two matrix jobs maintain separate sticky
+          # comments instead of overwriting each other.
+          header: react-doctor-${{ matrix.app.name }}
           path: ${{ runner.temp }}/comment.md
 
       - name: ❌ Fail if errors introduced
