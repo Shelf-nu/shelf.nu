@@ -156,7 +156,13 @@ export function useAuditInit({
 
       // ── Crash recovery ───────────────────────────────
       const persisted = await loadAuditScanState(auditId);
-      if (persisted && persisted.scannedItems.length > 0) {
+      // why: gate on whether there is ANYTHING to recover (the inner check
+      // below decides recover-vs-clear from scanned items OR a non-empty
+      // queue), not on scannedItems alone. The eager queue-persist can write a
+      // fresh queue while scannedItems is still stale/empty (the list updates
+      // on a deferred render), so requiring scannedItems.length here would skip
+      // recovery and drop a queued scan. The queue is the durable record.
+      if (persisted) {
         // Find items that were scanned locally but not yet on the server
         const serverScannedIds = new Set(
           data.existingScans.map((s) => s.assetId)
@@ -180,10 +186,17 @@ export function useAuditInit({
         if (recoveredItems.length > 0 || queuedForSync.length > 0) {
           // Show recovery dialog (don't block init)
           setIsInitializing(false);
+          // Usually scannedItems and the queue agree; if only the queue
+          // survived (eager-persist before the list state committed), fall back
+          // to its length so the copy isn't "0 unsynced scans".
+          const unsyncedCount = Math.max(
+            recoveredItems.length,
+            queuedForSync.length
+          );
           Alert.alert(
             "Resume Previous Session?",
-            `Found ${recoveredItems.length} unsynced scan${
-              recoveredItems.length !== 1 ? "s" : ""
+            `Found ${unsyncedCount} unsynced scan${
+              unsyncedCount !== 1 ? "s" : ""
             } from a previous session.`,
             [
               {

@@ -500,16 +500,11 @@ function AuditScannerContent() {
           isExpected,
           scannedAt: new Date().toISOString(),
         };
-        // Compute the next list synchronously and update BOTH refs NOW. The
-        // scan queue's eager persist (inside enqueueScan below) runs before
-        // React commits this state update, so it must read the fresh list from
-        // the refs here — the deferred updater would set them too late, and the
-        // first scan would be eager-saved with a stale/empty scannedItems array
-        // and then skipped by useAuditInit on resume. (Codex review, PR #2586.)
-        const nextItems = [newItem, ...scannedItemsRef.current];
-        scannedItemsRef.current = nextItems;
-        stableScannedItemsRef.current = nextItems;
-        setScannedItems(nextItems);
+        setScannedItems((prev) => {
+          const next = [newItem, ...prev];
+          scannedItemsRef.current = next;
+          return next;
+        });
 
         if (isExpected) {
           // Found an expected asset
