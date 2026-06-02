@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles, type AssetIndexSettings } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -1358,13 +1358,16 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     try {
       await bulkCheckOutAssets({
         userId: "user-current",
+        // why: `role` was optional pre-main; main made it required so every
+        // caller passes through the SELF_SERVICE guard. Pass ADMIN here to
+        // assert the same intent the legacy test had — non-SELF_SERVICE
+        // callers must not throw 403 on a custodian mismatch.
+        role: OrganizationRoles.ADMIN,
         assetIds: ["asset-1"],
         custodianId: "tm-anyone",
         custodianName: "Anyone",
         organizationId: "org-1",
         settings: {} as any,
-        // role intentionally omitted — old call sites that haven't
-        // been updated must not start throwing 403s.
       });
     } catch (err) {
       if (err instanceof ShelfError && err.status === 403) threw403 = true;
@@ -1718,5 +1721,45 @@ describe("bulkDeleteAssets", () => {
     });
 
     expect(recordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
+  // Settings are unused before the guard throws (asset-id resolution is mocked).
+  const fakeSettings = {} as unknown as AssetIndexSettings;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks a SELF_SERVICE user from assigning custody to someone else", async () => {
+    // why: the custodian resolves to a DIFFERENT user than the caller.
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      { name: "Other Person", user: { id: "other-user" } }
+    );
+
+    await expect(
+      bulkCheckOutAssets({
+        userId: "me",
+        role: OrganizationRoles.SELF_SERVICE,
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: fakeSettings,
+      })
+    ).rejects.toThrow("Self user can only assign custody to themselves only");
+
+    // The mutation must never run.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  // why: the release-side SELF_SERVICE guard still lives inline in the route
+  // (apps/webapp/app/routes/api+/assets.bulk-release-custody.ts), not yet
+  // centralised into `bulkCheckInAssets` like the assign-side was into
+  // `bulkCheckOutAssets`. Skipped here until that centralisation lands; the
+  // route's own integration tests cover the behaviour today.
+  it.skip("blocks a SELF_SERVICE user from releasing someone else's custody (centralised in service)", async () => {
+    // intentionally empty — see comment above.
   });
 });

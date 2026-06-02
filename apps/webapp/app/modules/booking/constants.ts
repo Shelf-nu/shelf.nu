@@ -142,6 +142,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // second round-trip for images.
           mainImage: true,
           thumbnailImage: true,
+          // Tag names — searchable in-memory by filterBookingAssets (assets only).
+          tags: { select: { name: true } },
           category: {
             select: {
               id: true,
@@ -149,10 +151,27 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
               color: true,
             },
           },
+          // Asset's location lives on the `AssetLocation` pivot post-4b.
+          // Each row carries a `quantity` so we can surface "X units at L"
+          // for qty-tracked assets; for INDIVIDUAL there's exactly one
+          // row. Consumers normalise to a singular `location` via the
+          // primary-location helper at the loader boundary, feeding the
+          // Location column / sort / search added in main's perf rewrite.
+          assetLocations: {
+            select: {
+              id: true,
+              quantity: true,
+              location: {
+                select: { id: true, name: true },
+              },
+            },
+          },
           // `kit.id`/`kit.image` are needed by the partial check-in
           // drawer so we can render a kit summary row grouped from
-          // `booking.bookingAssets`. Previously only `name` was selected
-          // because no downstream consumer needed the rest.
+          // `booking.bookingAssets`. `location` + `category` are needed
+          // for kit-group location sorting and kit-level search added
+          // by main's perf rewrite — surfaced here under the pivot so
+          // the slice's kit identity stays correct for qty-tracked.
           assetKits: {
             select: {
               // `id` lets the booking grouping logic match
@@ -167,6 +186,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
                   id: true,
                   name: true,
                   image: true,
+                  location: {
+                    select: { id: true, name: true },
+                  },
+                  category: {
+                    select: { name: true },
+                  },
                 },
               },
             },
@@ -174,6 +199,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
         },
       },
     },
+    // Base fetch order. The rendered order is computed in-memory by the
+    // consuming route (sortBookingAssets / groupAndSortAssetsByKit); this DB
+    // order only acts as the stable tiebreaker fed into those sorts. Kept
+    // identical to the historical default (CHECKED_OUT first, then creation
+    // order) so the in-memory sorts receive the exact same input as before —
+    // preserving the booking page's default ordering 1:1.
     orderBy: [
       { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { asset: { createdAt: "asc" } }, // Then by creation order as fallback
@@ -222,6 +253,7 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
   status: "Status",
   title: "Name",
   category: "Category",
+  location: "Location",
 } as const;
 
 export type BookingAssetSortingOption =

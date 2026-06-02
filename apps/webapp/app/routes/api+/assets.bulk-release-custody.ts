@@ -48,6 +48,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
      * on rows assigned to their own user — guard before delegating to the
      * bulk service so we fail fast and don't leak counts via partial work.
+     * Symmetric with the SELF_SERVICE assign-side guard centralised inside
+     * `bulkCheckOutAssets` (see asset/service.server.ts).
      */
     if (role === OrganizationRoles.SELF_SERVICE) {
       const custodies = await db.custody.findMany({
@@ -74,11 +76,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId,
+      role,
       assetIds,
       organizationId,
       currentSearchParams,
       settings,
-      role,
     });
 
     const skippedNote =

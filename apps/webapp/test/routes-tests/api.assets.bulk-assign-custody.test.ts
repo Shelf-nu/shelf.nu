@@ -228,6 +228,9 @@ describe("api/assets/bulk-assign-custody", () => {
 
     await action(createActionArgs({ request }));
 
+    // Enforcement of the SELF_SERVICE self-restriction now lives inside
+    // bulkCheckOutAssets (unit-tested in asset/service.server.test.ts) so web
+    // and mobile share one implementation. The route's job is to forward role.
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
         role: OrganizationRoles.SELF_SERVICE,

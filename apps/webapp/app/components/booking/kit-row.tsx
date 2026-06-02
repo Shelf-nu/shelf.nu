@@ -1,6 +1,7 @@
 import React from "react";
 import type { Barcode, BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
+import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -29,6 +30,13 @@ type KitRowProps = {
   kit: Pick<Kit, "id" | "name" | "image" | "status"> & {
     imageExpiration: string | Date | null;
     category: Pick<Category, "name" | "id" | "color"> | null;
+    // Kit's pickup location — rendered in the Location column.
+    location?: {
+      id: string;
+      name: string;
+      parentId: string | null;
+      _count?: { children: number };
+    } | null;
     // Code-resolution relations — needed so the chip resolves on the kit row.
     // Kits don't have sequentialId / preferredBarcodeId in v1; the resolver's
     // optional fields tolerate that and fall back to QR when workspace pref
@@ -155,6 +163,20 @@ export default function KitRow({
         <Td>
           <EmptyTableValue />
         </Td>
+        <Td>
+          {kit.location ? (
+            <LocationBadge
+              location={{
+                id: kit.location.id,
+                name: kit.location.name,
+                parentId: kit.location.parentId ?? undefined,
+                childCount: kit.location._count?.children ?? 0,
+              }}
+            />
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
         {shouldShowCheckinColumns && (
           <>
             {/* Checked in on - for kits we don't show specific dates */}
@@ -219,7 +241,7 @@ export default function KitRow({
 
       {/* Add a separator row after the kit assets */}
       <tr className="kit-separator h-1 bg-gray-100">
-        <td colSpan={shouldShowCheckinColumns ? 8 : 6} className="h-1 p-0"></td>
+        <td colSpan={shouldShowCheckinColumns ? 9 : 7} className="h-1 p-0"></td>
       </tr>
     </React.Fragment>
   );

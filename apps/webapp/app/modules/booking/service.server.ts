@@ -105,7 +105,6 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
-  getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
@@ -3945,7 +3944,15 @@ export async function partialCheckinBooking({
         });
       });
 
-    /** Map bookingAssets to flat asset array for downstream logic */
+    /**
+     * Map bookingAssets to flat asset array for downstream logic. Also validate
+     * that every asset in the payload is actually on the booking BEFORE any
+     * completion shortcut. Without this guard a batch like [lastOutstandingAsset,
+     * unrelatedSameOrgAsset] would satisfy "covers all outstanding" and complete
+     * the booking (writing notes about a non-booking asset) instead of returning
+     * a 400. The mobile endpoint forwards raw assetIds with none of the web
+     * drawer's client-side filtering, so this is the only safety net.
+     */
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
     /** Types keyed by assetId — lets per-asset branches pick the right code path. */
@@ -3953,7 +3960,6 @@ export async function partialCheckinBooking({
       bookingFoundAssets.map((a) => [a.id, a.type])
     );
 
-    // Validate that every asset in the payload is actually on the booking.
     const bookingAssetIds = new Set(bookingFoundAssets.map((a) => a.id));
     const invalidAssetIds = effectiveAssetIds.filter(
       (id_) => !bookingAssetIds.has(id_)
@@ -3987,27 +3993,35 @@ export async function partialCheckinBooking({
       }
     }
 
-    // Early exit: legacy "all remaining CHECKED_OUT assets scanned → redirect
-    // to full check-in" path. Only safe when no qty dispositions are in play,
-    // because per-asset qty work needs to run in this function's transaction
-    // (so we don't split consumption-log writes across two services).
+    // Early exit: if this batch returns every asset still outstanding for THIS
+    // booking, run a complete check-in instead of recording another partial one.
+    //
+    // Completion is decided from this booking's PartialBookingCheckin records —
+    // NOT from the assets' global `status`. Assets are shared across overlapping
+    // bookings, so an asset that was returned for this booking can be
+    // CHECKED_OUT again by a later booking. Keying completion on global status
+    // therefore left the booking stuck ONGOING/OVERDUE even though every item
+    // was returned here. The records are the per-booking source of truth and
+    // match what the check-in progress bar shows the user (fix from main:
+    // ddafe62fd / 9df00afff).
+    //
+    // Only safe when no qty dispositions are in play, because per-asset qty
+    // work needs to run in this function's transaction (so we don't split
+    // consumption-log writes across two services).
     if (!hasQuantityDispositions) {
-      const currentAssetStatuses = await db.asset.findMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `bookingFoundAssets` derive from the booking loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
-        where: { id: { in: bookingFoundAssets.map((a) => a.id) } },
-        select: { id: true, status: true },
-      });
-      const checkedOutAssetIds = new Set(
-        currentAssetStatuses
-          .filter((a) => a.status === AssetStatus.CHECKED_OUT)
-          .map((a) => a.id)
-      );
+      const alreadyCheckedInAssetIds = await getPartiallyCheckedInAssetIds(id);
+      const recordedAssetIdSet = new Set(alreadyCheckedInAssetIds);
       const providedAssetIds = new Set(effectiveAssetIds);
 
+      // Booking assets not yet covered by any partial check-in record.
+      const outstandingAssetIds = bookingFoundAssets
+        .map((asset) => asset.id)
+        .filter((assetId) => !recordedAssetIdSet.has(assetId));
+
       if (
-        checkedOutAssetIds.size > 0 &&
-        checkedOutAssetIds.size === providedAssetIds.size &&
-        [...checkedOutAssetIds].every((id_) => providedAssetIds.has(id_))
+        bookingFoundAssets.length > 0 &&
+        outstandingAssetIds.length > 0 &&
+        outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
         // Don't create a PartialBookingCheckin row — the redirect to
         // `checkinBooking` handles completion itself.
@@ -4556,6 +4570,11 @@ export async function partialCheckinBooking({
       const qtyPerAsset = buildQtyPerAssetFragment(aggregatedQtySummaries);
       const qtyTail = qtyPerAsset ? ` — qty: ${qtyPerAsset}` : "";
 
+      // `txResult.isComplete` is set inside the partial-checkin tx using the
+      // same records-based outstanding calculation as the early-exit above
+      // (records, not global asset status — fix from main: ddafe62fd) and
+      // additionally handles qty-tracked completion. The tx already wrote the
+      // booking status update, so we just emit the right note variant here.
       if (txResult.isComplete) {
         const fromStatusBadge = wrapBookingStatusForNote(
           txResult.previousStatus,
@@ -6516,6 +6535,91 @@ export async function deleteBooking(
   }
 }
 
+/**
+ * Builds the organization-scoping `where` clause for a single-booking lookup:
+ * the booking must belong to the caller's active org, or to another org the
+ * caller is a member of (so cross-org booking links keep working). Shared by
+ * {@link getBooking} and {@link getBookingHeaderData} so their authorization is
+ * provably identical.
+ *
+ * @see .claude/rules/org-scope-user-supplied-ids.md
+ */
+function bookingOrgScopeWhere({
+  id,
+  organizationId,
+  userOrganizations,
+}: {
+  id: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+}): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { id, organizationId },
+      ...(userOrganizations?.length
+        ? [
+            {
+              id,
+              organizationId: {
+                in: userOrganizations.map((org) => org.organizationId),
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+/**
+ * Enforces the cross-org access rule after a scoped booking lookup: if the
+ * booking belongs to a different org that the caller can only reach via
+ * membership (not their active org), throw a 404 carrying redirect info. Shared
+ * by {@link getBooking} and {@link getBookingHeaderData} so the cross-org
+ * behavior cannot drift between them.
+ *
+ * @throws {ShelfError} 404 with cross-org redirect data
+ */
+function assertBookingInActiveOrg({
+  bookingFound,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  bookingFound: Pick<Booking, "organizationId">;
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}): void {
+  if (
+    userOrganizations?.length &&
+    bookingFound.organizationId !== organizationId &&
+    userOrganizations.some(
+      (org) => org.organizationId === bookingFound.organizationId
+    )
+  ) {
+    const redirectTo =
+      typeof request !== "undefined"
+        ? getRedirectUrlFromRequest(request)
+        : undefined;
+
+    throw new ShelfError({
+      cause: null,
+      title: "Booking not found",
+      message: "",
+      additionalData: {
+        model: "booking",
+        organization: userOrganizations.find(
+          (org) => org.organizationId === bookingFound.organizationId
+        ),
+        redirectTo,
+      },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
@@ -6527,106 +6631,35 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const { id, organizationId, userOrganizations, request, extraInclude } =
       booking;
 
-    // Extract search parameters from request
-    const searchParams = getCurrentSearchParams(request);
-    const paramsValues = getParamsValues(searchParams);
-    const { search, orderBy, orderDirection } = paramsValues;
-    // const status =
-    //   searchParams.get("status") === "ALL"
-    //     ? null
-    //     : (searchParams.get("status") as AssetStatus | null);
-
-    // Get dynamic orderBy based on URL params
-    const assetsOrderBy = getBookingAssetsOrderBy(orderBy, orderDirection);
-
     /**
-     * On the booking page, we need some data related to the assets added, so we know what actions are possible
+     * Asset search-filtering and sorting are intentionally NOT applied here.
+     * They are page concerns handled in-memory by the consuming route (the
+     * overview loader and the PDF export) via `filterBookingAssets` and
+     * `groupAndSortAssetsByKit`. Keeping them out of this shared fetch means
+     * every caller (manage-assets, duplicate, cal.ics, activity, the layout,
+     * …) receives the booking's FULL asset list in the stable `createdAt asc`
+     * base order defined on `BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy` —
+     * previously the page's `?s=` / `?orderBy=` leaked into all of them.
      *
-     * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
-     * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
+     * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
      */
-
-    // Build bookingAssets include with optional search, status filtering, and dynamic sorting
-    const assetsWhere: Prisma.AssetWhereInput = {};
-
-    if (search) {
-      // Match the asset's title OR any of its codes (QR id, barcode value)
-      // so a field worker can find an asset in a booking by the same string
-      // that's printed on the physical label.
-      assetsWhere.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        {
-          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
-        },
-        {
-          barcodes: {
-            some: { value: { contains: search, mode: "insensitive" } },
-          },
-        },
-      ];
-    }
-
-    // if (status) {
-    //   assetsWhere.status = status;
-    // }
-
-    const bookingAssetsInclude: Prisma.BookingInclude["bookingAssets"] = {
-      include: BOOKING_WITH_ASSETS_INCLUDE.bookingAssets.include,
-      orderBy: assetsOrderBy.map((o) => ({ asset: o })),
-      ...(Object.keys(assetsWhere).length > 0 && {
-        where: { asset: assetsWhere },
-      }),
-    };
-
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
-      bookingAssets: bookingAssetsInclude,
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
-    const otherOrganizationIds = userOrganizations?.map(
-      (org) => org.organizationId
-    );
-
     const bookingFound = (await db.booking.findFirstOrThrow({
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
       include: mergedInclude,
     })) as BookingWithExtraInclude<T>;
 
-    /* User is accessing the asset in the wrong organization. */
-    if (
-      userOrganizations?.length &&
-      bookingFound.organizationId !== organizationId &&
-      otherOrganizationIds?.includes(bookingFound.organizationId)
-    ) {
-      const redirectTo =
-        typeof request !== "undefined"
-          ? getRedirectUrlFromRequest(request)
-          : undefined;
-
-      throw new ShelfError({
-        cause: null,
-        title: "Booking not found",
-        message: "",
-        additionalData: {
-          model: "booking",
-          organization: userOrganizations?.find(
-            (org) => org.organizationId === bookingFound.organizationId
-          ),
-          redirectTo,
-        },
-        label,
-        status: 404,
-        shouldBeCaptured: false,
-      });
-    }
+    /* User is accessing the booking in the wrong organization. */
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     return bookingFound;
   } catch (cause) {
@@ -6639,6 +6672,81 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         ...booking,
+        ...(isShelfError ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
+    });
+  }
+}
+
+/**
+ * Lightweight booking fetch for the booking layout header.
+ *
+ * Returns only the scalar fields the header needs — it does NOT load the
+ * booking's assets/relations — but applies the EXACT same organization-scoping
+ * and cross-org redirect behavior as {@link getBooking}, so authorization is
+ * identical. Use this instead of `getBooking` anywhere the full asset list is
+ * not needed (e.g. the `bookings.$bookingId` layout route, which previously
+ * loaded every booking asset just to render the title/status).
+ *
+ * @param args.id - The booking id (from route params)
+ * @param args.organizationId - The caller's active organization id
+ * @param args.userOrganizations - The caller's org memberships, to allow
+ *   viewing a booking from another org the user belongs to (cross-org link)
+ * @param args.request - The request, used to build the cross-org redirect URL
+ * @returns The booking's header fields (id, name, status, from, to,
+ *   custodianUserId, organizationId)
+ * @throws {ShelfError} 404 when the booking is not found or not accessible
+ */
+export async function getBookingHeaderData({
+  id,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  id: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}) {
+  try {
+    const bookingFound = await db.booking.findFirstOrThrow({
+      // Same org-scoping as getBooking (shared helper), but a minimal select.
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        from: true,
+        to: true,
+        custodianUserId: true,
+        organizationId: true,
+      },
+    });
+
+    /* User is accessing the booking in the wrong organization. */
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+
+    return bookingFound;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      title: "Booking not found",
+      message:
+        "The booking you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
         ...(isShelfError ? cause.additionalData : {}),
       },
       label,

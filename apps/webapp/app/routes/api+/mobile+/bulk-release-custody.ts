@@ -61,11 +61,11 @@ export async function action({ request }: ActionFunctionArgs) {
      */
     await bulkCheckInAssets({
       userId: user.id,
+      role,
       assetIds,
       organizationId,
       currentSearchParams: "",
       settings,
-      role,
     });
 
     return data({ success: true });

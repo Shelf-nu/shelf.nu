@@ -141,6 +141,10 @@ export type AssetWithBooking = Asset & {
     lost: number;
     damaged: number;
   } | null;
+  // Pickup location rendered in the booking Location column. On the
+  // pivot model this comes from `assetLocations[0].location` via the
+  // loader's `getPrimaryLocation` normalisation.
+  location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
   // Fields required by `resolveDisplayCode` for the asset-code badge.
   // Loader-included relations — see `ASSET_CODE_RESOLUTION_SELECT` and
   // `BOOKING_WITH_ASSETS_INCLUDE`.

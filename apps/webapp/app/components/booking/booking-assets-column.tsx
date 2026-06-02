@@ -220,6 +220,7 @@ export function BookingAssetsColumn() {
                     <Th> </Th>
                     <Th>Category</Th>
                     <Th>Tags</Th>
+                    <Th>Location</Th>
                     {shouldShowCheckinColumns && (
                       <>
                         <Th className="whitespace-nowrap">

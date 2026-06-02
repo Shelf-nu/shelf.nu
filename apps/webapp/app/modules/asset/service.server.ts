@@ -4716,29 +4716,29 @@ export async function bulkDeleteAssets({
  */
 export async function bulkCheckOutAssets({
   userId,
+  role,
   assetIds,
   custodianId,
   custodianName,
   organizationId,
   currentSearchParams,
   settings,
-  role,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route. When
+   * `SELF_SERVICE` the service rejects assignments to anyone other than the
+   * calling user — symmetric counterpart on the release side lives in the
+   * route today (see `routes/api+/assets.bulk-release-custody.ts`).
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
-  /**
-   * Role of the user performing the operation. When `SELF_SERVICE`
-   * the service rejects assignments to anyone other than the calling
-   * user — symmetric counterpart to `bulkCheckInAssets`'s self-service
-   * guard. Centralised here so web + mobile callers share one source
-   * of truth.
-   */
-  role?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -4789,9 +4789,10 @@ export async function bulkCheckOutAssets({
     ]);
 
     /**
-     * SELF_SERVICE guard: a self-service user can only assign custody
-     * to themselves. Centralised here so the web and mobile bulk-assign
-     * routes share the same enforcement — both just pass `role`.
+     * SELF_SERVICE guard: a self-service user can only assign custody to
+     * themselves. Centralised in the service so every caller (web + mobile)
+     * is covered — previously this lived only in the web route and the mobile
+     * routes bypassed it. Both routes just pass `role` through.
      */
     if (
       role === OrganizationRoles.SELF_SERVICE &&
@@ -4946,19 +4947,24 @@ export async function bulkCheckOutAssets({
  */
 export async function bulkCheckInAssets({
   userId,
+  role,
   assetIds,
   organizationId,
   currentSearchParams,
   settings,
-  role,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route — when
+   * `SELF_SERVICE` the service rejects release of custody assigned to anyone
+   * other than the calling user.
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
-  /** The role of the user performing the operation, used for self-service validation */
-  role?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5014,28 +5020,6 @@ export async function bulkCheckInAssets({
       });
     }
 
-    /** Self-service users can only release custody of their own assets */
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      const custodies = await db.custody.findMany({
-        where: {
-          assetId: { in: assets.map((a) => a.id) },
-        },
-        select: { custodian: { select: { userId: true } } },
-      });
-      if (custodies.some((c) => c.custodian.userId !== userId)) {
-        throw new ShelfError({
-          cause: null,
-          title: "Action not allowed",
-          message:
-            "Self-service users can only release custody of their own assets.",
-          additionalData: { userId },
-          label: "Assets",
-          status: 403,
-          shouldBeCaptured: false,
-        });
-      }
-    }
-
     const hasAssetsWithoutCustody = assets.some(
       (asset) => !hasCustody(asset.custody)
     );
@@ -5046,6 +5030,29 @@ export async function bulkCheckInAssets({
         message:
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Self-service users may only release custody of assets assigned to them.
+    // `Asset.custody` is a `Custody[]` post Phase 2 widening (multi-custodian
+    // for QUANTITY_TRACKED). For INDIVIDUAL there's exactly one row; for
+    // qty-tracked we'd reject if ANY row belongs to someone else — but
+    // qty-tracked rows are filtered out above anyway.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      assets.some((asset) =>
+        (asset.custody ?? []).some((c) => c.custodian?.userId !== userId)
+      )
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Self service user can only release custody of assets assigned to their user.",
+        additionalData: { userId, assetIds },
+        label: "Assets",
+        status: 403,
         shouldBeCaptured: false,
       });
     }

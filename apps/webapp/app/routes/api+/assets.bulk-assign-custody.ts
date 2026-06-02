@@ -48,10 +48,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     /**
-     * Validate the custodian belongs to the same organization. We don't
-     * keep the result around any more — the SELF_SERVICE "assign-to-
-     * self" guard moved into `bulkCheckOutAssets` (which fetches the
-     * team member itself). The lookup here is still needed: it 404s
+     * Validate the custodian belongs to the same organization (early 404).
+     * We don't keep the result around any more — the SELF_SERVICE
+     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
+     * share one implementation). The lookup here is still needed: it 404s
      * the request if the requested custodianId is from another org or
      * doesn't exist.
      */
@@ -83,13 +83,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
      */
     const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
+      role,
       assetIds,
       custodianId: custodian.id,
       custodianName: custodian.name,
       organizationId,
       currentSearchParams,
       settings,
-      role,
     });
 
     const skippedNote =

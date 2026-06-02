@@ -87,13 +87,13 @@ export async function action({ request }: ActionFunctionArgs) {
      */
     await bulkCheckOutAssets({
       userId: user.id,
+      role,
       assetIds,
       custodianId,
       custodianName: teamMember.name,
       organizationId,
       currentSearchParams: "",
       settings,
-      role,
     });
 
     return data({ success: true });

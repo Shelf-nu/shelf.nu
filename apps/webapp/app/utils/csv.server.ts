@@ -42,7 +42,9 @@ import {
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
@@ -622,6 +624,22 @@ const formatCustomFieldForCsv = (
   }
 };
 
+/**
+ * Builds the bookings CSV string for the export route.
+ *
+ * Resolves which bookings to export — either the explicit `bookingsIds`, or,
+ * when the select-all sentinel is present, every booking matching the index's
+ * current filters — then enriches them with batched partial check-in state and
+ * delegates row construction to {@link buildCsvExportDataFromBookings}.
+ *
+ * @param request - The incoming request (carries filters, locale, timezone)
+ * @param userId - The acting user, for filter scoping in the select-all path
+ * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
+ * @param canSeeAllBookings - Whether the user may export bookings they don't own
+ * @param organizationId - The active workspace; scopes every booking read
+ * @returns The CSV body as a single CRLF-joined string
+ * @throws {ShelfError} If fetching bookings or building rows fails
+ */
 export async function exportBookingsFromIndexToCsv({
   request,
   userId,
@@ -685,11 +703,15 @@ export async function exportBookingsFromIndexToCsv({
                * `quantity` and `asset.type` are needed so the CSV builder
                * can render `"Title × N"` for QUANTITY_TRACKED assets.
                * Without these the row would silently show just the
-               * title and drop the booked quantity.
+               * title and drop the booked quantity. `asset.id` is
+               * required to match each row against the booking's
+               * partial check-ins for the per-asset check-in status
+               * column added by the booking export checkin-status feature.
                */
               quantity: true,
               asset: {
                 select: {
+                  id: true,
                   title: true,
                   type: true,
                 },
@@ -701,10 +723,18 @@ export async function exportBookingsFromIndexToCsv({
       });
     }
 
+    // Fetch partial check-in state for the exported bookings in a single
+    // batched query (avoids an N+1 across the selection) so the export can
+    // surface which assets are still checked out vs already returned.
+    const checkinsByBooking = await buildBookingCheckinMap(
+      bookings.map((booking) => booking.id)
+    );
+
     // Pass both assets and columns to the build function
     const csvData = buildCsvExportDataFromBookings(
       bookings as FlexibleBooking[],
-      request
+      request,
+      checkinsByBooking
     );
 
     // Join rows with CRLF as per CSV spec
@@ -908,25 +938,103 @@ export async function exportLocationNotesToCsv({
   });
 }
 
-/** Define some types to use for normalizing bookings across the different fetches */
+/**
+ * Normalized asset shape shared across the different booking export fetches —
+ * always has a `title`, with the remaining asset fields optional.
+ */
 type FlexibleAsset = Partial<Asset> & {
   title: string;
 };
 
+/**
+ * Normalized booking shape the CSV builder consumes, regardless of which fetch
+ * path (by-id vs. select-all) produced it: a booking with its custodians, the
+ * BookingAsset pivot list (each with optional `quantity` + {@link FlexibleAsset}),
+ * and name-only tags.
+ *
+ * `quantity` is optional so the type accepts bookings fetched without it
+ * (falls back to "no quantity annotation" in the renderer), but both query
+ * paths in `exportBookingsFromIndexToCsv` now populate it.
+ */
 type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
-  /**
-   * `quantity` is optional so the type accepts bookings fetched without it
-   * (falls back to "no quantity annotation" in the renderer), but both
-   * query paths in `exportBookingsFromIndexToCsv` now populate it.
-   */
   bookingAssets: { quantity?: number; asset: FlexibleAsset }[];
   tags: Pick<Tag, "name">[];
 };
 
 /**
- * Builds CSV export data from bookings
+ * Per-booking partial check-in state needed by the CSV export.
+ * - `checkedInAssetIds`: set of asset IDs that have been (partially) checked in
+ * - `checkinDateByAsset`: earliest check-in timestamp per asset, for the date column
+ */
+type BookingCheckinInfo = {
+  checkedInAssetIds: Set<string>;
+  checkinDateByAsset: Map<string, Date>;
+};
+
+/**
+ * Batch-fetch partial check-in state for a set of bookings.
+ *
+ * Reads every {@link PartialBookingCheckin} for the given bookings in one query
+ * and folds them into a per-booking lookup. For each asset only the earliest
+ * check-in is kept (an asset can in principle appear in more than one check-in
+ * session), matching {@link getDetailedPartialCheckinData}'s "first wins" rule.
+ *
+ * @param bookingIds - The bookings being exported
+ * @returns Map of bookingId → {@link BookingCheckinInfo}; bookings with no
+ *   partial check-ins are simply absent from the map
+ */
+async function buildBookingCheckinMap(
+  bookingIds: string[]
+): Promise<Map<string, BookingCheckinInfo>> {
+  const map = new Map<string, BookingCheckinInfo>();
+
+  if (!bookingIds.length) {
+    return map;
+  }
+
+  const checkins = await db.partialBookingCheckin.findMany({
+    where: { bookingId: { in: bookingIds } },
+    select: { bookingId: true, assetIds: true, checkinTimestamp: true },
+    // Earliest first so the "first check-in wins" assignment below is stable.
+    orderBy: { checkinTimestamp: "asc" },
+  });
+
+  for (const checkin of checkins) {
+    let info = map.get(checkin.bookingId);
+    if (!info) {
+      info = {
+        checkedInAssetIds: new Set<string>(),
+        checkinDateByAsset: new Map<string, Date>(),
+      };
+      map.set(checkin.bookingId, info);
+    }
+
+    for (const assetId of checkin.assetIds) {
+      info.checkedInAssetIds.add(assetId);
+      // Keep the earliest check-in per asset (rows are ordered ascending).
+      if (!info.checkinDateByAsset.has(assetId)) {
+        info.checkinDateByAsset.set(assetId, checkin.checkinTimestamp);
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Builds CSV export data from bookings.
+ *
+ * Each booking is emitted as a "main" row (booking fields + its first asset)
+ * followed by one row per additional asset. Per-asset columns
+ * (`Assets`, `Item check-in status`, `Check-in date`) are populated on every
+ * row for that row's asset; booking-level columns are populated on the main
+ * row only and left blank on the trailing asset rows.
+ *
  * @param bookings - Array of bookings to export
  * @param request - Request object for locale/timezone formatting
+ * @param checkinsByBooking - Per-booking partial check-in state, from
+ *   {@link buildBookingCheckinMap}. Used to derive the per-asset check-in
+ *   status/date columns and the booking-level checked-in rollup.
  * @returns Array of string arrays representing CSV rows, including headers
  */
 /**
@@ -954,7 +1062,8 @@ const formatBookingAssetForCsv = (ba: {
 
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
-  request: Request
+  request: Request,
+  checkinsByBooking: Map<string, BookingCheckinInfo> = new Map()
 ): string[][] => {
   if (!bookings.length) return [];
 
@@ -964,7 +1073,11 @@ export const buildCsvExportDataFromBookings = (
     timeStyle: "short",
   }).format;
 
-  // Create headers row using column names
+  // Create headers row using column names. The check-in columns are appended
+  // last so existing consumers that key off earlier column positions are
+  // unaffected. Per-asset columns (assetCheckinStatus/assetCheckinDate) sit
+  // beside `asset`; the booking-level rollup (checkedInCount/totalAssets)
+  // follows.
   const headers = {
     url: "Booking URL", // custom string
     id: "Booking ID", // string
@@ -977,114 +1090,167 @@ export const buildCsvExportDataFromBookings = (
     custodian: "Custodian",
     description: "Description", // string
     tags: "Tags",
-    asset: "Assets", // New column for assets
+    asset: "Assets", // asset title (per row)
+    assetCheckinStatus: "Item check-in status", // "Checked in" / "Checked out" (per asset)
+    assetCheckinDate: "Check-in date", // when the asset was checked in (per asset)
+    checkedInCount: "Checked in", // assets returned for this booking (per booking)
+    totalAssets: "Total assets", // assets on this booking (per booking)
   };
 
   // Create data rows with assets
   const rows: string[][] = [];
 
   bookings.forEach((booking) => {
-    // Get the first asset label (with qty annotation for qty-tracked assets)
-    const firstAssetLabel =
+    // Normalise to a non-empty list of BookingAsset pivot rows so a booking
+    // with no assets still emits a single row. The placeholder has no asset
+    // id, so its check-in / status columns stay blank.
+    const bookingAssetRows =
       booking.bookingAssets && booking.bookingAssets.length > 0
-        ? formatBookingAssetForCsv(booking.bookingAssets[0])
-        : "No assets";
+        ? booking.bookingAssets
+        : [
+            {
+              quantity: undefined,
+              asset: {
+                id: undefined as unknown as string | undefined,
+                title: "No assets",
+              } as FlexibleAsset,
+            },
+          ];
 
-    // First add the main booking row (including the first asset)
-    const bookingRow = Object.keys(headers).map((column) => {
-      // Handle different column types
-      let value: any;
+    // Per-booking partial check-in state. `calculatePartialCheckinProgress` is
+    // the same helper that powers the booking detail "X / Y checked in" bar, so
+    // the export rollup matches what users see in-app. Count UNIQUE assets
+    // (not slices) — a qty-tracked asset with one standalone + one kit-driven
+    // slice is still one asset for progress purposes.
+    const checkinInfo = checkinsByBooking.get(booking.id);
+    const checkedInAssetIds =
+      checkinInfo?.checkedInAssetIds ?? new Set<string>();
+    const uniqueAssetIdCount = new Set(
+      (booking.bookingAssets ?? [])
+        .map((ba) => ba.asset.id)
+        .filter((id): id is string => Boolean(id))
+    ).size;
+    const progress = calculatePartialCheckinProgress(
+      uniqueAssetIdCount,
+      [...checkedInAssetIds],
+      booking.status
+    );
 
-      // If it's not a custom field, it must be a fixed field or 'name'
-      switch (column) {
-        case "url":
-          value = `${SERVER_URL}/bookings/${booking.id}`;
-          break;
-        case "id":
-          value = booking.id;
-          break;
-        case "name":
-          value = booking.name;
-          break;
-        case "status":
-          value =
-            booking.status.charAt(0).toUpperCase() +
-            booking.status.slice(1).toLowerCase();
-          break;
-        case "from":
-          value = booking.from ? format(booking.from).split(",") : "";
-          break;
-        case "originalFrom":
-          value = booking.originalFrom
-            ? format(booking.originalFrom).split(",")
-            : booking.from
-            ? format(booking.from).split(",")
-            : "";
-          break;
+    bookingAssetRows.forEach((ba, index) => {
+      // The first BookingAsset row shares the booking's "main" row; the rest
+      // get their own rows with booking-level columns blanked.
+      const isMainRow = index === 0;
+      const asset = ba.asset;
 
-        case "to":
-          value = booking.to ? format(booking.to).split(",") : "";
-          break;
-        case "originalTo":
-          value = booking.originalTo
-            ? format(booking.originalTo).split(",")
-            : booking.to
-            ? format(booking.to).split(",")
-            : "";
-          break;
-        case "custodian": {
-          const teamMember = {
-            name: booking.custodianTeamMember?.name ?? "",
-            user: booking?.custodianUser
-              ? {
-                  firstName: booking.custodianUser?.firstName,
-                  lastName: booking.custodianUser?.lastName,
-                  email: booking.custodianUser?.email,
-                }
-              : null,
-          };
-
-          value = resolveTeamMemberName(teamMember, true);
-          break;
+      const row = Object.keys(headers).map((column) => {
+        // --- Per-asset columns: populated on every row for that asset ---
+        if (column === "asset") {
+          // formatBookingAssetForCsv adds the "× N" suffix for qty-tracked.
+          return formatValueForCsv(
+            asset.id
+              ? formatBookingAssetForCsv(ba)
+              : asset.title ?? "No assets",
+            false
+          );
         }
-        case "description":
-          value = booking.description ?? "";
-          break;
-        case "asset":
-          // Include the first asset label (with "× N" for qty-tracked) in the main row
-          value = firstAssetLabel;
-          break;
+        if (column === "assetCheckinStatus") {
+          const label = asset.id
+            ? getBookingAssetCheckinLabel(
+                asset.id,
+                checkedInAssetIds,
+                booking.status
+              )
+            : "";
+          return formatValueForCsv(label, false);
+        }
+        if (column === "assetCheckinDate") {
+          const checkinDate = asset.id
+            ? checkinInfo?.checkinDateByAsset.get(asset.id)
+            : undefined;
+          return formatValueForCsv(
+            checkinDate ? format(checkinDate) : "",
+            false
+          );
+        }
 
-        case "tags":
-          value = booking.tags.length
-            ? booking.tags.map((tag) => tag.name).join(", ")
-            : "No tags";
-          break;
-        default:
-          value = "";
-      }
-      return formatValueForCsv(value, false);
-    });
-
-    rows.push(bookingRow);
-
-    // Then add remaining asset rows if the booking has more than one asset
-    if (booking.bookingAssets && booking.bookingAssets.length > 1) {
-      // Start from the second asset (index 1)
-      booking.bookingAssets.slice(1).forEach((ba) => {
-        // Create an asset row with empty values for all columns except 'asset'
-        const assetRow = Object.keys(headers).map((column) => {
-          if (column === "asset") {
-            // Renders "× N" suffix for qty-tracked assets via the shared helper
-            return formatValueForCsv(formatBookingAssetForCsv(ba), false);
-          }
-          // Empty values for all other columns
+        // --- Booking-level columns: main row only, blank on asset rows ---
+        if (!isMainRow) {
           return formatValueForCsv("", false);
-        });
+        }
 
-        rows.push(assetRow);
+        let value: any;
+        switch (column) {
+          case "url":
+            value = `${SERVER_URL}/bookings/${booking.id}`;
+            break;
+          case "id":
+            value = booking.id;
+            break;
+          case "name":
+            value = booking.name;
+            break;
+          case "status":
+            value =
+              booking.status.charAt(0).toUpperCase() +
+              booking.status.slice(1).toLowerCase();
+            break;
+          case "from":
+            value = booking.from ? format(booking.from).split(",") : "";
+            break;
+          case "originalFrom":
+            value = booking.originalFrom
+              ? format(booking.originalFrom).split(",")
+              : booking.from
+              ? format(booking.from).split(",")
+              : "";
+            break;
+          case "to":
+            value = booking.to ? format(booking.to).split(",") : "";
+            break;
+          case "originalTo":
+            value = booking.originalTo
+              ? format(booking.originalTo).split(",")
+              : booking.to
+              ? format(booking.to).split(",")
+              : "";
+            break;
+          case "custodian": {
+            const teamMember = {
+              name: booking.custodianTeamMember?.name ?? "",
+              user: booking?.custodianUser
+                ? {
+                    firstName: booking.custodianUser?.firstName,
+                    lastName: booking.custodianUser?.lastName,
+                    email: booking.custodianUser?.email,
+                  }
+                : null,
+            };
+
+            value = resolveTeamMemberName(teamMember, true);
+            break;
+          }
+          case "description":
+            value = booking.description ?? "";
+            break;
+          case "tags":
+            value = booking.tags.length
+              ? booking.tags.map((tag) => tag.name).join(", ")
+              : "No tags";
+            break;
+          case "checkedInCount":
+            value = progress.checkedInCount;
+            break;
+          case "totalAssets":
+            value = progress.totalAssets;
+            break;
+          default:
+            value = "";
+        }
+        return formatValueForCsv(value, false);
       });
-    }
+
+      rows.push(row);
+    });
   });
 
   // Return headers followed by data rows

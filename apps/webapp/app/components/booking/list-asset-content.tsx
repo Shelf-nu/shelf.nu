@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
@@ -393,6 +394,25 @@ export default function ListAssetContent({
         )}
       >
         <ListItemTagsColumn tags={tags} />
+      </Td>
+
+      <Td
+        className={tw(
+          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+        )}
+      >
+        {item.location ? (
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
 
       {shouldShowCheckinColumns && (
