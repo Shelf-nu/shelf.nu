@@ -110,6 +110,11 @@ export async function fetchAllPdfRelatedData(
           kit: {
             select: {
               name: true,
+              // Kit location — required so groupAndSortAssetsByKit can sort kit
+              // groups by Location in the exported PDF (otherwise every kit is
+              // treated as null-location and falls back to kit-name order,
+              // making the PDF not match the selected Location sort).
+              location: { select: { name: true } },
             },
           },
         },
@@ -151,8 +156,10 @@ export async function fetchAllPdfRelatedData(
     return {
       booking,
       assets: sortedAssets,
+      // Keep the total aligned with the exported (search-filtered) rows so a
+      // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
-        assets: booking.assets,
+        assets: sortedAssets,
         currency: organization.currency,
         locale: getClientHint(request).locale,
       }),

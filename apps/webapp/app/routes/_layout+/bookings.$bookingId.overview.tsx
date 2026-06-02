@@ -571,6 +571,12 @@ export async function clientLoader({
     return {
       ...serverData,
       items: view.items,
+      // Override the view params so the pager/search UI stay in sync with the
+      // reshaped items (serverData holds the values from the initial load).
+      // perPage is intentionally not overridden — a per_page change is a cache
+      // miss (see CLIENT_VIEW_PARAM_KEYS), so serverData.perPage is current.
+      page: paramsValues.page,
+      search: paramsValues.search,
       totalItems: view.totalPaginationItems,
       totalPaginationItems: view.totalPaginationItems,
       totalPages: view.totalPages,

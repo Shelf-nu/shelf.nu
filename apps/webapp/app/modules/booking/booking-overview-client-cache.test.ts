@@ -39,6 +39,15 @@ describe("booking-overview-client-cache", () => {
     expect(readBookingOverviewCache("b2", url("?page=1")).hit).toBe(false);
   });
 
+  it("misses when per_page changes (page-size is a server refetch boundary)", () => {
+    primeBookingOverviewCache("b1", url("?page=1&per_page=10"), {
+      tag: "server",
+    });
+    expect(readBookingOverviewCache("b1", url("?page=1&per_page=20")).hit).toBe(
+      false
+    );
+  });
+
   it("advances the baseline so consecutive view changes keep hitting", () => {
     primeBookingOverviewCache("b1", url("?page=1"), { tag: "server" });
     expect(readBookingOverviewCache("b1", url("?s=a")).hit).toBe(true);

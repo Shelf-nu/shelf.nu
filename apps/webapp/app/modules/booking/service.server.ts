@@ -3859,6 +3859,91 @@ export async function deleteBooking(
   }
 }
 
+/**
+ * Builds the organization-scoping `where` clause for a single-booking lookup:
+ * the booking must belong to the caller's active org, or to another org the
+ * caller is a member of (so cross-org booking links keep working). Shared by
+ * {@link getBooking} and {@link getBookingHeaderData} so their authorization is
+ * provably identical.
+ *
+ * @see .claude/rules/org-scope-user-supplied-ids.md
+ */
+function bookingOrgScopeWhere({
+  id,
+  organizationId,
+  userOrganizations,
+}: {
+  id: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+}): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { id, organizationId },
+      ...(userOrganizations?.length
+        ? [
+            {
+              id,
+              organizationId: {
+                in: userOrganizations.map((org) => org.organizationId),
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+/**
+ * Enforces the cross-org access rule after a scoped booking lookup: if the
+ * booking belongs to a different org that the caller can only reach via
+ * membership (not their active org), throw a 404 carrying redirect info. Shared
+ * by {@link getBooking} and {@link getBookingHeaderData} so the cross-org
+ * behavior cannot drift between them.
+ *
+ * @throws {ShelfError} 404 with cross-org redirect data
+ */
+function assertBookingInActiveOrg({
+  bookingFound,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  bookingFound: Pick<Booking, "organizationId">;
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}): void {
+  if (
+    userOrganizations?.length &&
+    bookingFound.organizationId !== organizationId &&
+    userOrganizations.some(
+      (org) => org.organizationId === bookingFound.organizationId
+    )
+  ) {
+    const redirectTo =
+      typeof request !== "undefined"
+        ? getRedirectUrlFromRequest(request)
+        : undefined;
+
+    throw new ShelfError({
+      cause: null,
+      title: "Booking not found",
+      message: "",
+      additionalData: {
+        model: "booking",
+        organization: userOrganizations.find(
+          (org) => org.organizationId === bookingFound.organizationId
+        ),
+        redirectTo,
+      },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
@@ -3887,49 +3972,18 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
-    const otherOrganizationIds = userOrganizations?.map(
-      (org) => org.organizationId
-    );
-
     const bookingFound = (await db.booking.findFirstOrThrow({
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
       include: mergedInclude,
     })) as BookingWithExtraInclude<T>;
 
-    /* User is accessing the asset in the wrong organization. */
-    if (
-      userOrganizations?.length &&
-      bookingFound.organizationId !== organizationId &&
-      otherOrganizationIds?.includes(bookingFound.organizationId)
-    ) {
-      const redirectTo =
-        typeof request !== "undefined"
-          ? getRedirectUrlFromRequest(request)
-          : undefined;
-
-      throw new ShelfError({
-        cause: null,
-        title: "Booking not found",
-        message: "",
-        additionalData: {
-          model: "booking",
-          organization: userOrganizations?.find(
-            (org) => org.organizationId === bookingFound.organizationId
-          ),
-          redirectTo,
-        },
-        label,
-        status: 404,
-        shouldBeCaptured: false,
-      });
-    }
+    /* User is accessing the booking in the wrong organization. */
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     return bookingFound;
   } catch (cause) {
@@ -3983,21 +4037,9 @@ export async function getBookingHeaderData({
   request?: Request;
 }) {
   try {
-    const otherOrganizationIds = userOrganizations?.map(
-      (org) => org.organizationId
-    );
-
     const bookingFound = await db.booking.findFirstOrThrow({
-      // Same org-scoping as getBooking: caller's org, or another org the
-      // caller is a member of (cross-org booking link).
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
+      // Same org-scoping as getBooking (shared helper), but a minimal select.
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
       select: {
         id: true,
         name: true,
@@ -4010,32 +4052,12 @@ export async function getBookingHeaderData({
     });
 
     /* User is accessing the booking in the wrong organization. */
-    if (
-      userOrganizations?.length &&
-      bookingFound.organizationId !== organizationId &&
-      otherOrganizationIds?.includes(bookingFound.organizationId)
-    ) {
-      const redirectTo =
-        typeof request !== "undefined"
-          ? getRedirectUrlFromRequest(request)
-          : undefined;
-
-      throw new ShelfError({
-        cause: null,
-        title: "Booking not found",
-        message: "",
-        additionalData: {
-          model: "booking",
-          organization: userOrganizations?.find(
-            (org) => org.organizationId === bookingFound.organizationId
-          ),
-          redirectTo,
-        },
-        label,
-        status: 404,
-        shouldBeCaptured: false,
-      });
-    }
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     return bookingFound;
   } catch (cause) {

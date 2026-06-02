@@ -379,6 +379,27 @@ describe("filterBookingAssets", () => {
     expect(result.map((a) => a.id)).toEqual(["k1", "k2"]);
   });
 
+  it("matches by a kit-level field (kit location) and surfaces the whole kit", () => {
+    const assets = [
+      asset({
+        id: "k1",
+        kitId: "kit-1",
+        title: "Camera body",
+        kit: { name: "Cam Kit", location: { name: "Studio B" } },
+      }),
+      asset({
+        id: "k2",
+        kitId: "kit-1",
+        title: "Tripod",
+        kit: { name: "Cam Kit", location: { name: "Studio B" } },
+      }),
+      asset({ id: "solo", kitId: null, title: "Unrelated" }),
+    ];
+    // Neither asset title matches; the hit comes from kit.location.name.
+    const result = filterBookingAssets(assets, "studio");
+    expect(result.map((a) => a.id)).toEqual(["k1", "k2"]);
+  });
+
   it("returns an empty array when nothing matches", () => {
     const assets = [asset({ id: "a1", title: "laptop" })];
     expect(filterBookingAssets(assets, "zzz")).toEqual([]);
