@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bulkAssignCustody } from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
@@ -140,7 +141,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: { id: true },
     });
   });
 
@@ -186,11 +187,11 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
+      select: { id: true },
     });
   });
 
-  it("prevents self-service users from assigning custody to other team members", async () => {
+  it("forwards the caller's role to the service for self-restriction enforcement", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
@@ -222,9 +223,14 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(createActionArgs({ request }))) as any;
+    await action(createActionArgs({ request }));
 
-    expect(response.status).toBe(403);
+    // Enforcement of the SELF_SERVICE self-restriction now lives inside
+    // bulkAssignCustody (unit-tested in asset/service.server.test.ts) so web and
+    // mobile share one implementation. The route's job is to forward the role.
+    expect(bulkAssignCustody).toHaveBeenCalledWith(
+      expect.objectContaining({ role: OrganizationRoles.SELF_SERVICE })
+    );
   });
 
   it("allows self-service users to assign custody to themselves", async () => {

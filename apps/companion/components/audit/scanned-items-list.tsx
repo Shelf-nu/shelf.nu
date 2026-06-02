@@ -26,6 +26,7 @@ export function ScannedItemsList({
     ({ item }: { item: ScannedItem }) => {
       const evidenceCount = (item.notesCount ?? 0) + (item.imagesCount ?? 0);
       const hasEvidence = evidenceCount > 0;
+      const syncFailed = item.syncFailed === true;
 
       return (
         <TouchableOpacity
@@ -34,8 +35,8 @@ export function ScannedItemsList({
           activeOpacity={0.7}
           accessibilityLabel={`${item.name}, ${
             item.isExpected ? "found" : "unexpected"
-          }${
-            hasEvidence ? `, ${evidenceCount} evidence items` : ""
+          }${hasEvidence ? `, ${evidenceCount} evidence items` : ""}${
+            syncFailed ? ", not synced" : ""
           }. Tap to add notes or photos.`}
           accessibilityRole="button"
         >
@@ -53,9 +54,20 @@ export function ScannedItemsList({
               <Text style={styles.evidenceCount}>{evidenceCount}</Text>
             </View>
           )}
-          <Text style={styles.scannedItemBadge}>
-            {item.isExpected ? "Found" : "Unexpected"}
-          </Text>
+          {syncFailed ? (
+            <View style={styles.syncFailedBadge}>
+              <Ionicons
+                name="cloud-offline-outline"
+                size={12}
+                color={colors.warning}
+              />
+              <Text style={styles.syncFailedText}>Not synced</Text>
+            </View>
+          ) : (
+            <Text style={styles.scannedItemBadge}>
+              {item.isExpected ? "Found" : "Unexpected"}
+            </Text>
+          )}
           <Ionicons name="chevron-forward" size={16} color={colors.muted} />
         </TouchableOpacity>
       );
@@ -148,5 +160,15 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.xs,
     fontWeight: "600",
     color: colors.primary,
+  },
+  syncFailedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  syncFailedText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.warning,
   },
 }));
