@@ -77,18 +77,21 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           APP_DIR: ${{ matrix.app.dir }}
         run: |
-          # Capture first, then grep a here-string — piping `git diff` into
-          # `grep -q` is unsafe under `bash -eo pipefail`: grep exits on first
-          # match and closes the pipe, git can die with SIGPIPE (141) on large
-          # diffs, and pipefail would surface that 141 as the pipeline status,
-          # flipping the `if` to the else branch (CHANGED=false) for an app
-          # that actually changed.
+          # Capture the diff, then test each path with a literal prefix match.
+          # Two reasons to avoid `git diff | grep -q "^${APP_DIR}/"`:
+          #   * pipefail: grep -q exits on first match and closes the pipe; git
+          #     can die with SIGPIPE (141) on large diffs and bash -eo pipefail
+          #     surfaces that 141 — flipping the gate to false for an app that
+          #     actually changed.
+          #   * regex: APP_DIR interpolated into a grep pattern would treat any
+          #     metacharacter as regex. A quoted `case` glob keeps it literal.
           CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD")
-          if grep -q "^${APP_DIR}/" <<< "$CHANGED_FILES"; then
-            CHANGED=true
-          else
-            CHANGED=false
-          fi
+          CHANGED=false
+          while IFS= read -r file; do
+            case "$file" in
+              "${APP_DIR}"/*) CHANGED=true; break ;;
+            esac
+          done <<< "$CHANGED_FILES"
           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "App ${APP_DIR} changed in this PR: $CHANGED"
 
