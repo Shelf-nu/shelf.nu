@@ -1,5 +1,5 @@
-import type { Asset } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import type { Asset, User } from "@prisma/client";
+import { AssetStatus, OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
@@ -9,15 +9,25 @@ import { ShelfError } from "~/utils/error";
  *
  * @param assetId - The ID of the asset to release custody from
  * @param organizationId - The organization ID
+ * @param userId - The caller's user ID (for the SELF_SERVICE self-restriction)
+ * @param role - The caller's role; SELF_SERVICE may only release their own custody
  * @param activityEvent - Optional activity event data for audit trail
  */
 export async function releaseCustody({
   assetId,
   organizationId,
+  userId,
+  role,
   activityEvent,
 }: {
   assetId: Asset["id"];
   organizationId: Asset["organizationId"];
+  userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route.
+   */
+  role: OrganizationRoles;
   /** Optional activity event data - if provided, records CUSTODY_RELEASED event atomically */
   activityEvent?: {
     actorUserId: string;
@@ -25,6 +35,28 @@ export async function releaseCustody({
     targetUserId?: string;
   };
 }) {
+  // Self-service users may only release custody of assets assigned to them.
+  // Checked BEFORE the transaction so the 403 is returned cleanly — a throw
+  // inside the tx below would be re-wrapped by the catch as a generic error.
+  if (role === OrganizationRoles.SELF_SERVICE) {
+    const current = await db.custody.findFirst({
+      where: { assetId, asset: { organizationId } },
+      select: { custodian: { select: { userId: true } } },
+    });
+    if (current?.custodian?.userId !== userId) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Self service user can only release custody of assets assigned to their user.",
+        additionalData: { userId, assetId },
+        label: "Custody",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
   try {
     // Use transaction to ensure custody release and activity event are atomic
     return await db.$transaction(async (tx) => {
