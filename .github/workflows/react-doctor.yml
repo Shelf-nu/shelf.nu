@@ -77,8 +77,14 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           APP_DIR: ${{ matrix.app.dir }}
         run: |
-          if git diff --name-only "origin/${BASE_REF}...HEAD" \
-            | grep -q "^${APP_DIR}/"; then
+          # Capture first, then grep a here-string — piping `git diff` into
+          # `grep -q` is unsafe under `bash -eo pipefail`: grep exits on first
+          # match and closes the pipe, git can die with SIGPIPE (141) on large
+          # diffs, and pipefail would surface that 141 as the pipeline status,
+          # flipping the `if` to the else branch (CHANGED=false) for an app
+          # that actually changed.
+          CHANGED_FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          if grep -q "^${APP_DIR}/" <<< "$CHANGED_FILES"; then
             CHANGED=true
           else
             CHANGED=false
