@@ -924,49 +924,51 @@ function AuditScannerContent() {
             </View>
           </View>
 
-          {/* Scan frame */}
-          <View style={styles.scanFrameContainer}>
-            <View style={styles.scanFrame}>
-              <View
-                style={[
-                  styles.corner,
-                  styles.cornerTL,
-                  frameHighlight && { borderColor: frameColor },
-                ]}
-              />
-              <View
-                style={[
-                  styles.corner,
-                  styles.cornerTR,
-                  frameHighlight && { borderColor: frameColor },
-                ]}
-              />
-              <View
-                style={[
-                  styles.corner,
-                  styles.cornerBL,
-                  frameHighlight && { borderColor: frameColor },
-                ]}
-              />
-              <View
-                style={[
-                  styles.corner,
-                  styles.cornerBR,
-                  frameHighlight && { borderColor: frameColor },
-                ]}
-              />
-              {!isPaused && !frameHighlight && (
-                <Animated.View
+          {/* Scan frame — hidden while paused so it doesn't bleed through the paused overlay */}
+          {!isPaused && (
+            <View style={styles.scanFrameContainer}>
+              <View style={styles.scanFrame}>
+                <View
                   style={[
-                    styles.scanLine,
-                    {
-                      transform: [{ translateY: scanLineTranslate }],
-                    },
+                    styles.corner,
+                    styles.cornerTL,
+                    frameHighlight && { borderColor: frameColor },
                   ]}
                 />
-              )}
+                <View
+                  style={[
+                    styles.corner,
+                    styles.cornerTR,
+                    frameHighlight && { borderColor: frameColor },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.corner,
+                    styles.cornerBL,
+                    frameHighlight && { borderColor: frameColor },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.corner,
+                    styles.cornerBR,
+                    frameHighlight && { borderColor: frameColor },
+                  ]}
+                />
+                {!frameHighlight && (
+                  <Animated.View
+                    style={[
+                      styles.scanLine,
+                      {
+                        transform: [{ translateY: scanLineTranslate }],
+                      },
+                    ]}
+                  />
+                )}
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Processing indicator */}
           {isProcessing && (

@@ -1,61 +1,36 @@
 import { describe, it, expect } from "vitest";
-import { getBookingAssetsOrderBy, groupAndSortAssetsByKit } from "./helpers";
+import {
+  filterBookingAssets,
+  groupAndSortAssetsByKit,
+  type SearchableBookingAsset,
+} from "./helpers";
 
-describe("getBookingAssetsOrderBy", () => {
-  it("returns status ordering by default", () => {
-    const result = getBookingAssetsOrderBy();
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns status ordering when orderBy is 'status'", () => {
-    const result = getBookingAssetsOrderBy("status", "desc");
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns status ordering with asc direction", () => {
-    const result = getBookingAssetsOrderBy("status", "asc");
-    expect(result).toEqual([{ status: "asc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns title ordering when orderBy is 'title'", () => {
-    const result = getBookingAssetsOrderBy("title", "desc");
-    expect(result).toEqual([{ title: "desc" }]);
-  });
-
-  it("returns title ordering with asc direction", () => {
-    const result = getBookingAssetsOrderBy("title", "asc");
-    expect(result).toEqual([{ title: "asc" }]);
-  });
-
-  it("returns category ordering when orderBy is 'category'", () => {
-    const result = getBookingAssetsOrderBy("category", "desc");
-    expect(result).toEqual([{ category: { name: "desc" } }]);
-  });
-
-  it("falls back to status ordering for unknown orderBy values", () => {
-    const result = getBookingAssetsOrderBy("unknown", "desc");
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
+// Helper to create test assets, shared across all describe blocks
+const createAsset = (
+  id: string,
+  title: string,
+  status: string,
+  kitId: string | null = null,
+  kitName: string | null = null,
+  categoryName: string | null = null,
+  locationName: string | null = null,
+  kitLocationName: string | null = null
+) => ({
+  id,
+  title,
+  status,
+  kitId,
+  kit: kitName
+    ? {
+        name: kitName,
+        location: kitLocationName ? { name: kitLocationName } : null,
+      }
+    : null,
+  category: categoryName ? { name: categoryName } : null,
+  location: locationName ? { name: locationName } : null,
 });
 
 describe("groupAndSortAssetsByKit", () => {
-  // Helper to create test assets
-  const createAsset = (
-    id: string,
-    title: string,
-    status: string,
-    kitId: string | null = null,
-    kitName: string | null = null,
-    categoryName: string | null = null
-  ) => ({
-    id,
-    title,
-    status,
-    kitId,
-    kit: kitName ? { name: kitName } : null,
-    category: categoryName ? { name: categoryName } : null,
-  });
-
   describe("grouping behavior", () => {
     it("groups assets by kit and places kits before individual assets", () => {
       const assets = [
@@ -262,5 +237,181 @@ describe("groupAndSortAssetsByKit", () => {
       expect(result[0].status).toBe("CHECKED_OUT");
       expect(result[1].status).toBe("AVAILABLE");
     });
+  });
+});
+
+describe("groupAndSortAssetsByKit — location", () => {
+  it("sorts individual assets by location name ascending", () => {
+    const assets = [
+      createAsset("1", "A", "AVAILABLE", null, null, null, "Warehouse B"),
+      createAsset("2", "B", "AVAILABLE", null, null, null, "Warehouse A"),
+    ];
+
+    const result = groupAndSortAssetsByKit(assets, "location", "asc");
+
+    expect(result[0].location?.name).toBe("Warehouse A");
+    expect(result[1].location?.name).toBe("Warehouse B");
+  });
+
+  it("places assets with no location at the end regardless of direction", () => {
+    const assets = [
+      createAsset("1", "NoLoc", "AVAILABLE"),
+      createAsset("2", "HasLoc", "AVAILABLE", null, null, null, "Shelf 1"),
+    ];
+
+    const ascResult = groupAndSortAssetsByKit(assets, "location", "asc");
+    expect(ascResult[0].location?.name).toBe("Shelf 1");
+    expect(ascResult[1].location).toBeNull();
+
+    const descResult = groupAndSortAssetsByKit(assets, "location", "desc");
+    expect(descResult[1].location).toBeNull();
+  });
+
+  it("sorts kit groups by the kit's own location", () => {
+    const assets = [
+      createAsset(
+        "1",
+        "A",
+        "AVAILABLE",
+        "kit-z",
+        "Kit Z",
+        null,
+        null,
+        "Zone Z"
+      ),
+      createAsset(
+        "2",
+        "B",
+        "AVAILABLE",
+        "kit-a",
+        "Kit A",
+        null,
+        null,
+        "Zone A"
+      ),
+    ];
+
+    const result = groupAndSortAssetsByKit(assets, "location", "asc");
+
+    expect(result[0].kit?.name).toBe("Kit A");
+    expect(result[1].kit?.name).toBe("Kit Z");
+  });
+});
+
+describe("filterBookingAssets", () => {
+  // Minimal asset builder for search tests — only the searchable fields.
+  const asset = (
+    over: Partial<SearchableBookingAsset> = {}
+  ): SearchableBookingAsset => ({
+    id: "a1",
+    kitId: null,
+    title: "Generic Asset",
+    sequentialId: null,
+    category: null,
+    tags: null,
+    location: null,
+    qrCodes: null,
+    barcodes: null,
+    kit: null,
+    ...over,
+  });
+
+  it("returns all assets unchanged for blank or missing search", () => {
+    const assets = [asset({ id: "a1" }), asset({ id: "a2" })];
+    expect(filterBookingAssets(assets, "")).toEqual(assets);
+    expect(filterBookingAssets(assets, "   ")).toEqual(assets);
+    expect(filterBookingAssets(assets, undefined)).toEqual(assets);
+  });
+
+  it("matches title case-insensitively as a substring", () => {
+    const assets = [
+      asset({ id: "a1", title: "MacBook Pro" }),
+      asset({ id: "a2", title: "Dell Dock" }),
+    ];
+    const result = filterBookingAssets(assets, "book");
+    expect(result.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  it("matches sequentialId, tag, location, qr id, and barcode value", () => {
+    const assets = [
+      asset({ id: "seq", sequentialId: "SAM-0042" }),
+      asset({ id: "tag", tags: [{ name: "Fragile" }] }),
+      asset({ id: "loc", location: { name: "Warehouse A" } }),
+      asset({ id: "qr", qrCodes: [{ id: "qr-xyz" }] }),
+      asset({ id: "bar", barcodes: [{ value: "BC-999" }] }),
+      asset({ id: "none", title: "nothing" }),
+    ];
+    expect(filterBookingAssets(assets, "0042").map((a) => a.id)).toEqual([
+      "seq",
+    ]);
+    expect(filterBookingAssets(assets, "fragile").map((a) => a.id)).toEqual([
+      "tag",
+    ]);
+    expect(filterBookingAssets(assets, "warehouse").map((a) => a.id)).toEqual([
+      "loc",
+    ]);
+    expect(filterBookingAssets(assets, "qr-xyz").map((a) => a.id)).toEqual([
+      "qr",
+    ]);
+    expect(filterBookingAssets(assets, "bc-999").map((a) => a.id)).toEqual([
+      "bar",
+    ]);
+  });
+
+  it("treats commas as OR across terms", () => {
+    const assets = [
+      asset({ id: "a1", title: "laptop" }),
+      asset({ id: "a2", title: "dock" }),
+      asset({ id: "a3", title: "monitor" }),
+    ];
+    const result = filterBookingAssets(assets, "laptop, dock");
+    expect(result.map((a) => a.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("re-expands the whole kit when one of its assets matches", () => {
+    const assets = [
+      asset({ id: "k1", kitId: "kit-1", title: "Camera body" }),
+      asset({ id: "k2", kitId: "kit-1", title: "Tripod" }),
+      asset({ id: "solo", kitId: null, title: "Unrelated" }),
+    ];
+    // "camera" only matches k1, but its whole kit (k1 + k2) should surface.
+    const result = filterBookingAssets(assets, "camera");
+    expect(result.map((a) => a.id)).toEqual(["k1", "k2"]);
+  });
+
+  it("matches by a kit-level field (kit location) and surfaces the whole kit", () => {
+    const assets = [
+      asset({
+        id: "k1",
+        kitId: "kit-1",
+        title: "Camera body",
+        kit: { name: "Cam Kit", location: { name: "Studio B" } },
+      }),
+      asset({
+        id: "k2",
+        kitId: "kit-1",
+        title: "Tripod",
+        kit: { name: "Cam Kit", location: { name: "Studio B" } },
+      }),
+      asset({ id: "solo", kitId: null, title: "Unrelated" }),
+    ];
+    // Neither asset title matches; the hit comes from kit.location.name.
+    const result = filterBookingAssets(assets, "studio");
+    expect(result.map((a) => a.id)).toEqual(["k1", "k2"]);
+  });
+
+  it("returns an empty array when nothing matches", () => {
+    const assets = [asset({ id: "a1", title: "laptop" })];
+    expect(filterBookingAssets(assets, "zzz")).toEqual([]);
+  });
+
+  it("preserves input order", () => {
+    const assets = [
+      asset({ id: "a3", title: "match three" }),
+      asset({ id: "a1", title: "match one" }),
+      asset({ id: "a2", title: "match two" }),
+    ];
+    const result = filterBookingAssets(assets, "match");
+    expect(result.map((a) => a.id)).toEqual(["a3", "a1", "a2"]);
   });
 });

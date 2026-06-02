@@ -62,6 +62,7 @@ import {
 import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
+import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -77,6 +78,15 @@ import { tw } from "~/utils/tw";
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export type LayoutLoaderResponse = typeof loader;
+
+/**
+ * The app-shell loader (user, org, subscription) does not depend on a page's
+ * client-side view params (search/sort/page). Skip re-running it for same-path
+ * client-view-only navigations so pages that filter client-side (e.g. the
+ * booking overview) never trigger a shell refetch. Mutations and real
+ * navigations still revalidate.
+ */
+export const shouldRevalidate = skipRevalidationOnClientViewChange;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
