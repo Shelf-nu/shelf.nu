@@ -94,6 +94,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       preferredBarcodeId: true,
       qrCodes: { take: 1, select: { id: true } },
       barcodes: { select: { id: true, type: true, value: true } },
+      // Tag names — searchable in-memory by filterBookingAssets (assets only).
+      tags: { select: { name: true } },
       category: {
         select: {
           id: true,
@@ -127,6 +129,12 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
         },
       },
     },
+    // Base fetch order. The rendered order is computed in-memory by the
+    // consuming route (sortBookingAssets / groupAndSortAssetsByKit); this DB
+    // order only acts as the stable tiebreaker fed into those sorts. Kept
+    // identical to the historical default (CHECKED_OUT first, then creation
+    // order) so the in-memory sorts receive the exact same input as before —
+    // preserving the booking page's default ordering 1:1.
     orderBy: [
       { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { createdAt: "asc" }, // Then by creation order as fallback

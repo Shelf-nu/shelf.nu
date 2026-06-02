@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildBookingAssetsSearchOR,
-  getBookingAssetsOrderBy,
+  filterBookingAssets,
   groupAndSortAssetsByKit,
+  type SearchableBookingAsset,
 } from "./helpers";
 
 // Helper to create test assets, shared across all describe blocks
@@ -28,48 +28,6 @@ const createAsset = (
     : null,
   category: categoryName ? { name: categoryName } : null,
   location: locationName ? { name: locationName } : null,
-});
-
-describe("getBookingAssetsOrderBy", () => {
-  it("returns status ordering by default", () => {
-    const result = getBookingAssetsOrderBy();
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns status ordering when orderBy is 'status'", () => {
-    const result = getBookingAssetsOrderBy("status", "desc");
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns status ordering with asc direction", () => {
-    const result = getBookingAssetsOrderBy("status", "asc");
-    expect(result).toEqual([{ status: "asc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns title ordering when orderBy is 'title'", () => {
-    const result = getBookingAssetsOrderBy("title", "desc");
-    expect(result).toEqual([{ title: "desc" }]);
-  });
-
-  it("returns title ordering with asc direction", () => {
-    const result = getBookingAssetsOrderBy("title", "asc");
-    expect(result).toEqual([{ title: "asc" }]);
-  });
-
-  it("returns category ordering when orderBy is 'category'", () => {
-    const result = getBookingAssetsOrderBy("category", "desc");
-    expect(result).toEqual([{ category: { name: "desc" } }]);
-  });
-
-  it("falls back to status ordering for unknown orderBy values", () => {
-    const result = getBookingAssetsOrderBy("unknown", "desc");
-    expect(result).toEqual([{ status: "desc" }, { createdAt: "asc" }]);
-  });
-
-  it("returns location ordering when orderBy is 'location'", () => {
-    const result = getBookingAssetsOrderBy("location", "asc");
-    expect(result).toEqual([{ location: { name: "asc" } }]);
-  });
 });
 
 describe("groupAndSortAssetsByKit", () => {
@@ -340,23 +298,99 @@ describe("groupAndSortAssetsByKit — location", () => {
   });
 });
 
-describe("buildBookingAssetsSearchOR", () => {
-  it("produces one OR group per comma-separated term", () => {
-    const result = buildBookingAssetsSearchOR("laptop, dock");
-    expect(result).toHaveLength(2);
+describe("filterBookingAssets", () => {
+  // Minimal asset builder for search tests — only the searchable fields.
+  const asset = (
+    over: Partial<SearchableBookingAsset> = {}
+  ): SearchableBookingAsset => ({
+    id: "a1",
+    kitId: null,
+    title: "Generic Asset",
+    sequentialId: null,
+    category: null,
+    tags: null,
+    location: null,
+    qrCodes: null,
+    barcodes: null,
+    kit: null,
+    ...over,
   });
 
-  it("matches asset title, location, and kit location for a term", () => {
-    const [group] = buildBookingAssetsSearchOR("warehouse");
-    const json = JSON.stringify(group);
-    expect(json).toContain('"title"');
-    expect(json).toContain('"location"');
-    expect(json).toContain('"sequentialId"');
-    expect(json).toContain('"kit"');
-    expect(json).toContain("warehouse");
+  it("returns all assets unchanged for blank or missing search", () => {
+    const assets = [asset({ id: "a1" }), asset({ id: "a2" })];
+    expect(filterBookingAssets(assets, "")).toEqual(assets);
+    expect(filterBookingAssets(assets, "   ")).toEqual(assets);
+    expect(filterBookingAssets(assets, undefined)).toEqual(assets);
   });
 
-  it("returns an empty array for blank search", () => {
-    expect(buildBookingAssetsSearchOR("   ")).toEqual([]);
+  it("matches title case-insensitively as a substring", () => {
+    const assets = [
+      asset({ id: "a1", title: "MacBook Pro" }),
+      asset({ id: "a2", title: "Dell Dock" }),
+    ];
+    const result = filterBookingAssets(assets, "book");
+    expect(result.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  it("matches sequentialId, tag, location, qr id, and barcode value", () => {
+    const assets = [
+      asset({ id: "seq", sequentialId: "SAM-0042" }),
+      asset({ id: "tag", tags: [{ name: "Fragile" }] }),
+      asset({ id: "loc", location: { name: "Warehouse A" } }),
+      asset({ id: "qr", qrCodes: [{ id: "qr-xyz" }] }),
+      asset({ id: "bar", barcodes: [{ value: "BC-999" }] }),
+      asset({ id: "none", title: "nothing" }),
+    ];
+    expect(filterBookingAssets(assets, "0042").map((a) => a.id)).toEqual([
+      "seq",
+    ]);
+    expect(filterBookingAssets(assets, "fragile").map((a) => a.id)).toEqual([
+      "tag",
+    ]);
+    expect(filterBookingAssets(assets, "warehouse").map((a) => a.id)).toEqual([
+      "loc",
+    ]);
+    expect(filterBookingAssets(assets, "qr-xyz").map((a) => a.id)).toEqual([
+      "qr",
+    ]);
+    expect(filterBookingAssets(assets, "bc-999").map((a) => a.id)).toEqual([
+      "bar",
+    ]);
+  });
+
+  it("treats commas as OR across terms", () => {
+    const assets = [
+      asset({ id: "a1", title: "laptop" }),
+      asset({ id: "a2", title: "dock" }),
+      asset({ id: "a3", title: "monitor" }),
+    ];
+    const result = filterBookingAssets(assets, "laptop, dock");
+    expect(result.map((a) => a.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("re-expands the whole kit when one of its assets matches", () => {
+    const assets = [
+      asset({ id: "k1", kitId: "kit-1", title: "Camera body" }),
+      asset({ id: "k2", kitId: "kit-1", title: "Tripod" }),
+      asset({ id: "solo", kitId: null, title: "Unrelated" }),
+    ];
+    // "camera" only matches k1, but its whole kit (k1 + k2) should surface.
+    const result = filterBookingAssets(assets, "camera");
+    expect(result.map((a) => a.id)).toEqual(["k1", "k2"]);
+  });
+
+  it("returns an empty array when nothing matches", () => {
+    const assets = [asset({ id: "a1", title: "laptop" })];
+    expect(filterBookingAssets(assets, "zzz")).toEqual([]);
+  });
+
+  it("preserves input order", () => {
+    const assets = [
+      asset({ id: "a3", title: "match three" }),
+      asset({ id: "a1", title: "match one" }),
+      asset({ id: "a2", title: "match two" }),
+    ];
+    const result = filterBookingAssets(assets, "match");
+    expect(result.map((a) => a.id)).toEqual(["a3", "a1", "a2"]);
   });
 });
