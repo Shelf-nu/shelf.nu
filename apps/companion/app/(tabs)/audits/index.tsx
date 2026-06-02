@@ -75,14 +75,23 @@ function AuditsListContent() {
   // their assignments regardless, and the effect below keeps their
   // (hidden) toggle pinned to true so visible state matches the server.
   const [assignedToMe, setAssignedToMe] = useState(false);
-  // Defensive: if the user's role changes mid-session to one that
-  // can't widen scope, snap the toggle back to true so the visible
-  // state matches what the server will actually return.
+  // Snap the toggle to "assigned to me" only once roles are KNOWN and the
+  // role genuinely can't widen scope (BASE/SELF_SERVICE), so the hidden
+  // toggle matches the server's forced scoping — and also catches a
+  // mid-session role downgrade.
+  //
+  // why gate on `rolesKnown`: on a cold mount `currentOrg?.roles` is briefly
+  // undefined, so `canWidenScope` is transiently false. Without this guard
+  // the effect would immediately flip an ADMIN/OWNER onto the assigned-only
+  // (often empty) list, and nothing flips it back once the real role arrives
+  // — re-creating the exact dead-end this screen's full-workspace default is
+  // meant to remove. (Codex review, PR #2583.)
+  const rolesKnown = Array.isArray(currentOrg?.roles);
   useEffect(() => {
-    if (!canWidenScope && !assignedToMe) {
+    if (rolesKnown && !canWidenScope && !assignedToMe) {
       setAssignedToMe(true);
     }
-  }, [canWidenScope, assignedToMe]);
+  }, [rolesKnown, canWidenScope, assignedToMe]);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   // why: the list re-fires on every status/scope toggle. Without
