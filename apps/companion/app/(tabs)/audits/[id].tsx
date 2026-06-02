@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -51,7 +51,8 @@ type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
  * Whether an asset-status filter is meaningful for an audit in the given
  * session status. A live (PENDING/ACTIVE) audit has Pending items but no
  * Missing ones; a COMPLETED audit is the reverse. Shared by the filter pills
- * and the effect that resets a now-hidden selection so the two never drift.
+ * and the derived `effectiveFilter` (which clamps a now-hidden selection) so
+ * the visible pills and the applied filter never drift.
  *
  * @param value - the filter being considered
  * @param status - the audit session status
@@ -117,18 +118,20 @@ function AuditDetailContent() {
   const [error, setError] = useState<string | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilterValue>("ALL");
 
-  // why: when the audit's status changes while this screen is open — it
-  // completes (here, or via another user + a focus refetch) or re-activates —
-  // a previously-selected filter can vanish from the pills (PENDING drops on
-  // completion, MISSING on re-activation). Left as-is, `filteredAssets()` then
-  // matches a status that no longer exists and shows an empty list with no
-  // active tab. Snap the selection back to "All" so it's always a visible
-  // pill. (Codex review, PR #2583.)
-  useEffect(() => {
-    if (audit && !isAssetFilterVisible(assetFilter, audit.status)) {
-      setAssetFilter("ALL");
-    }
-  }, [audit, assetFilter]);
+  // why: derive the *applied* filter rather than storing-then-resetting it.
+  // The user's raw `assetFilter` selection can become invalid when the audit's
+  // status changes while this screen is open — it completes (here, or via
+  // another user + a focus refetch) or re-activates — and a pill vanishes
+  // (PENDING drops on completion, MISSING on re-activation). Clamping to a
+  // still-visible value at render keeps the applied filter and the pills in
+  // lockstep with no effect at all — avoiding the state-syncing effect that
+  // both depended on and wrote `assetFilter` (and re-ran on every refetch via
+  // the `audit` object identity). When the filter becomes valid again the
+  // selection naturally reapplies. (Codex + DonKoko review, PR #2583.)
+  const effectiveFilter: AssetFilterValue =
+    audit && isAssetFilterVisible(assetFilter, audit.status)
+      ? assetFilter
+      : "ALL";
 
   // Progress bar animation
   const reduceMotion = useReducedMotion();
@@ -330,12 +333,12 @@ function AuditDetailContent() {
 
   const filteredAssets = useCallback((): DisplayAsset[] => {
     const all = displayAssets();
-    if (assetFilter === "ALL") return all;
+    if (effectiveFilter === "ALL") return all;
     // Statuses are now computed correctly per audit state (PENDING while
     // active, MISSING once completed), so a direct match is unambiguous —
     // no more Pending/Missing aliasing.
-    return all.filter((a) => a.status === assetFilter);
-  }, [displayAssets, assetFilter]);
+    return all.filter((a) => a.status === effectiveFilter);
+  }, [displayAssets, effectiveFilter]);
 
   // ── Render functions ──────────────────────────────────
 
@@ -501,8 +504,8 @@ function AuditDetailContent() {
   // Context-aware asset filters: a live audit has Pending items (not yet
   // Missing); a completed one has Missing items (no longer Pending). Showing
   // both at once was the source of two filters resolving to the same rows.
-  // Shares `isAssetFilterVisible` with the reset effect above so the pills and
-  // the selection-guard can never disagree.
+  // Shares `isAssetFilterVisible` with the derived `effectiveFilter` above so
+  // the visible pills and the applied selection can never disagree.
   const visibleFilters = ASSET_FILTERS.filter((f) =>
     isAssetFilterVisible(f.value, audit.status)
   );
@@ -837,7 +840,7 @@ function AuditDetailContent() {
                     key={f.value}
                     style={[
                       styles.filterPill,
-                      assetFilter === f.value && styles.filterPillActive,
+                      effectiveFilter === f.value && styles.filterPillActive,
                     ]}
                     onPress={() => {
                       Haptics.selectionAsync();
@@ -846,13 +849,14 @@ function AuditDetailContent() {
                     accessibilityLabel={`Filter: ${f.label}`}
                     accessibilityRole="tab"
                     accessibilityState={{
-                      selected: assetFilter === f.value,
+                      selected: effectiveFilter === f.value,
                     }}
                   >
                     <Text
                       style={[
                         styles.filterPillText,
-                        assetFilter === f.value && styles.filterPillTextActive,
+                        effectiveFilter === f.value &&
+                          styles.filterPillTextActive,
                       ]}
                     >
                       {f.label}
@@ -871,9 +875,9 @@ function AuditDetailContent() {
               color={colors.border}
             />
             <Text style={styles.emptyListText}>
-              {assetFilter === "ALL"
+              {effectiveFilter === "ALL"
                 ? "No assets in this audit"
-                : `No ${assetFilter.toLowerCase()} assets`}
+                : `No ${effectiveFilter.toLowerCase()} assets`}
             </Text>
           </View>
         }
