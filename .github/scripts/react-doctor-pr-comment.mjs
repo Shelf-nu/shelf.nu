@@ -30,7 +30,10 @@ import path from "node:path";
 
 const diagDir = process.argv[2];
 const exitCode = process.argv[3];
-const pathPrefix = process.argv[4] || "apps/webapp/";
+// Normalize to exactly one trailing slash so callers can pass either
+// "apps/companion" or "apps/companion/" without breaking the rendered links
+// (`${pathPrefix}${d.filePath}`) or the footer `cd` command.
+const pathPrefix = `${(process.argv[4] || "apps/webapp").replace(/\/+$/, "")}/`;
 
 /** App dir without a trailing slash, e.g. "apps/companion". */
 const appDir = pathPrefix.replace(/\/+$/, "");
