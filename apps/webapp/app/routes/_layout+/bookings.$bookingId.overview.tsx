@@ -29,8 +29,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import {
+  primeBookingOverviewCache,
+  readBookingOverviewCache,
+} from "~/modules/booking/booking-overview-client-cache";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
-import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
   archiveBooking,
   cancelBooking,
@@ -48,6 +52,7 @@ import {
   updateBasicBooking,
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
+import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -64,7 +69,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sortBookingAssets } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -96,6 +100,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { Route } from "./+types/bookings.$bookingId.overview";
 
 export type BookingPageLoaderData = typeof loader;
 
@@ -108,7 +113,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam, orderDirection } = paramsValues;
+  const { page, perPageParam, orderDirection, search } = paramsValues;
   // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
   const orderBy =
     paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
@@ -246,74 +251,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
-    // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
+    // `booking` already has full asset+kit light data; alias for clarity.
     const enhancedBooking = booking;
 
-    // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
-    // For other sort options, the database orderBy is sufficient
-    const isStatusSort = !orderBy || orderBy === "status";
-    if (isStatusSort) {
-      enhancedBooking.assets = sortBookingAssets(
-        enhancedBooking.assets,
-        partialCheckinDetails
-      );
-    }
+    // Derive all asset IDs and all kit IDs from the booking (no pagination yet).
+    const allBookingAssetIds = booking.assets.map((a) => a.id);
+    const allBookingKitIds = [
+      ...new Set(
+        booking.assets
+          .map((a) => a.kitId)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
 
-    // Use helper to group assets by kit and sort them
-    const sortedAssets = groupAndSortAssetsByKit(
-      enhancedBooking.assets,
-      orderBy,
-      orderDirection
-    );
-
-    // Convert sorted assets to pagination items (kits grouped, individual assets separate)
-    const paginationItems: Array<{
-      type: "kit" | "asset";
-      id: string;
-      assets: Array<(typeof enhancedBooking.assets)[0]>;
-    }> = [];
-
-    const processedKitIds = new Set<string>();
-    for (const asset of sortedAssets) {
-      if (asset.kitId && asset.kit) {
-        // Kit asset - group with other assets from same kit
-        if (!processedKitIds.has(asset.kitId)) {
-          processedKitIds.add(asset.kitId);
-          const kitAssets = sortedAssets.filter((a) => a.kitId === asset.kitId);
-          paginationItems.push({
-            type: "kit",
-            id: asset.kitId,
-            assets: kitAssets,
-          });
-        }
-      } else {
-        // Individual asset
-        paginationItems.push({
-          type: "asset",
-          id: asset.id,
-          assets: [asset],
-        });
-      }
-    }
-
-    // Calculate pagination
-    const totalPaginationItems = paginationItems.length;
-    const totalPages = Math.ceil(totalPaginationItems / perPage);
-    const skip = page > 1 ? (page - 1) * perPage : 0;
-    const paginatedItems = paginationItems.slice(skip, skip + perPage);
-
-    // Get all asset IDs from the current pagination page
-    const assetIdsToFetch = paginatedItems.flatMap((item) =>
-      item.assets.map((asset) => asset.id)
-    );
-
-    // Execute all necessary queries in parallel
+    // Execute all necessary queries in parallel. Asset + kit enrichment now
+    // covers ALL booking assets/kits (not just the current page) so the
+    // clientLoader can re-shape from cache without a server round-trip.
     const [
       teamMembersData,
       teamMembersForFormData,
-      assetDetails,
+      rawAssets,
       bookingFlags,
-      kits,
+      rawKits,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -344,14 +303,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
 
       /**
-       * Get detailed asset information with bookings for the paginated assets
+       * Enrich ALL booking assets (full booking, not just the current page) so
+       * the clientLoader can re-shape from cache.
+       * SECURITY (cross-org IDOR): scope to the caller's organizationId.
        */
       db.asset.findMany({
-        // SECURITY (cross-org IDOR): scope the asset fetch to the caller's
-        // organization so a foreign-org asset ID cannot be hydrated and
-        // surfaced in the booking overview.
         where: {
-          id: { in: assetIdsToFetch },
+          id: { in: allBookingAssetIds },
           organizationId,
         },
         include: {
@@ -359,6 +317,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
+          // Asset's pickup location — rendered in the booking Location column.
+          location: LOCATION_WITH_HIERARCHY,
           // Code-resolution relations — required for AssetCodeBadge on the
           // booking detail page rows. Scalar fields (sequentialId,
           // preferredBarcodeId) come in automatically via `include`; the
@@ -418,14 +378,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
       }),
 
-      /** Get kit details for the kits in the current page */
+      /**
+       * Enrich ALL booking kits (full booking, not just the current page) so
+       * the clientLoader can re-shape from cache.
+       */
       db.kit.findMany({
         where: {
-          id: {
-            in: paginatedItems
-              .filter((item) => item.type === "kit")
-              .map((item) => item.id),
-          },
+          id: { in: allBookingKitIds },
           organizationId,
         },
         include: {
@@ -441,27 +400,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // and `.claude/rules/code-bearing-entity-list-consistency.md`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
+          // Kit's pickup location — rendered on the kit row.
+          location: LOCATION_WITH_HIERARCHY,
           _count: { select: { assets: true } },
         },
       }),
     ]);
 
-    // Create maps for easy lookup
-    const assetDetailsMap = new Map(
-      assetDetails.map((asset) => [asset.id, asset])
-    );
-    const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
+    // Delegate filter → sort → group-by-kit → paginate to the shared pure
+    // shapeBookingAssets helper. The same function runs in clientLoader for
+    // subsequent navigations (no server round-trip).
+    const view = shapeBookingAssets({
+      rawAssets,
+      rawKits,
+      search,
+      orderBy,
+      orderDirection,
+      page,
+      perPage,
+      partialCheckinDetails,
+    });
 
-    // Enrich the paginated items with full asset details
-    const enrichedPaginatedItems = paginatedItems.map((item) => ({
-      ...item,
-      assets: item.assets.map((asset) => {
-        const details = assetDetailsMap.get(asset.id);
-        return details || asset;
-      }),
-      kit: item.type === "kit" ? kitsMap.get(item.id) : null,
-    }));
-
+    // Category options computed from the full booking (not just the current page).
     const assetCategories = enhancedBooking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
@@ -470,7 +430,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // Find the index of the first occurrence of this category ID
           index === self.findIndex((c) => c.id === category.id)
       );
-    const kitCategories = kits
+    // Kit categories derived from all rawKits (all kits, not just current page).
+    const kitCategories = rawKits
       .map((kit) => kit.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -518,32 +479,43 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking: enhancedBooking,
         modelName,
-        items: enrichedPaginatedItems,
+        // Shaped view for first paint (same field names the component reads):
+        items: view.items,
         page,
-        totalItems: totalPaginationItems,
-        totalPaginationItems,
+        totalItems: view.totalPaginationItems,
+        totalPaginationItems: view.totalPaginationItems,
         perPage,
-        totalPages,
+        totalPages: view.totalPages,
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
-        totalKits: paginationItems.filter((item) => item.type === "kit").length,
+        totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
         /** Assets inside the booking without kits */
-        assetsCount: paginationItems.filter((item) => item.type === "asset")
-          .length,
+        assetsCount: view.assetsCount,
         totalAssets: totalBookingAssets,
         allCategories,
         tags,
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
-        // Asset search tooltip
-        searchFieldLabel: "Search by asset name",
+        // Raw enriched data + shaping inputs so clientLoader can re-shape
+        // without a server round-trip on search/sort/pagination navigations.
+        rawAssets,
+        rawKits,
+        // Current search string so the search input pre-fills on first paint /
+        // hard refresh (SearchForm reads `search` from loader data).
+        search,
+        // Asset search label + tooltip listing searchable fields
+        searchFieldLabel: "Search assets & kits",
+        searchFieldTooltip: {
+          title: "Search booking items",
+          text: "Search the assets and kits in this booking. Separate keywords with a comma (,) to search with OR. Supported fields:\n- Name\n- Asset ID (SAM-id, assets only)\n- Category\n- Tags (assets only)\n- Location\n- QR code value\n- Barcode value",
+        },
         ...notifyData,
       }),
       {
@@ -555,6 +527,72 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * Client loader: makes search/sort/pagination instant by re-shaping the cached
+ * server response in the browser instead of revalidating the server loader.
+ *
+ * Runs on hydration (`hydrate = true`); during hydration `serverLoader()`
+ * returns the SSR'd data with no extra fetch. On a pure view-param navigation
+ * it re-shapes from cache (no network); otherwise (first load, post-mutation
+ * revalidation, non-view param change) it refetches from the server and
+ * re-primes the cache.
+ *
+ * @see {@link file://./../../modules/booking/booking-overview-client-cache.ts}
+ * @see {@link file://./../../modules/booking/shape-booking-assets.ts}
+ */
+export async function clientLoader({
+  request,
+  params,
+  serverLoader,
+}: Route.ClientLoaderArgs) {
+  const bookingId = params.bookingId as string;
+  const url = new URL(request.url);
+
+  const cached = readBookingOverviewCache(bookingId, url);
+  if (cached.hit) {
+    // The cached data is the full server-loader payload. We re-shape the view
+    // fields in the browser so search/sort/pagination navigations are instant.
+    const serverData = cached.data as Awaited<ReturnType<typeof serverLoader>>;
+    const paramsValues = getParamsValues(url.searchParams);
+    // Mirror the createdAt → status normalization from the server loader.
+    const orderBy =
+      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
+    const view = shapeBookingAssets({
+      rawAssets: serverData.rawAssets,
+      rawKits: serverData.rawKits,
+      search: paramsValues.search,
+      orderBy,
+      orderDirection: paramsValues.orderDirection,
+      page: paramsValues.page,
+      perPage: serverData.perPage,
+      partialCheckinDetails: serverData.partialCheckinDetails,
+    });
+    return {
+      ...serverData,
+      items: view.items,
+      // Override the view params so the pager/search UI stay in sync with the
+      // reshaped items (serverData holds the values from the initial load).
+      // perPage is intentionally not overridden — a per_page change is a cache
+      // miss (see CLIENT_VIEW_PARAM_KEYS), so serverData.perPage is current.
+      page: paramsValues.page,
+      search: paramsValues.search,
+      totalItems: view.totalPaginationItems,
+      totalPaginationItems: view.totalPaginationItems,
+      totalPages: view.totalPages,
+      totalKits: view.totalKits,
+      assetsCount: view.assetsCount,
+    };
+  }
+
+  // Cache miss: fetch from the server and prime the cache for subsequent
+  // view-only navigations.
+  const serverData = await serverLoader();
+  primeBookingOverviewCache(bookingId, url, serverData);
+  return serverData;
+}
+/** Run clientLoader on hydration so the cache is primed from the SSR data. */
+clientLoader.hydrate = true as const;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },

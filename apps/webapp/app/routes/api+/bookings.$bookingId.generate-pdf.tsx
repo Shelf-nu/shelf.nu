@@ -56,7 +56,7 @@ export const loader = async ({
       userId,
       role,
       request,
-      { orderBy, orderDirection }
+      { orderBy, orderDirection, search: paramsValues.search }
     );
 
     const dateTimeFormat = getDateTimeFormat(request, {
