@@ -1,3 +1,4 @@
+import { OrganizationRoles, type AssetIndexSettings } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -10,7 +11,9 @@ import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   bulkAssignAssetTags,
+  bulkAssignCustody,
   bulkDeleteAssets,
+  bulkReleaseCustody,
   bulkUpdateAssetCategory,
   getActiveCustomFieldsForAsset,
   parseAssetValuation,
@@ -45,6 +48,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
+    },
+    teamMember: {
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
   },
 }));
@@ -851,5 +857,58 @@ describe("bulkDeleteAssets", () => {
     });
 
     expect(recordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
+  // Settings are unused before the guard throws (asset-id resolution is mocked).
+  const fakeSettings = {} as unknown as AssetIndexSettings;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks a SELF_SERVICE user from assigning custody to someone else", async () => {
+    // why: the custodian resolves to a DIFFERENT user than the caller.
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      { name: "Other Person", user: { id: "other-user" } }
+    );
+
+    await expect(
+      bulkAssignCustody({
+        userId: "me",
+        role: OrganizationRoles.SELF_SERVICE,
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: fakeSettings,
+      })
+    ).rejects.toThrow("Self user can only assign custody to themselves only");
+
+    // The mutation must never run.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks a SELF_SERVICE user from releasing someone else's custody", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        custody: { id: "c1", custodian: { userId: "other-user" } },
+      },
+    ]);
+
+    await expect(
+      bulkReleaseCustody({
+        userId: "me",
+        role: OrganizationRoles.SELF_SERVICE,
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        settings: fakeSettings,
+      })
+    ).rejects.toThrow(
+      "Self service user can only release custody of assets assigned to their user"
+    );
   });
 });

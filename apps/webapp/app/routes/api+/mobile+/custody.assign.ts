@@ -80,6 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await bulkAssignCustody({
       userId: user.id,
+      role,
       assetIds: [assetId],
       custodianId,
       custodianName: teamMember.name,

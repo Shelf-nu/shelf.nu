@@ -443,6 +443,10 @@ describe("buildCsvExportDataFromBookings", () => {
       "Description",
       "Tags",
       "Assets",
+      "Item check-in status",
+      "Check-in date",
+      "Checked in",
+      "Total assets",
     ]);
 
     expect(bookingRow[0]).toBe('"http://localhost:3000/bookings/booking-1"');
@@ -460,6 +464,60 @@ describe("buildCsvExportDataFromBookings", () => {
         expect(value).toBe('""');
       }
     });
+  });
+
+  it("marks each asset checked in/out and rolls up the booking count", () => {
+    // why: an OVERDUE booking where one of two assets has been partially
+    // checked in — exercises the per-asset status/date columns and the
+    // booking-level rollup against real partial check-in input.
+    const checkinDate = new Date("2024-01-05T09:30:00Z");
+    const booking = {
+      id: "booking-2",
+      name: "Field shoot",
+      status: "OVERDUE",
+      from: new Date("2024-01-02T03:04:00Z"),
+      originalFrom: undefined,
+      to: new Date("2024-01-03T03:04:00Z"),
+      originalTo: undefined,
+      custodianTeamMember: { name: "Custodian", user: null },
+      custodianUser: null,
+      description: "",
+      tags: [],
+      assets: [
+        { id: "asset-returned", title: "Returned Camera" },
+        { id: "asset-out", title: "Still-Out Tripod" },
+      ],
+    };
+
+    const checkinsByBooking = new Map([
+      [
+        "booking-2",
+        {
+          checkedInAssetIds: new Set(["asset-returned"]),
+          checkinDateByAsset: new Map([["asset-returned", checkinDate]]),
+        },
+      ],
+    ]);
+
+    const [, mainRow, assetRow] = buildCsvExportDataFromBookings(
+      [booking as any],
+      baseRequest,
+      checkinsByBooking
+    );
+
+    // Main row carries the first (returned) asset + booking-level rollup.
+    expect(mainRow[11]).toBe('"Returned Camera"');
+    expect(mainRow[12]).toBe('"Checked in"');
+    expect(mainRow[13]).not.toBe('""'); // a formatted check-in date is present
+    expect(mainRow[14]).toBe('"1"'); // checked in
+    expect(mainRow[15]).toBe('"2"'); // total assets
+
+    // Trailing asset row carries the still-out asset; booking-level columns blank.
+    expect(assetRow[11]).toBe('"Still-Out Tripod"');
+    expect(assetRow[12]).toBe('"Checked out"');
+    expect(assetRow[13]).toBe('""'); // no check-in date for an item still out
+    expect(assetRow[14]).toBe('""'); // booking rollup not repeated on asset rows
+    expect(assetRow[15]).toBe('""');
   });
 });
 

@@ -56,6 +56,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await bulkReleaseCustody({
       userId: user.id,
+      role,
       assetIds,
       organizationId,
       currentSearchParams: "",

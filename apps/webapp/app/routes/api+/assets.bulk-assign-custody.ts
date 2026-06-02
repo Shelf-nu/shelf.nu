@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
 import { bulkAssignCustody } from "~/modules/asset/service.server";
@@ -48,11 +47,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
 
-    // Validate that the custodian belongs to the same organization
-    const teamMember = await getTeamMember({
+    // Validate that the custodian belongs to the same organization (early 404).
+    // The SELF_SERVICE self-restriction itself is enforced inside the service.
+    await getTeamMember({
       id: custodian.id,
       organizationId,
-      select: { id: true, userId: true },
+      select: { id: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -70,23 +70,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
-      throw new ShelfError({
-        cause: null,
-        title: "Action not allowed",
-        message: "Self user can only assign custody to themselves only.",
-        additionalData: { userId, assetIds, custodian },
-        label: "Assets",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
-
+    // SELF_SERVICE self-restriction is enforced inside bulkAssignCustody so
+    // web and mobile share one implementation.
     await bulkAssignCustody({
       userId,
+      role,
       assetIds,
       custodianId: custodian.id,
       custodianName: custodian.name,

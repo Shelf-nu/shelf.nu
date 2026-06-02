@@ -148,10 +148,12 @@ function AuditScannerContent() {
   // Callback for when scan is synced - updates React state with auditAssetId
   const handleScanSynced = useCallback(
     (assetId: string, auditAssetId: string) => {
-      // Update the scanned items list
+      // Update the scanned items list (clear any prior sync-failed marker)
       setScannedItemsRef.current?.((prev) =>
         prev.map((item) =>
-          item.assetId === assetId ? { ...item, auditAssetId } : item
+          item.assetId === assetId
+            ? { ...item, auditAssetId, syncFailed: false }
+            : item
         )
       );
       // Also update selectedItem if evidence modal is open for this asset
@@ -162,12 +164,29 @@ function AuditScannerContent() {
     []
   );
 
-  const { scanQueueRef, enqueueScan, processQueue, retryTimerRef } =
-    useScanQueue({
-      orgId: currentOrg?.id,
-      scannedItemsRef: stableScannedItemsRef,
-      onScanSynced: handleScanSynced,
-    });
+  // Callback for when a scan exhausts its retries — surface it in the list so
+  // the worker sees it never reached the server (and completion is blocked).
+  const handleScanFailed = useCallback((assetId: string) => {
+    setScannedItemsRef.current?.((prev) =>
+      prev.map((item) =>
+        item.assetId === assetId ? { ...item, syncFailed: true } : item
+      )
+    );
+  }, []);
+
+  const {
+    scanQueueRef,
+    failedQueueRef,
+    enqueueScan,
+    processQueue,
+    retryFailedScans,
+    retryTimerRef,
+  } = useScanQueue({
+    orgId: currentOrg?.id,
+    scannedItemsRef: stableScannedItemsRef,
+    onScanSynced: handleScanSynced,
+    onScanFailed: handleScanFailed,
+  });
 
   // ── Audit init (extracted hook) ─────────────────────
 
@@ -283,12 +302,33 @@ function AuditScannerContent() {
         clearTimeout(frameHighlightTimer.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-      // Normal exit — clear persisted state (crash recovery not needed)
-      debouncedSaverRef.current?.cancel();
+      // On exit, only clear persisted state if EVERYTHING has synced. If any
+      // scans are still pending or failed, flush the latest snapshot and KEEP
+      // it — clearing here would discard scans the worker saw as "Found",
+      // which the server then marks MISSING on completion.
+      const hasUnsyncedScans =
+        scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0;
+      if (auditId && hasUnsyncedScans) {
+        debouncedSaverRef.current?.flush(
+          scannedItemsRef.current,
+          scanQueueRef.current,
+          failedQueueRef.current
+        );
+      } else {
+        debouncedSaverRef.current?.cancel();
+        if (auditId) clearAuditScanState(auditId);
+      }
       /* eslint-enable react-hooks/exhaustive-deps */
-      if (auditId) clearAuditScanState(auditId);
     };
-  }, [auditId, toastTimerRef, retryTimerRef, debouncedSaverRef]);
+  }, [
+    auditId,
+    toastTimerRef,
+    retryTimerRef,
+    debouncedSaverRef,
+    scanQueueRef,
+    failedQueueRef,
+    scannedItemsRef,
+  ]);
 
   // ── Helpers ──────────────────────────────────────────
 
@@ -465,7 +505,8 @@ function AuditScannerContent() {
         // 6. Persist to disk for crash recovery (debounced)
         debouncedSaverRef.current?.save(
           scannedItemsRef.current,
-          scanQueueRef.current
+          scanQueueRef.current,
+          failedQueueRef.current
         );
 
         finalizeScan();
@@ -496,6 +537,7 @@ function AuditScannerContent() {
       setUnexpectedCount,
       debouncedSaverRef,
       scanQueueRef,
+      failedQueueRef,
       shouldSkipScan,
       lastScanRef,
     ]
@@ -503,11 +545,57 @@ function AuditScannerContent() {
 
   // ── Complete audit ───────────────────────────────────
 
-  const handleComplete = useCallback(() => {
+  // Performs the actual completion request + cleanup. Extracted so it can be
+  // reached both from the normal confirm and the "complete anyway" path.
+  const runCompletion = useCallback(async () => {
     if (!auditId || !currentOrg) return;
 
-    const remaining = expectedTotal - foundCount;
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    })();
 
+    const { error: err } = await api.completeAudit(currentOrg.id, {
+      sessionId: auditId,
+      timeZone,
+    });
+
+    if (err) {
+      // Completion failed — KEEP recovery state so nothing is lost.
+      Alert.alert("Error", err);
+      return;
+    }
+
+    // Server accepted completion — only now is it safe to drop the local
+    // recovery snapshot. Clear the in-memory queues too (in place): otherwise
+    // the unmount cleanup would see a non-empty failedQueue on navigate-back and
+    // re-flush a recovery snapshot for an audit that is already completed.
+    debouncedSaverRef.current?.cancel();
+    scanQueueRef.current.length = 0;
+    failedQueueRef.current.length = 0;
+    await clearAuditScanState(auditId);
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    playScanSound();
+    Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
+      { text: "OK", onPress: () => router.back() },
+    ]);
+  }, [
+    auditId,
+    currentOrg,
+    auditName,
+    router,
+    debouncedSaverRef,
+    scanQueueRef,
+    failedQueueRef,
+  ]);
+
+  // Standard confirm: warns how many expected assets will be marked missing.
+  const confirmAndComplete = useCallback(() => {
+    const remaining = expectedTotal - foundCount;
     Alert.alert(
       "Complete Audit",
       remaining > 0
@@ -517,52 +605,65 @@ function AuditScannerContent() {
         : `Complete "${auditName}"?\n\nAll expected assets have been found.`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Complete",
-          onPress: async () => {
-            // Clear crash recovery state — audit is being completed
-            debouncedSaverRef.current?.cancel();
-            await clearAuditScanState(auditId);
-
-            const timeZone = (() => {
-              try {
-                return (
-                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-                );
-              } catch {
-                return "UTC";
-              }
-            })();
-
-            const { error: err } = await api.completeAudit(currentOrg.id, {
-              sessionId: auditId,
-              timeZone,
-            });
-
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            playScanSound();
-            Alert.alert(
-              "Audit Complete",
-              `"${auditName}" has been completed.`,
-              [{ text: "OK", onPress: () => router.back() }]
-            );
-          },
-        },
+        { text: "Complete", onPress: runCompletion },
       ]
     );
+  }, [auditName, expectedTotal, foundCount, runCompletion]);
+
+  const handleComplete = useCallback(() => {
+    if (!auditId || !currentOrg) return;
+
+    // Scans still actively retrying (transient failures). Completing now would
+    // mark these locally-"Found" assets MISSING on the server, so ask the
+    // worker to wait while syncing continues.
+    const pendingCount = scanQueueRef.current.length;
+    if (pendingCount > 0) {
+      processQueue();
+      Alert.alert(
+        "Scans still syncing",
+        `${pendingCount} scan${pendingCount === 1 ? "" : "s"} ${
+          pendingCount === 1 ? "is" : "are"
+        } still syncing. Stay on this screen with an internet connection, ` +
+          `then complete again.`
+      );
+      return;
+    }
+
+    // Scans that exhausted their retries. These may be permanent failures (an
+    // asset deleted or moved to another workspace returns a 404 that will never
+    // succeed), so we must NOT trap the audit. Offer to retry or to complete
+    // anyway (acknowledging those assets will be marked missing).
+    const failedCount = failedQueueRef.current.length;
+    if (failedCount > 0) {
+      Alert.alert(
+        "Some scans didn't sync",
+        `${failedCount} scan${
+          failedCount === 1 ? "" : "s"
+        } couldn't be saved ` +
+          `to the server after several tries. Retry, or complete anyway ` +
+          `(${failedCount === 1 ? "it" : "they"} will be marked as missing).`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Retry sync", onPress: retryFailedScans },
+          {
+            text: "Complete anyway",
+            style: "destructive",
+            onPress: confirmAndComplete,
+          },
+        ]
+      );
+      return;
+    }
+
+    confirmAndComplete();
   }, [
     auditId,
     currentOrg,
-    auditName,
-    expectedTotal,
-    foundCount,
-    router,
-    debouncedSaverRef,
+    scanQueueRef,
+    failedQueueRef,
+    processQueue,
+    retryFailedScans,
+    confirmAndComplete,
   ]);
 
   // ── Remaining assets (expected but not yet scanned) ──

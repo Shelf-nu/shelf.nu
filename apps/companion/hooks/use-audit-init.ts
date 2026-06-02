@@ -21,6 +21,11 @@ export type ScannedItem = {
   notesCount?: number;
   /** Local count of photos added during this session (optimistic). */
   imagesCount?: number;
+  /**
+   * True when this scan exhausted its sync retries and has not yet reached the
+   * server. Surfaced in the UI and blocks audit completion until re-synced.
+   */
+  syncFailed?: boolean;
 };
 
 export type ScanQueueEntry = {
@@ -159,9 +164,20 @@ export function useAuditInit({
         const recoveredItems = persisted.scannedItems.filter(
           (item) => !serverScannedIds.has(item.assetId)
         );
+        // Re-sync BOTH still-pending scans and scans that previously exhausted
+        // their retries (failedQueue). Without the failedQueue, a scan dropped
+        // after max retries would be merged back into the list as "found" but
+        // never re-submitted — and then marked MISSING on completion.
         const pendingQueue = persisted.pendingQueue || [];
+        const failedQueue = persisted.failedQueue || [];
+        // Exclude anything the server already has: a crash after recordAuditScan
+        // succeeded but before the queue-removal snapshot persisted could leave a
+        // stale entry on disk; re-submitting it would double-record the scan.
+        const queuedForSync = [...pendingQueue, ...failedQueue].filter(
+          (entry) => !serverScannedIds.has(entry.assetId)
+        );
 
-        if (recoveredItems.length > 0 || pendingQueue.length > 0) {
+        if (recoveredItems.length > 0 || queuedForSync.length > 0) {
           // Show recovery dialog (don't block init)
           setIsInitializing(false);
           Alert.alert(
@@ -188,9 +204,9 @@ export function useAuditInit({
                   setScannedItems(merged);
                   scannedItemsRef.current = merged;
 
-                  // Requeue pending items for submission
-                  if (pendingQueue.length > 0) {
-                    scanQueueRef.current = pendingQueue.map((e) => ({
+                  // Requeue pending + previously-failed items for submission
+                  if (queuedForSync.length > 0) {
+                    scanQueueRef.current = queuedForSync.map((e) => ({
                       ...e,
                       retryCount: 0,
                     }));
