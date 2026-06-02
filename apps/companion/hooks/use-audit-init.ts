@@ -207,13 +207,35 @@ export function useAuditInit({
               {
                 text: "Resume",
                 onPress: () => {
+                  // A queued scan may have no recovered display item — the
+                  // eager persist can save a queue entry before the list state
+                  // commits. Rebuild display rows for those (name from the
+                  // expected-asset map, else a neutral label) so they show as
+                  // scanned, count correctly, and don't leave the Complete
+                  // button hidden because scannedItems stayed empty. (Codex
+                  // review, PR #2586.)
+                  const recoveredIds = new Set(
+                    recoveredItems.map((i) => i.assetId)
+                  );
+                  const queuedOnlyItems: ScannedItem[] = queuedForSync
+                    .filter((e) => !recoveredIds.has(e.assetId))
+                    .map((e) => ({
+                      assetId: e.assetId,
+                      name:
+                        expectedAssetMapRef.current.get(e.assetId)?.name ??
+                        "Scanned asset",
+                      isExpected: e.isExpected,
+                      scannedAt: new Date().toISOString(),
+                    }));
+                  const allRecovered = [...recoveredItems, ...queuedOnlyItems];
+
                   // Merge recovered items into state
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     scannedIds.add(item.assetId);
                   }
                   scannedAssetIdsRef.current = scannedIds;
 
-                  const merged = [...recoveredItems, ...restoredItems];
+                  const merged = [...allRecovered, ...restoredItems];
                   setScannedItems(merged);
                   scannedItemsRef.current = merged;
 
@@ -230,7 +252,7 @@ export function useAuditInit({
                   // Recalculate counters
                   let extraFound = 0;
                   let extraUnexpected = 0;
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     if (item.isExpected) extraFound++;
                     else extraUnexpected++;
                   }
@@ -243,8 +265,8 @@ export function useAuditInit({
                   }
 
                   announce(
-                    `Resumed ${recoveredItems.length} scan${
-                      recoveredItems.length !== 1 ? "s" : ""
+                    `Resumed ${allRecovered.length} scan${
+                      allRecovered.length !== 1 ? "s" : ""
                     } from previous session`
                   );
                 },
