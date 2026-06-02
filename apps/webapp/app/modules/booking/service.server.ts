@@ -87,7 +87,6 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
-  getBookingAssetsOrderBy,
   hasAssetBookingConflicts,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
@@ -3860,6 +3859,91 @@ export async function deleteBooking(
   }
 }
 
+/**
+ * Builds the organization-scoping `where` clause for a single-booking lookup:
+ * the booking must belong to the caller's active org, or to another org the
+ * caller is a member of (so cross-org booking links keep working). Shared by
+ * {@link getBooking} and {@link getBookingHeaderData} so their authorization is
+ * provably identical.
+ *
+ * @see .claude/rules/org-scope-user-supplied-ids.md
+ */
+function bookingOrgScopeWhere({
+  id,
+  organizationId,
+  userOrganizations,
+}: {
+  id: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+}): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { id, organizationId },
+      ...(userOrganizations?.length
+        ? [
+            {
+              id,
+              organizationId: {
+                in: userOrganizations.map((org) => org.organizationId),
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+/**
+ * Enforces the cross-org access rule after a scoped booking lookup: if the
+ * booking belongs to a different org that the caller can only reach via
+ * membership (not their active org), throw a 404 carrying redirect info. Shared
+ * by {@link getBooking} and {@link getBookingHeaderData} so the cross-org
+ * behavior cannot drift between them.
+ *
+ * @throws {ShelfError} 404 with cross-org redirect data
+ */
+function assertBookingInActiveOrg({
+  bookingFound,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  bookingFound: Pick<Booking, "organizationId">;
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}): void {
+  if (
+    userOrganizations?.length &&
+    bookingFound.organizationId !== organizationId &&
+    userOrganizations.some(
+      (org) => org.organizationId === bookingFound.organizationId
+    )
+  ) {
+    const redirectTo =
+      typeof request !== "undefined"
+        ? getRedirectUrlFromRequest(request)
+        : undefined;
+
+    throw new ShelfError({
+      cause: null,
+      title: "Booking not found",
+      message: "",
+      additionalData: {
+        model: "booking",
+        organization: userOrganizations.find(
+          (org) => org.organizationId === bookingFound.organizationId
+        ),
+        redirectTo,
+      },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
 export async function getBooking<T extends Prisma.BookingInclude | undefined>(
   booking: Pick<Booking, "id" | "organizationId"> & {
     userOrganizations?: Pick<UserOrganization, "organizationId">[];
@@ -3871,104 +3955,35 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
     const { id, organizationId, userOrganizations, request, extraInclude } =
       booking;
 
-    // Extract search parameters from request
-    const searchParams = getCurrentSearchParams(request);
-    const paramsValues = getParamsValues(searchParams);
-    const { search, orderBy, orderDirection } = paramsValues;
-    // const status =
-    //   searchParams.get("status") === "ALL"
-    //     ? null
-    //     : (searchParams.get("status") as AssetStatus | null);
-
-    // Get dynamic orderBy based on URL params
-    const assetsOrderBy = getBookingAssetsOrderBy(orderBy, orderDirection);
-
     /**
-     * On the booking page, we need some data related to the assets added, so we know what actions are possible
+     * Asset search-filtering and sorting are intentionally NOT applied here.
+     * They are page concerns handled in-memory by the consuming route (the
+     * overview loader and the PDF export) via `filterBookingAssets` and
+     * `groupAndSortAssetsByKit`. Keeping them out of this shared fetch means
+     * every caller (manage-assets, duplicate, cal.ics, activity, the layout,
+     * …) receives the booking's FULL asset list in the stable `createdAt asc`
+     * base order defined on `BOOKING_WITH_ASSETS_INCLUDE.assets.orderBy` —
+     * previously the page's `?s=` / `?orderBy=` leaked into all of them.
      *
-     * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
-     * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
+     * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
      */
-
-    // Build assets include with optional search, status filtering, and dynamic sorting
-    const assetsWhere: Prisma.AssetWhereInput = {};
-
-    if (search) {
-      // Match the asset's title OR any of its codes (QR id, barcode value)
-      // so a field worker can find an asset in a booking by the same string
-      // that's printed on the physical label.
-      assetsWhere.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        {
-          qrCodes: { some: { id: { contains: search, mode: "insensitive" } } },
-        },
-        {
-          barcodes: {
-            some: { value: { contains: search, mode: "insensitive" } },
-          },
-        },
-      ];
-    }
-
-    // if (status) {
-    //   assetsWhere.status = status;
-    // }
-
-    const assetsInclude: Prisma.BookingInclude["assets"] = {
-      select: BOOKING_WITH_ASSETS_INCLUDE.assets.select,
-      orderBy: assetsOrderBy,
-      ...(Object.keys(assetsWhere).length > 0 && { where: assetsWhere }),
-    };
-
     const mergedInclude = {
       ...BOOKING_WITH_ASSETS_INCLUDE,
-      assets: assetsInclude,
       ...extraInclude,
     } as MergeInclude<typeof BOOKING_WITH_ASSETS_INCLUDE, T>;
 
-    const otherOrganizationIds = userOrganizations?.map(
-      (org) => org.organizationId
-    );
-
     const bookingFound = (await db.booking.findFirstOrThrow({
-      where: {
-        OR: [
-          { id, organizationId },
-          ...(userOrganizations?.length
-            ? [{ id, organizationId: { in: otherOrganizationIds } }]
-            : []),
-        ],
-      },
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
       include: mergedInclude,
     })) as BookingWithExtraInclude<T>;
 
-    /* User is accessing the asset in the wrong organization. */
-    if (
-      userOrganizations?.length &&
-      bookingFound.organizationId !== organizationId &&
-      otherOrganizationIds?.includes(bookingFound.organizationId)
-    ) {
-      const redirectTo =
-        typeof request !== "undefined"
-          ? getRedirectUrlFromRequest(request)
-          : undefined;
-
-      throw new ShelfError({
-        cause: null,
-        title: "Booking not found",
-        message: "",
-        additionalData: {
-          model: "booking",
-          organization: userOrganizations?.find(
-            (org) => org.organizationId === bookingFound.organizationId
-          ),
-          redirectTo,
-        },
-        label,
-        status: 404,
-        shouldBeCaptured: false,
-      });
-    }
+    /* User is accessing the booking in the wrong organization. */
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
 
     return bookingFound;
   } catch (cause) {
@@ -3981,6 +3996,81 @@ export async function getBooking<T extends Prisma.BookingInclude | undefined>(
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: {
         ...booking,
+        ...(isShelfError ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: isShelfError
+        ? cause.shouldBeCaptured
+        : !isNotFoundError(cause),
+    });
+  }
+}
+
+/**
+ * Lightweight booking fetch for the booking layout header.
+ *
+ * Returns only the scalar fields the header needs — it does NOT load the
+ * booking's assets/relations — but applies the EXACT same organization-scoping
+ * and cross-org redirect behavior as {@link getBooking}, so authorization is
+ * identical. Use this instead of `getBooking` anywhere the full asset list is
+ * not needed (e.g. the `bookings.$bookingId` layout route, which previously
+ * loaded every booking asset just to render the title/status).
+ *
+ * @param args.id - The booking id (from route params)
+ * @param args.organizationId - The caller's active organization id
+ * @param args.userOrganizations - The caller's org memberships, to allow
+ *   viewing a booking from another org the user belongs to (cross-org link)
+ * @param args.request - The request, used to build the cross-org redirect URL
+ * @returns The booking's header fields (id, name, status, from, to,
+ *   custodianUserId, organizationId)
+ * @throws {ShelfError} 404 when the booking is not found or not accessible
+ */
+export async function getBookingHeaderData({
+  id,
+  organizationId,
+  userOrganizations,
+  request,
+}: {
+  id: Booking["id"];
+  organizationId: Booking["organizationId"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+}) {
+  try {
+    const bookingFound = await db.booking.findFirstOrThrow({
+      // Same org-scoping as getBooking (shared helper), but a minimal select.
+      where: bookingOrgScopeWhere({ id, organizationId, userOrganizations }),
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        from: true,
+        to: true,
+        custodianUserId: true,
+        organizationId: true,
+      },
+    });
+
+    /* User is accessing the booking in the wrong organization. */
+    assertBookingInActiveOrg({
+      bookingFound,
+      organizationId,
+      userOrganizations,
+      request,
+    });
+
+    return bookingFound;
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      title: "Booking not found",
+      message:
+        "The booking you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
         ...(isShelfError ? cause.additionalData : {}),
       },
       label,

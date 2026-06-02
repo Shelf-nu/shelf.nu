@@ -26,7 +26,7 @@ import {
 } from "~/components/shared/tooltip";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getBooking } from "~/modules/booking/service.server";
+import { getBookingHeaderData } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import type { RouteHandleWithName } from "~/modules/types";
 
@@ -39,6 +39,7 @@ import {
   payload,
   getCurrentSearchParams,
 } from "~/utils/http.server";
+import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
 import {
   PermissionAction,
   PermissionEntity,
@@ -82,7 +83,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const booking = await getBooking({
+    const booking = await getBookingHeaderData({
       id: bookingId,
       organizationId: organizationId,
       userOrganizations,
@@ -106,6 +107,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
 ];
+
+/**
+ * The overview child does its own client-side search/sort/pagination via
+ * clientLoader. This layout's data (booking name/status for the header) does
+ * not depend on those view params, so skip re-running getBooking — which loads
+ * all booking assets — on a client-view-only navigation. Mutations and real
+ * navigations still revalidate.
+ */
+export const shouldRevalidate = skipRevalidationOnClientViewChange;
 
 export default function AssetDetailsPage() {
   const name = useAtomValue(dynamicTitleAtom);
@@ -154,7 +164,7 @@ export default function AssetDetailsPage() {
               </div>
             }
             slots={{
-              "right-of-title": <AddToCalendar />,
+              "right-of-title": <AddToCalendar booking={booking} />,
             }}
           />
           <HorizontalTabs items={items} />
@@ -167,9 +177,13 @@ export default function AssetDetailsPage() {
   );
 }
 
-const AddToCalendar = () => {
+const AddToCalendar = ({
+  booking,
+}: {
+  /** Only the booking status is needed to decide if the action is allowed. */
+  booking: { status: BookingStatus };
+}) => {
   const disabled = useDisabled();
-  const { booking } = useLoaderData<typeof loader>();
   const isArchived = booking.status === BookingStatus.ARCHIVED;
   return (
     <div className="absolute right-4 top-3">
@@ -190,7 +204,9 @@ const AddToCalendar = () => {
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p className="text-xs">
-              {disabled
+              {isArchived
+                ? "Archived bookings can't be added to a calendar"
+                : disabled
                 ? "Not possible to add to calendar due to booking status"
                 : "Download this booking as a calendar event"}
             </p>

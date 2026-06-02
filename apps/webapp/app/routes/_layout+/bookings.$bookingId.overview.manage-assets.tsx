@@ -106,6 +106,8 @@ export type AssetWithBooking = Asset & {
   tags: Pick<Tag, "id" | "name" | "color">[];
   kitId?: string | null;
   qrScanned: string;
+  // Pickup location rendered in the booking Location column.
+  location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
   // Fields required by `resolveDisplayCode` for the asset-code badge.
   // Loader-included relations — see `ASSET_CODE_RESOLUTION_SELECT` and
   // `BOOKING_WITH_ASSETS_INCLUDE`.

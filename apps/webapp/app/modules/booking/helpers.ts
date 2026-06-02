@@ -1,32 +1,15 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
-
-/**
- * Generates dynamic Prisma orderBy clause for booking assets
- * @param orderBy - The field to sort by (status, title, category, kit)
- * @param orderDirection - The sort direction (asc or desc)
- * @returns Array of Prisma orderBy inputs
- */
-export function getBookingAssetsOrderBy(
-  orderBy: string = "status",
-  orderDirection: "asc" | "desc" = "desc"
-): Prisma.AssetOrderByWithRelationInput[] {
-  const orderByMap: Record<string, Prisma.AssetOrderByWithRelationInput[]> = {
-    status: [{ status: orderDirection }, { createdAt: "asc" }],
-    title: [{ title: orderDirection }],
-    category: [{ category: { name: orderDirection } }],
-  };
-  return orderByMap[orderBy] || orderByMap.status;
-}
 
 type AssetWithKit = {
   id: string;
   title: string;
   status: string;
   kitId: string | null;
-  kit: { name: string } | null;
+  kit: { name: string; location?: { name: string } | null } | null;
   category: { name: string } | null;
+  location?: { name: string } | null;
   [key: string]: unknown;
 };
 
@@ -35,7 +18,7 @@ type AssetWithKit = {
  * Returns: sorted kit assets (grouped) followed by sorted individual assets.
  *
  * @param assets - Array of assets with kit information
- * @param orderBy - Field to sort by (status, title, category, kit)
+ * @param orderBy - Field to sort by (status, title, category, location)
  * @param orderDirection - Sort direction (asc or desc)
  * @returns Sorted array with kit assets grouped together
  */
@@ -57,11 +40,18 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
   }
 
   // Group kit assets by kitId
-  const kitGroups = new Map<string, { kitName: string; assets: T[] }>();
+  const kitGroups = new Map<
+    string,
+    { kitName: string; kitLocationName: string | null; assets: T[] }
+  >();
   for (const asset of kitAssets) {
     const kitId = asset.kitId!;
     if (!kitGroups.has(kitId)) {
-      kitGroups.set(kitId, { kitName: asset.kit!.name, assets: [] });
+      kitGroups.set(kitId, {
+        kitName: asset.kit!.name,
+        kitLocationName: asset.kit!.location?.name ?? null,
+        assets: [],
+      });
     }
     kitGroups.get(kitId)!.assets.push(asset);
   }
@@ -82,6 +72,15 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
         if (!catA && !catB) return a.title.localeCompare(b.title);
         // At this point both catA and catB are defined (handled above)
         return multiplier * catA!.localeCompare(catB!);
+      }
+      case "location": {
+        const locA = a.location?.name;
+        const locB = b.location?.name;
+        // Null locations go to the end regardless of direction
+        if (!locA && locB) return 1;
+        if (locA && !locB) return -1;
+        if (!locA && !locB) return a.title.localeCompare(b.title);
+        return multiplier * locA!.localeCompare(locB!);
       }
       case "status":
       default: {
@@ -133,6 +132,16 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
             return groupA.kitName.localeCompare(groupB.kitName);
           // At this point both catA and catB are defined (handled above)
           return multiplier * catA!.localeCompare(catB!);
+        }
+        case "location": {
+          const locA = groupA.kitLocationName;
+          const locB = groupB.kitLocationName;
+          // Null locations go to the end regardless of direction
+          if (!locA && locB) return 1;
+          if (locA && !locB) return -1;
+          if (!locA && !locB)
+            return groupA.kitName.localeCompare(groupB.kitName);
+          return multiplier * locA!.localeCompare(locB!);
         }
         case "status":
         default: {
@@ -271,4 +280,119 @@ export function isAssetAlreadyBooked(
   currentBookingId: string
 ): boolean {
   return hasAssetBookingConflicts(asset, currentBookingId);
+}
+
+/**
+ * Minimal asset shape needed for in-memory booking search. Mirrors the fields
+ * selected by `BOOKING_WITH_ASSETS_INCLUDE.assets.select`. Relation fields are
+ * optional/nullable to allow structural subtyping against the richer Prisma
+ * asset payload.
+ *
+ * @see {@link file://./constants.ts} BOOKING_WITH_ASSETS_INCLUDE.assets.select
+ */
+export type SearchableBookingAsset = {
+  id: string;
+  kitId: string | null;
+  title: string;
+  sequentialId?: string | null;
+  category?: { name: string } | null;
+  tags?: { name: string }[] | null;
+  location?: { name: string } | null;
+  qrCodes?: { id: string }[] | null;
+  barcodes?: { value: string }[] | null;
+  kit?: {
+    name?: string | null;
+    location?: { name: string } | null;
+    category?: { name: string } | null;
+  } | null;
+};
+
+/**
+ * Splits a raw search string into lowercased, trimmed, non-empty terms.
+ * Commas separate terms (comma = OR).
+ *
+ * @param search - Raw search string from the `s` query param
+ * @returns Array of normalized terms (empty if the input is blank)
+ */
+function parseBookingSearchTerms(search: string): string[] {
+  return search
+    .toLowerCase()
+    .trim()
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+/**
+ * True when `term` is a case-insensitive substring of any searchable field of
+ * the asset (its own fields, its tags/codes, or its kit's fields).
+ *
+ * @param asset - The asset to test
+ * @param term - An already-lowercased search term
+ */
+function assetMatchesBookingTerm(
+  asset: SearchableBookingAsset,
+  term: string
+): boolean {
+  const haystacks: (string | null | undefined)[] = [
+    asset.title,
+    asset.sequentialId,
+    asset.category?.name,
+    asset.location?.name,
+    asset.kit?.name,
+    asset.kit?.location?.name,
+    asset.kit?.category?.name,
+    ...(asset.tags?.map((tag) => tag.name) ?? []),
+    ...(asset.qrCodes?.map((qr) => qr.id) ?? []),
+    ...(asset.barcodes?.map((barcode) => barcode.value) ?? []),
+  ];
+
+  return haystacks.some(
+    (value) => value != null && value.toLowerCase().includes(term)
+  );
+}
+
+/**
+ * In-memory replacement for the old Prisma multi-relation `OR` search on a
+ * booking's assets. An asset matches if ANY comma-separated term is a
+ * case-insensitive substring of ANY of its searchable fields. A match inside a
+ * kit re-expands to surface the ENTIRE kit (all sibling assets).
+ *
+ * Input order is preserved (callers sort afterwards). Blank/missing search
+ * returns the input array unchanged.
+ *
+ * @param assets - The booking's full asset list
+ * @param search - Raw search string from the `s` query param (may be blank)
+ * @returns The filtered subset (with kits re-expanded)
+ */
+export function filterBookingAssets<T extends SearchableBookingAsset>(
+  assets: T[],
+  search: string | null | undefined
+): T[] {
+  const terms = search ? parseBookingSearchTerms(search) : [];
+  if (terms.length === 0) {
+    return assets;
+  }
+
+  // Comma = OR: an asset matches if any term matches any of its fields.
+  const directMatches = assets.filter((asset) =>
+    terms.some((term) => assetMatchesBookingTerm(asset, term))
+  );
+
+  // Kit re-expansion: a matched asset surfaces its whole kit.
+  const matchedKitIds = new Set(
+    directMatches
+      .map((asset) => asset.kitId)
+      .filter((kitId): kitId is string => Boolean(kitId))
+  );
+  if (matchedKitIds.size === 0) {
+    return directMatches;
+  }
+
+  const directIds = new Set(directMatches.map((asset) => asset.id));
+  return assets.filter(
+    (asset) =>
+      directIds.has(asset.id) ||
+      (asset.kitId != null && matchedKitIds.has(asset.kitId))
+  );
 }
