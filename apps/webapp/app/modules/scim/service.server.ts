@@ -1,0 +1,557 @@
+import { randomUUID } from "crypto";
+import type { Prisma } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { createTeamMember } from "~/modules/team-member/service.server";
+import {
+  createUser,
+  revokeAccessToOrganization,
+} from "~/modules/user/service.server";
+import { isLikeShelfError } from "~/utils/error";
+import { randomUsernameFromEmail } from "~/utils/user";
+import { ScimError } from "./errors.server";
+import { parseScimFilter } from "./filters.server";
+import { userToScimResource } from "./mappers.server";
+import type {
+  ScimListResponse,
+  ScimPatchOp,
+  ScimUser,
+  ScimUserInput,
+} from "./types";
+import { SCIM_SCHEMA_LIST_RESPONSE } from "./types";
+
+/**
+ * Returns a Prisma select object for SCIM user queries scoped to an org.
+ * The `scimExternalIds` relation is pre-filtered to the calling org so the
+ * result contains at most one entry (enforced by the unique constraint).
+ */
+function scimUserSelect(organizationId: string) {
+  return {
+    id: true,
+    email: true,
+    firstName: true,
+    lastName: true,
+    scimExternalIds: {
+      where: { organizationId },
+      select: { scimExternalId: true },
+    },
+    createdAt: true,
+    updatedAt: true,
+  } satisfies Prisma.UserSelect;
+}
+
+/**
+ * Upserts a SCIM external ID for a user within a specific organization.
+ * Safe to call even when the row does not yet exist.
+ */
+async function upsertScimExternalId(
+  userId: string,
+  organizationId: string,
+  scimExternalId: string
+): Promise<void> {
+  await db.userScimExternalId.upsert({
+    where: { userId_organizationId: { userId, organizationId } },
+    create: { userId, organizationId, scimExternalId },
+    update: { scimExternalId },
+  });
+}
+
+// ──────────────────────────────────────────────
+// LIST / SEARCH
+// ──────────────────────────────────────────────
+
+export async function listScimUsers(
+  organizationId: string,
+  params: {
+    startIndex?: number;
+    count?: number;
+    filter?: string;
+  }
+): Promise<ScimListResponse> {
+  const startIndex = Math.max(params.startIndex ?? 1, 1);
+  const count = Math.min(Math.max(params.count ?? 100, 1), 100);
+
+  const where: Prisma.UserWhereInput = {
+    userOrganizations: { some: { organizationId } },
+  };
+
+  if (params.filter) {
+    const parsed = parseScimFilter(params.filter);
+    if (parsed) {
+      if (parsed.attribute === "username") {
+        where.email = { equals: parsed.value, mode: "insensitive" };
+      } else if (parsed.attribute === "externalid") {
+        // Filter within the org-scoped relation to avoid cross-org leakage
+        where.scimExternalIds = {
+          some: { organizationId, scimExternalId: parsed.value },
+        };
+      }
+    }
+  }
+
+  const [users, totalResults] = await Promise.all([
+    db.user.findMany({
+      where,
+      select: scimUserSelect(organizationId),
+      skip: startIndex - 1, // SCIM is 1-based
+      take: count,
+      orderBy: { createdAt: "asc" },
+    }),
+    db.user.count({ where }),
+  ]);
+
+  return {
+    schemas: [SCIM_SCHEMA_LIST_RESPONSE],
+    totalResults,
+    startIndex,
+    itemsPerPage: users.length,
+    Resources: users.map((u) => userToScimResource(u, true)),
+  };
+}
+
+// ──────────────────────────────────────────────
+// GET
+// ──────────────────────────────────────────────
+
+export async function getScimUser(
+  organizationId: string,
+  userId: string
+): Promise<ScimUser> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      ...scimUserSelect(organizationId),
+      userOrganizations: {
+        where: { organizationId },
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!user || user.userOrganizations.length === 0) {
+    throw new ScimError("User not found", 404);
+  }
+
+  const isActive = true;
+  return userToScimResource(user, isActive);
+}
+
+// ──────────────────────────────────────────────
+// CREATE
+// ──────────────────────────────────────────────
+
+export async function createScimUser(
+  organizationId: string,
+  input: ScimUserInput
+): Promise<ScimUser> {
+  const email = (input.userName || input.emails?.[0]?.value)?.toLowerCase();
+  if (!email) {
+    throw new ScimError("userName (email) is required", 400);
+  }
+
+  const firstName = input.name?.givenName ?? null;
+  const lastName = input.name?.familyName ?? null;
+  const externalId = input.externalId ?? null;
+
+  // Check if user already exists in Shelf DB
+  const existingUser = await db.user.findUnique({
+    where: { email },
+    select: {
+      ...scimUserSelect(organizationId),
+      userOrganizations: {
+        where: { organizationId },
+        select: { id: true },
+      },
+    },
+  });
+
+  if (existingUser) {
+    // Already in this org -> 409 conflict
+    if (existingUser.userOrganizations.length > 0) {
+      throw new ScimError(
+        `User with userName "${email}" already exists in this organization`,
+        409,
+        "uniqueness"
+      );
+    }
+
+    // Exists in Shelf but not in this org -> attach
+    await db.userOrganization.create({
+      data: {
+        userId: existingUser.id,
+        organizationId,
+        roles: [OrganizationRoles.SELF_SERVICE],
+      },
+    });
+
+    const teamMemberName =
+      [firstName, lastName].filter(Boolean).join(" ") || email;
+    await createTeamMember({
+      name: teamMemberName,
+      organizationId,
+      userId: existingUser.id,
+    });
+
+    if (externalId) {
+      await upsertScimExternalId(existingUser.id, organizationId, externalId);
+    }
+
+    const updatedUser = await db.user.findUniqueOrThrow({
+      where: { id: existingUser.id },
+      select: scimUserSelect(organizationId),
+    });
+
+    return userToScimResource(updatedUser, true);
+  }
+
+  // User doesn't exist — create in Shelf DB only.
+  // We do NOT create a Supabase auth account here. When the user signs in
+  // via SSO, the SSO callback will create the auth account and link it
+  // to this Shelf user by updating the user ID.
+  //
+  // A random suffix is appended to the email local-part to avoid collisions
+  // across SCIM orgs that provision users with the same local-part
+  // (e.g. two orgs both provisioning `jane@…`).
+  const placeholderId = randomUUID();
+  const username = randomUsernameFromEmail(email);
+
+  // The check-then-create above can race with a concurrent SCIM POST for the
+  // same email. Catch Prisma's unique-constraint violation and surface it as
+  // the SCIM-spec 409 "uniqueness" error rather than a generic 500.
+  let newUser;
+  try {
+    newUser = await createUser({
+      userId: placeholderId,
+      email,
+      username,
+      firstName,
+      lastName,
+      organizationId,
+      roles: [OrganizationRoles.SELF_SERVICE],
+      isSSO: true,
+      skipPersonalOrg: true,
+    });
+  } catch (err) {
+    const cause = isLikeShelfError(err) ? err.cause : err;
+    if (
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2002"
+    ) {
+      throw new ScimError(
+        `User with userName "${email}" already exists in this organization`,
+        409,
+        "uniqueness"
+      );
+    }
+    throw err;
+  }
+
+  if (externalId) {
+    await upsertScimExternalId(newUser.id, organizationId, externalId);
+  }
+
+  const teamMemberName =
+    [firstName, lastName].filter(Boolean).join(" ") || email;
+  await createTeamMember({
+    name: teamMemberName,
+    organizationId,
+    userId: newUser.id,
+  });
+
+  const createdUser = await db.user.findUniqueOrThrow({
+    where: { id: newUser.id },
+    select: scimUserSelect(organizationId),
+  });
+
+  return userToScimResource(createdUser, true);
+}
+
+// ──────────────────────────────────────────────
+// REPLACE (PUT)
+// ──────────────────────────────────────────────
+
+export async function replaceScimUser(
+  organizationId: string,
+  userId: string,
+  input: ScimUserInput
+): Promise<ScimUser> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      ...scimUserSelect(organizationId),
+      userOrganizations: {
+        where: { organizationId },
+        select: { id: true },
+      },
+    },
+  });
+
+  // Use 404 for both "doesn't exist" and "not a member of the calling org"
+  // to avoid leaking whether a user with this ID exists globally. Reactivating
+  // a previously-deactivated user must go through PATCH (active: true) or a
+  // fresh POST; PUT on a non-member is rejected.
+  if (!user || user.userOrganizations.length === 0) {
+    throw new ScimError("User not found", 404);
+  }
+
+  const newEmail = (input.userName || input.emails?.[0]?.value)?.toLowerCase();
+  const firstName = input.name?.givenName ?? null;
+  const lastName = input.name?.familyName ?? null;
+  const externalId = input.externalId ?? null;
+
+  // Update email if changed
+  if (newEmail && newEmail !== user.email) {
+    await updateUserEmail(userId, user.email, newEmail);
+  }
+
+  // Update core user attributes (name fields only — externalId is org-scoped)
+  await db.user.update({
+    where: { id: userId },
+    data: { firstName, lastName },
+  });
+
+  // PUT replaces all attributes: upsert the external ID when provided, clear it otherwise
+  if (externalId !== null) {
+    await upsertScimExternalId(userId, organizationId, externalId);
+  } else {
+    await db.userScimExternalId.deleteMany({
+      where: { userId, organizationId },
+    });
+  }
+
+  // Update team member name if exists
+  const currentEmail = newEmail || user.email;
+  const teamMemberName =
+    [firstName, lastName].filter(Boolean).join(" ") || currentEmail;
+  await db.teamMember.updateMany({
+    where: { userId, organizationId },
+    data: { name: teamMemberName },
+  });
+
+  const isCurrentlyActive = user.userOrganizations.length > 0;
+  const shouldBeActive = input.active !== false;
+
+  // Handle activation state changes.
+  // Only deactivation is possible here: the guard above ensures the user is
+  // already a member of this org, so !isCurrentlyActive can never be true.
+  if (isCurrentlyActive && !shouldBeActive) {
+    await revokeAccessToOrganization({ userId, organizationId });
+  }
+
+  const updatedUser = await db.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: scimUserSelect(organizationId),
+  });
+
+  return userToScimResource(updatedUser, shouldBeActive);
+}
+
+// ──────────────────────────────────────────────
+// PATCH
+// ──────────────────────────────────────────────
+
+export async function patchScimUser(
+  organizationId: string,
+  userId: string,
+  patchOp: ScimPatchOp
+): Promise<ScimUser> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      ...scimUserSelect(organizationId),
+      userOrganizations: {
+        where: { organizationId },
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!user || user.userOrganizations.length === 0) {
+    throw new ScimError("User not found", 404);
+  }
+
+  let isActive = user.userOrganizations.length > 0;
+  const updateData: Prisma.UserUpdateInput = {};
+  // externalId is org-scoped and cannot go in the main UserUpdateInput
+  let pendingExternalId: string | undefined;
+
+  for (const op of patchOp.Operations) {
+    if (op.op !== "replace") {
+      continue; // Only support "replace" operations for now
+    }
+
+    if (op.path === "active") {
+      // Only deactivation is reachable here: the guard above ensures the user
+      // is already a member of this org, so isActive is always true on entry.
+      const newActive = op.value === true || op.value === "True";
+      if (isActive && !newActive) {
+        await revokeAccessToOrganization({ userId, organizationId });
+        isActive = false;
+      }
+    } else if (op.path === "userName") {
+      updateData.email = String(op.value ?? "").toLowerCase();
+    } else if (op.path === "name.givenName") {
+      updateData.firstName = String(op.value ?? "");
+    } else if (op.path === "name.familyName") {
+      updateData.lastName = String(op.value ?? "");
+    } else if (op.path === "externalId") {
+      pendingExternalId = String(op.value ?? "");
+    } else if (!op.path && typeof op.value === "object" && op.value !== null) {
+      // Entra sometimes sends: { op: "replace", value: { active: false } }
+      const val = op.value as Record<string, unknown>;
+      if ("active" in val) {
+        // Same deactivation-only logic as the path-based branch above.
+        const newActive = val.active === true || val.active === "True";
+        if (isActive && !newActive) {
+          await revokeAccessToOrganization({ userId, organizationId });
+          isActive = false;
+        }
+      }
+      if ("name" in val && typeof val.name === "object" && val.name !== null) {
+        const name = val.name as Record<string, unknown>;
+        if ("givenName" in name) {
+          updateData.firstName = String(name.givenName ?? "");
+        }
+        if ("familyName" in name) {
+          updateData.lastName = String(name.familyName ?? "");
+        }
+      }
+      if ("userName" in val) {
+        updateData.email = String(val.userName ?? "").toLowerCase();
+      }
+      if ("externalId" in val) {
+        pendingExternalId = String(val.externalId ?? "");
+      }
+    }
+  }
+
+  // Handle email change via updateUserEmail (uniqueness + Supabase sync)
+  if (typeof updateData.email === "string" && updateData.email !== user.email) {
+    await updateUserEmail(userId, user.email, updateData.email as string);
+    // Remove from updateData since updateUserEmail already persisted it
+    delete updateData.email;
+  }
+
+  // Apply accumulated user attribute updates
+  if (Object.keys(updateData).length > 0) {
+    await db.user.update({ where: { id: userId }, data: updateData });
+
+    // Sync team member name if name changed
+    if (
+      updateData.firstName !== undefined ||
+      updateData.lastName !== undefined
+    ) {
+      const updatedUser = await db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, email: true },
+      });
+      const teamMemberName =
+        [updatedUser.firstName, updatedUser.lastName]
+          .filter(Boolean)
+          .join(" ") || updatedUser.email;
+      await db.teamMember.updateMany({
+        where: { userId, organizationId },
+        data: { name: teamMemberName },
+      });
+    }
+  }
+
+  // Apply org-scoped external ID update separately
+  if (pendingExternalId !== undefined) {
+    await upsertScimExternalId(userId, organizationId, pendingExternalId);
+  }
+
+  const updatedUser = await db.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: scimUserSelect(organizationId),
+  });
+
+  return userToScimResource(updatedUser, isActive);
+}
+
+// ──────────────────────────────────────────────
+// DEACTIVATE (DELETE)
+// ──────────────────────────────────────────────
+
+export async function deactivateScimUser(
+  organizationId: string,
+  userId: string
+): Promise<void> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      userOrganizations: {
+        where: { organizationId },
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!user) {
+    throw new ScimError("User not found", 404);
+  }
+
+  if (user.userOrganizations.length === 0) {
+    // Already deactivated — idempotent
+    return;
+  }
+
+  await revokeAccessToOrganization({ userId, organizationId });
+
+  // NOTE: We intentionally do not invalidate Supabase sessions here.
+  // `@supabase/auth-js` only exposes `admin.signOut(jwt, scope)`, which
+  // requires a JWT rather than a userId — we have no JWT in SCIM context.
+  // The deprovisioned user keeps a valid access token until it expires
+  // (~1h), but every Shelf loader/action re-checks org membership against
+  // `userOrganization`, so the stale session cannot access this org's data.
+  // Revisit if Supabase adds an admin "sign out by userId" API.
+}
+
+// ──────────────────────────────────────────────
+// HELPERS
+// ──────────────────────────────────────────────
+
+/**
+ * Updates a user's email in both Shelf DB and Supabase auth.
+ * Throws 409 if the new email is already taken by another user.
+ * Silently skips the Supabase auth update for SCIM-provisioned users
+ * who haven't logged in yet (no Supabase auth account).
+ */
+async function updateUserEmail(
+  userId: string,
+  currentEmail: string,
+  newEmail: string
+): Promise<void> {
+  if (newEmail === currentEmail) return;
+
+  const conflict = await db.user.findUnique({
+    where: { email: newEmail },
+    select: { id: true },
+  });
+
+  if (conflict) {
+    throw new ScimError(
+      `Email "${newEmail}" is already in use`,
+      409,
+      "uniqueness"
+    );
+  }
+
+  await db.user.update({
+    where: { id: userId },
+    data: { email: newEmail },
+  });
+
+  // Update Supabase auth email if the user has an auth account.
+  // SCIM-provisioned users who haven't logged in via SSO yet won't
+  // have one, so we silently skip on error.
+  try {
+    await getSupabaseAdmin().auth.admin.updateUserById(userId, {
+      email: newEmail,
+    });
+  } catch {
+    // No Supabase auth account — expected for pre-SSO users
+  }
+}
