@@ -15,12 +15,24 @@ type UseScanQueueParams = {
   scannedItemsRef: React.MutableRefObject<ScannedItem[]>;
   /** Called when a scan is confirmed and auditAssetId is received from server */
   onScanSynced?: (assetId: string, auditAssetId: string) => void;
+  /**
+   * Called when a scan exhausts its retries. The scan is moved to `failedQueueRef`
+   * (never silently dropped) so the UI can surface it and completion can be blocked.
+   */
+  onScanFailed?: (assetId: string) => void;
 };
 
 export type ScanQueueResult = {
   scanQueueRef: React.MutableRefObject<ScanQueueEntry[]>;
+  /**
+   * Scans that exhausted their retries. They are retained (not dropped) so they
+   * can be re-synced and so audit completion can be blocked until empty.
+   */
+  failedQueueRef: React.MutableRefObject<ScanQueueEntry[]>;
   enqueueScan: (entry: ScanQueueEntry) => void;
   processQueue: () => Promise<void>;
+  /** Move all failed scans back into the live queue and re-attempt sync. */
+  retryFailedScans: () => void;
   retryTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
 };
 
@@ -28,8 +40,10 @@ export function useScanQueue({
   orgId,
   scannedItemsRef,
   onScanSynced,
+  onScanFailed,
 }: UseScanQueueParams): ScanQueueResult {
   const scanQueueRef = useRef<ScanQueueEntry[]>([]);
+  const failedQueueRef = useRef<ScanQueueEntry[]>([]);
   const isProcessingQueueRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -59,6 +73,8 @@ export function useScanQueue({
             scannedItemsRef.current[itemIndex] = {
               ...scannedItemsRef.current[itemIndex],
               auditAssetId: data.auditAssetId,
+              // A successful (re)sync clears any prior failed marker.
+              syncFailed: false,
             };
           }
           // Notify caller to update React state for re-render
@@ -68,22 +84,40 @@ export function useScanQueue({
         saveAuditScanState(
           entry.auditSessionId,
           scannedItemsRef.current,
-          scanQueueRef.current
+          scanQueueRef.current,
+          failedQueueRef.current
         );
       } catch {
         // Network error — retry with backoff
         const retries = (entry.retryCount ?? 0) + 1;
         if (retries >= MAX_QUEUE_RETRIES) {
-          // Max retries reached — skip this item, move to next
+          // Max retries reached. CRITICAL: never silently drop the scan, or an
+          // asset the worker saw as "Found" is lost and later marked MISSING on
+          // completion. Move it to the failed queue (persisted, re-syncable) and
+          // mark the item so the UI surfaces it and completion can be blocked.
           scanQueueRef.current.shift();
+          failedQueueRef.current.push({ ...entry, retryCount: undefined });
+          // Mark the scanned item directly on the ref (mirrors the success path)
+          // so the persisted snapshot captures the failed state on crash.
+          const failedIndex = scannedItemsRef.current.findIndex(
+            (item) => item.assetId === entry.assetId
+          );
+          if (failedIndex !== -1) {
+            scannedItemsRef.current[failedIndex] = {
+              ...scannedItemsRef.current[failedIndex],
+              syncFailed: true,
+            };
+          }
+          onScanFailed?.(entry.assetId);
           saveAuditScanState(
             entry.auditSessionId,
             scannedItemsRef.current,
-            scanQueueRef.current
+            scanQueueRef.current,
+            failedQueueRef.current
           );
           if (__DEV__)
             console.warn(
-              `[AuditQueue] Giving up on scan after ${MAX_QUEUE_RETRIES} retries:`,
+              `[AuditQueue] Scan failed after ${MAX_QUEUE_RETRIES} retries; moved to failed queue:`,
               entry.assetId
             );
           continue;
@@ -100,7 +134,7 @@ export function useScanQueue({
     }
 
     isProcessingQueueRef.current = false;
-  }, [orgId, scannedItemsRef, onScanSynced]);
+  }, [orgId, scannedItemsRef, onScanSynced, onScanFailed]);
 
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {
@@ -110,10 +144,26 @@ export function useScanQueue({
     [processQueue]
   );
 
+  const retryFailedScans = useCallback(() => {
+    if (failedQueueRef.current.length === 0) return;
+    // Move failed scans back into the live queue with a fresh retry budget.
+    const retrying = failedQueueRef.current.map((e) => ({
+      ...e,
+      retryCount: 0,
+    }));
+    // Mutate in place — a pending debounced save holds this array reference,
+    // so reassigning it would let a later write repersist already-retried scans.
+    failedQueueRef.current.length = 0;
+    scanQueueRef.current.push(...retrying);
+    processQueue();
+  }, [processQueue]);
+
   return {
     scanQueueRef,
+    failedQueueRef,
     enqueueScan,
     processQueue,
+    retryFailedScans,
     retryTimerRef,
   };
 }
