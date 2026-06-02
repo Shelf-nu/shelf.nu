@@ -125,7 +125,21 @@ export function useScanQueue({
           // Move to end of queue with incremented retry count
           scanQueueRef.current.shift();
           scanQueueRef.current.push({ ...entry, retryCount: retries });
-          // Schedule retry with backoff
+          // Persist the requeued state NOW. The success and max-retry branches
+          // both persist; without this one, an app kill during the backoff —
+          // or a sub-2s scanning burst that perpetually resets the debounced
+          // saver — loses the in-memory queue entry, so a scan the worker saw
+          // as Found vanishes and is marked MISSING on completion.
+          saveAuditScanState(
+            entry.auditSessionId,
+            scannedItemsRef.current,
+            scanQueueRef.current,
+            failedQueueRef.current
+          );
+          // Clear any prior timer before scheduling a new one, so a rapid
+          // re-entry can't orphan a setTimeout that re-fires processQueue after
+          // unmount (post-unmount work / double-record).
+          if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
           const delay = RETRY_DELAYS[retries - 1] ?? 15_000;
           retryTimerRef.current = setTimeout(() => processQueue(), delay);
           break;
@@ -139,9 +153,20 @@ export function useScanQueue({
   const enqueueScan = useCallback(
     (entry: ScanQueueEntry) => {
       scanQueueRef.current.push(entry);
+      // Persist immediately (eager, not via the debounced saver): the scan must
+      // hit disk the instant it is queued, so an app kill before the first
+      // network attempt — or a sustained sub-2s scanning burst that keeps
+      // resetting the debounce — can never lose it. Fire-and-forget; the
+      // debounced saver remains for lower-priority UI snapshots.
+      saveAuditScanState(
+        entry.auditSessionId,
+        scannedItemsRef.current,
+        scanQueueRef.current,
+        failedQueueRef.current
+      );
       processQueue();
     },
-    [processQueue]
+    [processQueue, scannedItemsRef]
   );
 
   const retryFailedScans = useCallback(() => {
