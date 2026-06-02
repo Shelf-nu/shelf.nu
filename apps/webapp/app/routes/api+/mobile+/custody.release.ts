@@ -2,6 +2,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
@@ -32,6 +33,10 @@ export async function action({ request }: ActionFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.custody,
     });
+
+    // Caller's role — required so releaseCustody can enforce the SELF_SERVICE
+    // self-restriction (only release custody of assets assigned to themselves).
+    const { role } = await getMobileUserContext(user.id, organizationId);
 
     const body = await request.json();
     const { assetId } = z
@@ -69,6 +74,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const asset = await releaseCustody({
       assetId,
       organizationId,
+      userId: user.id,
+      role,
       activityEvent: {
         actorUserId: user.id,
         teamMemberId: custodyRecord?.custodian?.id,
