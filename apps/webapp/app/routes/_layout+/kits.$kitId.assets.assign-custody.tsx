@@ -35,6 +35,7 @@ import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -278,7 +279,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // discriminator distinguishes kit-allocated custody from
           // operator-assigned custody on the same asset.
           custody: { select: { id: true } },
-          assetKits: { select: { asset: { select: { id: true } } } },
+          // Per-asset note phrasing names the qty-tracked unit count
+          // ("custody of 50 boxes via Kittington"), so pull the fields
+          // `formatUnitCount` needs: type + unitOfMeasure. INDIVIDUAL
+          // rows continue to render countless ("custody via Kittington").
+          assetKits: {
+            select: {
+              asset: {
+                select: { id: true, type: true, unitOfMeasure: true },
+              },
+            },
+          },
         },
       });
 
@@ -335,7 +346,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       return {
         ...updatedKit,
-        inheritedAssetIds: inheritData.map((r) => r.assetId),
+        inheritData,
       };
     });
 
@@ -354,14 +365,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Only notes for assets that actually received a kit-allocated Custody
     // row. Fully operator-allocated qty-tracked assets are skipped.
-    if (kit.inheritedAssetIds.length > 0) {
-      await createNotes({
-        content: `${actor} granted ${custodianDisplay} custody via ${kitLink}.`,
-        type: NoteType.UPDATE,
-        userId,
-        assetIds: kit.inheritedAssetIds,
-        organizationId,
-      });
+    // Per-asset content so qty-tracked rows name the actual unit count
+    // moved into custody (mirrors the symmetric release-side note
+    // "released X's custody of N boxes via kit: Y" and the bulk-assign
+    // path in `bulkAssignKitCustody`).
+    if (kit.inheritData.length > 0) {
+      const assetById = new Map(
+        kit.assetKits.map((ak) => [ak.asset.id, ak.asset])
+      );
+      await Promise.all(
+        kit.inheritData.map((row) => {
+          const asset = assetById.get(row.assetId);
+          const count = asset ? formatUnitCount(asset, row.quantity) : null;
+          const custodyPhrase = count ? `custody of ${count}` : "custody";
+          return createNotes({
+            content: `${actor} granted ${custodianDisplay} ${custodyPhrase} via ${kitLink}.`,
+            type: NoteType.UPDATE,
+            userId,
+            assetIds: [row.assetId],
+            organizationId,
+          });
+        })
+      );
     }
 
     sendNotification({

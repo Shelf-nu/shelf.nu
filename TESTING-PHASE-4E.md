@@ -16,17 +16,17 @@ INDIVIDUAL-asset notes + events stay **byte-for-byte unchanged** — every phras
 
 ## Prerequisites
 
-- [ ] `pnpm webapp:validate` green at **≥ 2379** tests, lint + typecheck clean.
-- [ ] Dev server up.
-- [ ] Workspace data:
-  - [ ] **Asset A — INDIVIDUAL** (e.g. "Camera"), `unitOfMeasure = null`.
-  - [ ] **Asset B — QUANTITY_TRACKED** with `quantity = 80`, `unitOfMeasure = null` (renders as "units") — e.g. "Pens".
-  - [ ] **Asset C — QUANTITY_TRACKED** with `quantity = 50`, `unitOfMeasure = "boxes"` — e.g. "Markers" — proves the label is sourced from `unitOfMeasure`.
-  - [ ] **Kit K1** (empty, AVAILABLE).
-  - [ ] **Kit K2** (empty, AVAILABLE) — for the cross-kit move case.
-  - [ ] **Location L1** + **Location L2** + **Location L3**.
-  - [ ] A team member (you).
-- [ ] Browser console open. Have the MCP / `pnpm` shell ready for `execute_sql` checks of `Note.content`, `BookingNote.content`, and `ActivityEvent.meta`.
+- [x] `pnpm webapp:validate` green at **≥ 2379** tests, lint + typecheck clean.
+- [x] Dev server up.
+- [x] Workspace data:
+  - [x] **Asset A — INDIVIDUAL** (e.g. "Camera"), `unitOfMeasure = null`.
+  - [x] **Asset B — QUANTITY_TRACKED** with `quantity = 80`, `unitOfMeasure = null` (renders as "units") — e.g. "Pens".
+  - [x] **Asset C — QUANTITY_TRACKED** with `quantity = 50`, `unitOfMeasure = "boxes"` — e.g. "Markers" — proves the label is sourced from `unitOfMeasure`.
+  - [x] **Kit K1** (empty, AVAILABLE).
+  - [x] **Kit K2** (empty, AVAILABLE) — for the cross-kit move case.
+  - [x] **Location L1** + **Location L2** + **Location L3**.
+  - [x] A team member (you).
+- [x] Browser console open. Have the MCP / `pnpm` shell ready for `execute_sql` checks of `Note.content`, `BookingNote.content`, and `ActivityEvent.meta`.
 
 ---
 
@@ -50,37 +50,37 @@ Custody changes for qty-tracked assets are driven by the **kit-cascade** paths (
 2. Assign Kit K1 custody to yourself via the kits index "Assign custody" bulk action (or the per-kit detail page).
 3. Open Asset B's overview → Activity tab.
 
-- [ ] Note reads: **`You granted Self Service's custody of 50 units via kit assignment Kit K1.`**
-- [ ] MCP: `SELECT content FROM "Note" WHERE "assetId"='<B-id>' ORDER BY "createdAt" DESC LIMIT 1;` — markdown shows `custody of 50 units via kit assignment {% link ... text="Kit K1" /%}`.
-- [ ] MCP: `SELECT meta FROM "ActivityEvent" WHERE "assetId"='<B-id>' AND action='CUSTODY_ASSIGNED' ORDER BY "createdAt" DESC LIMIT 1;` → `meta.quantity = 50` AND `meta.viaKit = true`.
-- [ ] Asset C with `unitOfMeasure="boxes"` and `AssetKit.quantity = 30`: note reads `custody of 30 boxes via kit assignment …` (proves unitOfMeasure plumbing).
+- [x] Note reads: **`You granted Self Service's custody of 50 units via kit assignment Kit K1.`**
+- [x] MCP: `SELECT content FROM "Note" WHERE "assetId"='<B-id>' ORDER BY "createdAt" DESC LIMIT 1;` — markdown shows `custody of 50 units via kit assignment {% link ... text="Kit K1" /%}`.
+- [x] MCP: `SELECT meta FROM "ActivityEvent" WHERE "assetId"='<B-id>' AND action='CUSTODY_ASSIGNED' ORDER BY "createdAt" DESC LIMIT 1;` → `meta.quantity = 50` AND `meta.viaKit = true`.
+- [x] Asset C with `unitOfMeasure="boxes"` and `AssetKit.quantity = 30`: note reads `custody of 30 boxes via kit assignment …` (proves unitOfMeasure plumbing).
 
 ### §1.2 Bulk-release kit custody
 
 Continuing from §1.1: release Kit K1 custody (kits index bulk "Release custody", or the kit page).
 
-- [ ] Asset B note: **`You released Self Service's custody of 50 units via kit assignment Kit K1.`**
-- [ ] MCP: latest `ActivityEvent` for Asset B `CUSTODY_RELEASED` → `meta.quantity = 50`, `meta.viaKit = true`.
+- [x] Asset B note: **`You released Self Service's custody of 50 units via kit assignment Kit K1.`**
+- [x] MCP: latest `ActivityEvent` for Asset B `CUSTODY_RELEASED` → `meta.quantity = 50`, `meta.viaKit = true`.
 
 ### §1.3 Kit deletion releases custody
 
 1. Re-assign Kit K1 custody (B = 50). Then delete Kit K1.
 
-- [ ] Asset B note: **`You released Self Service's custody of 50 units when kit Kit K1 was deleted.`**
-- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
+- [x] Asset B note: **`You released Self Service's custody of 50 units when kit Kit K1 was deleted.`**
+- [x] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
 
 ### §1.4 Updating kit membership cascades custody
 
 1. Recreate Kit K1 with Asset B (qty = 50) and assign it to yourself.
 2. Edit Kit K1 in the kit picker → add Asset C (qty = 30). Save.
 
-- [ ] Asset C note: **`You granted Self Service custody of 30 boxes.`**
-- [ ] Event: `CUSTODY_ASSIGNED`, `meta.quantity = 30`.
+- [x] Asset C note: **`You granted Self Service custody of 30 boxes.`**
+- [x] Event: `CUSTODY_ASSIGNED`, `meta.quantity = 30`.
 
 3. Edit Kit K1 in the picker → remove Asset C. Save.
 
-- [ ] Asset C note: **`You released Self Service's custody of 30 boxes.`**
-- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 30`.
+- [x] Asset C note: **`You released Self Service's custody of 30 boxes.`**
+- [x] Event: `CUSTODY_RELEASED`, `meta.quantity = 30`.
 
 ### §1.5 Bulk-remove assets from kits (bulk action)
 

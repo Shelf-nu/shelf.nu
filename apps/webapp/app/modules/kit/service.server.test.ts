@@ -1620,7 +1620,14 @@ describe("updateKitAssets - Location Cascade", () => {
     vitest.clearAllMocks();
   });
 
-  it("creates a kit-driven AssetLocation row with assetKitId set when kit has a location", async () => {
+  it("writes the AssetKit pivot but never touches AssetLocation, regardless of kit's location", async () => {
+    // why: per the orthogonal-axes model in `docs/proposals/quantitative-assets.md`
+    // (lines 783-794), kit membership and physical location are independent.
+    // Adding an asset to a kit writes the AssetKit pivot only — the asset's
+    // existing AssetLocation rows are unchanged, and no kit-driven row is
+    // synthesised at the kit's location. The previous behaviour conflated
+    // both axes and broke "add a fully-placed asset to a kit" because the
+    // sum-within-total trigger summed manual + kit-driven rows together.
     expect.assertions(4);
 
     const mockKit = {
@@ -1631,8 +1638,7 @@ describe("updateKitAssets - Location Cascade", () => {
     };
 
     // Asset is currently placed at "manual-location-1" by the user.
-    // The cascade must NOT wipe this manual row — it must additively
-    // create a kit-driven row at the kit's location.
+    // The cascade must NOT touch this manual row.
     const mockNewAssets = [
       {
         id: "asset-1",
@@ -1649,12 +1655,6 @@ describe("updateKitAssets - Location Cascade", () => {
     db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue(mockNewAssets);
-    // Stub the re-fetch of just-created AssetKit rows that the cascade
-    // does inside the tx to thread the FK on the kit-driven
-    // AssetLocation rows.
-    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
-      { id: "assetkit-1", assetId: "asset-1", quantity: 1 },
-    ]);
 
     const { updateKitAssets } = await import("./service.server");
 
@@ -1678,89 +1678,13 @@ describe("updateKitAssets - Location Cascade", () => {
       ],
     });
 
-    // Invariant: the destructive `deleteMany` on manual AssetLocation
-    // rows is GONE — manual placements survive the kit-join cascade.
-    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
-
-    // The cascade re-queries the just-inserted AssetKit ids so it can
-    // wire them onto the new AssetLocation rows.
-    expect(db.assetKit.findMany).toHaveBeenCalledWith({
-      where: { kitId: "kit-1", assetId: { in: ["asset-1"] } },
-      select: { id: true, assetId: true, quantity: true },
-    });
-
-    // The kit-driven AssetLocation row is created with the AssetKit FK
-    // set and `quantity = AssetKit.quantity` (the slice, not the full
-    // pool).
-    expect(db.assetLocation.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          assetId: "asset-1",
-          locationId: "location-1",
-          organizationId: "org-1",
-          quantity: 1,
-          assetKitId: "assetkit-1",
-        },
-      ],
-    });
-  });
-
-  it("does NOT touch manual AssetLocation rows when kit has no location", async () => {
-    expect.assertions(3);
-
-    const mockKit = {
-      id: "kit-1",
-      location: null,
-      assetKits: [],
-      custody: null,
-    };
-
-    // Fixture: the asset is currently placed at "manual-location-1"
-    // by the user. Without a kit location there's nothing to cascade,
-    // and the cascade explicitly does NOT clear the manual row.
-    const mockNewAssets = [
-      {
-        id: "asset-1",
-        title: "Asset 1",
-        assetKits: [],
-        custody: null,
-        assetLocations: [
-          { location: { id: "manual-location-1", name: "Office A" } },
-        ],
-      },
-    ];
-
-    //@ts-expect-error missing vitest type
-    db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(mockNewAssets);
-
-    const { updateKitAssets } = await import("./service.server");
-
-    await updateKitAssets({
-      kitId: "kit-1",
-      assetIds: ["asset-1"],
-      userId: "user-1",
-      organizationId: "org-1",
-      request: new Request("http://test.com"),
-    });
-
-    // AssetKit row still gets created — membership is independent of
-    // whether the kit has a location.
-    expect(db.assetKit.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          assetId: "asset-1",
-          kitId: "kit-1",
-          organizationId: "org-1",
-          quantity: 1,
-        },
-      ],
-    });
-
-    // No AssetLocation writes at all when kit has no location.
-    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+    // Invariant: AssetLocation is on a separate axis — no writes from the
+    // kit-membership path. The mock exposes `createMany` / `updateMany` /
+    // `deleteMany`; any kit-cascade-to-AssetLocation regression would land
+    // on one of them.
     expect(db.assetLocation.createMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
   });
 });
 

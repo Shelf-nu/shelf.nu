@@ -67,14 +67,17 @@ vitest.mock("~/database/db.server", () => ({
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
-    // why: checkOutQuantity upserts custody rows and aggregates custody/booking totals;
-    // releaseQuantity additionally reads / decrements / deletes them, and
-    // counts remaining rows after a release to decide whether to flip
-    // Asset.status back to AVAILABLE.
+    // why: checkOutQuantity finds/creates/increments the operator-allocated
+    // custody row; releaseQuantity finds it then deletes or decrements by
+    // primary key. Both use `findFirst` (not `findUnique`) because the
+    // composite (assetId, teamMemberId) uniqueness was split into two
+    // partial uniques — operator-only WHERE kitCustodyId IS NULL and
+    // kit-only WHERE kitCustodyId IS NOT NULL. `aggregate` totals every
+    // Custody row on the asset for the availability calc.
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      upsert: vitest.fn().mockResolvedValue({}),
-      findUnique: vitest.fn().mockResolvedValue(null),
+      findFirst: vitest.fn().mockResolvedValue(null),
+      create: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
       // Default: pretend other custody rows still exist so the
@@ -574,7 +577,12 @@ describe("checkOutQuantity — availability accounting", () => {
   const mockCustodyAggregate = db.custody.aggregate as ReturnType<
     typeof vitest.fn
   >;
-  const mockCustodyUpsert = db.custody.upsert as ReturnType<typeof vitest.fn>;
+  // why: the Custody partial-uniques split (operator vs kit-allocated) means
+  // `checkOutQuantity` now does `findFirst` + branch into `create` or
+  // `update` instead of `upsert` — Prisma's `upsert` needs a single
+  // declared unique and we no longer have one. Track the create call as
+  // the "new operator-allocated row was written" signal.
+  const mockCustodyCreate = db.custody.create as ReturnType<typeof vitest.fn>;
   const mockBookingAssetAggregate = db.bookingAsset.aggregate as ReturnType<
     typeof vitest.fn
   >;
@@ -634,7 +642,7 @@ describe("checkOutQuantity — availability accounting", () => {
     // the service regressed to "Only 100 available" (custody-only math).
     expect((caught as ShelfError).message).toContain("Only 20");
     // The service must not create a custody row or log entry on rejection.
-    expect(mockCustodyUpsert).not.toHaveBeenCalled();
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
     expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
   });
 
@@ -650,7 +658,7 @@ describe("checkOutQuantity — availability accounting", () => {
       organizationId: "org-1",
     });
 
-    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCustodyCreate).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "CHECKOUT" })
@@ -684,7 +692,7 @@ describe("checkOutQuantity — availability accounting", () => {
         _sum: { quantity: true },
       })
     );
-    expect(mockCustodyUpsert).toHaveBeenCalledTimes(1);
+    expect(mockCustodyCreate).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
   });
 });
@@ -770,7 +778,10 @@ describe("checkOutQuantity — activity events", () => {
 
 describe("releaseQuantity — activity events", () => {
   const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
-  const mockCustodyFindUnique = db.custody.findUnique as ReturnType<
+  // why: the Custody partial-uniques split (operator vs kit-allocated) means
+  // `releaseQuantity` now uses `findFirst` scoped to `kitCustodyId: null`
+  // instead of `findUnique` by composite key. Track the new call.
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
     typeof vitest.fn
   >;
   // checkOutQuantity / releaseQuantity now resolve the custodian via
@@ -792,7 +803,7 @@ describe("releaseQuantity — activity events", () => {
     vitest.clearAllMocks();
     mockLock.mockResolvedValue(lockedAsset);
     // Existing custody row with 10 units — release of 4 is valid.
-    mockCustodyFindUnique.mockResolvedValue({
+    mockCustodyFindFirst.mockResolvedValue({
       id: "custody-1",
       assetId: "asset-1",
       teamMemberId: "tm-1",
@@ -831,7 +842,7 @@ describe("releaseQuantity — activity events", () => {
   it("flips Asset.status to AVAILABLE when the last custody row is removed", async () => {
     mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
     // Full release of the existing 10-unit custody row.
-    mockCustodyFindUnique.mockResolvedValue({
+    mockCustodyFindFirst.mockResolvedValue({
       id: "custody-1",
       assetId: "asset-1",
       teamMemberId: "tm-1",
@@ -858,7 +869,7 @@ describe("releaseQuantity — activity events", () => {
 
   it("does NOT flip Asset.status when other custody rows remain", async () => {
     mockTeamMemberFindUnique.mockResolvedValue({ user: { id: "user-42" } });
-    mockCustodyFindUnique.mockResolvedValue({
+    mockCustodyFindFirst.mockResolvedValue({
       id: "custody-1",
       assetId: "asset-1",
       teamMemberId: "tm-1",

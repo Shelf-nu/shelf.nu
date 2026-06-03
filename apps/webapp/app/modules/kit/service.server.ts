@@ -4011,50 +4011,15 @@ export async function updateKitAssets({
         }
       }
 
-      /**
-       * Kit-driven AssetLocation cascade — atomic with the AssetKit
-       * writes above so a kit-add either fully takes effect (membership
-       * + driven placement) or rolls back. The cascade is additive: it
-       * only creates/updates kit-driven rows (`assetKitId` set) and
-       * never touches manual user placements, and it places only the
-       * `AssetKit.quantity` slice (not the asset's full pool).
-       *
-       *   - Newly added (when kit.location is set): create one
-       *     `AssetLocation` row per new AssetKit with `assetKitId` set,
-       *     `quantity = AssetKit.quantity`, at the kit's location.
-       *     Manual rows for the same asset stay untouched. The DEFERRED
-       *     sum-within-total trigger re-checks at COMMIT.
-       *   - Qty edits: bump the matching kit-driven row's quantity if
-       *     one exists (kit may have no location → no row to update).
-       *   - Removed assets / cross-kit moves: handled by the FK
-       *     `onDelete: Cascade` on `AssetLocation.assetKitId` — the
-       *     AssetKit deletions above auto-drop their driven rows.
-       *
-       * `createMany` doesn't return ids, so we re-query the just-
-       * inserted AssetKit rows to thread the FK. One round-trip per
-       * `updateKitAssets` call — fine.
-       */
-      if (kit.location && newlyAddedAssets.length > 0) {
-        const newlyAddedAssetIds = newlyAddedAssets.map((a) => a.id);
-        const newAssetKits = await tx.assetKit.findMany({
-          where: {
-            kitId: kit.id,
-            assetId: { in: newlyAddedAssetIds },
-          },
-          select: { id: true, assetId: true, quantity: true },
-        });
-        if (newAssetKits.length > 0) {
-          await tx.assetLocation.createMany({
-            data: newAssetKits.map((ak) => ({
-              assetId: ak.assetId,
-              locationId: kit.location!.id,
-              organizationId,
-              quantity: ak.quantity,
-              assetKitId: ak.id,
-            })),
-          });
-        }
-      }
+      // Kit membership does NOT touch `AssetLocation`. Per the orthogonal-
+      // axes model documented in `docs/proposals/quantitative-assets.md`
+      // (lines 783-794), `AssetLocation` describes physical whereabouts and
+      // `AssetKit` describes organisational grouping; they don't subtract
+      // from each other. Adding an asset to a kit only writes the `AssetKit`
+      // pivot — units stay at whichever location(s) they were already placed.
+      // The asset's appearance on the kit's location-detail UI (when the kit
+      // has a `locationId`) is derived from the join `AssetKit + Kit.locationId`,
+      // not from a parallel kit-driven `AssetLocation` row.
 
       if (qtyChangedAssets.length > 0) {
         // Live link: every kit-driven BookingAsset row pointing at the
@@ -4163,19 +4128,10 @@ export async function updateKitAssets({
           });
         }
 
-        for (const change of qtyChangedAssets) {
-          // Relation-filter update — finds the AssetLocation row whose
-          // assetKit matches (assetId, kitId). `updateMany` because the
-          // composite unique on AssetKit guarantees at most one match,
-          // but Prisma's `update({ where: relation })` shorthand needs
-          // a scalar key.
-          await tx.assetLocation.updateMany({
-            where: {
-              assetKit: { assetId: change.id, kitId: kit.id },
-            },
-            data: { quantity: change.newQuantity },
-          });
-        }
+        // No mirrored `AssetLocation` update — kit slice quantity lives on
+        // `AssetKit` alone (and propagates to kit-driven `BookingAsset` rows
+        // above). The `AssetLocation` axis is orthogonal and isn't touched
+        // by kit-membership writes.
       }
     });
 

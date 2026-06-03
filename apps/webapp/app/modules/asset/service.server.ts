@@ -6369,20 +6369,29 @@ export async function checkOutQuantity({
         });
       }
 
-      /** Step 6: Upsert the custody record — create if new, increment if existing */
-      await tx.custody.upsert({
-        where: {
-          assetId_teamMemberId: { assetId, teamMemberId },
-        },
-        create: {
-          assetId,
-          teamMemberId,
-          quantity,
-        },
-        update: {
-          quantity: { increment: quantity },
-        },
+      /**
+       * Step 6: Upsert the OPERATOR-allocated custody row (kitCustodyId
+       * IS NULL). Find-then-branch instead of `prisma.upsert` because
+       * the composite (assetId, teamMemberId) uniqueness is now split
+       * into two partial uniques (operator + kit-allocated) — Prisma's
+       * `upsert` needs a single declared unique. The operator partial
+       * still guarantees at most one matching row, so the find +
+       * create/update sequence is safe inside this tx.
+       */
+      const existingOperatorCustody = await tx.custody.findFirst({
+        where: { assetId, teamMemberId, kitCustodyId: null },
+        select: { id: true },
       });
+      if (existingOperatorCustody) {
+        await tx.custody.update({
+          where: { id: existingOperatorCustody.id },
+          data: { quantity: { increment: quantity } },
+        });
+      } else {
+        await tx.custody.create({
+          data: { assetId, teamMemberId, quantity },
+        });
+      }
 
       /**
        * Step 6b: Flip `Asset.status` to `IN_CUSTODY`. Symmetric counterpart
@@ -6540,11 +6549,19 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 4: Find the custody record for this asset-teamMember pair */
-      const custody = await tx.custody.findUnique({
-        where: {
-          assetId_teamMemberId: { assetId, teamMemberId },
-        },
+      /**
+       * Step 4: Find the OPERATOR-allocated custody row for this
+       * (asset, teamMember) pair. `findFirst` filtered to
+       * `kitCustodyId: null` because the composite (assetId, teamMemberId)
+       * uniqueness was split into two partial uniques — a custodian can
+       * legitimately hold both an operator-allocated row AND one-or-more
+       * kit-allocated rows on the same asset, and only the operator row
+       * is releasable from this endpoint. The kit-allocated rows are
+       * released by releasing the kit's custody (which cascade-deletes
+       * them via `KitCustody.id` → `Custody.kitCustodyId`).
+       */
+      const custody = await tx.custody.findFirst({
+        where: { assetId, teamMemberId, kitCustodyId: null },
       });
 
       if (!custody) {
@@ -6554,31 +6571,6 @@ export async function releaseQuantity({
           label,
           status: 404,
           additionalData: { assetId, teamMemberId },
-        });
-      }
-
-      /**
-       * Step 4b: Reject the release if this Custody row was inherited from
-       * a kit's custody (`kitCustodyId IS NOT NULL`). Letting it through
-       * would delete the row while the parent KitCustody still exists —
-       * the kit would think it's in custody but the child allocation
-       * would be gone. The only correct path is releasing the kit's
-       * custody (which cascades). The UI hides the Release button for
-       * these rows already; this is a defense-in-depth check for direct
-       * API hits.
-       */
-      if (custody.kitCustodyId) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "This custody is held via a kit. Release the kit's custody to clear this allocation.",
-          label,
-          status: 400,
-          additionalData: {
-            assetId,
-            teamMemberId,
-            kitCustodyId: custody.kitCustodyId,
-          },
         });
       }
 
@@ -6598,21 +6590,20 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 6: Delete the custody record if releasing full amount, else decrement */
+      /**
+       * Step 6: Delete the custody record if releasing full amount, else
+       * decrement. Target by `Custody.id` (primary key) since the global
+       * composite unique is gone — the row we already loaded via
+       * `findFirst` above is the authoritative reference.
+       */
       if (quantity === custody.quantity) {
         await tx.custody.delete({
-          where: {
-            assetId_teamMemberId: { assetId, teamMemberId },
-          },
+          where: { id: custody.id },
         });
       } else {
         await tx.custody.update({
-          where: {
-            assetId_teamMemberId: { assetId, teamMemberId },
-          },
-          data: {
-            quantity: { decrement: quantity },
-          },
+          where: { id: custody.id },
+          data: { quantity: { decrement: quantity } },
         });
       }
 

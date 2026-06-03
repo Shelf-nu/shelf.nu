@@ -848,7 +848,17 @@ model Custody {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([assetId, teamMemberId]) // One record per asset-custodian pair
+  // Two partial uniques split the old global @@unique([assetId, teamMemberId])
+  // so the same (asset, custodian) pair can hold BOTH an operator-allocated
+  // row AND one-or-more kit-allocated rows simultaneously. The partials live
+  // in raw SQL (Prisma can't express partial uniques in the schema) — see
+  // migration 20260603100000_custody_partial_uniques_split_operator_kit:
+  //   • Custody_operator_unique → UNIQUE (assetId, teamMemberId)
+  //                               WHERE "kitCustodyId" IS NULL
+  //   • Custody_kit_unique      → UNIQUE (assetId, kitCustodyId)
+  //                               WHERE "kitCustodyId" IS NOT NULL
+  // The total cap (sum ≤ Asset.quantity) is enforced at the application
+  // layer by buildKitCustodyInheritData / checkOutQuantity.
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])

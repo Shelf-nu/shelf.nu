@@ -294,9 +294,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
-    // `booking` already has full asset+kit light data via BookingAsset pivot.
-    const enhancedBooking = booking;
-
+    // `booking` already has full asset+kit light data via the BookingAsset pivot.
     // Derive all asset IDs and all (current-booking) kit IDs from the
     // BookingAsset pivot. A single asset can have multiple BookingAsset
     // slices (one standalone + N kit-driven, Polish-6 multi-row) so we
@@ -485,9 +483,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // Index the enriched assets/kits for lookup during view construction.
+    // Index the enriched assets for lookup during per-slice projection below
+    // (`shapeBookingAssets` consumes `rawKits` directly, so we don't index it
+    // here — main's helper builds its own kits map internally).
     const assetDetailsMap = new Map(rawAssets.map((a) => [a.id, a]));
-    const kitsMap = new Map(rawKits.map((k) => [k.id, k]));
 
     /**
      * Build the view-asset array `shapeBookingAssets` consumes: one entry
