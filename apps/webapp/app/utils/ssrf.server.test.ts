@@ -2,9 +2,18 @@
 // why: exercises Node's undici-backed fetch/Response and the `dns`/`net`
 // primitives; happy-dom would shadow Response and ignore the undici dispatcher.
 
+/**
+ * Unit tests for the SSRF protection utilities in `./ssrf.server`:
+ * IP classification (`isPrivateOrReservedIp`), the guarded DNS lookup
+ * (`ssrfGuardedLookup`), URL/IP-literal validation (`assertSafeUrl`), protocol
+ * allowlisting and literal-host blocking in `safeFetch`, and the streaming /
+ * abortable body size cap in `readBodyWithLimit`.
+ */
+
 import { describe, expect, it } from "vitest";
 
 import {
+  assertSafeUrl,
   BlockedAddressError,
   isPrivateOrReservedIp,
   readBodyWithLimit,
@@ -119,6 +128,41 @@ describe("ssrfGuardedLookup", () => {
   );
 });
 
+// `assertSafeUrl` is the synchronous gate `safeFetch` runs on the initial URL
+// and on every redirect target. It closes the IP-literal bypass: undici's
+// connector skips `connect.lookup` for hosts that are already IPs, so literal
+// hosts must be classified here rather than relying on the guarded lookup.
+describe("assertSafeUrl", () => {
+  it.each([
+    ["http://127.0.0.1/x.jpg"],
+    ["http://169.254.169.254/latest/meta-data/iam/.jpg"], // cloud metadata
+    ["http://10.0.0.1/internal"],
+    ["http://192.168.1.1/"],
+    ["https://[::1]/x"],
+    ["http://[::ffff:127.0.0.1]/x"], // IPv4-mapped loopback
+  ])("blocks private/reserved IP literal %s", (url) => {
+    expect(() => assertSafeUrl(url)).toThrow(BlockedAddressError);
+  });
+
+  it.each([["file:///etc/passwd"], ["ftp://example.com/x"], ["gopher://h/x"]])(
+    "rejects non-http(s) protocol %s",
+    (url) => {
+      expect(() => assertSafeUrl(url)).toThrow(/http and https/i);
+    }
+  );
+
+  it("rejects malformed URLs", () => {
+    expect(() => assertSafeUrl("not a url")).toThrow(/invalid url/i);
+  });
+
+  it("allows http(s) URLs with public hosts", () => {
+    expect(assertSafeUrl("https://images.example.com/a.jpg").hostname).toBe(
+      "images.example.com"
+    );
+    expect(assertSafeUrl("http://1.1.1.1/a.png").hostname).toBe("1.1.1.1");
+  });
+});
+
 describe("safeFetch input validation", () => {
   it("rejects non-http(s) protocols", async () => {
     await expect(safeFetch("file:///etc/passwd")).rejects.toThrow(
@@ -136,11 +180,26 @@ describe("safeFetch input validation", () => {
     await expect(safeFetch("not a url")).rejects.toThrow(/invalid url/i);
   });
 
-  // NOTE: The end-to-end "connect is refused" guarantee is proven by the
-  // `ssrfGuardedLookup` suite above — that lookup is exactly what the undici
-  // dispatcher runs at connect time for every hop (initial + redirects). We
-  // don't assert it through `safeFetch` here because the test harness's MSW
-  // interceptor sits in front of the dispatcher and would shadow the guard.
+  // Regression guard for the IP-literal bypass (GHSA review, Codex P1): undici
+  // does not route literal hosts through `connect.lookup`, so `safeFetch` must
+  // reject them up front — before any socket is opened. These assertions run
+  // entirely pre-`fetch`, so they are deterministic and MSW-independent.
+  it.each([
+    ["http://127.0.0.1/x.jpg"],
+    ["http://169.254.169.254/latest/meta-data/iam/security-credentials/.jpg"],
+    ["http://10.0.0.1/internal"],
+    ["https://[::1]/x"],
+  ])("blocks the IP-literal SSRF target %s", async (url) => {
+    await expect(safeFetch(url)).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  // NOTE: The "connect is refused for a NAMED host" guarantee (and its
+  // re-validation on each redirect hop) is proven by the `ssrfGuardedLookup`
+  // suite above — that lookup is exactly what the undici dispatcher runs at
+  // connect time. We can't assert it through `safeFetch` here because the test
+  // harness's MSW interceptor sits in front of the dispatcher. Redirect targets
+  // that are IP literals are covered because each hop is re-checked by
+  // `assertSafeUrl` (tested directly above).
 });
 
 /**
@@ -174,5 +233,16 @@ describe("readBodyWithLimit", () => {
     await expect(readBodyWithLimit(res, 5000, "http://x/test")).rejects.toThrow(
       /maximum allowed size/i
     );
+  });
+
+  it("aborts a slow/trickle body when the signal fires", async () => {
+    // A body well under the size cap but read with an already-aborted signal
+    // must be cut off — this is the slow-body DoS guard (hex/CodeRabbit review).
+    const res = streamingResponse(10, 5); // 50 bytes, far below the cap
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readBodyWithLimit(res, 8000, "http://x/test", controller.signal)
+    ).rejects.toThrow(/timed out/i);
   });
 });
