@@ -56,6 +56,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
@@ -67,6 +68,7 @@ import {
   createKitBookingNote,
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
@@ -74,6 +76,11 @@ import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  wrapAssetWithCountForNote,
+  wrapLinkForNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -302,6 +309,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         where: { id: bookingId, organizationId },
         select: {
           id: true,
+          // why: `name` is used to build the booking link in per-asset
+          // notes written after `updateBookingAssets` ("added 50 units
+          // of {asset} via {kit} to {booking}"). Cheap scalar pull.
+          name: true,
           status: true,
           bookingAssets: {
             // `assetKitId` is needed by the kit-add logic below — it
@@ -370,10 +381,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // and inherit the kit's slice quantity for QUANTITY_TRACKED
           // assets (otherwise rows would default to qty=1, leaving the
           // kit's "10 boxes of Pencils" looking like 1 box in the booking).
+          // `title` + `type` + `unitOfMeasure` feed the per-asset Note
+          // emission after `updateBookingAssets` so qty-tracked rows
+          // render "added 50 boxes of {asset} via {kit} to {booking}".
           select: {
             id: true,
             quantity: true,
-            asset: { select: { id: true, status: true } },
+            asset: {
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                unitOfMeasure: true,
+                status: true,
+              },
+            },
           },
         },
       },
@@ -489,7 +511,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitSlices,
       });
 
-      /** We create notes for the newly added kits instead of individual assets */
+      /** Kit-level summary note on the booking timeline (the popover-
+       * style note listing the kits added). Per-asset notes on each
+       * asset's own timeline are written below — Phase 4e wants both:
+       * the kit summary for the booking surface, and a per-asset note
+       * carrying the per-row unit count for the asset surface.
+       */
       const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
@@ -501,6 +528,52 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           action: "added",
         });
       }
+
+      /** Per-asset notes — one per kit-driven slice. Mirrors the
+       * `addAssetsToBooking` kit-add branch in
+       * `booking/service.server.ts` so the asset timeline shows the
+       * per-row qty count for QUANTITY_TRACKED rows ("added 50 boxes
+       * of {asset} via {kit} to {booking}") and the legacy "added
+       * asset via {kit} to {booking}" wording for INDIVIDUAL. Same
+       * slice loop the BookingAsset insert uses, so the per-row
+       * AssetKit.quantity is naturally what we name in the note.
+       */
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, booking.name);
+      const assetKitToKit = new Map<string, { id: string; name: string }>();
+      for (const kit of newlyAddedKits) {
+        for (const ak of kit.assetKits) {
+          assetKitToKit.set(ak.id, { id: kit.id, name: kit.name });
+        }
+      }
+      await Promise.all(
+        kitSlices.map(async (slice) => {
+          const ak = newlyAddedKits
+            .flatMap((kit) => kit.assetKits.map((ak) => ({ ak, kit })))
+            .find((entry) => entry.ak.id === slice.assetKitId);
+          if (!ak) return;
+          const assetMeta = ak.ak.asset;
+          const kit = ak.kit;
+          const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name);
+          const content = isQuantityTracked(assetMeta)
+            ? `${actor} added ${wrapAssetWithCountForNote(
+                assetMeta,
+                slice.quantity
+              )} via ${kitLink} to ${bookingLink}.`
+            : `${actor} added asset via ${kitLink} to ${bookingLink}.`;
+          await createNotes({
+            content,
+            type: "UPDATE",
+            userId,
+            assetIds: [slice.assetId],
+            organizationId,
+          });
+        })
+      );
     }
 
     /** If some kits were removed, we also need to handle those */

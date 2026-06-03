@@ -102,6 +102,7 @@ import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapAssetsWithDataForNote,
+  wrapAssetWithCountForNote,
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -825,12 +826,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             const assetInfo = newAssetById.get(assetId);
             if (!assetInfo) return;
             const reservedQty = newQuantities[assetId];
-            const qtySuffix =
-              isQuantityTracked(assetInfo) && reservedQty != null
-                ? ` with quantity **${reservedQty}**`
-                : "";
+            // Mirror the qty-aware per-asset wording the Phase 4e sweep
+            // landed on `addAssetsToBooking` in `booking/service.server.ts`:
+            // QUANTITY_TRACKED → "added 50 units of {asset} to {booking}";
+            // INDIVIDUAL → "added asset to {booking}" (byte-for-byte
+            // unchanged). The previous inline " with quantity **N**"
+            // suffix bypassed `wrapAssetWithCountForNote` and rendered as
+            // legacy-shaped text on the asset's own timeline.
+            const fragment = wrapAssetWithCountForNote(assetInfo, reservedQty);
+            const content = isQuantityTracked(assetInfo)
+              ? `${actor} added ${fragment} to ${bookingLink}.`
+              : `${actor} added asset to ${bookingLink}.`;
             await createNotes({
-              content: `${actor} added asset to ${bookingLink}${qtySuffix}.`,
+              content,
               type: "UPDATE",
               userId: authSession.userId,
               assetIds: [assetId],

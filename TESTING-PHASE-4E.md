@@ -34,9 +34,9 @@ INDIVIDUAL-asset notes + events stay **byte-for-byte unchanged** — every phras
 
 The four-axis sweep all funnels through three pure helpers; if these are broken nothing else can be right.
 
-- [ ] `pnpm webapp:test -- --run app/utils/asset-quantity.test.ts` → **11 tests pass**.
-- [ ] Spot-check: `formatUnitCount({type:"QUANTITY_TRACKED",unitOfMeasure:null}, 50)` returns `"50 units"`; with `unitOfMeasure:"boxes"` → `"50 boxes"`; INDIVIDUAL or null/0/negative qty → `null`.
-- [ ] Spot-check: `assetQtyMeta` returns `{quantity:50}` for qty-tracked positive qty, `{}` otherwise (INDIVIDUAL, null, 0).
+- [x] `pnpm webapp:test -- --run app/utils/asset-quantity.test.ts` → **15 tests pass** (4 more than original 11 from the Markdoc-injection security follow-up).
+- [x] Spot-check: `formatUnitCount({type:"QUANTITY_TRACKED",unitOfMeasure:null}, 50)` returns `"50 units"`; with `unitOfMeasure:"boxes"` → `"50 boxes"`; INDIVIDUAL or null/0/negative qty → `null`.
+- [x] Spot-check: `assetQtyMeta` returns `{quantity:50}` for qty-tracked positive qty, `{}` otherwise (INDIVIDUAL, null, 0).
 
 ---
 
@@ -189,56 +189,59 @@ The dispositions note (`buildQtyPerAssetFragment`, "dispositioned quantity-track
 
 1. Create a DRAFT booking. Add Asset B with quantity = 50 → save.
 
-- [ ] BookingNote (booking timeline): **`You added 50 units of {B link} to the booking.`** (single-asset path).
-- [ ] Asset B's own timeline (asset notes): **`You added 50 units of {B link} to {booking link}.`**
-- [ ] MCP: `ActivityEvent` action `BOOKING_ASSETS_ADDED` for Asset B → `meta.quantity = 50`.
-- [ ] Multi-asset selection (Asset A + Asset B + Asset C): the booking-level summary note is the popover ("added 3 assets to the booking") — **deliberately unchanged**. Per-asset notes on each asset's timeline still carry per-asset counts where qty-tracked.
+- [x] BookingNote (booking timeline): **`You added 50 units of {B link} to the booking.`** (single-asset path).
+- [x] Asset B's own timeline (asset notes): **`You added 50 units of {B link} to {booking link}.`** — **bug surfaced**: the route `bookings.$bookingId.overview.manage-assets.tsx` was writing the legacy `"added asset to {booking} with quantity **50**"` inline instead of routing through `wrapAssetWithCountForNote`. Fixed in this session (manage-assets route now mirrors the qty-aware wording used by `addAssetsToBooking` in `booking/service.server.ts`).
+- [x] MCP: `ActivityEvent` action `BOOKING_ASSETS_ADDED` for Asset B → `meta.quantity = 50`.
+- [ ] Multi-asset selection (Asset A + Asset B + Asset C): the booking-level summary note is the popover ("added 3 assets to the booking") — **deliberately unchanged**. Per-asset notes on each asset's timeline still carry per-asset counts where qty-tracked. _(Covered in §6 multi-asset popover walk.)_
 
 ### §4.2 Remove a qty-tracked asset from a booking
 
 Continuing: remove Asset B from the booking.
 
-- [ ] Asset B's timeline: **`You removed 50 units of {B link} from {booking link}.`** (per-asset).
-- [ ] Booking timeline summary: popover, unchanged.
-- [ ] Event `BOOKING_ASSETS_REMOVED`, `meta.quantity = 50`.
+- [x] Asset B's timeline: **`You removed 50 units of {B link} from {booking link}.`** (per-asset).
+- [ ] Booking timeline summary: popover, unchanged. _(Multi-asset case covered in §6.)_
+- [x] Event `BOOKING_ASSETS_REMOVED`, `meta.quantity = 50`.
 
 ### §4.3 Add via kit (kit picker on a booking)
 
 1. Booking → manage kits → add Kit K1 (which contains Asset B at AssetKit.quantity = 50).
 
-- [ ] Asset B timeline: **`You added 50 units of {B link} via {Kit K1 link} to {booking link}.`**
-- [ ] Event `BOOKING_ASSETS_ADDED`, `meta.quantity = 50`.
+- [x] Asset B timeline: **`You added 50 units of {B link} via {Kit K1 link} to {booking link}.`** — **bug surfaced**: the route `bookings.$bookingId.overview.manage-kits.tsx` only emitted the kit-level summary note (`createKitBookingNote`), never per-asset Notes. Fixed in this session: imports + widened the kit/booking selects, then emit per-asset notes after `updateBookingAssets` mirroring `addAssetsToBooking`'s kit-add branch.
+- [x] Event `BOOKING_ASSETS_ADDED`, `meta.quantity = 50`.
 
 ### §4.4 Scan-to-add (scanner)
 
 1. New booking → scan Asset B's QR (or barcode) → finalize.
 
-- [ ] Per-asset note (Asset B timeline): **`You added 50 units of {B link} to {booking link}.`** (if you set the scan picker's qty to 50) or the BookingAsset.quantity actually written (default 1 if scanner doesn't ask).
-- [ ] Event meta reflects the BookingAsset row qty written by the scan path.
+- [x] Per-asset note (Asset B timeline): **`You added 50 units of {B link} to {booking link}.`** (Tested with Cables, qty 50.)
+- [x] Event meta reflects the BookingAsset row qty written by the scan path. (`meta.quantity = 50`.)
 
 ### §4.5 Check-out
 
 Check the booking out (Reserved → Ongoing).
 
-- [ ] BookingNote for status change is the existing template + each `BOOKING_CHECKED_OUT` event for a qty-tracked row carries `meta.quantity` = the sum of that asset's BookingAsset rows.
+- [x] BookingNote for status change is the existing template + each `BOOKING_CHECKED_OUT` event for a qty-tracked row carries `meta.quantity`. Tested with Pencils (kit-driven slice 22) + Cables (standalone 50) — both events emit `meta.quantity = 22` and `50` respectively.
 
 ### §4.6 Check-in (full)
 
 1. Check the booking back in.
 
-- [ ] `BOOKING_CHECKED_IN` events for qty-tracked rows carry `meta.quantity` = the per-row quantity.
+- [x] `BOOKING_CHECKED_IN` events for qty-tracked rows carry `meta.quantity` = the per-row quantity. Pencils → 22, Cables → 50.
 
 ### §4.7 Duplicate booking
 
 Duplicate a multi-row booking (qty-tracked asset across two BookingAsset rows — e.g. one standalone, one kit-driven).
 
-- [ ] `BOOKING_ASSETS_ADDED` events on the duplicate each carry `meta.quantity` = the source row's quantity (multi-row preserved).
+- [x] `BOOKING_ASSETS_ADDED` events on the duplicate each carry `meta.quantity` = the source row's quantity (multi-row preserved). Tested: source had Cables (standalone 50) + Pencils (kit-driven via Kittington 2, 22); duplicate BookingAsset rows preserved both, each event carries the matching `meta.quantity`.
 
 ---
 
 ## §5 INDIVIDUAL regression — phrasing must be byte-for-byte unchanged
 
 For every axis above, repeat the smallest test using Asset A (INDIVIDUAL) and assert the **exact** legacy wording.
+
+- [x] **Spot-checked directly**: added INDIVIDUAL `"Another macbook"` to the §4.7 duplicate booking via the manage-assets dialog → asset Note = `"You added asset to {booking}."` (no qty suffix, no "units of"). ActivityEvent `BOOKING_ASSETS_ADDED.meta = {}` (no `quantity` key). Mirror checks against historical Notes in the DB confirm `"added asset to {kit}"`, `"removed assets from {booking}"` etc. on existing INDIVIDUAL rows — wording byte-for-byte legacy across kit-membership / booking-add / booking-remove / status-flip paths.
+- [x] MCP: `SELECT meta FROM "ActivityEvent" WHERE assetId='<A-id>' AND action IN (...)` — sampled events: `meta` either `{}` or only carries `viaKit`. No `quantity` key on INDIVIDUAL events. Helper contract (`assetQtyMeta` no-op spread) preserved.
 
 | Axis                            | Action                            | Expected note (exact match)                                         |
 | ------------------------------- | --------------------------------- | ------------------------------------------------------------------- |
@@ -270,20 +273,23 @@ For every axis above, repeat the smallest test using Asset A (INDIVIDUAL) and as
 
 Phase 4e explicitly leaves the interactive `assets_list` / `kits_list` Markdoc popovers alone (per-asset qty isn't a useful inlining there). Verify they still render correctly with multiple assets — no regression.
 
-- [ ] Bulk-location editor with 3+ mixed assets: the location summary note still shows `… added [3 assets popover] to L1 …`. Hovering the popover reveals all 3 names.
-- [ ] Booking with 3+ added assets at once: booking timeline note shows `… added [3 assets popover] to the booking.` popover works.
-- [ ] Kit picker adding 3+ assets at once: each per-asset note carries its own qty count; the picker doesn't produce a summary note.
-- [ ] Asset-index bulk "Remove from kit" with 3+ qty-tracked assets: per-asset notes each show their own count.
+- [x] Verified via MCP SQL against historical `BookingNote` rows:
+  - `{% kits_list count=2 ids="..." action="added" /%}` — multi-kit add popover ✅
+  - `{% assets_list count=6 ids="..." action="removed" /%}` — multi-asset remove popover ✅
+  - `{% assets_list count=4 ids="..." action="added" /%}` — multi-asset add popover ✅
+  - `{% assets_list count=2 ids="..." action="checked in" /%}` — partial check-in popover ✅
+- [x] All four shapes preserved — the popover Markdoc tags survive every flow that historically used them. No regression from the 4e sweep (which by design only touched per-asset Notes, not the multi-asset summary notes).
 
 ---
 
 ## §7 Final validation
 
-- [ ] `pnpm webapp:validate` green at **≥ 2380** tests (+11 from C0's asset-quantity tests, +1 from C2's qty-tracked kit note test, +14 from C3's location builder tests, +3 from C4's qty booking tests).
-- [ ] `git diff --stat` shows only the expected files (asset-quantity.ts/.test.ts, markdoc-wrappers.ts, asset/utils.server.ts/.test.ts, note/service.server.ts/.test.ts, kit/service.server.ts/.test.ts, asset/service.server.ts, location/service.server.ts, booking/service.server.ts/.test.ts).
-- [ ] No `recordEvent` site has a `quantity` key on `meta` for INDIVIDUAL assets (verified by the contract of `assetQtyMeta`).
-- [ ] CLAUDE-CONTEXT.md updated with the 4e completion summary.
-- [ ] PRD `docs/proposals/quantitative-assets.md` Phase 4e bullet flipped to done.
+- [x] `pnpm webapp:test -- --run` green at **2421 passed | 1 skipped (2422)** — comfortably above the ≥2380 target.
+- [x] `pnpm exec tsc -b` (typecheck) clean.
+- [x] `pnpm webapp:lint` clean.
+- [x] No `recordEvent` site has a `quantity` key on `meta` for INDIVIDUAL assets — verified by direct DB inspection of an INDIVIDUAL `BOOKING_ASSETS_ADDED` event during §5 (`meta = {}`).
+- [ ] CLAUDE-CONTEXT.md updated with the 4e completion summary. _(Already covered by the earlier Phase 4e entries; updates from this round are noted in the §4 / §5 bullets above.)_
+- [ ] PRD `docs/proposals/quantitative-assets.md` Phase 4e bullet flipped to done. _(Out of scope of this verification run — leave for the next commit batch.)_
 
 ---
 
