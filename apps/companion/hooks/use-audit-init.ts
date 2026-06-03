@@ -156,7 +156,13 @@ export function useAuditInit({
 
       // ── Crash recovery ───────────────────────────────
       const persisted = await loadAuditScanState(auditId);
-      if (persisted && persisted.scannedItems.length > 0) {
+      // why: gate on whether there is ANYTHING to recover (the inner check
+      // below decides recover-vs-clear from scanned items OR a non-empty
+      // queue), not on scannedItems alone. The eager queue-persist can write a
+      // fresh queue while scannedItems is still stale/empty (the list updates
+      // on a deferred render), so requiring scannedItems.length here would skip
+      // recovery and drop a queued scan. The queue is the durable record.
+      if (persisted) {
         // Find items that were scanned locally but not yet on the server
         const serverScannedIds = new Set(
           data.existingScans.map((s) => s.assetId)
@@ -180,10 +186,17 @@ export function useAuditInit({
         if (recoveredItems.length > 0 || queuedForSync.length > 0) {
           // Show recovery dialog (don't block init)
           setIsInitializing(false);
+          // Usually scannedItems and the queue agree; if only the queue
+          // survived (eager-persist before the list state committed), fall back
+          // to its length so the copy isn't "0 unsynced scans".
+          const unsyncedCount = Math.max(
+            recoveredItems.length,
+            queuedForSync.length
+          );
           Alert.alert(
             "Resume Previous Session?",
-            `Found ${recoveredItems.length} unsynced scan${
-              recoveredItems.length !== 1 ? "s" : ""
+            `Found ${unsyncedCount} unsynced scan${
+              unsyncedCount !== 1 ? "s" : ""
             } from a previous session.`,
             [
               {
@@ -194,13 +207,35 @@ export function useAuditInit({
               {
                 text: "Resume",
                 onPress: () => {
+                  // A queued scan may have no recovered display item — the
+                  // eager persist can save a queue entry before the list state
+                  // commits. Rebuild display rows for those (name from the
+                  // expected-asset map, else a neutral label) so they show as
+                  // scanned, count correctly, and don't leave the Complete
+                  // button hidden because scannedItems stayed empty. (Codex
+                  // review, PR #2586.)
+                  const recoveredIds = new Set(
+                    recoveredItems.map((i) => i.assetId)
+                  );
+                  const queuedOnlyItems: ScannedItem[] = queuedForSync
+                    .filter((e) => !recoveredIds.has(e.assetId))
+                    .map((e) => ({
+                      assetId: e.assetId,
+                      name:
+                        expectedAssetMapRef.current.get(e.assetId)?.name ??
+                        "Scanned asset",
+                      isExpected: e.isExpected,
+                      scannedAt: new Date().toISOString(),
+                    }));
+                  const allRecovered = [...recoveredItems, ...queuedOnlyItems];
+
                   // Merge recovered items into state
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     scannedIds.add(item.assetId);
                   }
                   scannedAssetIdsRef.current = scannedIds;
 
-                  const merged = [...recoveredItems, ...restoredItems];
+                  const merged = [...allRecovered, ...restoredItems];
                   setScannedItems(merged);
                   scannedItemsRef.current = merged;
 
@@ -217,7 +252,7 @@ export function useAuditInit({
                   // Recalculate counters
                   let extraFound = 0;
                   let extraUnexpected = 0;
-                  for (const item of recoveredItems) {
+                  for (const item of allRecovered) {
                     if (item.isExpected) extraFound++;
                     else extraUnexpected++;
                   }
@@ -230,8 +265,8 @@ export function useAuditInit({
                   }
 
                   announce(
-                    `Resumed ${recoveredItems.length} scan${
-                      recoveredItems.length !== 1 ? "s" : ""
+                    `Resumed ${allRecovered.length} scan${
+                      allRecovered.length !== 1 ? "s" : ""
                     } from previous session`
                   );
                 },
