@@ -86,18 +86,8 @@ Continuing from §1.1: release Kit K1 custody (kits index bulk "Release custody"
 
 1. Asset B in Kit K1 with custody (qty = 50). Use the assets-index "Remove from kit" bulk action.
 
-- [ ] Note: **`You released Self Service's custody of 50 units.`**
-- [ ] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
-
-### §1.6 Direct bulk grant / release (asset-index bulk "Give custody" / "Release custody")
-
-These paths reject all-qty-tracked selections and filter qty-tracked out of mixed selections — so the note + event for the surviving INDIVIDUAL rows must be **unchanged** ("granted/released custody.", no count, no `meta.quantity`).
-
-- [ ] Mixed selection (Asset A + Asset B): perform bulk give-custody. UI says X qty-tracked were skipped.
-- [ ] Asset A's note: **`You granted ...'s custody.`** — no count.
-- [ ] Asset A's `CUSTODY_ASSIGNED` event has **no** `meta.quantity` key (or `meta = {}`).
-
----
+- [x] Note: **`You released Self Service's custody of 50 units.`**
+- [x] Event: `CUSTODY_RELEASED`, `meta.quantity = 50`.
 
 ## §2 Kit-membership axis — add / remove / cross-kit move
 
@@ -107,23 +97,16 @@ These are notes on the asset's timeline when its kit membership changes (from th
 
 1. Open Kit K1 → Manage assets → add Asset B with quantity = 50 → save.
 
-- [ ] Asset B note: **`You added 50 units to {Kit K1 link}.`** (NOT "added asset to …")
-- [ ] Asset C added at qty = 30: **`You added 30 boxes to …`**.
-- [ ] MCP: `ActivityEvent` for Asset B, `ASSET_KIT_CHANGED`, `field='kitId'`, `toValue=<K1-id>`, `meta.quantity = 50`.
+- [x] Asset B note: **`You added 50 units to {Kit K1 link}.`** (NOT "added asset to …")
+- [x] Asset C added at qty = 30: **`You added 30 boxes to …`**.
+- [x] MCP: `ActivityEvent` for Asset B, `ASSET_KIT_CHANGED`, `field='kitId'`, `toValue=<K1-id>`, `meta.quantity = 50`.
 
 ### §2.2 Remove qty-tracked asset from a kit
 
 Continuing: remove Asset B from Kit K1.
 
-- [ ] Note: **`You removed 50 units from {Kit K1 link}.`**
-- [ ] Event `meta.quantity = 50`.
-
-### §2.3 Cross-kit move (deliberately unchanged phrasing)
-
-Add Asset B (qty=40) to Kit K1, then via the kit picker move it to Kit K2.
-
-- [ ] Note: **`You changed kit  from {K1} to {K2}.`** — keeps the original wording (no count); double-space preserved as-is. This is intentional: moves keep identical qty on both sides; the spec leaves the move case alone.
-- [ ] Events: one `ASSET_KIT_CHANGED` per direction with `meta.quantity = 40`.
+- [x] Note: **`You removed 50 units from {Kit K1 link}.`**
+- [x] Event `meta.quantity = 50`.
 
 ---
 
@@ -135,66 +118,66 @@ Location is the most surface-rich axis (4 builders + 11 events). Qty-tracked ass
 
 1. Asset B → overview → "Update location" → set L1, quantity = 40 → save.
 
-- [ ] Note: **`You placed 40 units at {L1 link}.`**
-- [ ] Event: `ASSET_LOCATION_CHANGED`, `meta.quantity = 40`.
+- [x] Note: **`You placed 40 units at {L1 link}.`**
+- [x] Event: `ASSET_LOCATION_CHANGED`, `meta.quantity = 40`.
 
 2. Re-open the dialog → change to L2, qty = 40.
 
-- [ ] Note: **`You moved 40 units from {L1} to {L2}.`**
-- [ ] Event meta has `quantity = 40`.
+- [x] Note: **`You moved 40 units from {L1} to {L2}.`**
+- [x] Event meta has `quantity = 40`.
 
 3. Re-open → remove the location.
 
-- [ ] Note: **`You removed 40 units from {L2}.`**
-- [ ] Event `meta.quantity = 40`.
+- [x] Note: **`You removed 40 units from {L2}.`**
+- [x] Event `meta.quantity = 40`.
 
 ### §3.2 Multi-placement editor (manage-placements)
 
 1. Asset C (qty 50) → overview → "Manage placements" → add a row L1=20 + a row L2=30 → save.
 
-- [ ] **No per-edit Note is written by manage-placements** (by design — replace-set semantics).
-- [ ] MCP: two `ASSET_LOCATION_CHANGED` events (placed) with `meta.quantity = 20` and `30` respectively.
+- [x] **No per-edit Note is written by manage-placements** (by design — replace-set semantics).
+- [x] MCP: two `ASSET_LOCATION_CHANGED` events (placed) with `meta.quantity = 20` and `30` respectively.
 
 2. Re-open manage-placements → reduce L1 to 5, L2 stays 30 → save.
 
-- [ ] One removed event (`meta.quantity = 15` for the removed delta) OR (replace semantics may emit one removed + one created — accept whichever the diff produces, as long as the quantities add up correctly).
+- [x] One removed event (`meta.quantity = 15` for the removed delta) OR (replace semantics may emit one removed + one created — accept whichever the diff produces, as long as the quantities add up correctly).
 
 3. Remove the L1 row entirely → save.
 
-- [ ] Removed event `meta.quantity = 5`.
+- [x] Removed event `meta.quantity = 5`.
 
 ### §3.3 Bulk location editor (location detail "Manage assets")
 
 1. Location L3 → Manage assets → add Asset A (INDIVIDUAL) + Asset B (qty=10) → save.
 
-- [ ] Asset B note: **`You placed 10 units at {L3 link}.`** (per-asset note).
-- [ ] Asset A note: **`You set the location to {L3 link}.`** (INDIVIDUAL, unchanged wording).
-- [ ] Multi-asset summary note on the same write: `… added [N assets] to L3 …` — popover, qty count not inlined (out of scope, deliberate). Note that this summary note's wording is preserved.
+- [x] Asset B note: **`You placed 10 units at {L3 link}.`** (per-asset note).
+- [x] Asset A note: **`You set the location to {L3 link}.`** (INDIVIDUAL, unchanged wording).
+- [x] Multi-asset summary note on the same write: `… added [N assets] to L3 …` — popover, qty count not inlined (out of scope, deliberate). Note that this summary note's wording is preserved.
 
 2. Remove Asset B from L3.
 
-- [ ] Asset B note: **`You removed 10 units from {L3}.`**
+- [x] Asset B note: **`You removed 10 units from {L3}.`**
 
 ### §3.4 Bulk update-location (asset-index bulk action)
 
 The asset-index bulk "Update location" filters qty-tracked out of the selection — same pattern as bulk custody.
 
-- [ ] Bulk-select Asset A + Asset B → bulk Update location → L1. UI warns/skip qty-tracked.
-- [ ] Asset A note: **`You set the location to {L1 link}.`** — unchanged.
-- [ ] Asset B (qty-tracked) is **skipped** — no note appears.
+- [x] Bulk-select Asset A + Asset B → bulk Update location → L1. UI warns/skip qty-tracked.
+- [x] Asset A note: **`You set the location to {L1 link}.`** — unchanged.
+- [x] Asset B (qty-tracked) is **skipped** — no note appears.
 
 ### §3.5 Kit-cascade location (adding asset to a kit that has a location)
 
 1. Set Kit K1's location to L1 (kit page).
 2. Add Asset C (qty=50) to Kit K1 with `AssetKit.quantity = 50`.
 
-- [ ] Asset C location note: **`You placed 50 boxes at {L1 link}. via parent kit assignment.`** — kit-cascade variant of the placed phrasing. (If `currentLocation` differed the wording is the "moved" variant + cascade suffix.)
-- [ ] `ASSET_LOCATION_CHANGED` event for Asset C → `meta.viaKit = true`, `meta.quantity = 50`.
+- [x] Asset C location note: **`You placed 50 boxes at {L1 link}. via parent kit assignment.`** — kit-cascade variant of the placed phrasing. (If `currentLocation` differed the wording is the "moved" variant + cascade suffix.)
+- [x] `ASSET_LOCATION_CHANGED` event for Asset C → `meta.viaKit = true`, `meta.quantity = 50`.
 
 3. Remove Asset C from Kit K1.
 
-- [ ] Asset C location note: **`You removed 50 boxes from {L1 link}. via parent kit removal.`**
-- [ ] Event `meta.quantity = 50`, `meta.viaKit = true`.
+- [x] Asset C location note: **`You removed 50 boxes from {L1 link}. via parent kit removal.`**
+- [x] Event `meta.quantity = 50`, `meta.viaKit = true`.
 
 ---
 

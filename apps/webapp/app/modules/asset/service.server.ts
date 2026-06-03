@@ -64,7 +64,7 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-import { assetQtyMeta } from "~/utils/asset-quantity";
+import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -2585,6 +2585,9 @@ export async function replaceAssetPlacements({
         title: true,
         type: true,
         quantity: true,
+        // unitOfMeasure labels the qty-tracked unit count in per-row
+        // placement notes ("placed 50 boxes at L").
+        unitOfMeasure: true,
         assetLocations: {
           select: {
             locationId: true,
@@ -2695,17 +2698,20 @@ export async function replaceAssetPlacements({
     }
 
     // 6. Cross-org guard — every locationId must belong to this org.
-    //    A single COUNT scoped by org is enough; we don't need to
-    //    know which one is foreign (the dialog only offers org-scoped
-    //    locations, so tampering is the only way to reach this path).
+    //    Use findMany (not count) so we can reuse the (id, name) pairs
+    //    when rendering per-row "placed N units at L" notes after the tx.
+    //    The dialog only offers org-scoped locations, so tampering is
+    //    the only way to land a foreign id here.
+    const submittedLocations = new Map<string, { id: string; name: string }>();
     if (placements.length > 0) {
-      const inOrgCount = await db.location.count({
+      const orgLocations = await db.location.findMany({
         where: {
           id: { in: placements.map((p) => p.locationId) },
           organizationId,
         },
+        select: { id: true, name: true },
       });
-      if (inOrgCount !== placements.length) {
+      if (orgLocations.length !== placements.length) {
         throw new ShelfError({
           cause: null,
           message: "One or more locations don't belong to your organization.",
@@ -2715,6 +2721,7 @@ export async function replaceAssetPlacements({
           shouldBeCaptured: true,
         });
       }
+      for (const l of orgLocations) submittedLocations.set(l.id, l);
     }
 
     // 7. Compute diff against current MANUAL pivot rows only. Kit-
@@ -2818,6 +2825,105 @@ export async function replaceAssetPlacements({
         await recordEvents(events, tx);
       }
     });
+
+    // Per-row notes emitted AFTER the tx commits. Following the same
+    // pattern as `updateLocationAssets`: notes capture intent and don't
+    // need to be atomic with the placement diff — a markdoc hiccup
+    // shouldn't roll back the actual placement write. Three shapes:
+    //   • toCreate → "placed N units at L"
+    //   • toDelete → "removed N units from L"
+    //   • toUpdate → "changed quantity at L from X to Y units"
+    // (Activity events on the toUpdate path are still the deliberate
+    // gap — revisit when ASSET_LOCATION_CHANGED gets a "quantity-only"
+    // variant.)
+    if (toCreate.length > 0 || toDelete.length > 0 || toUpdate.length > 0) {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      const firstName = user?.firstName ?? "";
+      const lastName = user?.lastName ?? "";
+
+      // Resolve location ids for the toUpdate set (same locations as
+      // their pre-update manual rows; they survived the diff). We pull
+      // names from the manualPlacements snapshot so we don't need a
+      // second query.
+      const manualByLocation = new Map(
+        manualPlacements.map((al) => [al.locationId, al])
+      );
+
+      // The qty-change note is inline (not via `createLocationChangeNote`)
+      // because the helper handles add / move / remove, not a "same
+      // location, different quantity" case. INDIVIDUAL is also
+      // structurally never on this path — qty was forced to 1 above,
+      // so an INDIVIDUAL "qty change" diff entry can't reach here.
+      const qtyChangeNoteCalls = toUpdate.flatMap((p) => {
+        const existing = manualByLocation.get(p.locationId);
+        const locationMeta = submittedLocations.get(p.locationId);
+        if (!existing || !locationMeta) return [];
+        const fromCount = formatUnitCount(asset, existing.quantity);
+        const toCount = formatUnitCount(asset, p.quantity);
+        if (!fromCount || !toCount) return [];
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName,
+          lastName,
+        });
+        const locationLink = wrapLinkForNote(
+          `/locations/${locationMeta.id}`,
+          locationMeta.name.trim()
+        );
+        return [
+          createNote({
+            content: `${actor} changed quantity at ${locationLink} from ${fromCount} to ${toCount}.`,
+            type: "UPDATE",
+            userId,
+            assetId,
+            organizationId,
+          }),
+        ];
+      });
+
+      await Promise.all([
+        ...toCreate.map((p) => {
+          const location = submittedLocations.get(p.locationId);
+          if (!location) return Promise.resolve();
+          return createLocationChangeNote({
+            currentLocation: null,
+            newLocation: location,
+            firstName,
+            lastName,
+            assetId,
+            userId,
+            isRemoving: false,
+            organizationId,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
+            quantity: p.quantity,
+          });
+        }),
+        ...toDelete.map((al) =>
+          createLocationChangeNote({
+            currentLocation: al.location,
+            newLocation: null,
+            firstName,
+            lastName,
+            assetId,
+            userId,
+            isRemoving: true,
+            organizationId,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
+            quantity: al.quantity,
+          })
+        ),
+        ...qtyChangeNoteCalls,
+      ]);
+    }
 
     return { ok: true as const };
   } catch (cause) {

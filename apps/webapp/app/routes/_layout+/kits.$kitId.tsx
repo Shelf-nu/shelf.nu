@@ -51,6 +51,7 @@ import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -318,56 +319,79 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * `BookingAsset_manual_unique`. Detachment notes get the kit /
          * asset names from a snapshot taken before the merge.
          */
-        const { kit, detachmentImpact } = await db.$transaction(async (tx) => {
-          const assetKitRows = await tx.assetKit.findMany({
-            where: { kitId, assetId },
-            select: { id: true },
-          });
-          const assetKitIds = assetKitRows.map((ak: { id: string }) => ak.id);
-          const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
-          await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
+        const { kit, detachmentImpact, slice } = await db.$transaction(
+          async (tx) => {
+            const assetKitRows = await tx.assetKit.findMany({
+              where: { kitId, assetId },
+              // type + unitOfMeasure label the qty-tracked unit count in
+              // the membership-remove note ("removed 50 units from …");
+              // quantity is the per-row AssetKit.quantity actually being
+              // detached (NOT Asset.quantity). Captured before the
+              // deleteMany below so the note can render after the tx
+              // commits without re-querying.
+              select: {
+                id: true,
+                quantity: true,
+                asset: {
+                  select: { type: true, unitOfMeasure: true },
+                },
+              },
+            });
+            const assetKitIds = assetKitRows.map((ak: { id: string }) => ak.id);
+            const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
+            await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
 
-          const updatedKit = await tx.kit.update({
-            where: { id: kitId, organizationId },
-            data: {
-              // Remove the pivot row that links this asset to the kit.
-              assetKits: { deleteMany: { assetId } },
-            },
-            select: {
-              name: true,
-              custody: { select: { id: true, custodianId: true } },
-            },
-          });
-
-          /**
-           * If kit was in custody then we have to clean up the kit-
-           * allocated custody row on the asset. Filter the deleteMany by
-           * `kitCustodyId` so operator-assigned custody on the same asset
-           * (e.g. someone holding 10 of 50 batteries directly) is left
-           * untouched.
-           */
-          if (updatedKit.custody?.id) {
-            await tx.custody.deleteMany({
-              where: { assetId, kitCustodyId: updatedKit.custody.id },
+            const updatedKit = await tx.kit.update({
+              where: { id: kitId, organizationId },
+              data: {
+                // Remove the pivot row that links this asset to the kit.
+                assetKits: { deleteMany: { assetId } },
+              },
+              select: {
+                name: true,
+                custody: { select: { id: true, custodianId: true } },
+              },
             });
 
-            // After removing only the kit-allocated rows, check whether
-            // any custody rows remain for this asset. The asset should
-            // only flip back to AVAILABLE if no custody is left.
-            const remainingCustody = await tx.custody.count({
-              where: { assetId },
-            });
-
-            if (remainingCustody === 0) {
-              await tx.asset.update({
-                where: { id: assetId, organizationId },
-                data: { status: AssetStatus.AVAILABLE },
+            /**
+             * If kit was in custody then we have to clean up the kit-
+             * allocated custody row on the asset. Filter the deleteMany by
+             * `kitCustodyId` so operator-assigned custody on the same asset
+             * (e.g. someone holding 10 of 50 batteries directly) is left
+             * untouched.
+             */
+            if (updatedKit.custody?.id) {
+              await tx.custody.deleteMany({
+                where: { assetId, kitCustodyId: updatedKit.custody.id },
               });
-            }
-          }
 
-          return { kit: updatedKit, detachmentImpact: impact };
-        });
+              // After removing only the kit-allocated rows, check whether
+              // any custody rows remain for this asset. The asset should
+              // only flip back to AVAILABLE if no custody is left.
+              const remainingCustody = await tx.custody.count({
+                where: { assetId },
+              });
+
+              if (remainingCustody === 0) {
+                await tx.asset.update({
+                  where: { id: assetId, organizationId },
+                  data: { status: AssetStatus.AVAILABLE },
+                });
+              }
+            }
+
+            // Snapshot the (single) AssetKit slice being detached for the
+            // post-tx note. `assetKitRows[0]` is the only matching row
+            // (composite unique on AssetKit (assetId, kitId) guarantees ≤ 1).
+            const detachedSlice = assetKitRows[0] ?? null;
+
+            return {
+              kit: updatedKit,
+              detachmentImpact: impact,
+              slice: detachedSlice,
+            };
+          }
+        );
 
         await emitAssetKitDetachmentNotes({
           impact: detachmentImpact,
@@ -384,8 +408,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
         const kitLink = wrapLinkForNote(`/kits/${kitId}`, kit.name.trim());
 
+        // Qty-tracked: name the per-row AssetKit.quantity actually
+        // detached ("removed 50 units from Camera Kit"); INDIVIDUAL keeps
+        // the original countless wording. Mirrors the singular path in
+        // `createKitChangeNote` (note/service.server.ts) and the bulk
+        // remove path in `bulkRemoveAssetsFromKits`.
+        const count = slice?.asset
+          ? formatUnitCount(slice.asset, slice.quantity)
+          : null;
         await createNote({
-          content: `${actor} removed the asset from ${kitLink}.`,
+          content: count
+            ? `${actor} removed ${count} from ${kitLink}.`
+            : `${actor} removed the asset from ${kitLink}.`,
           type: "UPDATE",
           userId,
           assetId,

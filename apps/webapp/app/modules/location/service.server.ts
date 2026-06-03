@@ -1633,10 +1633,34 @@ async function createBulkLocationChangeNotes({
       const isRemoving = removedAssetIds.includes(asset.id);
       const isNew = assetIds.includes(asset.id);
       const newLocation = isRemoving ? null : location;
+      const isQtyTracked = asset.type === AssetType.QUANTITY_TRACKED;
       const assetPrimaryLocation = getPrimaryLocation(asset);
-      const currentLocation = assetPrimaryLocation
-        ? { name: assetPrimaryLocation.name, id: assetPrimaryLocation.id }
-        : null;
+
+      /**
+       * INDIVIDUAL assets have at most one placement, so adding to L
+       * implicitly relocates from their primary — render "moved from
+       * primary to L" (or "set the location to L" if there was no
+       * prior placement). For QUANTITY_TRACKED the picker adds a NEW
+       * AssetLocation row at L while leaving any other manual rows
+       * untouched, so referencing the primary in the note is wrong —
+       * pass `currentLocation = null` and the helper renders "placed
+       * N units at L".
+       *
+       * REMOVE path: the location being removed FROM is `location`
+       * (the picker's context), not the asset's primary — for
+       * INDIVIDUAL those are the same row anyway, but for
+       * QUANTITY_TRACKED the primary may be a different (untouched)
+       * placement. Always use `location` for the remove note.
+       */
+      let currentLocation: { id: string; name: string } | null = null;
+      if (isRemoving) {
+        currentLocation = { id: location.id, name: location.name };
+      } else if (!isQtyTracked && assetPrimaryLocation) {
+        currentLocation = {
+          id: assetPrimaryLocation.id,
+          name: assetPrimaryLocation.name,
+        };
+      }
 
       if (isNew || isRemoving) {
         // Affected per-row `AssetLocation.quantity` for the note count.

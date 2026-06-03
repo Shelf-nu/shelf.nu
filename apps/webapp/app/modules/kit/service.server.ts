@@ -4976,8 +4976,18 @@ export async function bulkRemoveAssetsFromKits({
               `/kits/${asset.kit!.id}`,
               asset.kit!.name.trim()
             );
+            // Qty-tracked: name the unit count being removed from this
+            // kit ("removed 50 units from Camera Kit") using the per-row
+            // AssetKit.quantity threaded as `kitQuantity` on the asset
+            // shape above. INDIVIDUAL preserves the original countless
+            // wording. Mirrors the singular path in
+            // `createKitChangeNote` (note/service.server.ts).
+            const count = formatUnitCount(asset, asset.kitQuantity);
+            const content = count
+              ? `${actor} removed ${count} from ${kitLink}.`
+              : `${actor} removed asset from ${kitLink}.`;
             return {
-              content: `${actor} removed asset from ${kitLink}.`,
+              content,
               type: "UPDATE",
               userId,
               assetId: asset.id,
