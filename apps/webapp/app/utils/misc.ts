@@ -16,9 +16,19 @@ export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
 
 /**
- * Validates if a string is a properly formatted URL and potentially an image URL
+ * Heuristic check that a string looks like an image URL (correct protocol,
+ * plausible extension / image-service host / image-ish path).
+ *
+ * SECURITY: This is a UX pre-filter ONLY — it is NOT an SSRF boundary. The
+ * checks below match on the URL *string*, which the user controls and which a
+ * redirect can change after the fact, so they cannot decide whether a
+ * destination is safe to reach. The actual SSRF protection (private/reserved
+ * IP blocking, redirect revalidation, size cap) lives in `safeFetch`
+ * (`~/utils/ssrf.server`), which is what `uploadImageFromUrl` calls. Do not
+ * rely on this function to gate server-side fetches. See GHSA-xgrm-8w6v-mvjg.
+ *
  * @param url - The URL to validate
- * @returns boolean indicating if URL is valid
+ * @returns boolean indicating if URL plausibly points at an image
  */
 export function isValidImageUrl(url: string): boolean {
   try {
@@ -81,26 +91,6 @@ export function sanitizeFilename(filename: string): string {
     s = "_" + s;
   }
   return s;
-}
-
-export async function getImageAsBase64(url: string) {
-  try {
-    // Fetch the image data
-    const response = await fetch(url);
-
-    const arrayBuffer = await response.arrayBuffer();
-
-    // Convert the image data to a Base64-encoded string
-    const base64Image = Buffer.from(arrayBuffer).toString("base64");
-
-    return base64Image;
-
-    // Convert the image data to a Base64-encoded string
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Error fetching image:", error);
-    return null;
-  }
 }
 
 /**
