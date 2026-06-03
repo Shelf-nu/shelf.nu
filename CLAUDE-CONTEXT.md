@@ -1709,6 +1709,106 @@ release note read _"released Self Service's custody via kit assignment
 Camera Kit"_ with no indication it was 76 units out of 80. Detailed
 scope in `docs/proposals/quantitative-assets.md` → Phase 4e.
 
+#### Phase 4e end-to-end validation pass (2026-06-02 → 2026-06-03)
+
+`TESTING-PHASE-4E.md` walked §0–§7 end-to-end against a fresh dev DB,
+driven via the Claude-in-Chrome extension for the §4–§6 UI sections
+(Custody / Kit / Location / Booking / Activity Feed) with Supabase MCP
+SQL spot-checks on Note rows + `ActivityEvent.meta`. Two structural
+regressions + seven sweep gaps surfaced and were fixed before PR review.
+All three commits landed on top of `f07abe29d`; branch is
+`feat-quantities` at `91a5a9ff6` (3 ahead of `origin/feat-quantities`).
+
+**Structural fixes (`30a549329`):**
+
+- **AssetLocation orthogonal-axes restoration.** Phase 4b's
+  `assetlocation_sum_within_total` trigger summed across all rows
+  including kit-driven ones, which violated the orthogonal-axes design
+  (Location and Kit are independent axes, each capped at `Asset.quantity`).
+  Adding to a kit while the location pool was full failed with a
+  trigger 500 even though the location axis had capacity. Trigger
+  rewritten to filter `WHERE "assetKitId" IS NULL` so only the manual
+  rows enter the sum — migration
+  `20260602100000_assetlocation_sum_exclude_kit_driven`. Removed the
+  now-redundant `updateKitAssets` location cascade that mirrored kit
+  rows into AssetLocation (no longer needed once the trigger ignores
+  them).
+- **Custody partial-unique split (operator vs kit).** The original
+  `Custody_assetId_teamMemberId_key` constraint (legacy from when
+  Custody was 1:1) blocked the legitimate "operator Custody row +
+  kit-cascade Custody row for the same (asset, custodian) pair" case —
+  P2002 thrown when assigning kit custody to a team member already
+  holding the asset. Migration
+  `20260603100000_custody_partial_uniques_split_operator_kit` drops the
+  composite unique and replaces it with two partial-unique indexes:
+  `Custody_operator_unique` (`WHERE kitCustodyId IS NULL`) and
+  `Custody_kit_unique` (`WHERE kitCustodyId IS NOT NULL`). The four
+  `checkOutQuantity` / `releaseQuantity` call sites in
+  `asset/service.server.ts` were refactored off `findUnique` / `upsert`
+  by composite key (which no longer exists) onto `findFirst` with
+  `kitCustodyId: null` + write by `Custody.id`. Migration is plain
+  `CREATE UNIQUE INDEX IF NOT EXISTS` — calibrated to actual table
+  scale (sub-100k rows), no `CONCURRENTLY` runbook needed.
+
+**Sweep gaps filled across two commits (`39e29d18b` + `91a5a9ff6`):**
+
+- **Kit-detail 3-dot remove.** `kits.$kitId.tsx` removal slice was
+  writing generic phrasing — widened the `assetKit.findMany` to include
+  `quantity` + asset `type` / `unitOfMeasure` and routed through
+  `formatUnitCount(slice.asset, slice.quantity)`.
+- **`replaceAssetPlacements` per-row Notes.** Manage-placements toCreate
+  / toDelete / toUpdate branches each emit a qty-aware Note now
+  (asset/service.server.ts) — replacing the previous "events-only"
+  policy because the user-visible `assets.$assetId.activity` feed is
+  Note-driven, not event-driven.
+- **Qty-change Note in manage-placements.** Editing a per-row quantity
+  inline at `manage-placements` now emits
+  `"changed quantity at {L} from X units to Y units"` instead of
+  silently mutating with no audit row.
+- **`updateLocationAssets` phrasing fix.** When adding qty-tracked
+  units at a location while the asset already exists at another
+  location, the note used to read `"moved 25 boxes from Christmas Event
+to Chambers of Xeric"` — wrong, because the original 50 are still at
+  Christmas Event. Resolution now branches on `isQtyTracked`: for
+  QUANTITY_TRACKED non-removal paths, `currentLocation` stays `null` so
+  the writer renders `"placed 25 boxes at Chambers of Xeric"`.
+  INDIVIDUAL keeps the single-location move semantics.
+- **`bookings.$bookingId.overview.manage-assets.tsx`.** Per-asset Note
+  was using the legacy `"added asset to {booking} with quantity **N**"`
+  inline construction; routed through `wrapAssetWithCountForNote` so
+  it matches the rest of the sweep
+  (`"added 50 units of {asset} to {booking}"`).
+- **`bookings.$bookingId.overview.manage-kits.tsx`.** Only wrote the
+  kit-level summary Note via `createKitBookingNote`; per-asset timeline
+  was silent. Added a per-asset Note loop after `updateBookingAssets`
+  mirroring the kit-add branch of `addAssetsToBooking`
+  (`"added 22 units of {asset} via {kit} to {booking}"`).
+- **Bulk add-to-kit qty warning parity.** Bulk-action add-to-kit on a
+  qty-tracked asset selection was silent about full-pool default;
+  warning now mirrors the bulk-location-update dialog
+  (`bulk-kit-update-dialog.tsx`).
+- **Kit-assign custody Note parity.** Assign-side note was thinner than
+  the release-side; now reads with the same custodian / kit / count
+  template.
+
+**Hex security follow-up (2026-06-01).** `unitOfMeasure` is the only
+user-controlled string the 4e sweep interpolates into Markdoc-rendered
+Note content. `sanitizeUnitOfMeasureLabel` strips `{`, `%`, `}` from
+the label (`asset-quantity.ts`); `NewAssetFormSchema.unitOfMeasure`
+rejects `{%` / `%}` via Zod refinement. Both layers covered by
+`asset-quantity.test.ts` + `form.test.ts`.
+
+**Migration cadence reminders captured:** never apply DDL via Supabase
+MCP — always go through `db:deploy-migration` with a proper Prisma
+migration file (so prod has a deploy path). Mitigations are calibrated
+to actual table scale; no elaborate `CONCURRENTLY` runbook for
+sub-100k-row Custody / AssetLocation tables.
+
+**Validate-clean across all three commits.** Final state: `pnpm
+webapp:validate` green at **2421 / 2422** tests (one pre-existing skip,
+unchanged from main). Typecheck + lint + Prettier + security-review +
+commitlint hooks green on each commit.
+
 ### Out of Phase 4 scope (still gated)
 
 - Open follow-ups (low-stock email recipient UI, backfill verification
