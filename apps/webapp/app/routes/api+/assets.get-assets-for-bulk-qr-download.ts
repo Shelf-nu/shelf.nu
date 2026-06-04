@@ -123,6 +123,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         label: "Assets",
+        status: 400,
         shouldBeCaptured: false,
         message: `QR export is limited to ${MAX_BULK_QR_EXPORT} assets at a time. Please narrow your selection.`,
       });

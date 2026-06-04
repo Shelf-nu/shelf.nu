@@ -68,7 +68,7 @@ vi.mock("~/modules/qr/utils.server", () => ({
 }));
 vi.mock("~/modules/asset/utils.server", () => ({
   // select-all path: just scope to the org (the real filter logic isn't under test here).
-  getAssetsWhereInput: ({ organizationId }: any) => ({ organizationId }),
+  getAssetsWhereInput: vi.fn(({ organizationId }: any) => ({ organizationId })),
 }));
 vi.mock("~/utils/subscription.server", () => ({
   canHideShelfBranding: vi.fn(),
@@ -82,6 +82,7 @@ const { loader, MAX_BULK_QR_EXPORT } = await import(
   "~/routes/api+/assets.get-assets-for-bulk-qr-download"
 );
 const { db } = await import("~/database/db.server");
+const { getAssetsWhereInput } = await import("~/modules/asset/utils.server");
 const { requirePermission } = await import("~/utils/roles.server");
 const { getOrganizationTierLimit } = await import(
   "~/modules/tier/service.server"
@@ -265,6 +266,16 @@ describe("loader wiring (A15–A19, A24)", () => {
     const ids = body.assets.map((a: any) => a.id);
     expect(ids).toEqual(["a1"]);
     expect(ids).not.toContain("foreign");
+  });
+
+  it("forwards the active filters to getAssetsWhereInput on select-all", async () => {
+    await callLoader([ALL_SELECTED, "s=laptop"].slice(0, 1)); // assetIds=all-selected
+    expect(getAssetsWhereInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        currentSearchParams: expect.stringContaining("assetIds=all-selected"),
+      })
+    );
   });
 
   it("bounds the query with take so a huge select-all isn't fully loaded", async () => {

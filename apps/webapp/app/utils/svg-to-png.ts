@@ -23,8 +23,14 @@ export async function svgToPngBlob(
   pxWidth: number = DEFAULT_PNG_WIDTH
 ): Promise<Blob> {
   const vb = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-  const w = vb ? parseFloat(vb[1]) : 1;
-  const h = vb ? parseFloat(vb[2]) : 1;
+  if (!vb) {
+    // Fail loud rather than emit a distorted 1x1-derived PNG.
+    throw new Error(
+      'svgToPngBlob: SVG is missing a `viewBox="0 0 W H"` — cannot size the raster.'
+    );
+  }
+  const w = parseFloat(vb[1]);
+  const h = parseFloat(vb[2]);
   const pxHeight = Math.max(1, Math.round(pxWidth * (h / w)));
 
   const img = new Image();
