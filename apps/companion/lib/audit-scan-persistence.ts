@@ -48,7 +48,7 @@ export async function saveAuditScanState(
   scannedItems: ScannedItem[],
   pendingQueue: ScanQueueEntry[],
   failedQueue: ScanQueueEntry[] = []
-): Promise<void> {
+): Promise<boolean> {
   try {
     const state: PersistedScanState = {
       version: 1,
@@ -59,8 +59,14 @@ export async function saveAuditScanState(
       failedQueue,
     };
     await AsyncStorage.setItem(storageKey(auditId), JSON.stringify(state));
+    return true;
   } catch (e) {
-    if (__DEV__) console.warn("[AuditPersistence] save failed:", e);
+    // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
+    // (e.g. device storage full during a long offline audit) is exactly how a
+    // saw-as-Found scan is silently lost. Returning false lets callers that
+    // care surface it; the device log / crash reporter captures it in prod.
+    console.warn("[AuditPersistence] save failed:", e);
+    return false;
   }
 }
 

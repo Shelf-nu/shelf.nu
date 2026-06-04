@@ -16,6 +16,7 @@ import {
   Linking,
   Platform,
   Alert,
+  AppState,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -330,6 +331,40 @@ function AuditScannerContent() {
     scannedItemsRef,
   ]);
 
+  // ── Persist on background, resume on foreground ──────
+  // why: iOS suspends the JS runtime when the app is backgrounded and may then
+  // terminate it WITHOUT running React unmount cleanup — so the unmount flush
+  // above never fires on an OS kill. Flush the latest snapshot the instant we
+  // go inactive/background (the last moment JS runs), so a saw-as-Found scan
+  // can't be lost to a background reclaim within the debounce window. On
+  // return to foreground, re-kick the queue: retry timers do not advance while
+  // suspended, so a queue frozen mid-backoff would otherwise stall.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "inactive" || next === "background") {
+        const hasUnsynced =
+          scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0;
+        if (auditId && hasUnsynced) {
+          debouncedSaverRef.current?.flush(
+            scannedItemsRef.current,
+            scanQueueRef.current,
+            failedQueueRef.current
+          );
+        }
+      } else if (next === "active" && scanQueueRef.current.length > 0) {
+        processQueue();
+      }
+    });
+    return () => sub.remove();
+  }, [
+    auditId,
+    debouncedSaverRef,
+    scanQueueRef,
+    failedQueueRef,
+    scannedItemsRef,
+    processQueue,
+  ]);
+
   // ── Helpers ──────────────────────────────────────────
 
   const togglePause = useCallback(() => {
@@ -550,6 +585,21 @@ function AuditScannerContent() {
   const runCompletion = useCallback(async () => {
     if (!auditId || !currentOrg) return;
 
+    // TOCTOU guard: handleComplete blocked on a non-empty PENDING queue, but the
+    // camera stays live while the confirm dialog is open, so a scan can have
+    // been enqueued since that gate. Completing now would mark its asset MISSING
+    // and the queue-clear below would destroy it. Re-gate on the pending queue
+    // (this is the freshly-scanned path; the failed queue is what "Complete
+    // anyway" intentionally accepts, and is unaffected here).
+    if (scanQueueRef.current.length > 0) {
+      processQueue();
+      Alert.alert(
+        "Scan still syncing",
+        "A scan just came in and is still saving. Give it a moment, then tap Complete again."
+      );
+      return;
+    }
+
     const timeZone = (() => {
       try {
         return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -591,6 +641,7 @@ function AuditScannerContent() {
     debouncedSaverRef,
     scanQueueRef,
     failedQueueRef,
+    processQueue,
   ]);
 
   // Standard confirm: warns how many expected assets will be marked missing.
