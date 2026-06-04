@@ -24,6 +24,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
+import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -593,6 +594,11 @@ function AuditScannerContent() {
     // anyway" intentionally accepts, and is unaffected here).
     if (scanQueueRef.current.length > 0) {
       processQueue();
+      reportAuditDurabilityEvent("completion_blocked_unsynced", {
+        auditId,
+        reason: "toctou_pending",
+        pending: scanQueueRef.current.length,
+      });
       Alert.alert(
         "Scan still syncing",
         "A scan just came in and is still saving. Give it a moment, then tap Complete again."
@@ -670,6 +676,11 @@ function AuditScannerContent() {
     const pendingCount = scanQueueRef.current.length;
     if (pendingCount > 0) {
       processQueue();
+      reportAuditDurabilityEvent("completion_blocked_unsynced", {
+        auditId,
+        reason: "pending",
+        pending: pendingCount,
+      });
       Alert.alert(
         "Scans still syncing",
         `${pendingCount} scan${pendingCount === 1 ? "" : "s"} ${
@@ -686,6 +697,14 @@ function AuditScannerContent() {
     // anyway (acknowledging those assets will be marked missing).
     const failedCount = failedQueueRef.current.length;
     if (failedCount > 0) {
+      // Highest-signal case: the worker is completing an audit that has scans
+      // which exhausted retries — those assets will be marked MISSING unless
+      // re-synced. Report at error level.
+      reportAuditDurabilityEvent(
+        "completion_blocked_unsynced",
+        { auditId, reason: "failed", failed: failedCount },
+        "error"
+      );
       Alert.alert(
         "Some scans didn't sync",
         `${failedCount} scan${

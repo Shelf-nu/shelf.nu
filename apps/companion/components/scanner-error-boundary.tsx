@@ -1,6 +1,7 @@
-import React, { type ReactNode } from "react";
+import React, { type ReactNode, type ErrorInfo } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Sentry from "@sentry/react-native";
 import { useTheme } from "@/lib/theme-context";
 
 /**
@@ -95,9 +96,15 @@ export class ScannerErrorBoundary extends React.Component<
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     const label = this.props.label ?? "Scanner";
     console.warn(`[${label}] Error boundary caught:`, error.message);
+    // Report camera/scanner render crashes to Sentry — otherwise a device that
+    // can't mount the camera is an invisible dead scanner. No-ops in dev/no DSN.
+    Sentry.captureException(error, {
+      tags: { feature: "scanner", boundary: label },
+      extra: { componentStack: errorInfo.componentStack },
+    });
   }
 
   render() {
