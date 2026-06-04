@@ -876,6 +876,34 @@ describe("bulkAssignAssetTags", () => {
       })
     ).rejects.toThrow(ShelfError);
   });
+
+  // Regression: the per-asset `update` loop runs inside the interactive tx, so
+  // large selections must not abort with P2028 (Sentry SHELF-WEBAPP-1MH).
+  it("raises the interactive transaction timeout to 15s", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.tag.findMany.mockResolvedValue([{ id: "tag-new" }]);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", tags: [] }]);
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      tags: [{ id: "tag-new", name: "New" }],
+    });
+
+    await bulkAssignAssetTags({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      tagsIds: ["tag-new"],
+      remove: false,
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
+  });
 });
 
 describe("bulkDeleteAssets", () => {
@@ -933,6 +961,26 @@ describe("bulkDeleteAssets", () => {
     });
 
     expect(recordEvents).not.toHaveBeenCalled();
+  });
+
+  // Regression: a bulk delete cascades across every asset relation, so large
+  // selections must not abort with P2028 (Sentry SHELF-WEBAPP-1MJ).
+  it("raises the interactive transaction timeout to 15s", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", mainImage: null }]);
+
+    await bulkDeleteAssets({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      // @ts-expect-error settings not relevant
+      settings: {},
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
   });
 });
 

@@ -3943,29 +3943,37 @@ export async function bulkDeleteAssets({
     });
 
     try {
-      await db.$transaction(async (tx) => {
-        // Activity events — one ASSET_DELETED per asset, emitted before the
-        // delete so the rows still exist for any cross-ref checks. Mirrors
-        // singular `deleteAsset`.
-        if (assets.length > 0) {
-          await recordEvents(
-            assets.map((asset) => ({
-              organizationId,
-              actorUserId: userId,
-              action: "ASSET_DELETED" as const,
-              entityType: "ASSET" as const,
-              entityId: asset.id,
-              assetId: asset.id,
-            })),
-            tx
-          );
-        }
+      // Defense-in-depth: a bulk delete cascades across every asset relation
+      // (notes, custody, codes, custom-field values, booking joins …), so a
+      // large selection can creep past Prisma's 5s interactive-tx default and
+      // abort with P2028 (Sentry SHELF-WEBAPP-1MJ). Bump the ceiling to 15s,
+      // matching the booking-checkout precedent.
+      await db.$transaction(
+        async (tx) => {
+          // Activity events — one ASSET_DELETED per asset, emitted before the
+          // delete so the rows still exist for any cross-ref checks. Mirrors
+          // singular `deleteAsset`.
+          if (assets.length > 0) {
+            await recordEvents(
+              assets.map((asset) => ({
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_DELETED" as const,
+                entityType: "ASSET" as const,
+                entityId: asset.id,
+                assetId: asset.id,
+              })),
+              tx
+            );
+          }
 
-        await tx.asset.deleteMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3659-3665 with where { id in resolvedIds, organizationId }; every id here is already org-proven
-          where: { id: { in: assets.map((asset) => asset.id) } },
-        });
-      });
+          await tx.asset.deleteMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3659-3665 with where { id in resolvedIds, organizationId }; every id here is already org-proven
+            where: { id: { in: assets.map((asset) => asset.id) } },
+          });
+        },
+        { timeout: 15000 }
+      );
 
       /** Deleting images of the assets (if any) */
       const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
@@ -4816,55 +4824,62 @@ export async function bulkAssignAssetTags({
         }, new Map())
       );
 
-    const updatedAssets = await db.$transaction(async (tx) => {
-      const results = await Promise.all(
-        resolvedIds.map((id) =>
-          tx.asset.update({
-            where: { id, organizationId },
-            data: {
-              tags: {
-                [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
-                  id: tagId,
-                })),
+    // Defense-in-depth: this issues one `asset.update` per selected asset
+    // inside the interactive tx (needed to diff each asset's tag set), so a
+    // large selection serially exhausts Prisma's 5s default and aborts with
+    // P2028 (Sentry SHELF-WEBAPP-1MH). Bump the ceiling to 15s.
+    const updatedAssets = await db.$transaction(
+      async (tx) => {
+        const results = await Promise.all(
+          resolvedIds.map((id) =>
+            tx.asset.update({
+              where: { id, organizationId },
+              data: {
+                tags: {
+                  [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
+                    id: tagId,
+                  })),
+                },
               },
-            },
-            include: {
-              tags: { select: { id: true, name: true } },
-            },
-          })
-        )
-      );
+              include: {
+                tags: { select: { id: true, name: true } },
+              },
+            })
+          )
+        );
 
-      // Activity events — one ASSET_TAGS_CHANGED per asset whose tag set
-      // actually changed. Same shape as the singular `updateAsset` flow.
-      const tagChangeEvents: Parameters<typeof recordEvents>[0] = [];
-      for (const asset of results) {
-        const previousTags = previousTagsByAssetId.get(asset.id) ?? [];
-        const previousTagIds = new Set(previousTags.map((t) => t.id));
-        const currentTagIds = new Set(asset.tags.map((t) => t.id));
-        const setsDiffer =
-          previousTagIds.size !== currentTagIds.size ||
-          [...previousTagIds].some((t) => !currentTagIds.has(t));
-        if (setsDiffer) {
-          tagChangeEvents.push({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_TAGS_CHANGED",
-            entityType: "ASSET",
-            entityId: asset.id,
-            assetId: asset.id,
-            field: "tags",
-            fromValue: [...previousTagIds],
-            toValue: [...currentTagIds],
-          });
+        // Activity events — one ASSET_TAGS_CHANGED per asset whose tag set
+        // actually changed. Same shape as the singular `updateAsset` flow.
+        const tagChangeEvents: Parameters<typeof recordEvents>[0] = [];
+        for (const asset of results) {
+          const previousTags = previousTagsByAssetId.get(asset.id) ?? [];
+          const previousTagIds = new Set(previousTags.map((t) => t.id));
+          const currentTagIds = new Set(asset.tags.map((t) => t.id));
+          const setsDiffer =
+            previousTagIds.size !== currentTagIds.size ||
+            [...previousTagIds].some((t) => !currentTagIds.has(t));
+          if (setsDiffer) {
+            tagChangeEvents.push({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_TAGS_CHANGED",
+              entityType: "ASSET",
+              entityId: asset.id,
+              assetId: asset.id,
+              field: "tags",
+              fromValue: [...previousTagIds],
+              toValue: [...currentTagIds],
+            });
+          }
         }
-      }
-      if (tagChangeEvents.length > 0) {
-        await recordEvents(tagChangeEvents, tx);
-      }
+        if (tagChangeEvents.length > 0) {
+          await recordEvents(tagChangeEvents, tx);
+        }
 
-      return results;
-    });
+        return results;
+      },
+      { timeout: 15000 }
+    );
 
     await Promise.all(
       updatedAssets.map((asset) =>
