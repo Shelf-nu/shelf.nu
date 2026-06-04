@@ -537,7 +537,9 @@ describe("updateAsset custom-field writes", () => {
   // Regression for Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF: persisting custom
   // field values must not use a nested `upsert`, which makes Prisma issue a
   // SELECT-then-write per field (N+1). New values become a single `create`,
-  // existing ones an `update` keyed by the value-row id we already loaded.
+  // existing ones an `updateMany` keyed by the value-row id we already loaded
+  // (`updateMany` so a concurrently-deleted row matches zero rows instead of
+  // throwing P2025 and aborting the whole save).
   it("creates new custom-field values and updates existing ones without a nested upsert", async () => {
     expect.assertions(4);
 
@@ -579,8 +581,9 @@ describe("updateAsset custom-field writes", () => {
     expect(customFields.create).toEqual([
       { value: { raw: "fresh" }, customFieldId: "cf-new" },
     ]);
-    // Existing value → update keyed by the value-row id we already loaded.
-    expect(customFields.update).toEqual([
+    // Existing value → updateMany (no-throw on a concurrently-deleted row),
+    // keyed by the value-row id we already loaded.
+    expect(customFields.updateMany).toEqual([
       { where: { id: "val-1" }, data: { value: { raw: "updated" } } },
     ]);
     // Existence info is read in a single query, not once per field.

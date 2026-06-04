@@ -1507,6 +1507,16 @@ export async function updateAsset({
         .filter(({ id }) => !existingValueIdByFieldId.has(id))
         .map(({ id, value }) => ({ value, customFieldId: id }));
 
+      /**
+       * Existing values are written with `updateMany` (one entry per row),
+       * NOT a nested `update`. `update` would throw P2025 and abort the whole
+       * asset save if a concurrent edit deleted the value row in the window
+       * between the `findMany` above and this write; `updateMany` matches zero
+       * rows instead of throwing. The concurrent delete then wins (the row
+       * stays gone) rather than 500-ing the user — an acceptable
+       * last-write-wins outcome for this rare interleaving, and it keeps the
+       * per-field existence SELECT eliminated.
+       */
       const customFieldsToUpdate = customFieldValuesToAdd
         .filter(({ id }) => existingValueIdByFieldId.has(id))
         .map(({ id, value }) => ({
@@ -1520,7 +1530,7 @@ export async function updateAsset({
             ? { create: customFieldsToCreate }
             : {}),
           ...(customFieldsToUpdate.length > 0
-            ? { update: customFieldsToUpdate }
+            ? { updateMany: customFieldsToUpdate }
             : {}),
           ...(customFieldValuesToRemove.length > 0
             ? {
