@@ -50,7 +50,8 @@
       "expo-font",
       "expo-web-browser",
       "expo-quick-actions",
-      "./plugins/swift-concurrency-fix"
+      "./plugins/swift-concurrency-fix",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true

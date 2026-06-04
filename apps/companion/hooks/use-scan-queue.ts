@@ -1,6 +1,7 @@
 import { useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { saveAuditScanState } from "@/lib/audit-scan-persistence";
+import { reportAuditDurabilityEvent } from "@/lib/sentry";
 import type { ScannedItem, ScanQueueEntry } from "./use-audit-init";
 
 // ── Constants ────────────────────────────────────────────
@@ -114,6 +115,18 @@ export function useScanQueue({
             scannedItemsRef.current,
             scanQueueRef.current,
             failedQueueRef.current
+          );
+          // Surface to Sentry: a scan the worker saw as Found has not reached
+          // the server after all retries. This is the field signal we'd
+          // otherwise only learn about from a "my audit is wrong" report.
+          reportAuditDurabilityEvent(
+            "scan_sync_failed",
+            {
+              auditSessionId: entry.auditSessionId,
+              assetId: entry.assetId,
+              retries: MAX_QUEUE_RETRIES,
+            },
+            "error"
           );
           if (__DEV__)
             console.warn(
