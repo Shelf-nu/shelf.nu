@@ -4,13 +4,16 @@ import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
+import { QrSvg } from "~/components/assets/qr-svg";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { buildLabelSvg } from "~/modules/qr/label";
 import { resolveShowShelfBranding } from "~/utils/branding";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
+import { svgToPngBlob } from "~/utils/svg-to-png";
 import { tw } from "~/utils/tw";
 import { waitForImagesToLoad } from "~/utils/wait-for-images";
 import { AddBarcodeDialog } from "./add-barcode-dialog";
@@ -29,6 +32,8 @@ export interface CodeType {
   qrData?: {
     size: SizeKeys;
     src: string;
+    /** The scan URL the QR encodes — used to re-render as vector for download. */
+    url: string;
   };
   // Barcode specific
   barcodeData?: {
@@ -99,6 +104,7 @@ interface CodePreviewProps {
       size: SizeKeys;
       id: string;
       src: string;
+      url: string;
     };
   };
   barcodes?: Array<{
@@ -151,6 +157,7 @@ export const CodePreview = ({
         qrData: {
           size: qrObj.qr.size,
           src: qrObj.qr.src,
+          url: qrObj.qr.url,
         },
       });
     }
@@ -246,6 +253,35 @@ export const CodePreview = ({
   }, [item, selectedCode]);
 
   function downloadCode(e: MouseEvent<HTMLButtonElement>) {
+    // Vector path for the Shelf QR: render the label as SVG and rasterize at
+    // high resolution — genuinely sharp, unlike the legacy bitmap capture. One
+    // renderer with the bulk export. (Barcodes fall through to the DOM capture.)
+    if (selectedCode?.type === "qr" && selectedCode.qrData) {
+      e.preventDefault();
+      const idText =
+        organization?.qrIdDisplayPreference === "SAM_ID" && sequentialId
+          ? sequentialId
+          : selectedCode.id;
+      void svgToPngBlob(
+        buildLabelSvg({
+          url: selectedCode.qrData.url,
+          title: item.name,
+          idText,
+          showBranding: resolvedShowShelfBranding,
+        })
+      )
+        .then((blob) => {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = fileName;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(link.href), 4e4);
+        })
+        // eslint-disable-next-line no-console
+        .catch(console.error);
+      return;
+    }
+
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadBtnRef.current;
 
@@ -426,6 +462,8 @@ export type QrDef = {
   id?: string;
   size?: SizeKeys;
   src?: string;
+  /** Scan URL — when present the QR renders as inline vector (sharp preview + print). */
+  url?: string;
 };
 
 interface QrLabelProps {
@@ -449,10 +487,14 @@ export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
       <div style={QR_LABEL_STYLE} ref={ref}>
         <div style={LABEL_TITLE_STYLE}>{title}</div>
         <figure className="qr-code flex justify-center">
-          <img
-            src={data?.qr?.src}
-            alt={`${data?.qr?.size}-shelf-qr-code.png`}
-          />
+          {data?.qr?.url ? (
+            <QrSvg url={data.qr.url} size="200px" />
+          ) : (
+            <img
+              src={data?.qr?.src}
+              alt={`${data?.qr?.size}-shelf-qr-code.png`}
+            />
+          )}
         </figure>
         <div className="w-full text-center text-[12px]">
           <div className="font-semibold">
