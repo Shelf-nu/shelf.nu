@@ -7,6 +7,15 @@ export default {
   ssr: true,
   future: {
     v8_viteEnvironmentApi: true,
+    // Explicitly opt out of the remaining pre-v8 future flags so the 7.16+
+    // build/typegen don't emit "unadopted future flag" console warnings.
+    // `v8_middleware` and `v8_splitRouteModules` are the two that currently
+    // warn; the other two are set for completeness. Flip any of these to
+    // `true` deliberately as part of the eventual v8 migration.
+    v8_middleware: false,
+    v8_splitRouteModules: false,
+    v8_passThroughRequests: false,
+    v8_trailingSlashAwareDataRequests: false,
   },
   buildEnd: async ({ reactRouterConfig }) => {
     const sentryInstrument = `instrument.server`;

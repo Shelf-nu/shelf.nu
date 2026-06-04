@@ -10,14 +10,13 @@ import { vi } from "vitest";
 export function createLoaderArgs(
   args: Partial<LoaderFunctionArgs>
 ): LoaderFunctionArgs {
+  const request = args.request || new Request("http://localhost:3000");
   return {
-    request: args.request || new Request("http://localhost:3000"),
+    request,
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern || "*",
-    unstable_url:
-      args.unstable_url ??
-      new URL(args.request?.url ?? "http://localhost:3000"),
+    pattern: args.pattern || "*",
+    url: args.url ?? new URL(request.url),
   };
 }
 
@@ -31,8 +30,8 @@ export function createActionArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern || "*",
-    unstable_url: args.unstable_url ?? new URL(request.url),
+    pattern: args.pattern || "*",
+    url: args.url ?? new URL(request.url),
   };
 }
 
