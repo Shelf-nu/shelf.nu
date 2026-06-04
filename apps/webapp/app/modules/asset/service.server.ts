@@ -1486,24 +1486,59 @@ export async function updateAsset({
         (cf) => !cf.value
       );
 
+      /**
+       * Split the writes into create vs update ourselves instead of using a
+       * nested `upsert`. Prisma emulates each nested upsert with a
+       * SELECT-then-write round-trip per field, which is the N+1 reported in
+       * Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF. We already loaded the
+       * existing values above (`currentCustomFieldsValuesWithFields`), so we
+       * know which fields exist without asking the database again. Each
+       * custom field has at most one value row per asset, so keying by
+       * `customFieldId` is unambiguous.
+       */
+      const existingValueIdByFieldId = new Map(
+        currentCustomFieldsValuesWithFields.map((ccfv) => [
+          ccfv.customFieldId,
+          ccfv.id,
+        ])
+      );
+
+      const customFieldsToCreate = customFieldValuesToAdd
+        .filter(({ id }) => !existingValueIdByFieldId.has(id))
+        .map(({ id, value }) => ({ value, customFieldId: id }));
+
+      /**
+       * Existing values are written with `updateMany` (one entry per row),
+       * NOT a nested `update`. `update` would throw P2025 and abort the whole
+       * asset save if a concurrent edit deleted the value row in the window
+       * between the `findMany` above and this write; `updateMany` matches zero
+       * rows instead of throwing. The concurrent delete then wins (the row
+       * stays gone) rather than 500-ing the user — an acceptable
+       * last-write-wins outcome for this rare interleaving, and it keeps the
+       * per-field existence SELECT eliminated.
+       */
+      const customFieldsToUpdate = customFieldValuesToAdd
+        .filter(({ id }) => existingValueIdByFieldId.has(id))
+        .map(({ id, value }) => ({
+          where: { id: existingValueIdByFieldId.get(id) as string },
+          data: { value },
+        }));
+
       Object.assign(data, {
         customFields: {
-          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
-            where: {
-              id:
-                currentCustomFieldsValuesWithFields.find(
-                  (ccfv) => ccfv.customFieldId === id
-                )?.id || "",
-            },
-            update: { value },
-            create: {
-              value,
-              customFieldId: id,
-            },
-          })),
-          deleteMany: customFieldValuesToRemove.map((cf) => ({
-            customFieldId: cf.id,
-          })),
+          ...(customFieldsToCreate.length > 0
+            ? { create: customFieldsToCreate }
+            : {}),
+          ...(customFieldsToUpdate.length > 0
+            ? { updateMany: customFieldsToUpdate }
+            : {}),
+          ...(customFieldValuesToRemove.length > 0
+            ? {
+                deleteMany: customFieldValuesToRemove.map((cf) => ({
+                  customFieldId: cf.id,
+                })),
+              }
+            : {}),
         },
       });
     }
