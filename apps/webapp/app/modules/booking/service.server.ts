@@ -4547,24 +4547,30 @@ export async function bulkArchiveBookings({
       });
     }
 
-    await db.$transaction(async (tx) => {
-      /** Updating status of bookings to ARCHIVED  */
-      await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) }, organizationId },
-        data: { status: BookingStatus.ARCHIVED },
-      });
-
-      /** Create booking status transition notes for each booking */
-      for (const booking of bookings) {
-        await createStatusTransitionNote({
-          bookingId: booking.id,
-          organizationId,
-          fromStatus: booking.status,
-          toStatus: BookingStatus.ARCHIVED,
-          custodianUserId: booking.custodianUserId || undefined,
-        });
-      }
+    /** Update all selected bookings to ARCHIVED. This is a single statement —
+     * atomic on its own — so it needs no interactive transaction. */
+    await db.booking.updateMany({
+      where: { id: { in: bookings.map((b) => b.id) }, organizationId },
+      data: { status: BookingStatus.ARCHIVED },
     });
+
+    /** Create booking status transition notes for each booking.
+     *
+     * Done AFTER the status update, NOT inside an interactive transaction:
+     * `createStatusTransitionNote` writes via the global `db` (not a passed
+     * `tx`), so the previous `$transaction` never made these notes atomic with
+     * the status change. It only held the interactive-tx connection open across
+     * N sequential note writes, which on large selections blew past Prisma's
+     * 5s default and aborted the commit with P2028 (Sentry SHELF-WEBAPP-1KQ). */
+    for (const booking of bookings) {
+      await createStatusTransitionNote({
+        bookingId: booking.id,
+        organizationId,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.ARCHIVED,
+        custodianUserId: booking.custodianUserId || undefined,
+      });
+    }
 
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));

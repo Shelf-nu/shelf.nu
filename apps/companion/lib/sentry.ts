@@ -49,6 +49,13 @@ export function initSentry() {
  * This makes every event — crashes included — self-describing: which org, what
  * role, which user — so an issue can be triaged (org-specific? role-specific?)
  * without re-investigation. IDs/roles only, never names or emails.
+ *
+ * @param params - identifiers to attach to the Sentry scope
+ * @param params.userId - the user id, or null/undefined to clear the user
+ * @param params.orgId - the active organization id; null/undefined unsets the tag
+ * @param params.role - the user's role(s) in the active org; null/undefined unsets the tag
+ * @returns void
+ * @throws Never — no-ops when Sentry isn't configured (dev / no DSN)
  */
 export function setSentryUser(params: {
   userId?: string | null;
