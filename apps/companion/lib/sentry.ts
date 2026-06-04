@@ -44,6 +44,24 @@ export function initSentry() {
 }
 
 /**
+ * Attach the current user/org/role to all subsequent Sentry events. Call when
+ * the active org (and its roles) resolves, and clear (pass {}) on sign-out.
+ * This makes every event — crashes included — self-describing: which org, what
+ * role, which user — so an issue can be triaged (org-specific? role-specific?)
+ * without re-investigation. IDs/roles only, never names or emails.
+ */
+export function setSentryUser(params: {
+  userId?: string | null;
+  orgId?: string | null;
+  role?: string | null;
+}) {
+  if (!dsn || __DEV__) return;
+  Sentry.setUser(params.userId ? { id: params.userId } : null);
+  Sentry.setTag("orgId", params.orgId ?? undefined);
+  Sentry.setTag("role", params.role ?? undefined);
+}
+
+/**
  * The audit scan-durability danger points. If any of these fire in production,
  * the offline/kill/sync path is being stressed or failing — the exact failure
  * class that otherwise only surfaces as a user reporting wrong audit results.

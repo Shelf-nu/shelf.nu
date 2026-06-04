@@ -1,6 +1,7 @@
-import React, { type ReactNode } from "react";
+import React, { type ReactNode, type ErrorInfo } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Sentry from "@sentry/react-native";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { ThemeContext } from "@/lib/theme-context";
 import type { Colors } from "@/lib/theme-colors";
@@ -28,13 +29,22 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn(
       `[ErrorBoundary${
         this.props.screenName ? `:${this.props.screenName}` : ""
       }] Caught:`,
       error.message
     );
+    // Report to Sentry — without this, every screen render crash is invisible
+    // in the field (the boundary swallows it). No-ops in dev / without a DSN.
+    Sentry.captureException(error, {
+      tags: {
+        feature: "error-boundary",
+        screen: this.props.screenName ?? "unknown",
+      },
+      extra: { componentStack: errorInfo.componentStack },
+    });
   }
 
   private handleRetry = () => {
