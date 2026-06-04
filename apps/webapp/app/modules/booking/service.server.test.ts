@@ -3380,8 +3380,8 @@ describe("bulkArchiveBookings", () => {
   // sequential note writes and aborted the commit with P2028 on large
   // selections. Notes are written via the global db (never `tx`), so they were
   // never atomic — they must run AFTER a plain `updateMany`, with no tx.
-  it("archives via a plain updateMany (no interactive tx) and writes one status note per booking", async () => {
-    expect.assertions(3);
+  it("archives via a plain updateMany (no interactive tx) and persists a status note for each booking", async () => {
+    expect.assertions(4);
     //@ts-expect-error mock setup
     db.booking.findMany.mockResolvedValue([
       {
@@ -3409,7 +3409,17 @@ describe("bulkArchiveBookings", () => {
     });
     // The fix removed the interactive transaction entirely for this path.
     expect(db.$transaction).not.toHaveBeenCalled();
-    expect(createSystemBookingNote).toHaveBeenCalledTimes(2);
+
+    // Observable outcome: each archived booking gets its own status note in the
+    // caller's org. `createSystemBookingNote` is the persistence boundary the
+    // suite stubs for booking notes (it forwards to db.bookingNote.create), so
+    // we assert per-booking payload here rather than just a call count.
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b1", organizationId: "org-1" })
+    );
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b2", organizationId: "org-1" })
+    );
   });
 
   it("throws if any selected booking is not COMPLETE", async () => {
