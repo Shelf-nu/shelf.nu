@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -33,6 +34,7 @@ import {
   extendBooking,
   removeAssets,
   getOngoingBookingForAsset,
+  bulkArchiveBookings,
   // Test helper functions
   getActionTextFromTransition,
   getSystemActionText,
@@ -80,6 +82,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       delete: vitest.fn().mockResolvedValue({}),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
@@ -3364,5 +3367,65 @@ describe("getOngoingBookingForAsset", () => {
       },
     });
     expect(result).toEqual(checkedOutBooking);
+  });
+});
+
+describe("bulkArchiveBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  // Regression for Sentry SHELF-WEBAPP-1KQ: the per-booking status notes used
+  // to run inside an interactive transaction, which held the tx open across N
+  // sequential note writes and aborted the commit with P2028 on large
+  // selections. Notes are written via the global db (never `tx`), so they were
+  // never atomic — they must run AFTER a plain `updateMany`, with no tx.
+  it("archives via a plain updateMany (no interactive tx) and writes one status note per booking", async () => {
+    expect.assertions(3);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: "u1",
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b2",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "b2"],
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["b1", "b2"] }, organizationId: "org-1" },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    // The fix removed the interactive transaction entirely for this path.
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(createSystemBookingNote).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws if any selected booking is not COMPLETE", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
   });
 });
