@@ -7,6 +7,7 @@ import {
   createDebouncedSaver,
 } from "@/lib/audit-scan-persistence";
 import { announce } from "@/lib/a11y";
+import { reportAuditDurabilityEvent } from "@/lib/sentry";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -193,6 +194,15 @@ export function useAuditInit({
             recoveredItems.length,
             queuedForSync.length
           );
+          // Surface to Sentry: a previous session ended (kill/crash/background)
+          // with scans that never reached the server. Recovery is about to run
+          // — this tells us how often the durability net is actually catching.
+          reportAuditDurabilityEvent("session_recovered", {
+            auditId,
+            unsyncedCount,
+            recoveredItems: recoveredItems.length,
+            queuedForSync: queuedForSync.length,
+          });
           Alert.alert(
             "Resume Previous Session?",
             `Found ${unsyncedCount} unsynced scan${

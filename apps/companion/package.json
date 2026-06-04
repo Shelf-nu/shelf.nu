@@ -29,6 +29,7 @@
     "@react-native-community/netinfo": "11.4.1",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
+    "@sentry/react-native": "~7.2.0",
     "@supabase/supabase-js": "^2.49.1",
     "expo": "~54.0.33",
     "expo-av": "^16.0.8",
