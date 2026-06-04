@@ -14,10 +14,8 @@ export function createLoaderArgs(
     request: args.request || new Request("http://localhost:3000"),
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern || "*",
-    unstable_url:
-      args.unstable_url ??
-      new URL(args.request?.url ?? "http://localhost:3000"),
+    pattern: args.pattern || "*",
+    url: args.url ?? new URL(args.request?.url ?? "http://localhost:3000"),
   };
 }
 
@@ -31,8 +29,8 @@ export function createActionArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern || "*",
-    unstable_url: args.unstable_url ?? new URL(request.url),
+    pattern: args.pattern || "*",
+    url: args.url ?? new URL(request.url),
   };
 }
 
