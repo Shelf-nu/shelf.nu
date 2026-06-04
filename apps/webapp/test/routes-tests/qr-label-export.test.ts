@@ -78,9 +78,10 @@ vi.mock("~/utils/logger", () => ({
   Logger: { warn: vi.fn(), error: vi.fn() },
 }));
 
-const { loader } = await import(
+const { loader, MAX_BULK_QR_EXPORT } = await import(
   "~/routes/api+/assets.get-assets-for-bulk-qr-download"
 );
+const { db } = await import("~/database/db.server");
 const { requirePermission } = await import("~/utils/roles.server");
 const { getOrganizationTierLimit } = await import(
   "~/modules/tier/service.server"
@@ -264,6 +265,13 @@ describe("loader wiring (A15–A19, A24)", () => {
     const ids = body.assets.map((a: any) => a.id);
     expect(ids).toEqual(["a1"]);
     expect(ids).not.toContain("foreign");
+  });
+
+  it("bounds the query with take so a huge select-all isn't fully loaded", async () => {
+    await callLoader([ALL_SELECTED]);
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: MAX_BULK_QR_EXPORT + 1 })
+    );
   });
 
   it("A18 — returns the env-derived qrBaseUrl", async () => {

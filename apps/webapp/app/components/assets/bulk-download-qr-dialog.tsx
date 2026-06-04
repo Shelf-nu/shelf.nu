@@ -115,6 +115,16 @@ export default function BulkDownloadQrDialog({
     ? data?.assets.length ?? 0
     : selectedAssets.length;
 
+  // The loader can return an error payload (e.g. a select-all over the export
+  // limit). useApiQuery surfaces it as `data` without an `assets` array, so
+  // guard before reading `data.assets` instead of crashing.
+  const hasAssets = Array.isArray((data as { assets?: unknown })?.assets);
+  const apiErrorMessage =
+    data && !hasAssets
+      ? (data as { error?: { message?: string } }).error?.message ??
+        "Something went wrong preparing the labels."
+      : null;
+
   return (
     <DialogPortal>
       <Dialog
@@ -166,6 +176,13 @@ export default function BulkDownloadQrDialog({
             <div className="mb-6 flex flex-col items-center gap-4 py-6">
               <Spinner />
               <h3>Preparing {count > 0 ? count : ""} QR codes…</h3>
+            </div>
+          ) : apiErrorMessage ? (
+            <div className="py-6 text-center">
+              <p className="mb-4 text-error-500">{apiErrorMessage}</p>
+              <Button type="button" variant="secondary" onClick={handleClose}>
+                Close
+              </Button>
             </div>
           ) : view === "pdf" ? (
             <>

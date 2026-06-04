@@ -169,8 +169,16 @@ export function buildLabelSvg({
   );
 }
 
-/** RFC-4180 escape: wrap in quotes, double any embedded quotes. */
-const csvCell = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+/**
+ * RFC-4180 escape + spreadsheet-formula-injection neutralization. A cell that
+ * starts with `=`, `+`, `-`, `@`, or a control char can execute as a formula
+ * when the CSV is opened in Excel/Sheets — and asset names are attacker-
+ * controllable — so we prefix those with an apostrophe before quoting.
+ */
+const csvCell = (value: string): string => {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
 
 /** Manifest column headers — stable contract for the merge workflow. */
 export const MANIFEST_HEADERS = ["Asset ID", "Name", "QR ID", "Scan URL"];

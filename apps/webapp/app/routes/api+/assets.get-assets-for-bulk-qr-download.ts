@@ -114,6 +114,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const rows = await db.asset.findMany({
       where,
       select: { id: true, title: true, ...ASSET_CODE_RESOLUTION_SELECT },
+      // Bound the work: never load more than the cap (+1 to still detect overflow),
+      // so a huge select-all doesn't load the whole inventory just to be rejected.
+      take: MAX_BULK_QR_EXPORT + 1,
     });
 
     if (rows.length > MAX_BULK_QR_EXPORT) {

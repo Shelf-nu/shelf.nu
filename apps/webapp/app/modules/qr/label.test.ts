@@ -146,6 +146,14 @@ describe("buildManifestCsv (A12–A14)", () => {
     const csv = buildManifestCsv([asset({ title: 'Cam, "A"' })], base);
     expect(csv).toContain('"Cam, ""A"""');
   });
+
+  it("A14b — a formula-prefixed name is neutralized against CSV injection", () => {
+    for (const lead of ["=", "+", "-", "@"]) {
+      const csv = buildManifestCsv([asset({ title: `${lead}cmd()` })], base);
+      // apostrophe-prefixed so spreadsheets treat it as text, then quoted.
+      expect(csv).toContain(`"'${lead}cmd()"`);
+    }
+  });
 });
 
 describe("buildLabelZipEntries (A22)", () => {
