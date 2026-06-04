@@ -1695,7 +1695,7 @@ describe("checkoutBooking", () => {
   });
 
   it("should throw error when assets have booking conflicts", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = {
       ...mockBookingData,
@@ -1723,6 +1723,11 @@ describe("checkoutBooking", () => {
     await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
       "Cannot check out booking. Some assets are already booked or checked out: Asset 1. Please remove conflicted assets and try again."
     );
+    // Expected business-rule conflict — must not be captured to Sentry
+    // (was noise: SHELF-WEBAPP-1KR; mirrors the reserve path).
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toMatchObject({
+      shouldBeCaptured: false,
+    });
   });
 
   it("should handle checkout for non-reserved booking", async () => {
