@@ -152,6 +152,10 @@ export function buildLabelSvg({
     ? `<text x="${cx}" y="${brandY}" font-size="${brandSize}" text-anchor="middle" fill="#475467">Powered by shelf.nu</text>`
     : "";
 
+  // SVG <text> doesn't wrap; truncate long names so they don't overflow the card.
+  const titleText =
+    title.length > 21 ? `${title.slice(0, 20).trimEnd()}…` : title;
+
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${qrSize} ${totalH}" ` +
     `width="${qrSize}" height="${totalH}" shape-rendering="crispEdges" ` +
@@ -159,7 +163,7 @@ export function buildLabelSvg({
     `<rect width="${qrSize}" height="${totalH}" fill="#ffffff"/>` +
     `<g fill="#000000">${rects}</g>` +
     `<text x="${cx}" y="${titleY}" font-size="${titleSize}" font-weight="700" text-anchor="middle" fill="#101828">${escapeXml(
-      title
+      titleText
     )}</text>` +
     `<text x="${cx}" y="${idY}" font-size="${idSize}" text-anchor="middle" fill="#344054">${escapeXml(
       idText
@@ -168,6 +172,18 @@ export function buildLabelSvg({
     `</svg>`
   );
 }
+
+/**
+ * Same label as {@link buildLabelSvg}, as a vector `data:` URL — so React
+ * surfaces (preview, print, the PDF sheet) can render the EXACT same artifact
+ * the download/zip produce, via a single `<img>`. One template, zero drift.
+ *
+ * @returns `data:image/svg+xml;utf8,<encoded svg>`
+ */
+export const labelSvgDataUrl = (
+  args: Parameters<typeof buildLabelSvg>[0]
+): string =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(buildLabelSvg(args))}`;
 
 /**
  * RFC-4180 escape + spreadsheet-formula-injection neutralization. A cell that

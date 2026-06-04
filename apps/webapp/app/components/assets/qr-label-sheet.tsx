@@ -11,12 +11,12 @@
  * cut guides. No margins/paddings/stock templates — vector scales, the tail uses
  * the SVG export journey instead.
  *
- * @see {@link file://./qr-svg.tsx}
+ * @see {@link file://./qr-label-card.tsx}
  * @see {@link file://./bulk-download-qr-dialog.tsx}
  */
 import { useEffect, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { QrSvg } from "~/components/assets/qr-svg";
+import { QrLabelCard } from "~/components/assets/qr-label-card";
 import { Button } from "~/components/shared/button";
 import { qrScanUrl } from "~/modules/qr/label";
 import { tw } from "~/utils/tw";
@@ -148,7 +148,7 @@ export function QrLabelSheet({
         </div>
         <div>
           <div className="mb-1.5 text-xs font-semibold text-gray-700">
-            Label size
+            QR size
           </div>
           <Segmented
             value={size}
@@ -228,56 +228,16 @@ export function QrLabelSheet({
                   breakInside: "avoid",
                 }}
               >
-                {/* Box is the chosen physical size in print, but caps at the
-                  column width on screen so the QR never overflows/clips. */}
-                <div
-                  style={{
-                    width: `${s.qrMm}mm`,
-                    maxWidth: "100%",
-                    aspectRatio: "1 / 1",
-                  }}
-                >
-                  <QrSvg url={qrScanUrl(qrBaseUrl, a.qrId)} size="100%" />
-                </div>
-                <div
-                  style={{
-                    fontSize: `${s.nmPt}pt`,
-                    fontWeight: 700,
-                    marginTop: "1.5mm",
-                    maxWidth: "100%",
-                    // Wrap to at most 2 lines instead of hard-truncating the name.
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                    overflowWrap: "anywhere",
-                    color: "#101828",
-                  }}
-                >
-                  {a.title}
-                </div>
-                <div
-                  style={{
-                    fontSize: `${s.idPt}pt`,
-                    color: "#344054",
-                    marginTop: "0.5mm",
-                    maxWidth: "100%",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {a.idText}
-                </div>
-                {showBranding ? (
-                  <div
-                    style={{
-                      fontSize: `${s.idPt * 0.85}pt`,
-                      color: "#475467",
-                      marginTop: "0.5mm",
-                    }}
-                  >
-                    Powered by shelf.nu
-                  </div>
-                ) : null}
+                {/* The ONE label template (same as the download/zip), sized in
+                    mm for print but capped to the column on screen. */}
+                <QrLabelCard
+                  url={qrScanUrl(qrBaseUrl, a.qrId)}
+                  title={a.title}
+                  idText={a.idText}
+                  showBranding={showBranding}
+                  width={`${s.qrMm}mm`}
+                  style={{ maxWidth: "100%" }}
+                />
               </div>
             ))}
           </div>

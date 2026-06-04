@@ -87,6 +87,17 @@ describe("buildLabelSvg", () => {
     expect(svg).not.toContain("<quote>");
   });
 
+  it("truncates a very long title with an ellipsis (SVG text can't wrap)", () => {
+    const svg = buildLabelSvg({
+      url: "https://eam.sh/x",
+      title: "Crestron AV Over IP DM 4K Net E/D w/Sim Inputs",
+      idText: "SAM-0599",
+      showBranding: true,
+    });
+    expect(svg).toContain("…");
+    expect(svg).not.toContain("w/Sim Inputs"); // tail dropped
+  });
+
   it("omits the branding text when showBranding is false", () => {
     const off = buildLabelSvg({
       url: "u",

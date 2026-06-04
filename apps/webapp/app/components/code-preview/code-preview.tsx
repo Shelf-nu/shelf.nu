@@ -4,7 +4,7 @@ import type { BarcodeType } from "@prisma/client";
 import { changeDpiDataUrl } from "changedpi";
 import { toPng } from "html-to-image";
 import { useReactToPrint } from "react-to-print";
-import { QrSvg } from "~/components/assets/qr-svg";
+import { QrLabelCard } from "~/components/assets/qr-label-card";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -68,12 +68,7 @@ const LABEL_CONTAINER_STYLE: CSSProperties = {
   backgroundColor: "white",
 };
 
-/** QR labels are square; barcode labels have a minimum height instead. */
-const QR_LABEL_STYLE: CSSProperties = {
-  ...LABEL_CONTAINER_STYLE,
-  aspectRatio: "1 / 1",
-};
-
+/** Barcode labels have a minimum height (QR labels render via `<QrLabelCard>`). */
 const BARCODE_LABEL_STYLE: CSSProperties = {
   ...LABEL_CONTAINER_STYLE,
   minHeight: "300px",
@@ -137,7 +132,7 @@ export const CodePreview = ({
   preferredBarcodeId,
   showShelfBranding,
 }: CodePreviewProps) => {
-  const captureDivRef = useRef<HTMLImageElement>(null);
+  const captureDivRef = useRef<HTMLDivElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
   const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
@@ -425,13 +420,18 @@ export const CodePreview = ({
       {/* Code Preview */}
       <div className="flex w-full justify-center pt-6">
         {selectedCode?.type === "qr" ? (
-          <QrLabel
+          <div
             ref={captureDivRef}
-            data={{ qr: { id: selectedCode.id, ...selectedCode.qrData } }}
-            title={item.name}
-            idText={resolvedIdText}
-            showShelfBranding={resolvedShowShelfBranding}
-          />
+            className="flex w-[260px] flex-col items-center rounded border bg-white p-4"
+          >
+            <QrLabelCard
+              url={selectedCode.qrData?.url ?? ""}
+              title={item.name}
+              idText={resolvedIdText || selectedCode.id}
+              showBranding={resolvedShowShelfBranding}
+              width="220px"
+            />
+          </div>
         ) : selectedCode?.type === "barcode" ? (
           <BarcodeLabel
             ref={captureDivRef}
@@ -478,53 +478,6 @@ export const CodePreview = ({
     </div>
   );
 };
-
-// QR Label Component (existing)
-export type QrDef = {
-  id?: string;
-  size?: SizeKeys;
-  src?: string;
-  /** Scan URL — when present the QR renders as inline vector (sharp preview + print). */
-  url?: string;
-};
-
-interface QrLabelProps {
-  data?: { qr?: QrDef };
-  title: string;
-  /** Resolver-driven identifier text shown under the QR (single source of truth). */
-  idText?: string;
-  showShelfBranding?: boolean;
-}
-
-export const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
-  function QrLabel(props, ref) {
-    const { data, title, idText, showShelfBranding = true } = props ?? {};
-    return (
-      <div style={QR_LABEL_STYLE} ref={ref}>
-        <div style={LABEL_TITLE_STYLE}>{title}</div>
-        <figure className="qr-code flex justify-center">
-          {data?.qr?.url ? (
-            <QrSvg url={data.qr.url} size="200px" />
-          ) : (
-            <img
-              src={data?.qr?.src}
-              alt={`${data?.qr?.size}-shelf-qr-code.png`}
-            />
-          )}
-        </figure>
-        <div className="w-full text-center text-[12px]">
-          <div className="font-semibold">{idText ?? data?.qr?.id}</div>
-          {showShelfBranding ? (
-            <div>
-              Powered by{" "}
-              <span className="font-semibold text-black">shelf.nu</span>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-);
 
 // Barcode Label Component (new)
 interface BarcodeLabelProps {

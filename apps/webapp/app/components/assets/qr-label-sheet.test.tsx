@@ -1,13 +1,19 @@
 /**
  * QrLabelSheet — render + print-CSS tests (RTL / happy-dom).
  *
- * A20: N assets → N vector cells. A21: the print stylesheet carries `@page` and
- * cells are `break-inside: avoid` (the Safari/page-split guardrail), and a size
- * preset changes the grid density. A2: the QR is inline `<svg>`/`<rect>`, never raster.
+ * Each cell is one `<QrLabelCard>` — a vector `<img>` of `buildLabelSvg` (the
+ * SAME artifact the download/zip produce). So we assert one labelled card per
+ * asset + the print CSS, rather than inline DOM text.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { QrLabelSheet } from "./qr-label-sheet";
+
+/** Decode a QrLabelCard's `data:image/svg+xml;utf8,...` src back to the SVG. */
+const decodeCardSvg = (img: Element): string =>
+  decodeURIComponent(
+    (img.getAttribute("src") || "").replace(/^data:[^,]+,/, "")
+  );
 
 const ASSETS = [
   { id: "a1", title: "MacBook Pro 16", qrId: "qr-1", idText: "SAM-0001" },
@@ -26,20 +32,22 @@ function renderSheet(showBranding = true) {
 }
 
 describe("QrLabelSheet", () => {
-  it("A20 — renders one cell per asset with its name + id text", () => {
+  it("A20 — renders one label card per asset (alt carries the name)", () => {
     renderSheet();
-    expect(screen.getByText("MacBook Pro 16")).toBeTruthy();
-    expect(screen.getByText("Lock Washer")).toBeTruthy();
-    expect(screen.getByText("SAM-0003")).toBeTruthy();
+    expect(screen.getByAltText("QR label for MacBook Pro 16")).toBeTruthy();
+    expect(screen.getByAltText("QR label for Lock Washer")).toBeTruthy();
+    expect(screen.getByAltText("QR label for Sony FX6")).toBeTruthy();
   });
 
-  it("A2 — each QR is inline vector <svg> with <rect> modules, never an <img>", () => {
+  it("A2 — each card is a VECTOR svg image (rects + the name/id inside)", () => {
     const { container } = renderSheet();
-    const svgs = container.querySelectorAll("svg");
-    expect(svgs.length).toBeGreaterThanOrEqual(3);
-    // The QR svgs contain rect modules; no raster <img> anywhere.
-    expect(container.querySelector("svg rect")).toBeTruthy();
-    expect(container.querySelector("img")).toBeNull();
+    const cards = container.querySelectorAll('img[src^="data:image/svg+xml"]');
+    expect(cards.length).toBe(3);
+    const svg = decodeCardSvg(cards[0]);
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("<rect"); // vector QR modules, not raster
+    expect(svg).toContain("MacBook Pro 16");
+    expect(svg).toContain("SAM-0001");
   });
 
   it("A21 — print stylesheet sets @page and the default paper size", () => {
@@ -67,8 +75,18 @@ describe("QrLabelSheet", () => {
     expect(sheet()?.getAttribute("style")).toContain("repeat(6,");
   });
 
-  it("hides branding text when showBranding is false", () => {
-    renderSheet(false);
-    expect(screen.queryByText("Powered by shelf.nu")).toBeNull();
+  it("branding inside the card follows showBranding", () => {
+    const on = renderSheet(true);
+    const onCard = on.container.querySelector(
+      'img[src^="data:image/svg+xml"]'
+    )!;
+    expect(decodeCardSvg(onCard)).toContain("Powered by shelf.nu");
+    on.unmount();
+
+    const off = renderSheet(false);
+    const offCard = off.container.querySelector(
+      'img[src^="data:image/svg+xml"]'
+    )!;
+    expect(decodeCardSvg(offCard)).not.toContain("Powered by shelf.nu");
   });
 });
