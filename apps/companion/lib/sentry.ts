@@ -32,7 +32,10 @@ export function initSentry() {
   }
   Sentry.init({
     dsn,
-    environment: "production",
+    // Distinguish preview/TestFlight builds from real production so QA traffic
+    // doesn't pollute production telemetry and durability alerts stay honest.
+    // Set per-environment as an EAS env var; default to production if unset.
+    environment: process.env.EXPO_PUBLIC_SENTRY_ENV ?? "production",
     // Modest perf sampling — we care about errors + the durability events,
     // not full tracing volume.
     tracesSampleRate: 0.1,
