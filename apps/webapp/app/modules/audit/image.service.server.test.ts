@@ -124,6 +124,8 @@ describe("audit image service", () => {
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
       vi.mocked(db.auditImage.count).mockResolvedValue(3);
 
+      // Expected limit-validation (a 400) — not a server error, so it must
+      // not be captured to Sentry (was noise: SHELF-WEBAPP-1KT).
       await expect(
         uploadAuditImage({
           request: {
@@ -134,7 +136,11 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        message: "Maximum of 3 images per asset exceeded",
+        status: 400,
+        shouldBeCaptured: false,
+      });
     });
 
     it("validates limit for general audit images (5 max)", async () => {
@@ -142,6 +148,8 @@ describe("audit image service", () => {
       vi.mocked(parseFileFormData).mockResolvedValue(new FormData());
       vi.mocked(db.auditImage.count).mockResolvedValue(5);
 
+      // Expected limit-validation (a 400) — not a server error, so it must
+      // not be captured to Sentry (sibling of SHELF-WEBAPP-1KT).
       await expect(
         uploadAuditImage({
           request: {
@@ -152,7 +160,11 @@ describe("audit image service", () => {
           organizationId: "org-1",
           uploadedById: "user-1",
         })
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        message: "Maximum of 5 general images per audit exceeded",
+        status: 400,
+        shouldBeCaptured: false,
+      });
     });
   });
 

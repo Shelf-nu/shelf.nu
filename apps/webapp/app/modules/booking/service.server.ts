@@ -1368,7 +1368,12 @@ export async function checkoutBooking({
         throw new ShelfError({
           cause: null,
           label,
+          title: "Booking conflict",
           message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          // Expected business-rule conflict shown to the user — a 400, not a
+          // server error. Mirrors the reserve path above (was noise:
+          // SHELF-WEBAPP-1KR).
+          shouldBeCaptured: false,
         });
       }
     }

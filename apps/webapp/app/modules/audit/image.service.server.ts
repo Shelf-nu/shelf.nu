@@ -222,6 +222,10 @@ async function validateImageLimits({
           currentCount: assetImageCount,
         },
         label,
+        status: 400,
+        // Expected limit-validation shown to the user — a 400, not a server
+        // error. Don't capture to Sentry (was noise: SHELF-WEBAPP-1KT).
+        shouldBeCaptured: false,
       });
     }
   } else {
@@ -240,6 +244,10 @@ async function validateImageLimits({
         message: `Maximum of ${MAX_GENERAL_IMAGES_PER_AUDIT} general images per audit exceeded`,
         additionalData: { auditSessionId, currentCount: generalImageCount },
         label,
+        status: 400,
+        // Expected limit-validation shown to the user — a 400, not a server
+        // error. Don't capture to Sentry (sibling of SHELF-WEBAPP-1KT).
+        shouldBeCaptured: false,
       });
     }
   }
