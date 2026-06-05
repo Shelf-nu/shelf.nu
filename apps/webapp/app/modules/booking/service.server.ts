@@ -4230,6 +4230,109 @@ export async function getBookingsForCalendar(params: {
   }
 }
 
+/**
+ * A booking shaped for the iCal feed: scalars + custodian + asset titles.
+ * The literal `include` keeps the Prisma payload type precise for the route.
+ */
+export type ICalFeedBooking = Prisma.BookingGetPayload<{
+  include: {
+    custodianUser: true;
+    custodianTeamMember: true;
+    assets: { select: { title: true } };
+  };
+}>;
+
+/**
+ * Fetches the bookings to render into a member's subscribable iCal feed.
+ *
+ * Scoping mirrors the in-app `/calendar` (minus unconfirmed DRAFTs): members who
+ * can see all bookings get the whole workspace; self-service/base members are
+ * restricted to their own (`custodianUserId`), which can only ever *narrow*
+ * visibility — never widen it. DRAFT, ARCHIVED and CANCELLED bookings are
+ * excluded, and results are windowed (~last month → next year) so the feed
+ * stays bounded.
+ *
+ * @param params.organizationId - Workspace the feed belongs to
+ * @param params.userId - The subscribing member
+ * @param params.canSeeAllBookings - Derived from the member's role + org settings
+ * @returns Bookings with custodian + asset titles for VEVENT rendering
+ * @throws {ShelfError} If a restricted member has no team-member record, or on a DB error
+ */
+export async function getBookingsForICalFeed(params: {
+  organizationId: Organization["id"];
+  userId: string;
+  canSeeAllBookings: boolean;
+}): Promise<ICalFeedBooking[]> {
+  const { organizationId, userId, canSeeAllBookings } = params;
+
+  // Bounded window: recent past through ~1 year out.
+  const now = new Date();
+  const bookingFrom = new Date(now);
+  bookingFrom.setMonth(bookingFrom.getMonth() - 1);
+  const bookingTo = new Date(now);
+  bookingTo.setFullYear(bookingTo.getFullYear() + 1);
+
+  // Members without the "see all bookings" override only get their own — the
+  // same restriction the calendar applies. `getBookings` turns a set
+  // `custodianUserId` into `where.custodianUserId = userId`.
+  let custodianUserId: string | null = null;
+  if (!canSeeAllBookings) {
+    const teamMember = await db.teamMember.findFirst({
+      where: { userId, organizationId },
+      select: { id: true },
+    });
+    if (!teamMember) {
+      throw new ShelfError({
+        cause: null,
+        title: "Team member not found",
+        message:
+          "You are not part of a team in this organization. Please contact your organization admin to resolve this.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+    custodianUserId = userId;
+  }
+
+  try {
+    const { bookings } = await getBookings({
+      organizationId,
+      userId,
+      page: 1,
+      // Return every matching booking in the window (takeAll ignores perPage).
+      // Bounded by the ~13-month window for a single workspace, and the public
+      // feed route is IP rate-limited (calendarIpRateLimit), so this is not an
+      // amplification vector. Revisit with windowed pagination only if a
+      // workspace ever has an impractically large booking volume.
+      takeAll: true,
+      custodianUserId,
+      statuses: [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+        BookingStatus.COMPLETE,
+      ],
+      bookingFrom,
+      bookingTo,
+      extraInclude: {
+        custodianUser: true,
+        custodianTeamMember: true,
+        assets: { select: { title: true } },
+      },
+    });
+
+    return bookings as ICalFeedBooking[];
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings for the calendar feed.",
+      additionalData: { organizationId, userId },
+      label,
+    });
+  }
+}
+
 export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
   const assetsWithKit = assets.filter((a) => !!a.kitId) as Pick<
     Asset,

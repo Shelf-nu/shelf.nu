@@ -9,6 +9,7 @@ import { data, Link, useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
+import CalendarSubscribeDialog from "~/components/calendar/calendar-subscribe-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
 import renderEventCard from "~/components/calendar/event-card";
@@ -25,6 +26,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -109,8 +111,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, teamMembersForFormData, tagsData, events] =
-      await Promise.all([
+    const [
+      teamMembersData,
+      teamMembersForFormData,
+      tagsData,
+      events,
+      calendarFeedUrl,
+    ] = await Promise.all([
         // Team members for filters - when canSeeAllCustody is false, only current user's team member
         getTeamMemberForCustodianFilter({
           organizationId,
@@ -142,6 +149,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
           canSeeAllBookings,
           canSeeAllCustody,
         }),
+        getMemberCalendarFeedUrl({ organizationId, userId }),
       ]);
 
     const modelName = {
@@ -162,6 +170,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       modelName,
       isSelfServiceOrBase,
       userId,
+      calendarFeedUrl,
       searchFieldTooltip: {
         title: "Search your bookings",
         text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
@@ -182,7 +191,7 @@ export default function Calendar() {
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const { events } = useLoaderData<typeof loader>();
+  const { events, calendarFeedUrl } = useLoaderData<typeof loader>();
   const isLoading = useDisabled();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -246,6 +255,18 @@ export default function Calendar() {
           trigger={
             <Button type="button" aria-label="new booking">
               New booking
+            </Button>
+          }
+        />
+        <CalendarSubscribeDialog
+          calendarFeedUrl={calendarFeedUrl}
+          trigger={
+            <Button
+              type="button"
+              variant="secondary"
+              aria-label="subscribe to calendar"
+            >
+              Subscribe
             </Button>
           }
         />
