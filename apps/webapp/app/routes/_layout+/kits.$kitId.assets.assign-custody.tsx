@@ -362,7 +362,7 @@ export default function GiveKitCustody() {
             showSearch={!isSelfService}
             disabled={disabled || isSelfService}
             defaultValue={
-              isSelfService
+              isSelfService && teamMembers?.length > 0
                 ? JSON.stringify({
                     id: teamMembers[0].id,
                     name: resolveTeamMemberName(teamMembers[0]),
