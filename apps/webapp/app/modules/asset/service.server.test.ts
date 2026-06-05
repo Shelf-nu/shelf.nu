@@ -15,6 +15,7 @@ import {
   bulkDeleteAssets,
   bulkReleaseCustody,
   bulkUpdateAssetCategory,
+  createAsset,
   getActiveCustomFieldsForAsset,
   parseAssetValuation,
   refreshExpiredAssetImages,
@@ -153,6 +154,12 @@ vitest.mock("~/modules/note/service.server", () => ({
 // why: control custom-field lookup so we can assert org+category scoping
 vitest.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vitest.fn(),
+}));
+
+// why: createAsset generates a sequential id via a DB-backed counter; stub it
+// so the create-path test reaches the org-scope guard without DB plumbing.
+vitest.mock("./sequential-id.server", () => ({
+  getNextSequentialId: vitest.fn().mockResolvedValue("TST-0001"),
 }));
 
 describe("relinkAssetQrCode (asset)", () => {
@@ -518,6 +525,61 @@ describe("updateAsset cross-org guards", () => {
 
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { id: "location-from-org-B", organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+
+  it("rejects a customFieldId from a different organization", async () => {
+    expect.assertions(2);
+    // No existing values for this asset; the form references a foreign-org
+    // custom field whose org-scoped lookup returns nothing → guard throws.
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+});
+
+describe("createAsset cross-org guards", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("rejects a customFieldId from a different organization", async () => {
+    expect.assertions(2);
+    // Foreign-org custom field → org-scoped lookup returns nothing → the guard
+    // (run inside the create transaction) rejects before the asset is written.
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
       select: { id: true },
     });
   });

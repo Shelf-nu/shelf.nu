@@ -15,6 +15,7 @@
 import { ShelfError } from "./error";
 import {
   assertAssetsBelongToOrg,
+  assertCustomFieldsBelongToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
   assertCategoryBelongsToOrg,
@@ -36,6 +37,7 @@ function txWith(overrides: Record<string, any>) {
     teamMember: { findFirst: vitest.fn().mockResolvedValue(null) },
     category: { findFirst: vitest.fn().mockResolvedValue(null) },
     location: { findFirst: vitest.fn().mockResolvedValue(null) },
+    customField: { findMany: vitest.fn().mockResolvedValue([]) },
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
@@ -129,6 +131,83 @@ describe("assertTagsBelongToOrg", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.title).toBe("Invalid tags");
+  });
+});
+
+describe("assertCustomFieldsBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({});
+    await expect(
+      assertCustomFieldsBelongToOrg(
+        { customFieldIds: [], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+    expect(tx.customField.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves and scopes the query by organizationId when all belong to the org", async () => {
+    // why: simulate both requested custom fields existing in the caller's org
+    // so the count matches and the guard resolves.
+    const tx = txWith({
+      customField: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }, { id: "cf2" }]),
+      },
+    });
+
+    await expect(
+      assertCustomFieldsBelongToOrg(
+        { customFieldIds: ["cf1", "cf2"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf1", "cf2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("dedupes input so duplicate IDs don't inflate the expected count", async () => {
+    // why: findMany returns unique rows; the duplicated input ["cf1","cf1"]
+    // must collapse to one expected row, otherwise the guard would falsely
+    // reject a legitimate request.
+    const tx = txWith({
+      customField: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }]),
+      },
+    });
+
+    await expect(
+      assertCustomFieldsBelongToOrg(
+        { customFieldIds: ["cf1", "cf1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf1"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when a custom field is foreign/missing", async () => {
+    // why: cf2 belongs to another org, so the org-scoped findMany returns only
+    // cf1 — the count mismatch is what the guard must reject.
+    const tx = txWith({
+      customField: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }]),
+      },
+    });
+
+    const err = await assertCustomFieldsBelongToOrg(
+      { customFieldIds: ["cf1", "cf2"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid custom fields");
   });
 });
 

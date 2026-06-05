@@ -104,6 +104,7 @@ import {
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertCustomFieldsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
@@ -1160,11 +1161,24 @@ export async function createAsset({
         });
       }
 
+      /** Custom-field ids referenced by this create. Sourced from form input
+       * and validated for org ownership inside the create transaction below
+       * (cross-org IDOR guard). */
+      let customFieldIdsToValidate: string[] = [];
+
       /** If custom fields are passed, create them */
       if (customFieldsValues && customFieldsValues.length > 0) {
         const customFieldValuesToAdd = customFieldsValues.filter(
           (cf) => !!cf.value
         );
+
+        // SECURITY (cross-org IDOR): these ids get connected to a CustomField
+        // by the nested `create` below, which has no org scoping of its own.
+        // Collected here and validated inside the transaction (see the
+        // assertCustomFieldsBelongToOrg call there).
+        customFieldIdsToValidate = customFieldValuesToAdd
+          .map(({ id }) => id)
+          .filter(Boolean);
 
         Object.assign(data, {
           /** Custom fields here refers to the values, check the Schema for more info */
@@ -1219,6 +1233,15 @@ export async function createAsset({
 
       // Use transaction to ensure asset creation and activity event are atomic
       const asset = await db.$transaction(async (tx) => {
+        // SECURITY (cross-org IDOR): prove every form-supplied custom-field id
+        // belongs to this org before the nested create connects them. Run inside
+        // the tx so the ownership check shares the write's transaction (no-op
+        // when there are no custom-field ids).
+        await assertCustomFieldsBelongToOrg(
+          { customFieldIds: customFieldIdsToValidate, organizationId },
+          tx
+        );
+
         const created = await tx.asset.create({
           data,
           include: {
@@ -1485,6 +1508,18 @@ export async function updateAsset({
       const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
         (cf) => !cf.value
       );
+
+      // SECURITY (cross-org IDOR): the create/updateMany writes below connect
+      // values to a CustomField by an id sourced from form input. Prove every
+      // referenced custom field belongs to this org before writing. (Removals
+      // go through `deleteMany` scoped to this asset's own value rows, so only
+      // the added/updated ids need the check.)
+      await assertCustomFieldsBelongToOrg({
+        customFieldIds: customFieldValuesToAdd
+          .map(({ id }) => id)
+          .filter(Boolean),
+        organizationId,
+      });
 
       /**
        * Split the writes into create vs update ourselves instead of using a
