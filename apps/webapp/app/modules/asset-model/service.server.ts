@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Asset Model";
 
@@ -207,6 +208,85 @@ export async function deleteAssetModel({
         "Something went wrong while deleting the asset model. Please try again or contact support.",
       additionalData: { id, organizationId },
       label,
+    });
+  }
+}
+
+/**
+ * Resolves AssetModel references from a CSV-import payload to existing model
+ * IDs, creating any that do not yet exist in the workspace.
+ *
+ * Mirrors the shape of `createCategoriesIfNotExists` / `createKitsIfNotExists`
+ * so the CSV importer can drop this into the same `Promise.all` pre-resolve
+ * batch. Match is case-insensitive on `name` (tolerates casing drift in
+ * spreadsheets) but writes the trimmed original casing on create.
+ *
+ * @param params.data - Parsed CSV rows; each row may carry an `assetModel`
+ *   string column referencing a model by name
+ * @param params.userId - Authoring user for newly-created models
+ * @param params.organizationId - Org scope; all reads + writes are filtered
+ * @returns Record keyed by the original (un-trimmed) CSV `assetModel` string,
+ *   value is the resolved `AssetModel.id`. Rows without an `assetModel` are
+ *   skipped — callers should null-coalesce when looking up.
+ * @throws {ShelfError} Wrapped error if a create / read fails
+ */
+export async function createAssetModelsIfNotExists({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<Record<string, AssetModel["id"]>> {
+  try {
+    /** Build a Map keyed by the original (un-trimmed) CSV cell so callers
+     * can look up by exactly what the row contained, mirroring the
+     * `createCategoriesIfNotExists` contract. */
+    const models = new Map<string, string>(
+      data
+        .filter((asset) => asset.assetModel)
+        .map((asset) => [asset.assetModel as string, ""])
+    );
+
+    for (const [rawName] of models) {
+      const trimmed = rawName.trim();
+      if (trimmed === "") {
+        models.set(rawName, "");
+        continue;
+      }
+
+      const existing = await db.assetModel.findFirst({
+        where: {
+          name: { equals: trimmed, mode: "insensitive" },
+          organizationId,
+        },
+      });
+
+      if (existing) {
+        models.set(rawName, existing.id);
+      } else {
+        const created = await db.assetModel.create({
+          data: {
+            name: trimmed,
+            createdBy: { connect: { id: userId } },
+            organization: { connect: { id: organizationId } },
+          },
+        });
+        models.set(rawName, created.id);
+      }
+    }
+
+    return Object.fromEntries(Array.from(models));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating asset models. Seems like some of the asset-model data in your import file is invalid. Please check and try again.",
+      additionalData: { userId, organizationId },
+      label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }

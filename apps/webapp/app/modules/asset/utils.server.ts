@@ -725,6 +725,18 @@ export const ASSET_CSV_HEADERS = [
   "barcode_DataMatrix",
   "barcode_ExternalQR",
   "barcode_EAN13",
+  // AssetModel reference by name (case-insensitive). Resolved /
+  // upserted via createAssetModelsIfNotExists during import.
+  "assetModel",
+  // Quantity-tracked columns. Defaults: type=INDIVIDUAL, quantity=1.
+  // For QUANTITY_TRACKED rows, quantity is required (>0) and
+  // consumptionType is required. unitOfMeasure is free-form text
+  // (sanitised against Markdoc injection in the importer).
+  "type",
+  "quantity",
+  "minQuantity",
+  "unitOfMeasure",
+  "consumptionType",
 ];
 
 type AllSelectedValues = {

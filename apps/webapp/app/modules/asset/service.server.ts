@@ -18,6 +18,7 @@ import {
   AssetStatus,
   AssetType,
   BookingStatus,
+  ConsumptionType,
   ErrorCorrection,
   KitStatus,
   OrganizationRoles,
@@ -64,7 +65,11 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
+import {
+  assetQtyMeta,
+  formatUnitCount,
+  sanitizeUnitOfMeasureLabel,
+} from "~/utils/asset-quantity";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -108,6 +113,7 @@ import {
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertAssetModelBelongsToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
@@ -148,6 +154,10 @@ import {
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
+import {
+  createAssetModelsIfNotExists,
+  getAssetModel,
+} from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
@@ -1189,6 +1199,22 @@ export async function createAsset({
         status: 400,
       });
     }
+    // AssetModel is an INDIVIDUAL-only concept: a model groups N
+    // distinguishable units of the same template (e.g. 100 MacBook Pro
+    // 2025 laptops). A QUANTITY_TRACKED asset is itself one record
+    // representing a stock pool, so a model link makes no semantic
+    // sense — reject up-front rather than silently dropping it.
+    if (assetModelId) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not allowed",
+        message:
+          "Asset models can only be linked to individually tracked assets. Remove the model or change the tracking method to INDIVIDUAL.",
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
   }
 
   let attempts = 0;
@@ -1487,6 +1513,294 @@ export async function createAsset({
 }
 
 /**
+ * Hard cap on `bulkCreateAssetsFromModel` batch size. Tuned to keep a single
+ * synchronous request comfortable (each underlying `createAsset` opens its
+ * own tx); for higher counts users should reach for CSV import.
+ */
+export const BULK_CREATE_MAX = 100;
+
+const BULK_NAME_TEMPLATE_TOKEN = /\{i\}/g;
+
+/**
+ * Renders the title for the Nth bulk-created asset from a template string.
+ *
+ * - If the template contains the literal `{i}` token, every occurrence is
+ *   replaced with `indexValue`. Multiple tokens are supported (e.g.
+ *   `"Batt-{i}-{i}"` with `5` → `"Batt-5-5"`).
+ * - If the template contains no `{i}` token, `indexValue` is appended with
+ *   a single space separator (mirrors the spreadsheet-fill convention).
+ *
+ * Final string is trimmed.
+ *
+ * @param template - User-supplied template (already sanitised against
+ *   Markdoc injection by the caller)
+ * @param indexValue - The number to substitute / append (typically
+ *   `startNumber + i` from the bulk-create loop)
+ */
+export function renderBulkAssetTitle(
+  template: string,
+  indexValue: number
+): string {
+  if (template.includes("{i}")) {
+    return template
+      .replace(BULK_NAME_TEMPLATE_TOKEN, String(indexValue))
+      .trim();
+  }
+  return `${template.trim()} ${indexValue}`.trim();
+}
+
+/**
+ * Bulk-creates N `INDIVIDUAL` assets from an `AssetModel` template.
+ *
+ * The use case is "I want 20 separate distinguishable Dell Latitudes" —
+ * each asset gets its own row, QR code, sequential ID, and (if SAM
+ * barcodes are enabled at the workspace level) auto-allocated barcode.
+ * All N assets share the same model-derived defaults (category +
+ * valuation) and any caller-supplied overrides (location, kit, tags,
+ * custom fields, description, valuation override, image) — values are
+ * applied uniformly across the batch.
+ *
+ * **`QUANTITY_TRACKED` is intentionally NOT supported via this primitive.**
+ * A stock pool is one asset with `Asset.quantity = N`, not N assets. Users
+ * onboarding stock should reach for single-create + restock instead.
+ *
+ * **Transaction semantics — pragmatic, not all-or-nothing.** Each underlying
+ * `createAsset` opens its own `db.$transaction` with a sequential-ID retry
+ * loop; nesting these under one outer transaction would break the retry
+ * semantics. So on a mid-loop failure at index K, indices `[0..K-1]` stay
+ * committed and the caller receives `failedAt: K + error`. Aggressive
+ * up-front validation makes mid-loop failures rare in practice (most
+ * recoverable conditions trip the synchronous validators first).
+ *
+ * @param params.assetModelId - The AssetModel to inherit defaults from
+ * @param params.count - Batch size; must be between 2 and `BULK_CREATE_MAX`
+ * @param params.nameTemplate - Title template; supports `{i}` token, falls
+ *   back to `"{template} {i}"` if absent. Sanitised against Markdoc
+ *   injection.
+ * @param params.startNumber - First value substituted for `{i}` (default 1)
+ * @param params.organizationId - Caller's validated org id
+ * @param params.userId - Authoring user id
+ * @param params.categoryId - Optional override; defaults to model's
+ *   `defaultCategoryId`
+ * @param params.valuation - Optional override; defaults to model's
+ *   `defaultValuation`
+ * @param params.locationId - Optional shared primary location
+ * @param params.kitId - Optional shared kit membership
+ * @param params.tags - Optional shared tag set
+ * @param params.customFieldsValues - Optional shared custom-field values
+ * @param params.description - Optional shared description
+ * @param params.mainImage / mainImageExpiration - Optional shared cover image
+ * @param params.availableToBook - Optional override (default true)
+ * @returns On full success: `{ createdAssetIds }`. On partial failure at
+ *   index K: `{ createdAssetIds: [the K already-committed], failedAt: K,
+ *   error }` — recovery is re-running for the remainder.
+ * @throws {ShelfError} 400 for pre-validation failures (count out of range,
+ *   empty / malformed template, duplicate titles within batch, foreign org
+ *   IDs). These happen BEFORE any writes.
+ */
+export async function bulkCreateAssetsFromModel({
+  assetModelId,
+  count,
+  nameTemplate,
+  startNumber = 1,
+  organizationId,
+  userId,
+  categoryId,
+  valuation,
+  description,
+  locationId,
+  kitId,
+  tags,
+  customFieldsValues,
+  mainImage,
+  mainImageExpiration,
+  availableToBook,
+}: {
+  assetModelId: string;
+  count: number;
+  nameTemplate: string;
+  startNumber?: number;
+  organizationId: Organization["id"];
+  userId: User["id"];
+  categoryId?: Category["id"];
+  valuation?: number | null;
+  description?: string | null;
+  locationId?: Location["id"];
+  kitId?: Kit["id"];
+  tags?: { set: { id: string }[] };
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
+  availableToBook?: boolean;
+}): Promise<{
+  createdAssetIds: Asset["id"][];
+  failedAt?: number;
+  error?: ShelfError;
+}> {
+  // ── Synchronous pre-validation ────────────────────────────────────────
+  // Everything that can be rejected without a DB write gets rejected
+  // here. After this block, mid-loop failures are rare (mostly transient
+  // DB issues).
+
+  if (!Number.isInteger(count) || count < 2 || count > BULK_CREATE_MAX) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid count",
+      message: `Asset count must be a whole number between 2 and ${BULK_CREATE_MAX}.`,
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { count, max: BULK_CREATE_MAX },
+    });
+  }
+
+  if (!Number.isInteger(startNumber) || startNumber < 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid start number",
+      message: "Start number must be a non-negative whole number.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { startNumber },
+    });
+  }
+
+  // Strip Markdoc tokens (`{`, `%`, `}`) without destroying whitespace
+  // adjacent to the `{i}` substitution token. The earlier chunked
+  // implementation used `sanitizeUnitOfMeasureLabel` per-chunk, which
+  // also `.trim()`-ed each chunk — so `"Asset {i}"` collapsed to
+  // `"Asset{i}"` (trailing space on the left chunk dropped). Fix:
+  // protect `{i}` with a private-use placeholder, strip Markdoc chars
+  // globally, then restore.
+  const rawTemplate = (nameTemplate ?? "").toString();
+  const I_TOKEN_PLACEHOLDER = "I_TOKEN";
+  const protectedTemplate = rawTemplate.replace(/\{i\}/g, I_TOKEN_PLACEHOLDER);
+  const strippedTemplate = protectedTemplate.replace(/[{%}]/g, "");
+  const sanitisedTemplate = strippedTemplate.replace(
+    new RegExp(I_TOKEN_PLACEHOLDER, "g"),
+    "{i}"
+  );
+  const trimmedTemplate = sanitisedTemplate.trim();
+  if (!trimmedTemplate || trimmedTemplate === "{i}") {
+    // Pure `{i}` alone with no surrounding text would produce raw integers
+    // ("1", "2", ...) as titles — almost certainly a user mistake.
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid name template",
+      message:
+        'Name template must include some text alongside the {i} number token (e.g. "Battery {i}").',
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const titles = Array.from({ length: count }, (_, i) =>
+    renderBulkAssetTitle(trimmedTemplate, startNumber + i)
+  );
+  if (titles.some((t) => t.length === 0)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid name template",
+      message:
+        "The name template produced an empty title for one or more assets.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+  if (new Set(titles).size !== titles.length) {
+    // Duplicates only happen when the template has no `{i}` token AND the
+    // user supplied a fixed suffix, OR (theoretical) when startNumber
+    // arithmetic collides. Either way the result would be confusing.
+    throw new ShelfError({
+      cause: null,
+      title: "Duplicate titles",
+      message:
+        "The name template produced duplicate titles within the batch. Include {i} so each asset gets a distinct name.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  // ── Org-scope all entity references ──────────────────────────────────
+
+  await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+
+  if (locationId) {
+    await assertLocationBelongsToOrg({ locationId, organizationId });
+  }
+
+  if (tags?.set && tags.set.length > 0) {
+    await assertTagsBelongToOrg({
+      tagIds: tags.set.map((t) => t.id),
+      organizationId,
+    });
+  }
+  // kitId + customFieldsValues + categoryId — createAsset's connect will
+  // throw a 400 on cross-org id (Prisma surfaces a foreign-key violation).
+  // Could harden with explicit asserts in a future polish.
+
+  // ── Read model + resolve defaults ────────────────────────────────────
+
+  const model = await getAssetModel({ id: assetModelId, organizationId });
+  const resolvedCategoryId: string | null =
+    categoryId ?? model.defaultCategoryId ?? null;
+  const resolvedValuation: number | null =
+    valuation ?? model.defaultValuation ?? null;
+
+  // ── Sequential create loop ──────────────────────────────────────────
+  // Each `createAsset` runs its own transaction with sequential-ID retry.
+  // Nesting under an outer tx would break that retry; instead we accept
+  // partial-success semantics and surface `failedAt` on mid-loop failure.
+
+  const createdAssetIds: Asset["id"][] = [];
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i];
+    try {
+      const created = await createAsset({
+        title,
+        description: description ?? null,
+        userId,
+        organizationId,
+        assetModelId,
+        categoryId: resolvedCategoryId,
+        valuation: resolvedValuation,
+        kitId,
+        locationId,
+        tags,
+        customFieldsValues,
+        mainImage,
+        mainImageExpiration,
+        availableToBook: availableToBook ?? true,
+        type: AssetType.INDIVIDUAL,
+      });
+      createdAssetIds.push(created.id);
+    } catch (cause) {
+      const error = isLikeShelfError(cause)
+        ? (cause as ShelfError)
+        : new ShelfError({
+            cause,
+            title: "Bulk create failed",
+            message:
+              "Something went wrong while creating one of the assets in the batch. Earlier assets in the batch were saved successfully.",
+            label,
+            additionalData: {
+              assetModelId,
+              organizationId,
+              failedAtIndex: i,
+            },
+          });
+      return { createdAssetIds, failedAt: i, error };
+    }
+  }
+
+  return { createdAssetIds };
+}
+
+/**
  * Resolves the `AssetLocation.quantity` to write when the asset-overview
  * "Update location" dialog rewrites the asset's single primary placement.
  *
@@ -1698,6 +2012,27 @@ export async function updateAsset({
         },
       });
     } else if (assetModelId) {
+      // AssetModel is INDIVIDUAL-only (see the matching guard in
+      // createAsset). Block the connect for a QUANTITY_TRACKED asset
+      // with a labelled 400 rather than letting it silently link.
+      // Reads `type` directly off the asset row — sub-millisecond
+      // org-scoped index lookup, only on the link branch.
+      const currentAsset = await db.asset.findUnique({
+        where: { id, organizationId },
+        select: { type: true },
+      });
+      if (currentAsset && currentAsset.type === AssetType.QUANTITY_TRACKED) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset model not allowed",
+          message:
+            "Asset models can only be linked to individually tracked assets. This asset is tracked by quantity.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId: id, assetModelId },
+        });
+      }
       /** If assetModelId is a valid ID, connect the asset model */
       Object.assign(data, {
         assetModel: {
@@ -3634,6 +3969,10 @@ export async function fetchAssetsForExport({
       include: {
         category: true,
         assetLocations: { include: { location: true } },
+        // Phase A5: include the model so backup-export can emit
+        // assetModel.name (round-trippable across orgs). Without it,
+        // re-import would only get the opaque assetModelId.
+        assetModel: { select: { name: true } },
         notes: true,
         custody: {
           include: {
@@ -3656,6 +3995,197 @@ export async function fetchAssetsForExport({
       label,
     });
   }
+}
+
+/**
+ * Parsed shape of the quantity-tracked + AssetModel columns for a single
+ * CSV import row. All fields are optional: a row with none of these
+ * columns falls back to `type=INDIVIDUAL, quantity=1` at the createAsset
+ * boundary.
+ *
+ * @see {@link parseQtyTrackedCsvRow}
+ */
+type ParsedQtyTrackedCsvRow = {
+  type: AssetType | undefined;
+  quantity: number | undefined;
+  minQuantity: number | undefined;
+  unitOfMeasure: string | undefined;
+  consumptionType: ConsumptionType | undefined;
+};
+
+const CSV_ASSET_TYPES = new Set<string>([
+  AssetType.INDIVIDUAL,
+  AssetType.QUANTITY_TRACKED,
+]);
+const CSV_CONSUMPTION_TYPES = new Set<string>([
+  ConsumptionType.ONE_WAY,
+  ConsumptionType.TWO_WAY,
+]);
+
+/**
+ * Parses + validates the quantity-tracked columns
+ * (`type`, `quantity`, `minQuantity`, `unitOfMeasure`, `consumptionType`)
+ * and the AssetModel reference from a single CSV import row.
+ *
+ * Throws a labelled `ShelfError` (HTTP 400) with row-identifying context
+ * on any malformed value so the importer surfaces "row 14: quantity must
+ * be a positive integer" rather than a generic 500 deeper in the chain.
+ *
+ * Validation rules:
+ * - `type` (optional): must be `INDIVIDUAL` or `QUANTITY_TRACKED`; missing → INDIVIDUAL
+ * - `quantity` (required for QUANTITY_TRACKED, ≥1): non-negative integer
+ * - `quantity > 1` is rejected for INDIVIDUAL (matches the DB invariant)
+ * - `minQuantity` (optional): non-negative integer
+ * - `unitOfMeasure` (optional): plain string, sanitised against Markdoc tokens
+ * - `consumptionType` (required for QUANTITY_TRACKED): `ONE_WAY` | `TWO_WAY`
+ *
+ * @param asset - The parsed CSV row (raw string values + injected `key`)
+ * @returns Typed object ready to spread into the createAsset payload
+ * @throws {ShelfError} 400 on any column-format failure
+ */
+function parseQtyTrackedCsvRow(
+  asset: CreateAssetFromContentImportPayload
+): ParsedQtyTrackedCsvRow {
+  const rowLabel = `asset "${asset.title}"`;
+
+  // ── type ────────────────────────────────────────────────────────────
+  const rawType =
+    typeof asset.type === "string" ? asset.type.trim().toUpperCase() : "";
+  let parsedType: AssetType | undefined;
+  if (rawType === "") {
+    parsedType = undefined; // createAsset will default to INDIVIDUAL via DB
+  } else if (CSV_ASSET_TYPES.has(rawType)) {
+    parsedType = rawType as AssetType;
+  } else {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid asset type",
+      message: `Invalid type "${asset.type}" for ${rowLabel}. Must be "INDIVIDUAL" or "QUANTITY_TRACKED".`,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetKey: asset.key, type: asset.type },
+    });
+  }
+  const effectiveType = parsedType ?? AssetType.INDIVIDUAL;
+
+  // ── quantity ────────────────────────────────────────────────────────
+  const rawQty =
+    typeof asset.quantity === "string" ? asset.quantity.trim() : "";
+  let parsedQty: number | undefined;
+  if (rawQty !== "") {
+    const n = Number(rawQty);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid quantity",
+        message: `Invalid quantity "${asset.quantity}" for ${rowLabel}. Must be a non-negative whole number.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, quantity: asset.quantity },
+      });
+    }
+    parsedQty = n;
+  }
+
+  if (effectiveType === AssetType.QUANTITY_TRACKED) {
+    if (parsedQty === undefined || parsedQty <= 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Quantity required",
+        message: `Quantity is required (and must be > 0) for QUANTITY_TRACKED ${rowLabel}.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key },
+      });
+    }
+  } else if (effectiveType === AssetType.INDIVIDUAL) {
+    if (parsedQty !== undefined && parsedQty > 1) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid quantity for INDIVIDUAL",
+        message: `INDIVIDUAL assets must have quantity 1 (or omit the column). Got "${asset.quantity}" for ${rowLabel}. To track stock, set type=QUANTITY_TRACKED.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, quantity: asset.quantity },
+      });
+    }
+  }
+
+  // ── minQuantity ─────────────────────────────────────────────────────
+  const rawMin =
+    typeof asset.minQuantity === "string" ? asset.minQuantity.trim() : "";
+  let parsedMin: number | undefined;
+  if (rawMin !== "") {
+    const n = Number(rawMin);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid min quantity",
+        message: `Invalid minQuantity "${asset.minQuantity}" for ${rowLabel}. Must be a non-negative whole number.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, minQuantity: asset.minQuantity },
+      });
+    }
+    parsedMin = n;
+  }
+
+  // ── unitOfMeasure ───────────────────────────────────────────────────
+  // Sanitised to strip Markdoc tokens — see Phase 4e Hex follow-up.
+  const rawUnit =
+    typeof asset.unitOfMeasure === "string"
+      ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+      : "";
+  const parsedUnit = rawUnit === "" ? undefined : rawUnit;
+
+  // ── consumptionType ─────────────────────────────────────────────────
+  const rawCt =
+    typeof asset.consumptionType === "string"
+      ? asset.consumptionType.trim().toUpperCase()
+      : "";
+  let parsedCt: ConsumptionType | undefined;
+  if (rawCt !== "") {
+    if (!CSV_CONSUMPTION_TYPES.has(rawCt)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid consumption type",
+        message: `Invalid consumptionType "${asset.consumptionType}" for ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: {
+          assetKey: asset.key,
+          consumptionType: asset.consumptionType,
+        },
+      });
+    }
+    parsedCt = rawCt as ConsumptionType;
+  }
+
+  if (effectiveType === AssetType.QUANTITY_TRACKED && !parsedCt) {
+    throw new ShelfError({
+      cause: null,
+      title: "Consumption type required",
+      message: `Consumption type is required for QUANTITY_TRACKED ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetKey: asset.key },
+    });
+  }
+
+  return {
+    type: parsedType,
+    quantity: parsedQty,
+    minQuantity: parsedMin,
+    unitOfMeasure: parsedUnit,
+    consumptionType: parsedCt,
+  };
 }
 
 /**
@@ -3726,38 +4256,50 @@ export async function createAssetsFromContentImport({
     });
 
     // Create all required related entities
-    const [kits, categories, locations, teamMembers, tags, { customFields }] =
-      await Promise.all([
-        createKitsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createCategoriesIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createLocationsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createTeamMemberIfNotExists({
-          data,
-          organizationId,
-        }),
-        createTagsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createCustomFieldsIfNotExists({
-          data,
-          organizationId,
-          userId,
-        }),
-      ]);
+    const [
+      kits,
+      categories,
+      locations,
+      teamMembers,
+      tags,
+      { customFields },
+      assetModels,
+    ] = await Promise.all([
+      createKitsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createCategoriesIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createLocationsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createTeamMemberIfNotExists({
+        data,
+        organizationId,
+      }),
+      createTagsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createCustomFieldsIfNotExists({
+        data,
+        organizationId,
+        userId,
+      }),
+      createAssetModelsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+    ]);
 
     // Process assets sequentially to handle image uploads
     for (const asset of data) {
@@ -3949,6 +4491,48 @@ export async function createAssetsFromContentImport({
         });
       }
 
+      // ── AssetModel column → resolved model id ──────────────────────
+      const modelKey = asset.assetModel?.trim();
+      const assetModelId =
+        modelKey && assetModels?.[modelKey] ? assetModels[modelKey] : undefined;
+      if (modelKey && !assetModelId) {
+        // The createAssetModelsIfNotExists pre-resolve should have
+        // populated every non-empty key. If we land here, something
+        // went wrong upstream (e.g. an upsert failed silently).
+        throw new ShelfError({
+          cause: null,
+          message: `Asset model "${modelKey}" could not be resolved for asset "${asset.title}". Please verify the assetModel column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            assetModel: modelKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      // ── Quantity-tracked columns → typed + validated ───────────────
+      const { type, quantity, minQuantity, unitOfMeasure, consumptionType } =
+        parseQtyTrackedCsvRow(asset);
+
+      // AssetModel is INDIVIDUAL-only — a model represents N
+      // distinguishable units of the same template, whereas a
+      // QUANTITY_TRACKED asset is a stock pool. Reject the row up-front
+      // with a row-friendly message rather than silently dropping the
+      // model link or relying on createAsset's downstream guard.
+      if (type === AssetType.QUANTITY_TRACKED && assetModelId) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset model not allowed",
+          message: `Asset "${asset.title}": models can only be linked to INDIVIDUAL assets. Remove the assetModel cell or change type to INDIVIDUAL.`,
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetKey: asset.key, assetTitle: asset.title },
+        });
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -3975,6 +4559,14 @@ export async function createAssetsFromContentImport({
         mainImageExpiration: mainImageExpiration || null,
         // Add barcodes if present
         barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
+        // AssetModel + qty-tracked fields (default INDIVIDUAL, quantity=1
+        // when columns are absent or empty).
+        assetModelId,
+        type,
+        quantity,
+        minQuantity,
+        unitOfMeasure,
+        consumptionType,
       });
     }
 
@@ -4047,6 +4639,43 @@ export async function createAssetsFromBackupImport({
     //TODO use concurrency control or it will overload the server
     await Promise.all(
       data.map(async (asset) => {
+        /** Quantity-tracked + assetModel fields — passed through from
+         * the backup payload. Backup export emits these as raw string
+         * values (per-Asset scalar columns); on restore we read them
+         * back so round-trip preserves the qty-tracked semantics. The
+         * content-import path validates these aggressively; for backup
+         * import we trust the source (it came from our own exporter)
+         * but still coerce types defensively. */
+        const backupType =
+          typeof asset.type === "string" &&
+          (asset.type === AssetType.INDIVIDUAL ||
+            asset.type === AssetType.QUANTITY_TRACKED)
+            ? (asset.type as AssetType)
+            : undefined;
+        const backupQuantity =
+          typeof asset.quantity === "string" && asset.quantity.trim() !== ""
+            ? Number(asset.quantity)
+            : typeof asset.quantity === "number"
+            ? asset.quantity
+            : undefined;
+        const backupMinQuantity =
+          typeof asset.minQuantity === "string" &&
+          asset.minQuantity.trim() !== ""
+            ? Number(asset.minQuantity)
+            : typeof asset.minQuantity === "number"
+            ? asset.minQuantity
+            : undefined;
+        const backupUnit =
+          typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
+            ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+            : undefined;
+        const backupCt =
+          typeof asset.consumptionType === "string" &&
+          (asset.consumptionType === ConsumptionType.ONE_WAY ||
+            asset.consumptionType === ConsumptionType.TWO_WAY)
+            ? (asset.consumptionType as ConsumptionType)
+            : undefined;
+
         /** Base data from asset */
         const d = {
           data: {
@@ -4071,8 +4700,53 @@ export async function createAssetsFromBackupImport({
               ],
             },
             valuation: asset.valuation ? +asset.valuation : null,
+            ...(backupType !== undefined ? { type: backupType } : {}),
+            ...(backupQuantity !== undefined
+              ? { quantity: backupQuantity }
+              : {}),
+            ...(backupMinQuantity !== undefined
+              ? { minQuantity: backupMinQuantity }
+              : {}),
+            ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
+            ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
           },
         };
+
+        /** AssetModel by name — mirrors the category block below.
+         * Skip linkage entirely when the row is QUANTITY_TRACKED:
+         * models are INDIVIDUAL-only by design. Importing a backup that
+         * predates this rule should not block (we just drop the model
+         * connect) — the user can clean up the export upstream or
+         * re-import the model link manually after fixing the type. */
+        if (
+          asset.assetModel &&
+          typeof asset.assetModel === "object" &&
+          (asset.assetModel as any).name &&
+          backupType !== AssetType.QUANTITY_TRACKED
+        ) {
+          const modelPayload = asset.assetModel as { name: string };
+          const existingModel = await db.assetModel.findFirst({
+            where: {
+              organizationId,
+              name: {
+                equals: modelPayload.name.trim(),
+                mode: "insensitive",
+              },
+            },
+          });
+          if (existingModel) {
+            Object.assign(d.data, { assetModelId: existingModel.id });
+          } else {
+            const newModel = await db.assetModel.create({
+              data: {
+                name: modelPayload.name.trim(),
+                createdBy: { connect: { id: userId } },
+                organization: { connect: { id: organizationId } },
+              },
+            });
+            Object.assign(d.data, { assetModelId: newModel.id });
+          }
+        }
 
         /** Category */
         if (asset.category && Object.keys(asset?.category).length > 0) {

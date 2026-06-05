@@ -185,13 +185,18 @@ export const buildCsvBackupDataFromAssets = ({
        * This needs to be done for all one-to-one relations
        */
       if (value === null) {
-        if (["custody", "location", "category"].includes(key)) {
+        if (["custody", "location", "category", "assetModel"].includes(key)) {
           return toExport.push("{}");
         }
         return toExport.push("");
       }
 
-      /** Special handling for category and location */
+      /** Special handling for category and location.
+       *
+       * Phase A5: `assetModel` is included here — backup-export emits it
+       * as a JSON `{ name }` object so the backup-import path can resolve
+       * (or create) the model by name on restore (symmetric with the
+       * `category` / `location` handling above). */
       switch (key) {
         case "location":
         case "category":
@@ -201,6 +206,7 @@ export const buildCsvBackupDataFromAssets = ({
         case "organization":
         case "valuation":
         case "customFields":
+        case "assetModel":
           toExport.push(
             JSON.stringify(value, (_key, value) => {
               /** Custom replacer function.
@@ -234,6 +240,11 @@ const keysToSkip = [
   "customFieldId",
   "mainImage",
   "mainImageExpiration",
+  // Phase A5: backup-export now emits the resolved `assetModel` object
+  // (`{ name }`) so cross-org restore can find / create the model by
+  // name. The opaque FK column would only resolve in the source org and
+  // can be safely dropped from the backup.
+  "assetModelId",
 ];
 
 export async function exportAssetsBackupToCsv({

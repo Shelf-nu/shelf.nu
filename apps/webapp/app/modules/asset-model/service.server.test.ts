@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import {
   createAssetModel,
+  createAssetModelsIfNotExists,
   getAssetModels,
   getAssetModel,
   updateAssetModel,
@@ -16,6 +17,7 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     assetModel: {
       create: vitest.fn(),
+      findFirst: vitest.fn(),
       findMany: vitest.fn(),
       findFirstOrThrow: vitest.fn(),
       update: vitest.fn(),
@@ -336,6 +338,103 @@ describe("deleteAssetModel", () => {
       deleteAssetModel({
         id: "asset-model-123",
         organizationId: "org-123",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("createAssetModelsIfNotExists", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reuses an existing model when name matches case-insensitively", async () => {
+    // why: spreadsheets are noisy — "Dell Latitude 5550" and
+    // "dell latitude 5550" must collapse to the same model row.
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue({ id: "model-existing" });
+
+    const result = await createAssetModelsIfNotExists({
+      data: [
+        { key: "r1", title: "Asset 1", assetModel: "dell latitude 5550" },
+      ] as any,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetModel.findFirst).toHaveBeenCalledWith({
+      where: {
+        name: { equals: "dell latitude 5550", mode: "insensitive" },
+        organizationId: "org-1",
+      },
+    });
+    expect(db.assetModel.create).not.toHaveBeenCalled();
+    expect(result).toEqual({ "dell latitude 5550": "model-existing" });
+  });
+
+  it("creates a new model when none matches and trims whitespace before write", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue(null);
+    // @ts-expect-error mock setup
+    db.assetModel.create.mockResolvedValue({ id: "model-new" });
+
+    const result = await createAssetModelsIfNotExists({
+      data: [{ key: "r1", title: "Asset 1", assetModel: "  Brand X  " }] as any,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetModel.create).toHaveBeenCalledWith({
+      data: {
+        name: "Brand X",
+        createdBy: { connect: { id: "user-1" } },
+        organization: { connect: { id: "org-1" } },
+      },
+    });
+    expect(result).toEqual({ "  Brand X  ": "model-new" });
+  });
+
+  it("skips rows without an assetModel column", async () => {
+    const result = await createAssetModelsIfNotExists({
+      data: [
+        { key: "r1", title: "Asset 1" }, // no assetModel
+      ] as any,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+    expect(db.assetModel.create).not.toHaveBeenCalled();
+    expect(result).toEqual({});
+  });
+
+  it("deduplicates repeated model names across rows", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValue({ id: "model-shared" });
+
+    await createAssetModelsIfNotExists({
+      data: [
+        { key: "r1", title: "Asset 1", assetModel: "Brand X" },
+        { key: "r2", title: "Asset 2", assetModel: "Brand X" },
+        { key: "r3", title: "Asset 3", assetModel: "Brand X" },
+      ] as any,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Map dedupes by exact-key — only one lookup per unique name.
+    expect(db.assetModel.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps unexpected errors in ShelfError", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      createAssetModelsIfNotExists({
+        data: [{ key: "r1", title: "Asset 1", assetModel: "Brand X" }] as any,
+        userId: "user-1",
+        organizationId: "org-1",
       })
     ).rejects.toThrow(ShelfError);
   });

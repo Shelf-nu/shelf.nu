@@ -22,6 +22,7 @@
 
 import type {
   Asset,
+  AssetModel,
   Category,
   Location,
   Tag,
@@ -81,6 +82,12 @@ export type OrgValidationTxClient = {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string }[]>;
+  };
+  assetModel: {
+    findFirst: (args: {
+      where: { id: string; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
   };
 };
 
@@ -311,6 +318,47 @@ export async function assertLocationBelongsToOrg(
       status: 404,
       shouldBeCaptured: false,
       additionalData: { organizationId, locationId },
+    });
+  }
+}
+
+/**
+ * Asserts that a single AssetModel belongs to `organizationId`.
+ *
+ * Used by both single- and bulk-create-from-model paths and by the CSV
+ * importer when an `assetModel` column resolves to an existing model ID
+ * — never trust a model ID coming from form/request input until ownership
+ * is proven.
+ *
+ * @param params.assetModelId - AssetModel ID sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 404 if the model is missing or in another org
+ */
+export async function assertAssetModelBelongsToOrg(
+  {
+    assetModelId,
+    organizationId,
+  }: { assetModelId: AssetModel["id"]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  const client = tx ?? db;
+
+  const found = await client.assetModel.findFirst({
+    where: { id: assetModelId, organizationId },
+    select: { id: true },
+  });
+
+  if (!found) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid asset model",
+      message:
+        "The selected asset model could not be found in your workspace. Please reload and try again.",
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+      additionalData: { organizationId, assetModelId },
     });
   }
 }

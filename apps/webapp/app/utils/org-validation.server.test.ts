@@ -16,6 +16,7 @@ import { ShelfError } from "./error";
 import {
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
+  assertAssetModelBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
   assertCategoryBelongsToOrg,
@@ -39,6 +40,7 @@ function txWith(overrides: Record<string, any>) {
     location: { findFirst: vitest.fn().mockResolvedValue(null) },
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     assetKit: { findMany: vitest.fn().mockResolvedValue([]) },
+    assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -258,6 +260,38 @@ describe("single-entity guards reject foreign/missing with 404", () => {
     });
     await expect(
       assertLocationBelongsToOrg({ locationId: "l-1", organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+  });
+
+  it("assertAssetModelBelongsToOrg throws 404 when foreign/missing", async () => {
+    const tx = txWith({
+      assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
+    });
+    const err = await assertAssetModelBelongsToOrg(
+      { assetModelId: "am-foreign", organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(404);
+    expect(err.title).toBe("Invalid asset model");
+    expect(tx.assetModel.findFirst).toHaveBeenCalledWith({
+      where: { id: "am-foreign", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("assertAssetModelBelongsToOrg resolves when the model is in the org", async () => {
+    const tx = txWith({
+      assetModel: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "am-1" }),
+      },
+    });
+    await expect(
+      assertAssetModelBelongsToOrg(
+        { assetModelId: "am-1", organizationId: ORG },
+        tx
+      )
     ).resolves.toBeUndefined();
   });
 });

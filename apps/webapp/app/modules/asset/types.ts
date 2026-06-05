@@ -91,6 +91,20 @@ export interface CreateAssetFromContentImportPayload
   custodian?: string;
   bookable?: "yes" | "no";
   imageUrl?: string; // URL of the image to import
+  /** AssetModel reference by name (case-insensitive). Resolved /
+   * upserted via createAssetModelsIfNotExists during import. */
+  assetModel?: string;
+  /** AssetType — defaults to INDIVIDUAL when omitted */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  /** Required (>0) for QUANTITY_TRACKED; defaults to 1 for INDIVIDUAL */
+  quantity?: string;
+  /** Optional low-stock threshold for QUANTITY_TRACKED */
+  minQuantity?: string;
+  /** Free-form text label ("boxes", "kg", …) for QUANTITY_TRACKED */
+  unitOfMeasure?: string;
+  /** Required for QUANTITY_TRACKED. ONE_WAY (consumed on checkout) or
+   * TWO_WAY (returned with consumption report). */
+  consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
 
 export interface CreateAssetFromBackupImportPayload

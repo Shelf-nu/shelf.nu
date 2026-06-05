@@ -15,8 +15,10 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
+  BULK_CREATE_MAX,
   bulkAssignAssetTags,
   bulkCheckOutAssets,
+  bulkCreateAssetsFromModel,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
   checkOutQuantity,
@@ -26,6 +28,7 @@ import {
   refreshExpiredAssetImages,
   releaseQuantity,
   relinkAssetQrCode,
+  renderBulkAssetTitle,
   updateAsset,
   uploadDuplicateAssetMainImage,
 } from "./service.server";
@@ -1773,4 +1776,112 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
   it.skip("blocks a SELF_SERVICE user from releasing someone else's custody (centralised in service)", async () => {
     // intentionally empty — see comment above.
   });
+});
+
+describe("renderBulkAssetTitle", () => {
+  it("substitutes the {i} token with the index value", () => {
+    expect(renderBulkAssetTitle("Dell Latitude {i}", 5)).toBe(
+      "Dell Latitude 5"
+    );
+  });
+
+  it("substitutes every occurrence of {i}", () => {
+    expect(renderBulkAssetTitle("Batt-{i}-{i}", 7)).toBe("Batt-7-7");
+  });
+
+  it("appends the index when no {i} token is present", () => {
+    expect(renderBulkAssetTitle("Battery", 3)).toBe("Battery 3");
+  });
+
+  it("trims surrounding whitespace from the resolved title", () => {
+    expect(renderBulkAssetTitle("  Battery {i}  ", 2)).toBe("Battery 2");
+    // No-token fallback also trims the template before appending — surrounding
+    // whitespace shouldn't leak into the rendered title.
+    expect(renderBulkAssetTitle("  Battery  ", 4)).toBe("Battery 4");
+  });
+
+  it("supports the {i} token at the start, middle, and end", () => {
+    expect(renderBulkAssetTitle("{i}-Drone", 9)).toBe("9-Drone");
+    expect(renderBulkAssetTitle("Drone-{i}-X", 11)).toBe("Drone-11-X");
+    expect(renderBulkAssetTitle("Drone-{i}", 100)).toBe("Drone-100");
+  });
+});
+
+describe("bulkCreateAssetsFromModel — pre-validation rejects before any write", () => {
+  // why: every test in this describe exercises the synchronous validation
+  // block at the top of bulkCreateAssetsFromModel. None of them should reach
+  // the org-scope assert / model read / create loop. We assert by inspecting
+  // the thrown ShelfError; no db mocking required.
+
+  const COMMON = {
+    assetModelId: "am-1",
+    nameTemplate: "Battery {i}",
+    organizationId: "org-1",
+    userId: "user-1",
+  };
+
+  it("rejects count < 2 (no batch makes sense for a single asset)", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: 1,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid count");
+  });
+
+  it("rejects count > BULK_CREATE_MAX", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: BULK_CREATE_MAX + 1,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid count");
+  });
+
+  it("rejects non-integer count", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: 5.5,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.title).toBe("Invalid count");
+  });
+
+  it("rejects negative startNumber", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: 5,
+      startNumber: -1,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.title).toBe("Invalid start number");
+  });
+
+  it("rejects empty name template", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: 5,
+      nameTemplate: "   ",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.title).toBe("Invalid name template");
+  });
+
+  it("rejects a `{i}`-only template (would render as raw integers)", async () => {
+    const err = await bulkCreateAssetsFromModel({
+      ...COMMON,
+      count: 5,
+      nameTemplate: "{i}",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.title).toBe("Invalid name template");
+  });
+
+  // Note on the duplicate-titles branch: with `{i}` substitution + a fixed
+  // template, duplicates are only reachable via pathological inputs we
+  // can't construct with public params (the renderer always varies the
+  // suffix by `startNumber + i`). The branch is defensive and exercised
+  // by the runtime walk-through (TESTING-BULK-CREATE.md §4).
 });
