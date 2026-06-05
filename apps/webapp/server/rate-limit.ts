@@ -89,3 +89,24 @@ export const appLoaderRateLimit = (limit = 60) =>
         429
       ),
   });
+
+/**
+ * Coarse IP-based rate limit for `/api/calendar/*` (the subscribable iCal feed).
+ *
+ * The feed is in `publicPaths` (cookie-bypassed, secret-token auth) and runs an
+ * unpaginated, windowed booking query per request. Real calendar clients poll
+ * only every few hours, so a generous per-IP cap is invisible to them while
+ * defeating a leaked/shared URL being hammered. The limit is higher than the
+ * mobile one because calendar providers (Google/Apple/Outlook) fetch from
+ * shared, rotating IP pools and we don't want to throttle legitimate polls.
+ *
+ * Same in-memory MemoryStore caveat as `mobileIpRateLimit`.
+ */
+export const calendarIpRateLimit = () =>
+  rateLimiter({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-7",
+    keyGenerator: (c) => `calendar:ip:${getClientIp(c)}`,
+    handler: (c) => c.text("Too many requests. Please try again later.", 429),
+  });
