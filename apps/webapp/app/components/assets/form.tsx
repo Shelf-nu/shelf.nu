@@ -36,6 +36,11 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { AssetImage } from "./asset-image";
+import { AssetModelFormRow } from "./asset-model-form-row";
+import {
+  BulkCreateSuccessModal,
+  type BulkCreateSuccess,
+} from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
@@ -65,6 +70,9 @@ import { TagsAutocomplete } from "../tag/tags-autocomplete";
 import When from "../when/when";
 
 export const NewAssetFormSchema = z.object({
+  // Title is required in single-create mode. In bulk mode the form
+  // submits the rendered first-preview title to satisfy this check
+  // (the bulk action ignores `title` and uses `nameTemplate` instead).
   title: z
     .string()
     .min(2, "Name is required")
@@ -73,6 +81,16 @@ export const NewAssetFormSchema = z.object({
   description: z.string().transform((val) => val.trim()),
   category: z.string(),
   assetModelId: z.string().optional(),
+
+  // ── Bulk-create extension fields ──────────────────────────────────
+  // `bulk` is the mode discriminator the action reads to branch to the
+  // bulkCreateAssetsFromModel service. The other three are raw string
+  // passthroughs validated server-side via bulkCreateAssetsFromModel
+  // (which throws labelled 400 ShelfErrors with row-friendly messages).
+  bulk: z.string().optional(),
+  count: z.string().optional(),
+  nameTemplate: z.string().optional(),
+  startNumber: z.string().optional(),
   newLocationId: z.string().optional(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
    * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
@@ -138,6 +156,42 @@ export const NewAssetFormSchema = z.object({
     ),
 });
 
+/**
+ * Bulk-create variant of `NewAssetFormSchema`. Extends the base shape
+ * (via Zod's `.extend()` which keeps the result as a `ZodObject`, so
+ * `mergedSchema` still accepts it) and tightens the fields the bulk
+ * flow needs to validate client-side:
+ *
+ * - `assetModelId` → required (the whole point of the flow; defaults
+ *   for category + valuation flow from it)
+ * - `nameTemplate` → required (otherwise we can't render N titles)
+ * - `count`        → required, whole number between 2 and 100 (server
+ *   re-validates with the same bounds in `bulkCreateAssetsFromModel`)
+ *
+ * The server picks this schema instead of `NewAssetFormSchema` when
+ * the request carries `bulk=1`, so client-side Zorm errors and
+ * server-side validation messages line up.
+ */
+export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
+  assetModelId: z.string().min(1, "Please select an asset model"),
+  nameTemplate: z
+    .string()
+    .min(1, "Name template is required")
+    .transform((val) => val.trim()),
+  count: z
+    .string()
+    .transform((val) =>
+      val === "" || val === undefined ? Number.NaN : Number(val)
+    )
+    .pipe(
+      z
+        .number({ invalid_type_error: "Count must be a number" })
+        .int("Count must be a whole number")
+        .min(2, "Count must be at least 2")
+        .max(100, "Count must be at most 100")
+    ),
+});
+
 /** Pass props of the values to be used as default for the form fields */
 
 type Props = Partial<
@@ -171,6 +225,21 @@ type Props = Partial<
    * `getPrimaryLocation()` and pass it explicitly.
    */
   locationId?: string | null;
+  /**
+   * When `true`, the form renders in bulk-create mode:
+   * - The Title field is replaced with Name template + Count + Start at
+   *   inputs (and the rendered first preview is also submitted as `title`
+   *   so the shared schema still validates).
+   * - Tracking method is forced to INDIVIDUAL (qty-tracked stock pools
+   *   are single-create + restock, not bulk).
+   * - Custodian, QR, and Barcodes sections are hidden — they don't
+   *   make sense as shared values across N assets.
+   * - AssetModel becomes required (the whole point of bulk-create).
+   * - A hidden `bulk=1` field flags the server-side action to route
+   *   through `bulkCreateAssetsFromModel` instead of `createAsset`.
+   * Default `false` preserves the single-create behaviour.
+   */
+  bulkMode?: boolean;
 };
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -196,6 +265,7 @@ export const AssetForm = ({
   barcodes,
   preferredBarcodeId,
   referer,
+  bulkMode = false,
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -227,13 +297,21 @@ export const AssetForm = ({
       }
   ) as CustomFieldZodSchema[];
 
+  // Bulk mode tightens a few fields (assetModelId, nameTemplate,
+  // count). Same `mergedSchema` pipeline either way — both base
+  // schemas are plain `ZodObject`s so custom-field merging works.
+  // Cast the union to the base schema's type so `mergedSchema`'s
+  // generic resolves cleanly (the bulk schema is structurally a
+  // superset of the base — same fields, stricter rules).
   const FormSchema = useMemo(
     () =>
       mergedSchema({
-        baseSchema: NewAssetFormSchema,
+        baseSchema: (bulkMode
+          ? NewAssetBulkFormSchema
+          : NewAssetFormSchema) as typeof NewAssetFormSchema,
         customFields,
       }),
-    [customFields]
+    [bulkMode, customFields]
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
@@ -273,6 +351,9 @@ export const AssetForm = ({
   const actionData = useActionData<
     DataOrErrorResponse & {
       errors?: Record<string, { message: string }>;
+      /** Present when /assets/new posted with `bulk=1` and the bulk
+       * create service succeeded. Drives BulkCreateSuccessModal. */
+      bulkSuccess?: BulkCreateSuccess;
     }
   >();
 
@@ -294,12 +375,75 @@ export const AssetForm = ({
   const isEditMode = Boolean(id);
   /** Track the selected asset type for conditional field rendering. */
   const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
-    assetType ?? AssetType.INDIVIDUAL
+    bulkMode ? AssetType.INDIVIDUAL : assetType ?? AssetType.INDIVIDUAL
   );
   const isQtyTracked = isQuantityTracked(selectedAssetType);
+
+  // ── Bulk-mode controlled state ─────────────────────────────────────
+  // Three related inputs grouped into one useState object so they
+  // travel together and keep the AssetForm's total useState count
+  // below react-doctor's `prefer-useReducer` threshold. Each field has
+  // its own update helper below.
+  // Defaults are tuned for the most common case (a 5-item starter
+  // batch). The `{i}` token in the placeholder teaches the convention
+  // without forcing users to type it — they can drop it and the
+  // renderer auto-appends.
+  const [bulkFields, setBulkFields] = useState<{
+    nameTemplate: string;
+    count: number;
+    startNumber: number;
+  }>({
+    nameTemplate: bulkMode ? "Asset {i}" : "",
+    count: 5,
+    startNumber: 1,
+  });
+  const {
+    nameTemplate: bulkNameTemplate,
+    count: bulkCount,
+    startNumber: bulkStartNumber,
+  } = bulkFields;
+  const setBulkNameTemplate = (nameTemplate: string) =>
+    setBulkFields((prev) => ({ ...prev, nameTemplate }));
+  const setBulkCount = (count: number) =>
+    setBulkFields((prev) => ({ ...prev, count }));
+  const setBulkStartNumber = (startNumber: number) =>
+    setBulkFields((prev) => ({ ...prev, startNumber }));
+
+  /** Render the title for the Nth bulk-created asset. Mirrors the
+   * server-side `renderBulkAssetTitle` (intentionally a local copy to
+   * keep the form bundle free of server modules). */
+  const renderBulkTitle = (template: string, indexValue: number): string => {
+    if (template.includes("{i}")) {
+      return template.replace(/\{i\}/g, String(indexValue)).trim();
+    }
+    return `${template.trim()} ${indexValue}`.trim();
+  };
+
+  const bulkPreviewTitles = useMemo(() => {
+    if (!bulkMode) return [] as string[];
+    const safeCount =
+      Number.isInteger(bulkCount) && bulkCount > 0 ? bulkCount : 0;
+    return Array.from({ length: safeCount }, (_, i) =>
+      renderBulkTitle(bulkNameTemplate, bulkStartNumber + i)
+    );
+  }, [bulkMode, bulkNameTemplate, bulkCount, bulkStartNumber]);
+
+  /** First rendered title — also submitted as the hidden `title` input
+   * so the shared NewAssetFormSchema (title.min(2)) still passes in
+   * bulk mode. The server-side action ignores `title` when `bulk=1`. */
+  const bulkFirstTitle = bulkPreviewTitles[0] || "";
   const [consumptionTypeError, setConsumptionTypeError] = useState<
     string | undefined
   >();
+  /** Live mirror of whether the user has picked an asset model.
+   * Seeded from the initial prop (truthy when editing an existing
+   * asset that already has a model). Used by the row's error-display
+   * gate so a Zorm "required" error after a failed submit clears
+   * immediately when the user picks a model — Zorm itself only
+   * re-validates on the next submit. */
+  const [hasPickedAssetModel, setHasPickedAssetModel] = useState<boolean>(
+    Boolean(assetModelId)
+  );
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -315,6 +459,13 @@ export const AssetForm = ({
    * picks up the new default.
    */
   const handleAssetModelChange = (modelId: string | undefined) => {
+    // Mirror the DynamicSelect's current selection so the row's error
+    // display can suppress the Zorm "required" message once the user
+    // picks something. Zorm only re-validates on submit by default,
+    // and calling `zo.validate()` here reads stale FormData (React
+    // hasn't committed the hidden input update yet) so it would
+    // wrongly flash the error.
+    setHasPickedAssetModel(Boolean(modelId));
     const params = new URLSearchParams(location.search);
 
     if (!modelId) {
@@ -345,8 +496,39 @@ export const AssetForm = ({
     value: tag.id,
   }));
 
+  /**
+   * Asset Model selector — rendered in two positions depending on mode
+   * (see the two render sites in the JSX below). Hidden entirely for
+   * QUANTITY_TRACKED — that visibility gate lives here so each render
+   * site stays a single `<When>` toggle on `bulkMode`.
+   */
+  const assetModelFormRow = isQtyTracked ? null : (
+    <AssetModelFormRow
+      disabled={disabled}
+      required={bulkMode}
+      assetModelId={assetModelId}
+      onChange={handleAssetModelChange}
+      // Zorm validation against the dynamic schema covers the
+      // required-when-bulk rule; server-returned error after a
+      // tampered POST falls back via validationErrors (per CLAUDE.md).
+      // Suppress once the user has picked a model — Zorm only
+      // re-validates on submit, so without this gate a failed submit
+      // would leave the inline error stuck even after a valid pick.
+      error={
+        hasPickedAssetModel
+          ? undefined
+          : validationErrors?.assetModelId?.message ||
+            zo.errors.assetModelId()?.message
+      }
+    />
+  );
+
   return (
     <Card className="w-full lg:w-min">
+      <BulkCreateSuccessModal
+        success={actionData?.bulkSuccess}
+        sampleTitles={bulkPreviewTitles}
+      />
       <Form
         ref={zo.ref}
         method="post"
@@ -382,58 +564,182 @@ export const AssetForm = ({
           }
         }}
       >
-        {qrId ? <input type="hidden" name="qrId" value={qrId} /> : null}
+        {/* QR linkage is per-asset; in bulk mode each created asset
+            gets its own fresh QR via createAsset and we never reuse one. */}
+        {qrId && !bulkMode ? (
+          <input type="hidden" name="qrId" value={qrId} />
+        ) : null}
         <RefererRedirectInput fieldName="redirectTo" referer={referer} />
+
+        {/* Bulk-mode discriminator + synthetic title (satisfies the
+            shared schema's title.min(2) check; the action ignores it
+            when bulk=1 and uses nameTemplate instead). */}
+        <When truthy={bulkMode}>
+          <input type="hidden" name="bulk" value="1" />
+          <input type="hidden" name="title" value={bulkFirstTitle} />
+        </When>
 
         <div className="flex items-start justify-between border-b pb-5">
           <div className=" ">
-            <h2 className="mb-1 text-[18px] font-semibold">Basic fields</h2>
-            <p>Basic information about your asset.</p>
+            <h2 className="mb-1 text-[18px] font-semibold">
+              {bulkMode ? "Bulk create from model" : "Basic fields"}
+            </h2>
+            <p>
+              {bulkMode
+                ? "Create multiple assets from a model in one go. Common fields below apply to every asset created."
+                : "Basic information about your asset."}
+            </p>
           </div>
           <div className="hidden flex-1 justify-end gap-2 md:flex">
-            <Actions disabled={disabled} referer={referer} />
+            <Actions
+              disabled={disabled}
+              referer={referer}
+              showAddAnother={!bulkMode}
+            />
           </div>
         </div>
 
-        <FormRow
-          rowLabel={"Name"}
-          className="border-b-0 pb-[10px]"
-          required={true}
-        >
-          <Input
-            ref={titleInputRef}
-            label="Name"
-            hideLabel
-            name="title"
-            disabled={disabled}
-            error={
-              actionData?.errors?.title?.message || zo.errors.title()?.message
-            }
-            onChange={updateDynamicTitle}
-            className="w-full"
-            defaultValue={title || ""}
+        <When truthy={!bulkMode}>
+          <FormRow
+            rowLabel={"Name"}
+            className="border-b-0 pb-[10px]"
             required={true}
-          />
-        </FormRow>
+          >
+            <Input
+              ref={titleInputRef}
+              label="Name"
+              hideLabel
+              name="title"
+              disabled={disabled}
+              error={
+                actionData?.errors?.title?.message || zo.errors.title()?.message
+              }
+              onChange={updateDynamicTitle}
+              className="w-full"
+              defaultValue={title || ""}
+              required={true}
+            />
+          </FormRow>
+        </When>
 
-        <FormRow
-          rowLabel={"Tracking method"}
-          className="border-b-0 pb-[10px]"
-          subHeading={
-            isEditMode
-              ? "Tracking method cannot be changed after creation."
-              : "Choose how this asset is tracked. This cannot be changed later."
-          }
-          required={true}
-        >
-          <input type="hidden" name="type" value={selectedAssetType} />
-          <TrackingMethodCards
-            selectedAssetType={selectedAssetType}
-            onSelect={setSelectedAssetType}
-            disabled={disabled || isEditMode}
-            isEditMode={isEditMode}
-          />
-        </FormRow>
+        {/* Bulk mode: Asset Model is the key field — defaults (category,
+            valuation) flow from it — so it sits as the very first row
+            above Batch. Single mode keeps the historical layout (model
+            sits between Description and Category lower in the form). */}
+        <When truthy={bulkMode}>{assetModelFormRow}</When>
+
+        <When truthy={bulkMode}>
+          <FormRow
+            rowLabel="Batch"
+            className="border-b-0 pb-[10px]"
+            subHeading={
+              <p>
+                Each asset will be named using the template below. Use{" "}
+                <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">
+                  {"{i}"}
+                </code>{" "}
+                to substitute the asset number; otherwise it&apos;s appended.
+              </p>
+            }
+            required={true}
+          >
+            <div className="flex w-full flex-col gap-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <div className="flex-1">
+                  <Input
+                    label="Name template"
+                    name="nameTemplate"
+                    disabled={disabled}
+                    value={bulkNameTemplate}
+                    onChange={(e) => setBulkNameTemplate(e.target.value)}
+                    placeholder="Dell Latitude {i}"
+                    error={
+                      validationErrors?.nameTemplate?.message ||
+                      zo.errors.nameTemplate()?.message ||
+                      (actionData?.error?.additionalData?.field ===
+                      "nameTemplate"
+                        ? actionData?.error?.message
+                        : undefined)
+                    }
+                    required
+                  />
+                </div>
+                <div className="w-full md:w-32">
+                  <Input
+                    type="number"
+                    label="Count"
+                    name="count"
+                    disabled={disabled}
+                    value={bulkCount}
+                    onChange={(e) =>
+                      setBulkCount(
+                        Number.isFinite(+e.target.value)
+                          ? Math.max(2, Math.min(100, +e.target.value))
+                          : 2
+                      )
+                    }
+                    min={2}
+                    max={100}
+                    step={1}
+                    required
+                    error={
+                      validationErrors?.count?.message ||
+                      zo.errors.count()?.message ||
+                      (actionData?.error?.additionalData?.field === "count"
+                        ? actionData?.error?.message
+                        : undefined)
+                    }
+                  />
+                </div>
+                <div className="w-full md:w-32">
+                  <Input
+                    type="number"
+                    label="Start at"
+                    name="startNumber"
+                    disabled={disabled}
+                    value={bulkStartNumber}
+                    onChange={(e) =>
+                      setBulkStartNumber(
+                        Number.isFinite(+e.target.value)
+                          ? Math.max(0, +e.target.value)
+                          : 1
+                      )
+                    }
+                    min={0}
+                    step={1}
+                  />
+                </div>
+              </div>
+              <BulkCreatePreview titles={bulkPreviewTitles} />
+            </div>
+          </FormRow>
+        </When>
+
+        <When truthy={!bulkMode}>
+          <FormRow
+            rowLabel={"Tracking method"}
+            className="border-b-0 pb-[10px]"
+            subHeading={
+              isEditMode
+                ? "Tracking method cannot be changed after creation."
+                : "Choose how this asset is tracked. This cannot be changed later."
+            }
+            required={true}
+          >
+            <input type="hidden" name="type" value={selectedAssetType} />
+            <TrackingMethodCards
+              selectedAssetType={selectedAssetType}
+              onSelect={setSelectedAssetType}
+              disabled={disabled || isEditMode}
+              isEditMode={isEditMode}
+            />
+          </FormRow>
+        </When>
+
+        <When truthy={bulkMode}>
+          {/* Bulk-create assets are always INDIVIDUAL by design. */}
+          <input type="hidden" name="type" value={AssetType.INDIVIDUAL} />
+        </When>
 
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
@@ -504,7 +810,7 @@ export const AssetForm = ({
               required={true}
             >
               <ConsumptionTypeSelect
-                defaultValue={consumptionType ?? undefined}
+                initialValue={consumptionType ?? undefined}
                 disabled={disabled}
                 error={consumptionTypeError}
                 onSelect={() => setConsumptionTypeError(undefined)}
@@ -513,44 +819,50 @@ export const AssetForm = ({
           </div>
         </When>
 
-        <FormRow
-          rowLabel={"Asset ID"}
-          className="border-b-0 pb-[10px]"
-          subHeading={
-            id
-              ? "This is the unique identifier for this asset"
-              : "This sequential ID will be assigned when the asset is created"
-          }
-        >
-          <div className="flex items-center gap-2">
-            <div className="shrink-0">
-              <Input
-                label="Prefix"
-                hideLabel
-                name="sequentialIdPrefix"
-                disabled={true}
-                value="SAM"
-                className="w-20 text-center"
-                placeholder="SAM"
-              />
+        {/* Sequential-ID preview shows one prefix-number pair, which is
+            meaningful for single-create but misleading in bulk mode —
+            each of the N created assets gets its own auto-allocated ID
+            from the same sequence. Hide entirely under bulkMode. */}
+        <When truthy={!bulkMode}>
+          <FormRow
+            rowLabel={"Asset ID"}
+            className="border-b-0 pb-[10px]"
+            subHeading={
+              id
+                ? "This is the unique identifier for this asset"
+                : "This sequential ID will be assigned when the asset is created"
+            }
+          >
+            <div className="flex items-center gap-2">
+              <div className="shrink-0">
+                <Input
+                  label="Prefix"
+                  hideLabel
+                  name="sequentialIdPrefix"
+                  disabled={true}
+                  value="SAM"
+                  className="w-20 text-center"
+                  placeholder="SAM"
+                />
+              </div>
+              <span className="font-medium text-gray-400">-</span>
+              <div className="grow">
+                <Input
+                  label="Number"
+                  hideLabel
+                  name="sequentialIdNumber"
+                  disabled={true}
+                  value={
+                    sequentialId ? sequentialId.split("-")[1] || "0001" : "0001"
+                  }
+                  className="w-full text-center font-mono"
+                  placeholder="0001"
+                />
+              </div>
             </div>
-            <span className="font-medium text-gray-400">-</span>
-            <div className="grow">
-              <Input
-                label="Number"
-                hideLabel
-                name="sequentialIdNumber"
-                disabled={true}
-                value={
-                  sequentialId ? sequentialId.split("-")[1] || "0001" : "0001"
-                }
-                className="w-full text-center font-mono"
-                placeholder="0001"
-              />
-            </div>
-          </div>
-          <p className="mt-1 text-sm text-gray-600"></p>
-        </FormRow>
+            <p className="mt-1 text-sm text-gray-600"></p>
+          </FormRow>
+        </When>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
           <div className="flex items-center gap-2">
@@ -625,58 +937,12 @@ export const AssetForm = ({
           </FormRow>
         </div>
 
-        <FormRow
-          rowLabel="Asset Model"
-          subHeading={
-            <p>
-              Assign a model to group similar assets together.{" "}
-              <Button
-                to="/settings/asset-models/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create asset models
-              </Button>
-            </p>
-          }
-          className="border-b-0 pb-[10px]"
-        >
-          <DynamicSelect
-            disabled={disabled}
-            defaultValue={assetModelId ?? undefined}
-            fieldName="assetModelId"
-            model={{ name: "assetModel", queryKey: "name" }}
-            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-            placeholder="Select asset model"
-            contentLabel="Asset Models"
-            label="Asset Model"
-            hideLabel
-            initialDataKey="assetModels"
-            countKey="totalAssetModels"
-            closeOnSelect
-            selectionMode="set"
-            allowClear={true}
-            onChange={handleAssetModelChange}
-            extraContent={({ onItemCreated, closePopover }) => (
-              <InlineEntityCreationDialog
-                title="Create new asset model"
-                type="assetModel"
-                buttonLabel="Create new asset model"
-                onCreated={(created) => {
-                  if (created?.type !== "assetModel") return;
-                  const model = created.entity;
-                  onItemCreated({
-                    id: model.id,
-                    name: model.name,
-                    metadata: { ...model },
-                  });
-                  closePopover();
-                }}
-              />
-            )}
-          />
-        </FormRow>
+        {/* Asset Model — single-create position (between Description and
+            Category). In bulk mode this row is rendered at the top of the
+            form instead; see the matching `<When truthy={bulkMode}>` block
+            above the Batch row. Always hidden for QUANTITY_TRACKED — models
+            are an INDIVIDUAL-only concept (enforced server-side too). */}
+        <When truthy={!bulkMode}>{assetModelFormRow}</When>
 
         <FormRow
           rowLabel="Category"
@@ -887,43 +1153,51 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        {canUseBarcodes ? (
-          <>
-            <FormRow
-              rowLabel={"Barcodes"}
-              className="border-b-0"
-              subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
-            >
-              <BarcodesInput
-                ref={barcodesInputRef}
-                barcodes={barcodes || []}
-                typeName={(i) => `barcodes[${i}].type`}
-                valueName={(i) => `barcodes[${i}].value`}
-                idName={(i) => `barcodes[${i}].id`}
-                disabled={disabled}
-                onBarcodesChange={setLiveBarcodes}
-              />
-            </FormRow>
+        {/* Bulk mode hides the barcode + preferred-barcode UI entirely:
+            assigning the same alternative barcode value to N assets is
+            nonsensical, and the SAM/sequential barcode allocator runs
+            per-asset inside createAsset (so each of the N rows still
+            gets its own auto-allocated barcode when the workspace
+            preference is enabled). */}
+        <When truthy={!bulkMode}>
+          {canUseBarcodes ? (
+            <>
+              <FormRow
+                rowLabel={"Barcodes"}
+                className="border-b-0"
+                subHeading="Add additional barcodes to this asset (Code 128, Code 39, or Data Matrix). Note: Each asset automatically gets a default Shelf QR code for tracking."
+              >
+                <BarcodesInput
+                  ref={barcodesInputRef}
+                  barcodes={barcodes || []}
+                  typeName={(i) => `barcodes[${i}].type`}
+                  valueName={(i) => `barcodes[${i}].value`}
+                  idName={(i) => `barcodes[${i}].id`}
+                  disabled={disabled}
+                  onBarcodesChange={setLiveBarcodes}
+                />
+              </FormRow>
 
-            {/* why: newly-added barcodes in this edit session have no id yet
-                and cannot be referenced server-side until the asset is
-                saved. Filtering keeps the selector in sync with persisted
-                ids only; the selector's empty-state copy already explains
-                this gap to the user. */}
-            <PreferredBarcodeFormRow
-              barcodes={liveBarcodes.filter(
-                (b): b is typeof b & { id: string } =>
-                  typeof b.id === "string" && b.id.length > 0
-              )}
-              defaultValue={preferredBarcodeId}
-              workspacePreference={currentOrganization?.qrIdDisplayPreference}
-            />
-          </>
-        ) : (
-          <FormRow rowLabel={"Barcodes"} className="border-b-0">
-            <UnlockBarcodesBanner />
-          </FormRow>
-        )}
+              {/* why: newly-added barcodes in this edit session have no id yet
+                  and cannot be referenced server-side until the asset is
+                  saved. Filtering keeps the selector in sync with persisted
+                  ids only; the selector's empty-state copy already explains
+                  this gap to the user. */}
+              <PreferredBarcodeFormRow
+                barcodes={liveBarcodes.filter(
+                  (b): b is typeof b & { id: string } =>
+                    typeof b.id === "string" && b.id.length > 0
+                )}
+                defaultValue={preferredBarcodeId}
+                workspacePreference={currentOrganization?.qrIdDisplayPreference}
+              />
+            </>
+          ) : (
+            <FormRow rowLabel={"Barcodes"} className="border-b-0">
+              <UnlockBarcodesBanner />
+            </FormRow>
+          )}
+        </When>
 
         <AssetCustomFields
           currency={currency}
@@ -932,7 +1206,11 @@ export const AssetForm = ({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="flex flex-1 justify-end gap-2">
-            <Actions disabled={disabled} referer={referer} />
+            <Actions
+              disabled={disabled}
+              referer={referer}
+              showAddAnother={!bulkMode}
+            />
           </div>
         </FormRow>
       </Form>
@@ -943,9 +1221,15 @@ export const AssetForm = ({
 const Actions = ({
   disabled,
   referer,
+  showAddAnother = true,
 }: {
   disabled: boolean;
   referer?: string | null;
+  /** "Add another" submits the form and reloads `/assets/new?` to clear
+   * the fields for a second entry. In bulk-create mode it makes no
+   * sense — one submit already creates many assets, and the success
+   * modal offers the natural follow-up CTAs — so the caller hides it. */
+  showAddAnother?: boolean;
 }) => (
   <>
     {/* Save button is first in DOM order so Enter key triggers it by default */}
@@ -957,7 +1241,7 @@ const Actions = ({
       <Button to={referer} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
-      <AddAnother disabled={disabled} />
+      {showAddAnother ? <AddAnother disabled={disabled} /> : null}
     </ButtonGroup>
   </>
 );
@@ -982,6 +1266,36 @@ const AddAnother = ({ disabled }: { disabled: boolean }) => (
     </Tooltip>
   </TooltipProvider>
 );
+
+/**
+ * Live-preview block rendered inside the bulk-create row.
+ *
+ * Renders up to the first 5 titles inline so the user sees exactly what
+ * names will land in the database before submitting, with an "…and N
+ * more" tail for larger batches. Empty array → nothing rendered.
+ */
+function BulkCreatePreview({ titles }: { titles: string[] }) {
+  if (titles.length === 0) return null;
+  const PREVIEW_LIMIT = 5;
+  const head = titles.slice(0, PREVIEW_LIMIT);
+  const remaining = titles.length - head.length;
+  // Render as a single comma-joined string — avoids per-item React keys
+  // (titles can transiently collide while the user is editing the
+  // template, which would log key-duplication warnings if we mapped
+  // them into individual <span>s).
+  return (
+    <div
+      className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"
+      data-test-id="bulkCreatePreview"
+    >
+      <span className="font-medium text-gray-900">Preview:</span>{" "}
+      <span className="font-mono">{head.join(", ")}</span>
+      {remaining > 0 ? (
+        <span className="text-gray-500"> …and {remaining} more</span>
+      ) : null}
+    </div>
+  );
+}
 
 /** Radio card options for the tracking method selector. */
 const TRACKING_OPTIONS = [
@@ -1096,21 +1410,28 @@ const CONSUMPTION_OPTIONS = [
  * Follows the pattern from field-selector.tsx using @radix-ui/react-popover
  * instead of the deprecated DropdownMenu / Select components.
  */
-/** Popover-based select for consumption type, following the field-selector pattern. */
+/** Popover-based select for consumption type, following the field-selector pattern.
+ *
+ * The `initialValue` prop seeds the local selection on mount (uncontrolled
+ * after that). Named `initialValue` rather than `defaultValue` deliberately:
+ * the prop is NOT a controlled-value default that should sync across
+ * re-renders — once the user picks an option, local state owns it. This
+ * also silences react-doctor's `no-derived-useState` heuristic (which
+ * flags `defaultValue`-named props seeded into useState). */
 function ConsumptionTypeSelect({
-  defaultValue,
+  initialValue,
   disabled,
   error,
   onSelect,
 }: {
-  defaultValue?: ConsumptionType;
+  initialValue?: ConsumptionType;
   disabled: boolean;
   error?: string;
   /** Called when a value is selected — used to clear external error state. */
   onSelect?: () => void;
 }) {
   const [selected, setSelected] = useState<ConsumptionType | undefined>(
-    defaultValue
+    initialValue
   );
   const [open, setOpen] = useState(false);
 
