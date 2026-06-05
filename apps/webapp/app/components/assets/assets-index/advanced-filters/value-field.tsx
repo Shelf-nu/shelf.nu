@@ -107,6 +107,52 @@ function filterConflictingSelections(
   }
 }
 
+/**
+ * Sentinel value indicating "no default to apply" — distinct from the
+ * empty-string filter value so callers can tell apart "we resolved to
+ * a deliberate empty" vs "we resolved to nothing".
+ */
+const NO_DEFAULT = Symbol("no-default-filter-value");
+
+/** Custom-field shape `resolveFilterDefault` needs to inspect — kept
+ * narrow so the helper stays decoupled from the wider filter context. */
+type CustomFieldSummary = { name?: string; options?: string[] };
+
+/**
+ * Pure resolver: given an empty-valued filter, return the default value
+ * to seed it with, or `NO_DEFAULT` when the user must pick manually.
+ *
+ * Mirrors the previous branched `useEffect` body so the only visible
+ * behaviour change is "one setFilter call instead of up to one per
+ * branch" — react-doctor's `no-cascading-set-state` is happy and the
+ * underlying infinite-loop avoidance (`setFilter("")` is a thrash, so
+ * we return `NO_DEFAULT` for that case) is preserved verbatim.
+ */
+function resolveFilterDefault(
+  filter: Filter,
+  customFields: CustomFieldSummary[]
+): Filter["value"] | typeof NO_DEFAULT {
+  if (filter.value !== "") return NO_DEFAULT;
+  if (filter.type === "boolean") return true;
+  if (filter.type === "enum") {
+    if (filter.name === "type") return "INDIVIDUAL";
+    if (filter.name === "status") return Object.values(AssetStatus)[0];
+    if (filter.name.startsWith("cf_")) {
+      const options =
+        customFields.find((f) => f?.name === filter.name.slice(3))?.options ??
+        [];
+      // Only return a real default — empty-string would thrash parent
+      // state via setFilter's unstable identity (infinite loop).
+      return options[0] ?? NO_DEFAULT;
+    }
+    // Non-custom enum fields (category, location, kit, assetModel, …)
+    // default to empty string. Returning NO_DEFAULT avoids the no-op
+    // setFilter("") that would re-trigger the effect.
+    return NO_DEFAULT;
+  }
+  return NO_DEFAULT;
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export function ValueField({
   filter,
@@ -175,40 +221,16 @@ export function ValueField({
   }, [localValue, validateBetweenFilter]);
 
   useEffect(() => {
-    if (filter.type === "boolean" && filter.value === "") {
-      setFilter(true); // Set default value to true when boolean field is selected
+    // Single dispatch — react-doctor's `no-cascading-set-state` rule
+    // flags branched setState calls, even when only one fires per
+    // render. Consolidate via `resolveFilterDefault` which returns the
+    // value to apply (or `null` for "no default to apply"), so this
+    // effect only invokes `setFilter` once at most.
+    const next = resolveFilterDefault(filter, customFields);
+    if (next !== NO_DEFAULT) {
+      setFilter(next);
     }
-
-    if (filter.type === "enum" && filter.value === "") {
-      if (filter.name === "type") {
-        setFilter("INDIVIDUAL"); // Default to INDIVIDUAL for asset type filter
-      } else if (filter.name === "status") {
-        const options = Object.values(AssetStatus);
-        setFilter(options[0]); // Set default value to first option
-      } else if (filter.name.startsWith("cf_")) {
-        // Only look up custom field options for actual custom fields (cf_ prefix)
-        const options =
-          customFields.find((field) => field?.name === filter.name.slice(3))
-            ?.options || [];
-        // why: only call setFilter when there's an actual default to apply.
-        // Non-empty `options[0]` is a real default; falsy means there's no
-        // default and the user must pick — calling setFilter("") here would
-        // be a no-op that thrashes parent state and triggers an infinite
-        // render loop (parent rebuilds the filters array on every call,
-        // setFilter gets a new identity, effect re-runs, setFilter("") is
-        // called again, repeat).
-        if (options[0]) {
-          setFilter(options[0]);
-        }
-      }
-      // Non-custom enum fields (category, location, kit, assetModel, etc.)
-      // default to empty string — the user must pick a value from the
-      // selector. We deliberately do not call setFilter("") here because
-      // the value is already "" (it would be a no-op that creates a new
-      // filters array, retriggering this effect via setFilter's unstable
-      // identity → infinite loop).
-    }
-  }, [customFields, filter.name, filter.type, filter.value, setFilter]);
+  }, [customFields, filter, setFilter]);
 
   function handleChange(
     event: ChangeEvent<
@@ -1806,13 +1828,18 @@ function TrackingTypeEnumField({
   const selectedLabel =
     options.find((opt) => opt.id === value)?.label || "Select type";
 
-  useEffect(() => {
-    if (isPopoverOpen) {
+  // Sync the keyboard-highlight index when the popover opens. Done in
+  // the open handler (not a useEffect) so react-doctor's
+  // `no-effect-event-handler` rule sees the cause-and-effect tied to
+  // the actual user event.
+  const openPopoverWithSelection = (open: boolean) => {
+    if (disabled) return;
+    if (open) {
       const currentIndex = options.findIndex((opt) => opt.id === value);
       setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPopoverOpen, value]);
+    setIsPopoverOpen(open);
+  };
 
   const handleSelect = (optionValue: string) => {
     handleChange(optionValue);
@@ -1848,7 +1875,7 @@ function TrackingTypeEnumField({
       <input type="hidden" value={value} name={name} />
       <Popover
         open={isPopoverOpen && !disabled}
-        onOpenChange={(open) => !disabled && setIsPopoverOpen(open)}
+        onOpenChange={openPopoverWithSelection}
       >
         <PopoverTrigger asChild>
           <Button

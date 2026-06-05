@@ -177,35 +177,42 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         action: PermissionAction.update,
       });
 
-    const {
-      search,
-      totalAssets,
-      perPage,
-      page,
-      categories,
-      tags,
-      assets,
-      totalPages,
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-    } = await getPaginatedAndFilterableAssets({
-      request,
-      organizationId,
-      extraInclude: {
-        assetLocations: {
-          select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-        },
+    // getPaginatedAndFilterableAssets + getBooking both only need
+    // `organizationId` (from requirePermission above). They're
+    // independent — parallelise to cut a serial DB round-trip.
+    const [
+      {
+        search,
+        totalAssets,
+        perPage,
+        page,
+        categories,
+        tags,
+        assets,
+        totalPages,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
       },
-    });
-
-    const booking = await getBooking({
-      id,
-      organizationId,
-      userOrganizations,
-      request,
-    });
+      booking,
+    ] = await Promise.all([
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+        extraInclude: {
+          assetLocations: {
+            select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+          },
+        },
+      }),
+      getBooking({
+        id,
+        organizationId,
+        userOrganizations,
+        request,
+      }),
+    ]);
 
     /**
      * For QUANTITY_TRACKED assets, compute available quantity factoring

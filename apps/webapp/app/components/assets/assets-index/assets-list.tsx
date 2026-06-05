@@ -365,18 +365,22 @@ export const ListAssetContent = ({
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <ul className="flex flex-col gap-1 text-sm">
-                        {[primaryCustody, ...otherCustodians].map(
-                          (entry, index) => {
-                            const name = entry.custodian?.name ?? "Unknown";
-                            const qty = entry.quantity;
-                            return (
-                              <li key={`${name}-${index}`}>
-                                {name}
-                                {qty && qty > 1 ? ` (${qty})` : null}
-                              </li>
-                            );
-                          }
-                        )}
+                        {[primaryCustody, ...otherCustodians].map((entry) => {
+                          const name = entry.custodian?.name ?? "Unknown";
+                          const qty = entry.quantity;
+                          // why: Custody rows carry their own `id`; fall back
+                          // to a name+qty composite only when missing (the
+                          // upstream `formatCustodyList` type is generic, so
+                          // TS can't prove `id` is present without a cast).
+                          const key =
+                            (entry as { id?: string }).id ?? `${name}-${qty}`;
+                          return (
+                            <li key={key}>
+                              {name}
+                              {qty && qty > 1 ? ` (${qty})` : null}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </TooltipContent>
                   </Tooltip>

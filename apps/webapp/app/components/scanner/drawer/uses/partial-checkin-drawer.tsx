@@ -1162,29 +1162,10 @@ export default function PartialCheckinDrawer({
   // (BookingHeader is defined at module scope above — no nested component
   // here so we don't shadow it or remount on every render.)
 
-  // Render a single scanned item row (real or synthetic).
-  const renderScannedItemRow = useCallback(
-    (qrId: string, item: any): ReactNode => (
-      <GenericItemRow
-        key={qrId}
-        qrId={qrId}
-        item={item}
-        onRemove={removeItem}
-        renderLoading={(pendingQrId, error) => (
-          <DefaultLoadingState qrId={pendingQrId} error={error} />
-        )}
-        renderItem={(data) => {
-          if (item?.type === "asset") {
-            return <AssetRow asset={data as AssetFromQr} />;
-          } else if (item?.type === "kit") {
-            return <KitRow kit={data as KitFromQr} />;
-          }
-          return null;
-        }}
-      />
-    ),
-    [removeItem]
-  );
+  // Stable callback reference for the row's onRemove — keeps the
+  // extracted `ScannedItemRow` component's prop identity stable across
+  // renders so React can reconcile it in place.
+  const onRemoveScanned = removeItem;
 
   /**
    * Invoked when the user clicks "Check in without scanning" on a
@@ -1294,7 +1275,11 @@ export default function PartialCheckinDrawer({
             : [];
           return (
             <Fragment key={qrId}>
-              {renderScannedItemRow(qrId, item)}
+              <ScannedItemRow
+                qrId={qrId}
+                item={item}
+                onRemove={onRemoveScanned}
+              />
               {qtyMembers.map((member) => (
                 <ScannedKitQtyMemberRow
                   key={`scanned-kit-qty-${member.bookingAssetId}`}
@@ -1393,7 +1378,7 @@ export default function PartialCheckinDrawer({
     activatedQtyBookingAssetIds,
     kitMetaById,
     handleQuickCheckin,
-    renderScannedItemRow,
+    onRemoveScanned,
   ]);
 
   const progressLabel = (
@@ -1472,6 +1457,43 @@ const assetTypePillClass = tw(
  * Renders as a full-width `<tr>` so it lives inside the existing
  * `<tbody>` without breaking DOM semantics.
  */
+/**
+ * Module-scope renderer for a single scanned row — promoted out of the
+ * inline `renderScannedItemRow` useCallback so React can reconcile it
+ * as a stable component (react-doctor `no-render-in-render`). Branches
+ * on `item.type` to pick between the asset and kit shells; rendering
+ * loading + error states is delegated to `DefaultLoadingState`.
+ */
+function ScannedItemRow({
+  qrId,
+  item,
+  onRemove,
+}: {
+  qrId: string;
+  item: any;
+  onRemove: (qrId: string) => void;
+}) {
+  return (
+    <GenericItemRow
+      key={qrId}
+      qrId={qrId}
+      item={item}
+      onRemove={onRemove}
+      renderLoading={(pendingQrId, error) => (
+        <DefaultLoadingState qrId={pendingQrId} error={error} />
+      )}
+      renderItem={(data) => {
+        if (item?.type === "asset") {
+          return <AssetRow asset={data as AssetFromQr} />;
+        } else if (item?.type === "kit") {
+          return <KitRow kit={data as KitFromQr} />;
+        }
+        return null;
+      }}
+    />
+  );
+}
+
 function SectionHeader({
   label,
   tone,

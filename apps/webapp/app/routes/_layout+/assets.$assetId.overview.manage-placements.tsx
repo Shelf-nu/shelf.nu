@@ -131,38 +131,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const asset = await getAsset({
-      organizationId,
-      id,
-      userOrganizations,
-      request,
-      include: {
-        // Pull the current placement set so the form can pre-populate
-        // existing rows with their qty. Polish-4: `assetKitId` +
-        // `assetKit.kit` discriminate kit-driven rows so the form can
-        // render them read-only with a "via {kit}" indicator.
-        assetLocations: {
-          select: {
-            locationId: true,
-            quantity: true,
-            assetKitId: true,
-            location: { select: { id: true, name: true } },
-            assetKit: {
-              select: {
-                id: true,
-                kit: { select: { id: true, name: true } },
+    // getAsset + getLocationsForCreateAndEdit only need organizationId
+    // from requirePermission above — independent, parallelise.
+    const [asset, { locations }] = await Promise.all([
+      getAsset({
+        organizationId,
+        id,
+        userOrganizations,
+        request,
+        include: {
+          // Pull the current placement set so the form can pre-populate
+          // existing rows with their qty. Polish-4: `assetKitId` +
+          // `assetKit.kit` discriminate kit-driven rows so the form can
+          // render them read-only with a "via {kit}" indicator.
+          assetLocations: {
+            select: {
+              locationId: true,
+              quantity: true,
+              assetKitId: true,
+              location: { select: { id: true, name: true } },
+              assetKit: {
+                select: {
+                  id: true,
+                  kit: { select: { id: true, name: true } },
+                },
               },
             },
           },
         },
-      },
-    });
-
-    const { locations } = await getLocationsForCreateAndEdit({
-      organizationId,
-      request,
-      defaultLocation: null,
-    });
+      }),
+      getLocationsForCreateAndEdit({
+        organizationId,
+        request,
+        defaultLocation: null,
+      }),
+    ]);
 
     const isQty = isQuantityTracked(asset);
 

@@ -13,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 export default function AssetModelBulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -33,14 +34,6 @@ export default function AssetModelBulkActionsDropdown() {
     </div>
   );
 }
-
-/** Hardcoded CSS for fixing Radix dropdown positioning on mobile (no user input). */
-const MOBILE_DROPDOWN_FIX_CSS = `@media (max-width: 640px) {
-  [data-radix-popper-content-wrapper] {
-    transform: none !important;
-    will-change: auto !important;
-  }
-}`;
 
 function ConditionalDropdown() {
   const selectedCount = useAtomValue(selectedBulkItemsCountAtom);
@@ -99,13 +92,7 @@ function ConditionalDropdown() {
           <span className="flex items-center gap-2">Actions</span>
         </Button>
 
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: MOBILE_DROPDOWN_FIX_CSS,
-            }}
-          ></style>
-        )}
+        <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
           asChild

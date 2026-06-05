@@ -559,11 +559,15 @@ function CustodyColumnContent({
             data-testid="custody-more-tooltip"
           >
             <ul className="flex flex-col gap-1 text-sm">
-              {[primary, ...others].map((entry, index) => {
+              {[primary, ...others].map((entry) => {
                 const name = entry.custodian?.name ?? entry.name ?? "Unknown";
                 const qty = entry.quantity;
+                // why: Custody rows carry their own `id`; the upstream
+                // `formatCustodyList` type is generic, so we cast to read
+                // it and fall back to a name+qty composite if missing.
+                const key = (entry as { id?: string }).id ?? `${name}-${qty}`;
                 return (
-                  <li key={`${name}-${index}`}>
+                  <li key={key}>
                     {name}
                     {qty && qty > 1 ? ` (${qty})` : null}
                   </li>

@@ -130,8 +130,11 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
             <p className="pl-2 text-gray-700">
               <span className="font-medium">{standaloneTotal}</span> standalone
             </p>
-            {buckets.standalone.map((b, i) => (
-              <p key={`s${i}`} className="pl-4 text-gray-600">
+            {buckets.standalone.map((b) => (
+              <p
+                key={`s-${b.bookingId ?? b.bookingName}`}
+                className="pl-4 text-gray-600"
+              >
                 • <SliceBookingName slice={b} /> — {b.quantity}{" "}
                 {b.quantity === 1 ? "unit" : "units"}
               </p>
@@ -143,8 +146,11 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
             <p className="pl-2 text-gray-700">
               <span className="font-medium">{kitTotal}</span> via kits
             </p>
-            {buckets.kitDriven.map((b, i) => (
-              <p key={`k${i}`} className="pl-4 text-gray-600">
+            {buckets.kitDriven.map((b) => (
+              <p
+                key={`k-${b.bookingId ?? b.bookingName}-${b.viaKitName ?? ""}`}
+                className="pl-4 text-gray-600"
+              >
                 • <SliceBookingName slice={b} /> — {b.quantity}{" "}
                 {b.quantity === 1 ? "unit" : "units"}
               </p>

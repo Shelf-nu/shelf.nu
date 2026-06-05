@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AssetStatus, AssetType, type Prisma } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
@@ -330,11 +330,18 @@ export default function AddAssetsToLocation() {
   }, []);
 
   /**
-   * Set selected items for kit based on the route data
+   * Initialise the shared Jotai atom synchronously during the first
+   * render (guarded by a ref) rather than running the setter inside a
+   * mount effect — react-doctor's `no-derived-state-effect` flags the
+   * useEffect form, and the render-time init avoids the empty-first-
+   * frame flicker. Mirrors the kit picker at
+   * `kits.$kitId.assets.manage-assets.tsx:365-369`.
    */
-  useEffect(() => {
+  const didInitializeSelectedItemsRef = useRef(false);
+  if (!didInitializeSelectedItemsRef.current) {
+    didInitializeSelectedItemsRef.current = true;
     setSelectedBulkItems(locationAssets);
-  }, [locationAssets, setSelectedBulkItems]);
+  }
 
   return (
     <Tabs

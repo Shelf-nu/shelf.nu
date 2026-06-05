@@ -65,25 +65,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const loaderData = await loadBookingsData({
-      request,
-      organizationId,
-      userId: authSession?.userId,
-      isSelfServiceOrBase,
-      ids: assetId ? [assetId] : undefined,
-    });
-
-    /** Fetch the asset so we can show a quantity picker for qty-tracked assets */
-    const asset = await db.asset.findFirst({
-      where: { id: assetId, organizationId },
-      select: {
-        id: true,
-        title: true,
-        type: true,
-        quantity: true,
-        unitOfMeasure: true,
-      },
-    });
+    // loadBookingsData + the asset lookup are independent (both only
+    // need organizationId from requirePermission above), so parallelise
+    // for a faster TTFB.
+    const [loaderData, asset] = await Promise.all([
+      loadBookingsData({
+        request,
+        organizationId,
+        userId: authSession?.userId,
+        isSelfServiceOrBase,
+        ids: assetId ? [assetId] : undefined,
+      }),
+      db.asset.findFirst({
+        where: { id: assetId, organizationId },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          quantity: true,
+          unitOfMeasure: true,
+        },
+      }),
+    ]);
 
     /**
      * For qty-tracked assets, compute current booking-aware availability so
