@@ -70,6 +70,12 @@ export type OrgValidationTxClient = {
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
+  customField: {
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
+  };
   userOrganization: {
     findFirst: (args: {
       where: { userId: string; organizationId: string };
@@ -112,6 +118,52 @@ export async function assertAssetsBelongToOrg(
       title: "Invalid assets",
       message:
         "Some of the selected assets do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every custom-field ID belongs to `organizationId`.
+ *
+ * Asset custom-field *values* link a value row to a `CustomField` by id. Those
+ * ids arrive from form/request input and are written via a nested Prisma
+ * `create`/`updateMany` (`createAsset`/`updateAsset`), which has no org scoping
+ * of its own — so a crafted foreign-org custom-field id would otherwise be
+ * attached to the caller's asset (cross-org IDOR). Dedupes first; no-op for an
+ * empty list.
+ *
+ * @param params.customFieldIds - Custom-field IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertCustomFieldsBelongToOrg(
+  {
+    customFieldIds,
+    organizationId,
+  }: { customFieldIds: string[]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (customFieldIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(customFieldIds)];
+
+  const found = await client.customField.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid custom fields",
+      message:
+        "Some of the selected custom fields do not exist in your workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,

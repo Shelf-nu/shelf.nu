@@ -104,6 +104,7 @@ import {
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertCustomFieldsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
@@ -1166,6 +1167,17 @@ export async function createAsset({
           (cf) => !!cf.value
         );
 
+        // SECURITY (cross-org IDOR): the nested `create` below connects each
+        // value to a CustomField by an id sourced from form input, with no org
+        // scoping of its own. Prove every referenced custom field belongs to
+        // this org before writing.
+        await assertCustomFieldsBelongToOrg({
+          customFieldIds: customFieldValuesToAdd
+            .map(({ id }) => id)
+            .filter(Boolean),
+          organizationId,
+        });
+
         Object.assign(data, {
           /** Custom fields here refers to the values, check the Schema for more info */
           customFields: {
@@ -1485,6 +1497,18 @@ export async function updateAsset({
       const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
         (cf) => !cf.value
       );
+
+      // SECURITY (cross-org IDOR): the create/updateMany writes below connect
+      // values to a CustomField by an id sourced from form input. Prove every
+      // referenced custom field belongs to this org before writing. (Removals
+      // go through `deleteMany` scoped to this asset's own value rows, so only
+      // the added/updated ids need the check.)
+      await assertCustomFieldsBelongToOrg({
+        customFieldIds: customFieldValuesToAdd
+          .map(({ id }) => id)
+          .filter(Boolean),
+        organizationId,
+      });
 
       /**
        * Split the writes into create vs update ourselves instead of using a

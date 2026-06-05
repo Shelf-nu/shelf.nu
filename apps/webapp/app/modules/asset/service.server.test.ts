@@ -521,6 +521,32 @@ describe("updateAsset cross-org guards", () => {
       select: { id: true },
     });
   });
+
+  it("rejects a customFieldId from a different organization", async () => {
+    expect.assertions(2);
+    // No existing values for this asset; the form references a foreign-org
+    // custom field whose org-scoped lookup returns nothing → guard throws.
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
 });
 
 describe("updateAsset custom-field writes", () => {
