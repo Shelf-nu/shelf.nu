@@ -147,6 +147,8 @@ describe("assertCustomFieldsBelongToOrg", () => {
   });
 
   it("resolves and scopes the query by organizationId when all belong to the org", async () => {
+    // why: simulate both requested custom fields existing in the caller's org
+    // so the count matches and the guard resolves.
     const tx = txWith({
       customField: {
         findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }, { id: "cf2" }]),
@@ -167,6 +169,9 @@ describe("assertCustomFieldsBelongToOrg", () => {
   });
 
   it("dedupes input so duplicate IDs don't inflate the expected count", async () => {
+    // why: findMany returns unique rows; the duplicated input ["cf1","cf1"]
+    // must collapse to one expected row, otherwise the guard would falsely
+    // reject a legitimate request.
     const tx = txWith({
       customField: {
         findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }]),
@@ -187,7 +192,8 @@ describe("assertCustomFieldsBelongToOrg", () => {
   });
 
   it("rejects with a 400 ShelfError when a custom field is foreign/missing", async () => {
-    // cf2 belongs to another org → org-scoped findMany returns only cf1
+    // why: cf2 belongs to another org, so the org-scoped findMany returns only
+    // cf1 — the count mismatch is what the guard must reject.
     const tx = txWith({
       customField: {
         findMany: vitest.fn().mockResolvedValue([{ id: "cf1" }]),
