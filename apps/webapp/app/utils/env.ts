@@ -74,6 +74,8 @@ declare global {
       SHOW_HOW_DID_YOU_FIND_US: string;
       COLLECT_BUSINESS_INTEL: string;
       COOKIE_DOMAIN: string;
+      POSTHOG_API_KEY: string;
+      POSTHOG_HOST: string;
     }
   }
 }
@@ -212,6 +214,21 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
  * We need this in order to make our webhook work properly.
  */
 export const CUSTOM_INSTALL_CUSTOMERS = getEnv("CUSTOM_INSTALL_CUSTOMERS", {
+  isRequired: false,
+});
+
+/**
+ * PostHog server-side analytics (free→paid funnel events). Optional — when
+ * `POSTHOG_API_KEY` is unset the server analytics client is a no-op (see
+ * ~/integrations/posthog/client.server). `POSTHOG_HOST` defaults to PostHog
+ * US cloud in the client when empty.
+ */
+export const POSTHOG_API_KEY = getEnv("POSTHOG_API_KEY", {
+  isSecret: true,
+  isRequired: false,
+});
+export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
+  isSecret: true,
   isRequired: false,
 });
 

@@ -8,6 +8,7 @@ import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
 import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { scheduleTrialEndsTomorrowEmail } from "~/modules/addon-trial/scheduler.server";
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
@@ -35,6 +36,39 @@ import {
 } from "./helpers.server";
 
 const OK = () => new Response(null, { status: 200 });
+
+/**
+ * Builds the `upgrade_completed` PostHog properties from a Stripe subscription.
+ * Normalises the recurring price to a monthly figure (`mrr`) so yearly and
+ * monthly plans are comparable; returns `null` amounts when the plan price is
+ * unavailable rather than guessing.
+ *
+ * @param subscription - The Stripe subscription from the webhook event
+ * @param tierId - The resolved Shelf tier for the subscription
+ * @param via - How the paid conversion happened: a direct subscribe vs an
+ *   upgrade / trial-to-paid conversion
+ * @returns Flat, PII-free property bag for the funnel event
+ */
+function buildUpgradeCompletedProps(
+  subscription: Stripe.Subscription,
+  tierId: string | undefined,
+  via: "direct" | "upgrade_or_trial_conversion"
+) {
+  const plan = subscription.items.data[0]?.plan;
+  const monthlyAmount =
+    typeof plan?.amount === "number"
+      ? plan.interval === "year"
+        ? Number((plan.amount / 100 / 12).toFixed(2))
+        : plan.amount / 100
+      : null;
+
+  return {
+    tierId: tierId ?? "unknown",
+    billing_cycle: plan?.interval ?? null,
+    mrr: monthlyAmount,
+    via,
+  };
+}
 
 // ─── Checkout ──────────────────────────────────────────────
 
@@ -206,6 +240,14 @@ export async function handleSubscriptionCreated(
         });
       });
 
+    // Direct paid conversion (non-trial, non-transfer): a free user just
+    // became paying. Best-effort funnel event — never blocks the webhook.
+    captureServerEvent({
+      distinctId: user.id,
+      event: "upgrade_completed",
+      properties: buildUpgradeCompletedProps(subscription, tierId, "direct"),
+    });
+
     const { emailsToNotify, customerName } = await getCustomerNotificationData({
       customerId,
       user,
@@ -349,6 +391,18 @@ export async function handleSubscriptionUpdated(
           status: 500,
         });
       });
+
+    // Tier moved up to an active paid plan — an upgrade or trial→paid
+    // conversion. Best-effort funnel event; never blocks the webhook.
+    captureServerEvent({
+      distinctId: user.id,
+      event: "upgrade_completed",
+      properties: buildUpgradeCompletedProps(
+        subscription,
+        tierId,
+        "upgrade_or_trial_conversion"
+      ),
+    });
   }
 
   return OK();
@@ -413,6 +467,13 @@ export async function handleSubscriptionDeleted(
           status: 500,
         });
       });
+
+    // A paying user dropped to free — the churn side of the funnel.
+    captureServerEvent({
+      distinctId: user.id,
+      event: "subscription_cancelled",
+      properties: { tierId: tierId ?? "unknown" },
+    });
 
     // Only reset branding when downgrading from Plus (tier_1) to Free
     if (user.tierId === TierId.tier_1) {
