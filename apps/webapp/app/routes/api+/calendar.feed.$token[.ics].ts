@@ -33,6 +33,13 @@ function plain(message: string, status: number) {
   });
 }
 
+/**
+ * Serves the member's bookings as a subscribable iCal document.
+ *
+ * @param params.token - The secret feed token from the URL
+ * @returns A `text/calendar` Response on success, or a plain-text 404 (unknown
+ *   or revoked token) / 500 (unexpected error). Never throws to the client.
+ */
 export async function loader({ params }: LoaderFunctionArgs) {
   const { token } = params;
 
@@ -72,6 +79,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
           : "",
         assetTitles: booking.assets.map((asset) => asset.title),
         bookingUrl: `${SERVER_URL}/bookings/${booking.id}`,
+        updatedAt: booking.updatedAt,
       })
     );
 
@@ -89,7 +97,9 @@ export async function loader({ params }: LoaderFunctionArgs) {
       },
     });
   } catch (cause) {
-    const reason = makeShelfError(cause, { token });
+    // Do NOT pass the token in additionalData — it is the feed's sole credential
+    // and additionalData is written to logs and sent to Sentry.
+    const reason = makeShelfError(cause);
     Logger.error(reason);
     return plain("Unable to generate calendar feed", 500);
   }

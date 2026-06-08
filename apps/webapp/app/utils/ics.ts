@@ -73,6 +73,12 @@ export type ICalBookingInput = {
   assetTitles: string[];
   /** Absolute URL to the booking, embedded in the event body. */
   bookingUrl: string;
+  /**
+   * Booking's last-modified time. Used as a STABLE `DTSTAMP` so a subscribed
+   * feed serializes an unchanged booking identically on every poll (using
+   * `new Date()` would make every event look modified on each refresh).
+   */
+  updatedAt: Date;
 };
 
 /**
@@ -118,7 +124,8 @@ export function buildBookingVEvent(booking: ICalBookingInput): string[] {
     "TRANSP:TRANSPARENT",
     `DTSTART:${formatDateForICal(booking.from)}`,
     `DTEND:${formatDateForICal(booking.to)}`,
-    `DTSTAMP:${formatDateForICal(new Date())}`,
+    // Booking-derived (not fetch time) so a subscribed feed is stable per poll.
+    `DTSTAMP:${formatDateForICal(booking.updatedAt)}`,
     "CATEGORIES:Shelf.nu booking",
     `DESCRIPTION:${description}`,
     `URL:${booking.bookingUrl}`,

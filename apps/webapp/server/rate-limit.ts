@@ -32,22 +32,24 @@ export const mobileIpRateLimit = () =>
   });
 
 /**
- * Coarse IP-based rate limit for `/api/calendar/*` (the subscribable iCal feed).
+ * Per-feed rate limit for the subscribable iCal feed (`/api/calendar/feed/*`).
  *
  * The feed is in `publicPaths` (cookie-bypassed, secret-token auth) and runs an
- * unpaginated, windowed booking query per request. Real calendar clients poll
- * only every few hours, so a generous per-IP cap is invisible to them while
- * defeating a leaked/shared URL being hammered. The limit is higher than the
- * mobile one because calendar providers (Google/Apple/Outlook) fetch from
- * shared, rotating IP pools and we don't want to throttle legitimate polls.
+ * unpaginated, windowed booking query per request. We key on the request PATH
+ * (which embeds the secret token) rather than the client IP, because:
+ *  - calendar providers (Google/Apple/Outlook) fetch many unrelated feeds from
+ *    shared, rotating egress IPs — per-IP keying would cross-throttle them; and
+ *  - a leaked URL can be polled from many IPs — per-path caps that single feed.
+ * Each feed gets its own budget; clients legitimately poll only every few hours.
  *
- * Same in-memory MemoryStore caveat as `mobileIpRateLimit`.
+ * Same in-memory MemoryStore caveat as `mobileIpRateLimit`. Generic floods of
+ * random (invalid-token) paths are cheap indexed 404s, best absorbed at the edge.
  */
-export const calendarIpRateLimit = () =>
+export const calendarFeedRateLimit = () =>
   rateLimiter({
     windowMs: 60_000,
     limit: 60,
     standardHeaders: "draft-7",
-    keyGenerator: (c) => `calendar:ip:${getClientIp(c)}`,
+    keyGenerator: (c) => `calendar:${c.req.path}`,
     handler: (c) => c.text("Too many requests. Please try again later.", 429),
   });

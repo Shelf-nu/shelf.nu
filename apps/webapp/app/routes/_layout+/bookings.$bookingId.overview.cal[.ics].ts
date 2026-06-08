@@ -67,6 +67,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         custodianName,
         assetTitles: booking.assets?.map((a) => a.title) ?? [],
         bookingUrl,
+        updatedAt: booking.updatedAt,
       }),
     ]);
 

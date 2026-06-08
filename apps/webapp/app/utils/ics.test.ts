@@ -142,6 +142,7 @@ describe("buildBookingVEvent", () => {
     custodianName: "Erfan R",
     assetTitles: ["Camera A", "Tripod"],
     bookingUrl: "https://app.shelf.nu/bookings/booking-123",
+    updatedAt: new Date(Date.UTC(2026, 5, 1, 8, 0, 0)),
   };
 
   it("emits a well-formed VEVENT with summary, dates, description and alarm", () => {
@@ -151,6 +152,10 @@ describe("buildBookingVEvent", () => {
     expect(lines).toContain("UID:booking-123");
     expect(lines).toContain(`DTSTART:${formatDateForICal(baseInput.from)}`);
     expect(lines).toContain(`DTEND:${formatDateForICal(baseInput.to)}`);
+    // DTSTAMP is booking-derived (stable per poll), not fetch time.
+    expect(lines).toContain(
+      `DTSTAMP:${formatDateForICal(baseInput.updatedAt)}`
+    );
     // Summary includes the asset count
     expect(lines).toContain("SUMMARY:Studio shoot (2 assets)");
     // 1-day-before reminder alarm
@@ -201,6 +206,7 @@ describe("buildBookingICalendar", () => {
     custodianName: "Sam",
     assetTitles: ["Lens"],
     bookingUrl: "https://app.shelf.nu/bookings/b1",
+    updatedAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 0)),
   });
 
   it("wraps events in a VCALENDAR envelope with CRLF line endings", () => {
@@ -230,6 +236,7 @@ describe("buildBookingICalendar", () => {
       custodianName: "Pat",
       assetTitles: [],
       bookingUrl: "https://app.shelf.nu/bookings/b2",
+      updatedAt: new Date(Date.UTC(2026, 0, 2, 9, 0, 0)),
     });
     const ics = buildBookingICalendar([vevent, second]);
     expect(ics).toContain("UID:b1");
@@ -246,6 +253,7 @@ describe("buildBookingICalendar", () => {
       custodianName: "Q",
       assetTitles: [],
       bookingUrl: "https://app.shelf.nu/bookings/b3",
+      updatedAt: new Date(Date.UTC(2026, 0, 3, 9, 0, 0)),
     });
     const ics = buildBookingICalendar([longVevent]);
     for (const line of ics.split("\r\n")) {

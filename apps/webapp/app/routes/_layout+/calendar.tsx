@@ -9,9 +9,9 @@ import { data, Link, useLoaderData } from "react-router";
 import { ClientOnly } from "remix-utils/client-only";
 import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
-import CalendarSubscribeDialog from "~/components/calendar/calendar-subscribe-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
+import CalendarSubscribeDialog from "~/components/calendar/calendar-subscribe-dialog";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";

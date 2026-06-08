@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 describe("getBookingsForICalFeed scoping", () => {
-  it("restricts a member who can't see all bookings to their own (custodianUserId)", async () => {
+  it("restricts a member who can't see all bookings to their own (custodian user OR team member)", async () => {
     vi.mocked(db.teamMember.findFirst).mockResolvedValue({ id: "tm-1" } as never);
 
     await getBookingsForICalFeed({
@@ -47,8 +47,13 @@ describe("getBookingsForICalFeed scoping", () => {
 
     const where = lastFindManyWhere();
     expect(where.organizationId).toBe(ORG_ID);
-    // The security property: a restricted member can only ever see their own.
-    expect(where.custodianUserId).toBe(USER_ID);
+    // Security property: a restricted member only ever sees their own bookings,
+    // matched by custodian user OR their linked team member — never others'.
+    expect(where.OR).toEqual([
+      { custodianTeamMemberId: { in: ["tm-1"] } },
+      { custodianUserId: USER_ID },
+    ]);
+    expect(where.custodianUserId).toBeUndefined();
   });
 
   it("does NOT restrict by custodian when the member can see all bookings", async () => {

@@ -22,6 +22,16 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/**
+ * Generates, regenerates or revokes the current member's calendar-feed token,
+ * selected by the `intent` form field.
+ *
+ * @param args.request - Carries the cookie session and the `intent` form field
+ *   (`generate` | `regenerate` | `revoke`).
+ * @param args.context - Load context providing the auth session.
+ * @returns `data({ calendarFeedUrl })` — the new feed URL, or `null` after a
+ *   revoke — or an error payload (with status) on failure.
+ */
 export async function action({ request, context }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
