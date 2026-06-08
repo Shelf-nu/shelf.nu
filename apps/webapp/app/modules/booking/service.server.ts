@@ -4891,12 +4891,12 @@ export type ICalFeedBooking = Prisma.BookingGetPayload<{
 /**
  * Fetches the bookings to render into a member's subscribable iCal feed.
  *
- * Scoping mirrors the in-app `/calendar` (minus unconfirmed DRAFTs): members who
- * can see all bookings get the whole workspace; self-service/base members are
- * restricted to their own (`custodianUserId`), which can only ever *narrow*
- * visibility — never widen it. DRAFT, ARCHIVED and CANCELLED bookings are
- * excluded, and results are windowed (~last month → next year) so the feed
- * stays bounded.
+ * Scoping (minus unconfirmed DRAFTs): members who can see all bookings get the
+ * whole workspace; self-service/base members are restricted to their own —
+ * matched by custodian user OR their linked team member — which can only ever
+ * *narrow* visibility to this member, never widen it. DRAFT, ARCHIVED and
+ * CANCELLED bookings are excluded, and results are windowed (~last month → next
+ * year) so the feed stays bounded.
  *
  * @param params.organizationId - Workspace the feed belongs to
  * @param params.userId - The subscribing member
@@ -4918,10 +4918,13 @@ export async function getBookingsForICalFeed(params: {
   const bookingTo = new Date(now);
   bookingTo.setFullYear(bookingTo.getFullYear() + 1);
 
-  // Members without the "see all bookings" override only get their own — the
-  // same restriction the calendar applies. `getBookings` turns a set
-  // `custodianUserId` into `where.custodianUserId = userId`.
+  // Members without the "see all bookings" override only get their own bookings,
+  // matched by custodian user OR their linked team member (the documented legacy
+  // case in getBookingsFilterData where a booking is assigned to the team member
+  // but custodianUserId is null). getBookings ORs the two, so this can only ever
+  // narrow visibility to this member's own bookings — never widen it.
   let custodianUserId: string | null = null;
+  let custodianTeamMemberIds: string[] | null = null;
   if (!canSeeAllBookings) {
     const teamMember = await db.teamMember.findFirst({
       where: { userId, organizationId },
@@ -4938,6 +4941,7 @@ export async function getBookingsForICalFeed(params: {
       });
     }
     custodianUserId = userId;
+    custodianTeamMemberIds = [teamMember.id];
   }
 
   try {
@@ -4952,6 +4956,7 @@ export async function getBookingsForICalFeed(params: {
       // workspace ever has an impractically large booking volume.
       takeAll: true,
       custodianUserId,
+      custodianTeamMemberIds,
       statuses: [
         BookingStatus.RESERVED,
         BookingStatus.ONGOING,

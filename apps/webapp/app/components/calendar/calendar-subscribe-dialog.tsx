@@ -23,6 +23,16 @@ type CalendarSubscribeDialogProps = {
   trigger: ReactElement<{ onClick: () => void }>;
 };
 
+/**
+ * Calendar subscribe dialog. Shows the member's secret feed URL with copy,
+ * `webcal://` add, regenerate and revoke actions — or a "generate" button when
+ * no feed exists yet. Mutations go through `/api/calendar-subscription` via a
+ * fetcher, whose result overrides the loader-seeded URL.
+ *
+ * @param props.calendarFeedUrl - The member's current feed URL, or `null` if not generated yet.
+ * @param props.trigger - Element that opens the dialog; its `onClick` is wired here.
+ * @returns The subscribe dialog UI.
+ */
 export default function CalendarSubscribeDialog({
   calendarFeedUrl,
   trigger,

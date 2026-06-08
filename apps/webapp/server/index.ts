@@ -20,7 +20,7 @@ import {
 } from "./middleware";
 import {
   appLoaderRateLimit,
-  calendarIpRateLimit,
+  calendarFeedRateLimit,
   mobileIpRateLimit,
 } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
@@ -138,11 +138,12 @@ export default createHonoServer<ServerEnv>({
     server.use("/api/mobile/*", mobileIpRateLimit());
 
     /**
-     * Calendar iCal feed rate limit. Path-scoped; the feed is public
-     * (secret-token auth, in publicPaths) and runs an unpaginated windowed
-     * query, so cap per IP before the handler runs.
+     * Calendar iCal feed rate limit. Scoped to the feed route; the feed is
+     * public (secret-token auth, in publicPaths) and runs an unpaginated
+     * windowed query, so cap each feed (keyed by its token path) before the
+     * handler runs.
      */
-    server.use("/api/calendar/*", calendarIpRateLimit());
+    server.use("/api/calendar/feed/*", calendarFeedRateLimit());
 
     /**
      * Add session middleware
@@ -233,11 +234,11 @@ export default createHonoServer<ServerEnv>({
           "/qr/:qrId/not-logged-in",
           "/qr/:qrId/contact-owner",
           "/api/mobile/*path", // Mobile companion app API (JWT auth, not cookie)
-          // why: auth-bypassed prefix. The iCal feed authenticates via a secret
-          // URL token (calendar clients can't send cookies). Only add read-only,
-          // token-authenticated routes under /api/calendar/* — never a route
-          // that relies on the cookie session.
-          "/api/calendar/*path",
+          // why: auth-bypassed. The iCal feed authenticates via a secret URL
+          // token (calendar clients can't send cookies). Scoped to the feed
+          // route only — cookie-authed routes like /api/calendar-subscription
+          // stay OUT of this prefix.
+          "/api/calendar/feed/*path",
         ],
       })
     );
