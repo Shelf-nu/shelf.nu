@@ -1308,8 +1308,16 @@ export async function createAsset({
         });
       }
 
-      /** If an assetModelId is passed, link the asset model to the asset. */
+      /** If an assetModelId is passed, link the asset model to the asset.
+       * Org-scope-guard before the connect — Prisma's FK only enforces
+       * that the row exists, not that it belongs to the caller's
+       * organization, so without this check a user in Org A could
+       * link their new asset to Org B's model (hex-security r3341845640
+       * / r3350881506). Same pattern as the other org-scope guards
+       * in this file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
+       */
       if (assetModelId) {
+        await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
         Object.assign(data, {
           assetModel: {
             connect: {
@@ -2012,6 +2020,15 @@ export async function updateAsset({
         },
       });
     } else if (assetModelId) {
+      // Org-scope guard before the connect — Prisma's FK only enforces
+      // that the AssetModel row exists, not that it belongs to the
+      // caller's org, so without this check a user in Org A could
+      // link their asset to Org B's model (hex-security r3341845640
+      // / r3350881506). Runs before the type-check below so a
+      // cross-org id is rejected with the "not in your workspace"
+      // 404 instead of leaking a "not allowed for qty-tracked" 400.
+      await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+
       // AssetModel is INDIVIDUAL-only (see the matching guard in
       // createAsset). Block the connect for a QUANTITY_TRACKED asset
       // with a labelled 400 rather than letting it silently link.
