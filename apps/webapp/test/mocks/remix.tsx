@@ -6,7 +6,9 @@ import { vi } from "vitest";
  * These are reusable mocks that can be imported across test files.
  */
 
-// why: provides proper type-safe args for testing loaders with all required React Router 7 properties
+// why: provides proper type-safe args for testing loaders with all required React Router 7
+// properties. `pattern` and `url` were renamed to `unstable_pattern` / `unstable_url` in
+// 7.16 (they'll graduate to stable names on a future release).
 export function createLoaderArgs(
   args: Partial<LoaderFunctionArgs>
 ): LoaderFunctionArgs {
@@ -15,12 +17,13 @@ export function createLoaderArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    pattern: args.pattern || "*",
-    url: args.url ?? new URL(request.url),
+    unstable_pattern: args.unstable_pattern ?? "*",
+    unstable_url: args.unstable_url ?? new URL(request.url),
   };
 }
 
-// why: provides proper type-safe args for testing actions with all required React Router 7 properties
+// why: same as `createLoaderArgs` — react-router 7.16 renamed `pattern` / `url` to
+// `unstable_pattern` / `unstable_url` on `ActionFunctionArgs`.
 export function createActionArgs(
   args: Partial<ActionFunctionArgs>
 ): ActionFunctionArgs {
@@ -30,8 +33,8 @@ export function createActionArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    pattern: args.pattern || "*",
-    url: args.url ?? new URL(request.url),
+    unstable_pattern: args.unstable_pattern ?? "*",
+    unstable_url: args.unstable_url ?? new URL(request.url),
   };
 }
 
