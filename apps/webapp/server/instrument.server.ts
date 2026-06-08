@@ -18,7 +18,11 @@ import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
 
 import { SENTRY_DSN } from "~/utils/env";
-import { isAbortError, isLikeShelfError } from "~/utils/error";
+import {
+  isAbortError,
+  isHandledClientError,
+  isLikeShelfError,
+} from "~/utils/error";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -37,6 +41,10 @@ if (SENTRY_DSN) {
     dsn: SENTRY_DSN,
     release: resolveRelease(),
     environment: process.env.NODE_ENV,
+    // Structured Logs (separate from the error-event quota). Handled 4xx
+    // client errors are emitted here as a low-severity trail instead of being
+    // captured as errors — see Logger.handledClientError + handleBeforeSendError.
+    enableLogs: true,
     integrations: [
       // Emit `span.op:db.sql.prisma` spans for every Prisma query. Requires
       // @prisma/instrumentation (already in the workspace) and Sentry.init
@@ -108,6 +116,14 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
   // Drop aborted-request errors that bypass `makeShelfError` — usually thrown
   // raw from streaming handlers or middleware when a client disconnects.
   if (isAbortError(exception)) {
+    return null;
+  }
+
+  // Handled client errors (4xx) are not server faults. They're recorded as a
+  // low-severity Sentry log trail (Logger.handledClientError) on the separate
+  // logs quota, so keep them OUT of the error-event pipeline entirely — this
+  // also makes PR3's per-site `shouldBeCaptured: false` opt-outs redundant.
+  if (isHandledClientError(exception)) {
     return null;
   }
 

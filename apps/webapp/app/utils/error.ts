@@ -213,6 +213,28 @@ export function isLikeShelfError(cause: unknown): cause is ShelfError {
 }
 
 /**
+ * A "handled client error": a `ShelfError` whose HTTP status is in the 4xx
+ * range. These are expected, user-facing outcomes (failed validation, business
+ * rule violations, not-found, forbidden) — not server faults. We deliberately
+ * keep them OUT of the Sentry error pipeline (they'd burn the small error
+ * quota and alert on non-issues) and instead record them as low-severity
+ * Sentry **logs** (separate quota) so there's still a searchable trail.
+ *
+ * Note: `ShelfError.status` defaults to 500, so anything without an explicit
+ * 4xx status is treated as a server error (captured normally).
+ *
+ * @see {@link file://./../../server/instrument.server.ts} beforeSend — drops these from errors
+ * @see {@link file://./logger.ts} Logger.handledClientError — emits the log trail
+ */
+export function isHandledClientError(cause: unknown): boolean {
+  if (!isLikeShelfError(cause)) {
+    return false;
+  }
+  const status = cause.status ?? 500;
+  return status >= 400 && status < 500;
+}
+
+/**
  * Detects whether an error (or any error in its `cause` chain) represents a
  * cancelled / aborted request. Used to suppress noise from client disconnects
  * and stream-handler aborts both in `makeShelfError` and in the Sentry

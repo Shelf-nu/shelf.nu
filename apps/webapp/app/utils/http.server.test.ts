@@ -24,6 +24,7 @@ import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
 vitest.mock("./logger", () => ({
   Logger: {
     error: vitest.fn(),
+    handledClientError: vitest.fn(),
   },
 }));
 
@@ -243,6 +244,38 @@ describe(error.name, () => {
     error(cause);
 
     expect(Logger.error).toBeCalledWith(cause);
+  });
+
+  it("records a handled client error to the log trail", () => {
+    const cause = new ShelfError({
+      cause: null,
+      message: "Validation failed",
+      label: "Request validation",
+      status: 400,
+    });
+
+    error(cause);
+
+    expect(Logger.handledClientError).toBeCalledWith(cause);
+  });
+
+  it("does not log or trail aborted requests (status 499)", () => {
+    // why: client disconnects are intentionally suppressed from both
+    // Logger.error and the 4xx log trail so they don't flood Sentry.
+    // Clear first — earlier tests in this describe call error() and the
+    // Logger mocks accumulate (no beforeEach in this block).
+    vitest.clearAllMocks();
+    const cause = new ShelfError({
+      cause: null,
+      message: "Request aborted",
+      label: "Request aborted",
+      status: 499,
+    });
+
+    error(cause);
+
+    expect(Logger.error).not.toBeCalled();
+    expect(Logger.handledClientError).not.toBeCalled();
   });
 });
 
