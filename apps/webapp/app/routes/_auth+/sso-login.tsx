@@ -42,13 +42,20 @@ const SSOLoginFormSchema = z.object({
   platform: z.enum(["web", "mobile"]).optional(),
 });
 
-export function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
   const subHeading = "Enter your company's domain to login with SSO.";
   const { disableSSO } = config;
 
+  // The native-app flow opens this page with `?platform=mobile`. The in-app
+  // browser may carry a stale web cookie, but the app still needs to complete
+  // the SSO handoff to obtain its OWN session — so don't short-circuit it to
+  // /assets. The web flow still redirects an already-authenticated session.
+  const isMobile =
+    new URL(request.url).searchParams.get("platform") === "mobile";
+
   try {
-    if (context.isAuthenticated) {
+    if (context.isAuthenticated && !isMobile) {
       return redirect("/assets");
     }
 

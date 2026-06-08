@@ -187,14 +187,18 @@ export async function redeemMobileAuthCode(code: string): Promise<AuthSession> {
 
     return await mintMobileSessionForUser(user.email);
   } catch (cause) {
+    // Invalid / expired / already-used codes are thrown above with an explicit
+    // 400 and re-thrown here unchanged. Anything else (e.g. a Supabase outage
+    // while minting) is an INTERNAL failure and must surface as 500 — not a
+    // client 400 — so retry and monitoring behavior can tell the two apart.
     if (isLikeShelfError(cause)) {
       throw cause;
     }
     throw new ShelfError({
       cause,
-      message: "Failed to redeem the mobile authorization code",
+      message: "Failed to complete the mobile authorization exchange",
       label,
-      status: 400,
+      status: 500,
     });
   }
 }

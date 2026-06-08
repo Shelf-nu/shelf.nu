@@ -68,11 +68,25 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
     }
 
     // Back-channel exchange — the code travels in the HTTPS body, never a URL.
-    const response = await fetch(`${API_BASE_URL}/api/mobile/exchange`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
+    // Abort after 15s so a flaky network can't leave sign-in hanging forever.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/api/mobile/exchange`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      if (controller.signal.aborted) {
+        return { error: "Sign-in timed out. Please try again." };
+      }
+      throw cause;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const payload = (await response
       .json()
