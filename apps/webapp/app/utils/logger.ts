@@ -4,6 +4,21 @@ import pino from "pino";
 import { SENTRY_DSN, env } from "./env";
 import { ShelfError } from "./error";
 
+/**
+ * Fraction of handled 4xx errors to record in the Sentry log trail. Defaults
+ * to 1 (keep all — the 5GB logs quota is ample); dial down via
+ * `SENTRY_HANDLED_4XX_SAMPLE_RATE` (0–1) without a deploy if 4xx volume ever
+ * threatens the quota.
+ *
+ * Note: the recurring curl-pentester sweep is filtered at the Sentry project
+ * level (an inbound/log filter on `browser.name:curl`), not here — the
+ * user-agent isn't available at this emit point.
+ */
+const HANDLED_4XX_SAMPLE_RATE = (() => {
+  const raw = Number(process.env.SENTRY_HANDLED_4XX_SAMPLE_RATE);
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 1;
+})();
+
 function serializeError<E extends Error>(error: E): Error {
   if (!(error.cause instanceof Error)) {
     return {
@@ -57,6 +72,48 @@ export class Logger {
     if (SENTRY_DSN) {
       Sentry.captureException(error);
     }
+  }
+
+  /**
+   * Record a handled client error (4xx) as a low-severity Sentry **log**
+   * rather than an error event. Keeps a searchable trail of expected,
+   * user-facing failures (validation, not-found, forbidden, business-rule
+   * conflicts) without consuming the small error-event quota or alerting —
+   * `handleBeforeSendError` drops these from the error pipeline, and they land
+   * on the separate logs quota instead. No-op for anything that isn't a 4xx
+   * `ShelfError`. A sampling rate caps volume so the trail can't be flooded.
+   */
+  static handledClientError(cause: ShelfError) {
+    // 4xx only — client errors. Mirrors `isHandledClientError()` in ./error
+    // (which the Sentry beforeSend hook uses to drop these from the error
+    // pipeline). Inlined here, rather than imported, so this commonly-hit path
+    // doesn't couple logger.ts to ./error's export surface — many tests fully
+    // mock ~/utils/error and a new import would break them. ShelfError.status
+    // defaults to 500, so a missing status is treated as a server error.
+    const status = cause?.status ?? 500;
+    if (!SENTRY_DSN || status < 400 || status >= 500) {
+      return;
+    }
+
+    const userId =
+      typeof cause.additionalData?.userId === "string"
+        ? cause.additionalData.userId
+        : undefined;
+
+    // Sample to protect the logs quota (default keeps all).
+    if (
+      HANDLED_4XX_SAMPLE_RATE < 1 &&
+      Math.random() >= HANDLED_4XX_SAMPLE_RATE
+    ) {
+      return;
+    }
+
+    Sentry.logger.info(cause.message, {
+      label: cause.label,
+      status: cause.status,
+      traceId: cause.traceId,
+      ...(userId ? { userId } : {}),
+    });
   }
 }
 
