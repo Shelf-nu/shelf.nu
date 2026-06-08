@@ -12,7 +12,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.shelf.companion",
       "infoPlist": {
-        "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets."
+        "NSCameraUsageDescription": "Shelf needs camera access to scan QR codes and barcodes on your assets.",
+        "NSPhotoLibraryUsageDescription": "Shelf needs photo access to attach images to your assets."
       }
     },
     "android": {
