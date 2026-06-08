@@ -3113,7 +3113,7 @@ export async function createAssetsFromContentImport({
             throw new ShelfError({
               cause: null,
               message:
-                "Image URL must be a valid http(s) URL. Whether it points to a real image is verified after download.",
+                "Image URL must be a valid http(s) URL, including the https:// prefix.",
               additionalData: { url: asset.imageUrl },
               label: "Assets",
               shouldBeCaptured: false,
