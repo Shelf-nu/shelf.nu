@@ -69,7 +69,7 @@ export type ServerFunnelEvent =
         tierId: string;
         billing_cycle: string | null;
         mrr: number | null;
-        via: "direct" | "upgrade_or_trial_conversion";
+        via: "direct" | "upgrade" | "trial_conversion";
       };
     }
   | {
