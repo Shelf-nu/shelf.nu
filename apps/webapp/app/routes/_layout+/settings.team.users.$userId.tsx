@@ -184,7 +184,7 @@ export default function UserPage() {
           <TeamUsersActionsDropdown
             userId={user.id}
             email={user.email}
-            teamMemberId={user.teamMembers[0].id}
+            teamMemberId={user.teamMembers?.[0]?.id}
             inviteStatus={user?.teamMembers?.[0]?.receivedInvites?.[0]?.status}
             isSSO={user.sso}
             customTrigger={(disabled) => (

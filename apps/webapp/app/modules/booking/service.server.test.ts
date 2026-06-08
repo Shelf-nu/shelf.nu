@@ -5689,7 +5689,7 @@ describe("bulkArchiveBookings", () => {
     vitest.clearAllMocks();
   });
 
-  it("emits one BOOKING_ARCHIVED event per archived booking inside the tx", async () => {
+  it("emits one BOOKING_ARCHIVED event per archived booking", async () => {
     expect.assertions(1);
 
     const completedBookings = [
@@ -5716,6 +5716,9 @@ describe("bulkArchiveBookings", () => {
       userId: "user-1",
     });
 
+    // Service no longer wraps the updateMany + notes in an interactive
+    // tx (P2028 regression — SHELF-WEBAPP-1KQ), so `recordEvents` is
+    // called WITHOUT a `tx` arg now. Assert the payload shape only.
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -5726,9 +5729,72 @@ describe("bulkArchiveBookings", () => {
           action: "BOOKING_ARCHIVED",
           bookingId: "bk-arch-2",
         }),
-      ]),
-      expect.anything()
+      ])
     );
+  });
+
+  // Regression for Sentry SHELF-WEBAPP-1KQ: the per-booking status notes used
+  // to run inside an interactive transaction, which held the tx open across N
+  // sequential note writes and aborted the commit with P2028 on large
+  // selections. Notes are written via the global db (never `tx`), so they were
+  // never atomic — they must run AFTER a plain `updateMany`, with no tx.
+  it("archives via a plain updateMany (no interactive tx) and persists a status note for each booking", async () => {
+    expect.assertions(4);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: "u1",
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b2",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "b2"],
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["b1", "b2"] }, organizationId: "org-1" },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    // The fix removed the interactive transaction entirely for this path.
+    expect(db.$transaction).not.toHaveBeenCalled();
+
+    // Observable outcome: each archived booking gets its own status note in the
+    // caller's org. `createSystemBookingNote` is the persistence boundary the
+    // suite stubs for booking notes (it forwards to db.bookingNote.create), so
+    // we assert per-booking payload here rather than just a call count.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b1", organizationId: "org-1" })
+    );
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b2", organizationId: "org-1" })
+    );
+  });
+
+  it("throws if any selected booking is not COMPLETE", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
   });
 });
 

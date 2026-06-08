@@ -1,5 +1,6 @@
 import {
   ShelfError,
+  isHandledClientError,
   isLikeShelfError,
   isPrismaTransientError,
   makeShelfError,
@@ -468,5 +469,42 @@ describe(notAllowedMethod.name, () => {
   it("produces an error that flows through makeShelfError without throwing", () => {
     const error = notAllowedMethod("POST");
     expect(() => makeShelfError(error)).not.toThrow();
+  });
+});
+
+describe(isHandledClientError.name, () => {
+  it("is true for a 4xx ShelfError", () => {
+    for (const status of [400, 401, 403, 404, 405, 409, 429, 499] as const) {
+      expect(
+        isHandledClientError(
+          new ShelfError({ cause: null, message: "x", label: "Assets", status })
+        )
+      ).toBe(true);
+    }
+  });
+
+  it("is false for a 5xx ShelfError and for the default (500) status", () => {
+    expect(
+      isHandledClientError(
+        new ShelfError({
+          cause: null,
+          message: "x",
+          label: "Assets",
+          status: 500,
+        })
+      )
+    ).toBe(false);
+    // No explicit status → ShelfError defaults to 500 → treated as a server error.
+    expect(
+      isHandledClientError(
+        new ShelfError({ cause: null, message: "x", label: "Assets" })
+      )
+    ).toBe(false);
+  });
+
+  it("is false for non-ShelfError values", () => {
+    expect(isHandledClientError(new Error("boom"))).toBe(false);
+    expect(isHandledClientError(null)).toBe(false);
+    expect(isHandledClientError({ status: 400 })).toBe(false);
   });
 });

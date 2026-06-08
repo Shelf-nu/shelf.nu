@@ -1851,7 +1851,12 @@ export async function checkoutBooking({
         throw new ShelfError({
           cause: null,
           label,
+          title: "Booking conflict",
           message: `Cannot check out booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          // Expected business-rule conflict shown to the user — a 400, not a
+          // server error. Mirrors the reserve path above (was noise:
+          // SHELF-WEBAPP-1KR).
+          shouldBeCaptured: false,
         });
       }
     }
@@ -7278,43 +7283,52 @@ export async function bulkArchiveBookings({
       });
     }
 
-    await db.$transaction(async (tx) => {
-      /** Updating status of bookings to ARCHIVED  */
-      await tx.booking.updateMany({
-        where: { id: { in: bookings.map((b) => b.id) }, organizationId },
-        data: { status: BookingStatus.ARCHIVED },
-      });
-
-      /** Create booking status transition notes for each booking */
-      for (const booking of bookings) {
-        await createStatusTransitionNote({
-          bookingId: booking.id,
-          organizationId,
-          fromStatus: booking.status,
-          toStatus: BookingStatus.ARCHIVED,
-          userId,
-          custodianUserId: booking.custodianUserId || undefined,
-        });
-      }
-
-      /**
-       * Per-booking lifecycle event — mirrors the single
-       * `archiveBooking` emission so reports treat bulk + single
-       * archival identically. Inside the same tx so a rollback wipes
-       * both the status flips and the events together.
-       */
-      await recordEvents(
-        bookings.map((booking) => ({
-          organizationId,
-          actorUserId: userId ?? null,
-          action: "BOOKING_ARCHIVED" as const,
-          entityType: "BOOKING" as const,
-          entityId: booking.id,
-          bookingId: booking.id,
-        })),
-        tx
-      );
+    /** Update all selected bookings to ARCHIVED. This is a single statement —
+     * atomic on its own — so it needs no interactive transaction. The prior
+     * `$transaction` wrapper added no atomicity (the per-booking notes below
+     * write via the global `db`, not a passed `tx`) and on large selections
+     * held the interactive connection open long enough to trip Prisma's 5s
+     * default → P2028 (Sentry SHELF-WEBAPP-1KQ). */
+    await db.booking.updateMany({
+      where: { id: { in: bookings.map((b) => b.id) }, organizationId },
+      data: { status: BookingStatus.ARCHIVED },
     });
+
+    /**
+     * Per-booking lifecycle event — mirrors the single `archiveBooking`
+     * emission so reports treat bulk + single archival identically.
+     * Best-effort (same as the notes below); the updateMany already
+     * committed so a recordEvents failure cannot undo the archival.
+     */
+    await recordEvents(
+      bookings.map((booking) => ({
+        organizationId,
+        actorUserId: userId ?? null,
+        action: "BOOKING_ARCHIVED" as const,
+        entityType: "BOOKING" as const,
+        entityId: booking.id,
+        bookingId: booking.id,
+      }))
+    );
+
+    /** Create booking status transition notes for each booking.
+     *
+     * Done AFTER the status update, NOT inside an interactive transaction:
+     * `createStatusTransitionNote` writes via the global `db` (not a passed
+     * `tx`), so the previous `$transaction` never made these notes atomic with
+     * the status change. It only held the interactive-tx connection open across
+     * N sequential note writes, which on large selections blew past Prisma's
+     * 5s default and aborted the commit with P2028 (Sentry SHELF-WEBAPP-1KQ). */
+    for (const booking of bookings) {
+      await createStatusTransitionNote({
+        bookingId: booking.id,
+        organizationId,
+        fromStatus: booking.status,
+        toStatus: BookingStatus.ARCHIVED,
+        userId,
+        custodianUserId: booking.custodianUserId || undefined,
+      });
+    }
 
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));

@@ -374,7 +374,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       createdWithInvite: existingUser.createdWithInvite,
     });
 
-    const payload = parseData(formData, OnboardingFormSchema);
+    const payload = parseData(formData, OnboardingFormSchema, {
+      // Expected user-input validation (e.g. "Field is required.") — a 400,
+      // not a server error. Don't capture to Sentry (was noise:
+      // SHELF-WEBAPP-1KV).
+      shouldBeCaptured: false,
+    });
 
     const {
       jobTitle,
