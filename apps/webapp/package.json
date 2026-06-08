@@ -193,7 +193,7 @@
     "vite": "^7.3.2",
     "vite-plugin-cjs-interop": "^2.4.4",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=22.20.0"
