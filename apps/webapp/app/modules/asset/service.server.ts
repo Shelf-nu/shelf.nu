@@ -3112,7 +3112,8 @@ export async function createAssetsFromContentImport({
           if (!isValidImageUrl(asset.imageUrl)) {
             throw new ShelfError({
               cause: null,
-              message: "Invalid image format. Please use .png, .jpg, or .jpeg",
+              message:
+                "Image URL must be a valid http(s) URL, including the https:// prefix.",
               additionalData: { url: asset.imageUrl },
               label: "Assets",
               shouldBeCaptured: false,
