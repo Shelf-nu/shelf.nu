@@ -24,6 +24,7 @@ import { assertIsDataWithResponseInit } from "../../test/helpers/assertions";
 vitest.mock("./logger", () => ({
   Logger: {
     error: vitest.fn(),
+    handledClientError: vitest.fn(),
   },
 }));
 

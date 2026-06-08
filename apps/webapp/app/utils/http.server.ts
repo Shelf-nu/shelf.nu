@@ -288,6 +288,12 @@ export function error(cause: ShelfError, shouldSendNotification = true) {
     Logger.error(cause);
   }
 
+  // Handled client errors (4xx) are dropped from the Sentry error pipeline
+  // (see handleBeforeSendError); record them as a low-severity log trail
+  // instead so we keep visibility without burning the error quota. No-op for
+  // non-4xx errors.
+  Logger.handledClientError(cause);
+
   if (
     cause.label !== "Request aborted" &&
     cause.additionalData?.userId &&
