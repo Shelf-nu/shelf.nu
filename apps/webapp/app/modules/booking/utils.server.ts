@@ -52,6 +52,19 @@ export function isBookingExpired({ to }: { to: NonNullable<Booking["to"]> }) {
 
 /**
  * Calculate partial check-in progress data for a booking
+ *
+ * Counts progress at the ASSET granularity: every asset (whether standalone or
+ * inside a kit) contributes one unit toward the total and one unit toward the
+ * checked-in count once it is checked in.
+ *
+ * The returned object carries `countMode: "assets"` so consumers (e.g. the
+ * booking statistics UI) can distinguish it from the unit-based counterpart
+ * {@link calculateUnitCheckinProgress}.
+ *
+ * @param totalAssets - Total number of assets in the booking
+ * @param checkedInAssetIds - IDs of assets that have been checked in
+ * @param bookingStatus - Optional booking status; COMPLETE/ARCHIVED force 100%
+ * @returns Progress data including counts, percentage and `countMode: "assets"`
  */
 export function calculatePartialCheckinProgress(
   totalAssets: number,
@@ -70,6 +83,7 @@ export function calculatePartialCheckinProgress(
       progressPercentage: 100,
       hasPartialCheckins: totalAssets > 0,
       checkedInAssetIds,
+      countMode: "assets" as const,
     };
   }
 
@@ -86,6 +100,114 @@ export function calculatePartialCheckinProgress(
     progressPercentage,
     hasPartialCheckins,
     checkedInAssetIds,
+    countMode: "assets" as const,
+  };
+}
+
+/**
+ * Calculate unit-based check-in progress for a booking.
+ *
+ * Unlike {@link calculatePartialCheckinProgress}, this treats each KIT as a
+ * single unit instead of counting the individual assets inside it. This backs
+ * the workspace `countKitsAsSingleUnit` setting on the booking details
+ * "Check-in progress" bar.
+ *
+ * Counting rules:
+ * - Each standalone asset (`kitId === null`) is one unit. It counts as checked
+ *   in when its id is in `checkedInAssetIds`.
+ * - Each distinct kit is one unit. A kit counts as checked in ONLY when EVERY
+ *   asset belonging to it has been checked in. A partially checked-in kit
+ *   contributes 0 toward the checked-in count.
+ *
+ * The total/checked-in numbers therefore represent UNITS, not assets. To keep a
+ * shape compatible with the asset-based function, the unit total is still
+ * exposed under the `totalAssets` field. The `countMode: "units"` discriminator
+ * lets consumers render unit-aware UI.
+ *
+ * @param bookingAssets - All assets in the booking with their `id` and `kitId`
+ * @param checkedInAssetIds - IDs of assets that have been checked in
+ * @param bookingStatus - Optional booking status; COMPLETE/ARCHIVED force 100%
+ * @returns Progress data including counts, percentage and `countMode: "units"`
+ */
+export function calculateUnitCheckinProgress(
+  bookingAssets: { id: string; kitId: string | null }[],
+  checkedInAssetIds: string[],
+  bookingStatus?: BookingStatus
+) {
+  const checkedInSet = new Set(checkedInAssetIds);
+
+  // Standalone assets: each one is a unit.
+  const standaloneAssets = bookingAssets.filter(
+    (asset) => asset.kitId === null
+  );
+  const standaloneTotal = standaloneAssets.length;
+  const standaloneCheckedIn = standaloneAssets.filter((asset) =>
+    checkedInSet.has(asset.id)
+  ).length;
+
+  // Group kitted assets by their kitId; each distinct kit is a unit.
+  const kitGroups = new Map<string, string[]>();
+  for (const asset of bookingAssets) {
+    if (asset.kitId === null) {
+      continue;
+    }
+    const existing = kitGroups.get(asset.kitId);
+    if (existing) {
+      existing.push(asset.id);
+    } else {
+      kitGroups.set(asset.kitId, [asset.id]);
+    }
+  }
+
+  const distinctKits = kitGroups.size;
+  // A kit is "checked in" only when every one of its assets is checked in.
+  let fullyCheckedInKits = 0;
+  for (const assetIds of kitGroups.values()) {
+    if (assetIds.every((assetId) => checkedInSet.has(assetId))) {
+      fullyCheckedInKits += 1;
+    }
+  }
+
+  // `totalAssets` here represents total UNITS (standalone assets + distinct kits).
+  const totalAssets = standaloneTotal + distinctKits;
+
+  // For final booking statuses, always show 100% progress (mirrors the
+  // asset-based function's early-return behavior exactly).
+  if (
+    bookingStatus === BookingStatus.COMPLETE ||
+    bookingStatus === BookingStatus.ARCHIVED
+  ) {
+    return {
+      totalAssets,
+      checkedInCount: totalAssets,
+      uncheckedCount: 0,
+      progressPercentage: 100,
+      hasPartialCheckins: totalAssets > 0,
+      checkedInAssetIds,
+      countMode: "units" as const,
+    };
+  }
+
+  const checkedInCount = standaloneCheckedIn + fullyCheckedInKits;
+  const uncheckedCount = totalAssets - checkedInCount;
+  const progressPercentage =
+    totalAssets > 0 ? Math.round((checkedInCount / totalAssets) * 100) : 0;
+  // `hasPartialCheckins` is deliberately ASSET-level, not unit-level: it drives
+  // whether the booking page shows the check-in progress section and the
+  // per-asset "checked in on/by" columns. A kit with some (but not all) of its
+  // assets checked in produces a unit `checkedInCount` of 0, yet there ARE
+  // asset-level check-ins to surface — basing this on the kit-unit count would
+  // hide that detail. See BookingAssetsColumn / BookingStatistics.
+  const hasPartialCheckins = checkedInAssetIds.length > 0;
+
+  return {
+    totalAssets,
+    checkedInCount,
+    uncheckedCount,
+    progressPercentage,
+    hasPartialCheckins,
+    checkedInAssetIds,
+    countMode: "units" as const,
   };
 }
 
