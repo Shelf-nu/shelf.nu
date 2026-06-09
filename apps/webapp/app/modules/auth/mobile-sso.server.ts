@@ -48,21 +48,55 @@ function hashCode(plaintext: string): string {
 }
 
 /**
- * Mints a fresh, independent Supabase session for an already-authenticated user
- * without a password, via the admin `generateLink` (magiclink) → `verifyOtp`
- * pattern. The resulting session is a brand-new token family, decoupled from
- * the user's web session.
+ * How many times to attempt the session mint. The `generateLink → verifyOtp`
+ * pair can fail transiently (Supabase 5xx, network blips), so we retry a few
+ * times with a short backoff before giving up.
+ */
+const MINT_MAX_ATTEMPTS = 3;
+
+/** Base backoff between mint retries, multiplied by the attempt number. */
+const MINT_RETRY_BASE_MS = 300;
+
+/** Resolves after `ms` milliseconds. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Whether a Supabase failure is a rate-limit (HTTP 429, or a "rate limit" code
+ * or message). Supabase throttles magic-link generation per email, so retrying
+ * inside the window is pointless — we surface a clear, user-retryable error.
  *
- * SECURITY: this hands out a full session for `email` with no further checks —
- * it must ONLY be called after the caller has independently authorized the
- * request (here: a valid single-use {@link redeemMobileAuthCode}). It is
- * intentionally NOT exported.
+ * @param cause - The error thrown by a Supabase admin call
+ * @returns true if the failure is a rate-limit
+ */
+function isRateLimitError(cause: unknown): boolean {
+  const err = cause as
+    | { status?: number; code?: string; message?: string }
+    | null
+    | undefined;
+  if (!err) {
+    return false;
+  }
+  if (err.status === 429) {
+    return true;
+  }
+  return (
+    /rate.?limit/i.test(err.code ?? "") || /rate limit/i.test(err.message ?? "")
+  );
+}
+
+/**
+ * Single attempt at minting a fresh Supabase session for `email` via the admin
+ * `generateLink` (magiclink) → `verifyOtp` pattern. Throws the raw Supabase
+ * error on failure so the caller can classify it (rate-limit vs transient).
  *
  * @param email - The already-authenticated user's email
  * @returns A mapped auth session (fresh access + refresh tokens)
- * @throws {ShelfError} If Supabase fails to generate or verify the link
+ * @throws The raw Supabase error, or a {@link ShelfError} if Supabase returns
+ *   success without a usable token/session
  */
-async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
+async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
   const { data: linkData, error: linkError } =
     await getSupabaseAdmin().auth.admin.generateLink({
       type: "magiclink",
@@ -102,6 +136,70 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
   }
 
   return mapAuthSession(session);
+}
+
+/**
+ * Mints a fresh, independent Supabase session for an already-authenticated user
+ * without a password, via the admin `generateLink` (magiclink) → `verifyOtp`
+ * pattern. The resulting session is a brand-new token family, decoupled from
+ * the user's web session.
+ *
+ * Resilience: transient failures (Supabase 5xx / network) are retried up to
+ * {@link MINT_MAX_ATTEMPTS} times with a short backoff. Rate-limit failures are
+ * NOT retried — they surface as a clear 429 so the client can prompt the user
+ * to wait. Deterministic failures (no token/session) fail fast.
+ *
+ * SECURITY: this hands out a full session for `email` with no further checks —
+ * it must ONLY be called after the caller has independently authorized the
+ * request (here: a valid single-use {@link redeemMobileAuthCode}). It is
+ * intentionally NOT exported.
+ *
+ * @param email - The already-authenticated user's email
+ * @returns A mapped auth session (fresh access + refresh tokens)
+ * @throws {ShelfError} 429 when rate-limited; 500 when the mint keeps failing
+ */
+async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
+  let lastCause: unknown = null;
+
+  for (let attempt = 1; attempt <= MINT_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await mintMobileSessionOnce(email);
+    } catch (cause) {
+      lastCause = cause;
+
+      // Rate-limited: retrying inside the window won't help. Surface a clear,
+      // user-retryable 429 instead of a generic 500.
+      if (isRateLimitError(cause)) {
+        throw new ShelfError({
+          cause,
+          message:
+            "Too many sign-in attempts. Please wait a moment and try again.",
+          label,
+          status: 429,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Our own deterministic failures (missing token / null session) won't
+      // change on retry — fail fast.
+      if (isLikeShelfError(cause)) {
+        throw cause;
+      }
+
+      // Otherwise treat as a transient blip and retry with a short backoff.
+      if (attempt < MINT_MAX_ATTEMPTS) {
+        await sleep(attempt * MINT_RETRY_BASE_MS);
+      }
+    }
+  }
+
+  // Every attempt failed on transient errors — capture for debugging (Sentry).
+  throw new ShelfError({
+    cause: lastCause,
+    message: "Could not establish a mobile session. Please try again.",
+    label,
+    status: 500,
+  });
 }
 
 /**

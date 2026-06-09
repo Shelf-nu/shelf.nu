@@ -141,6 +141,56 @@ describe("redeemMobileAuthCode", () => {
     );
     expect(supabaseMocks.verifyOtp).not.toHaveBeenCalled();
   });
+
+  it("retries a transient mint failure, then succeeds", async () => {
+    dbMocks.updateMany.mockResolvedValue({ count: 1 });
+    dbMocks.findUniqueOrThrow.mockResolvedValue({
+      user: { email: "sso@acme.com" },
+    });
+    // First generateLink fails transiently (503); the retry succeeds.
+    supabaseMocks.generateLink
+      .mockResolvedValueOnce({
+        data: null,
+        error: { status: 503, message: "upstream unavailable" },
+      })
+      .mockResolvedValueOnce({
+        data: { properties: { hashed_token: "hash_123" } },
+        error: null,
+      });
+    supabaseMocks.verifyOtp.mockResolvedValue({
+      data: {
+        session: {
+          access_token: "at",
+          refresh_token: "rt",
+          user: { id: "user_1", email: "sso@acme.com" },
+          expires_in: 3600,
+          expires_at: 9_999_999_999,
+        },
+      },
+      error: null,
+    });
+
+    const session = await redeemMobileAuthCode("good-code");
+
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(2); // retried once
+    expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
+  });
+
+  it("maps a rate-limit failure to a 429 and does not retry", async () => {
+    dbMocks.updateMany.mockResolvedValue({ count: 1 });
+    dbMocks.findUniqueOrThrow.mockResolvedValue({
+      user: { email: "sso@acme.com" },
+    });
+    supabaseMocks.generateLink.mockResolvedValue({
+      data: null,
+      error: { status: 429, message: "Email rate limit exceeded" },
+    });
+
+    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
+  });
 });
 
 describe("deleteExpiredMobileAuthCodes", () => {
