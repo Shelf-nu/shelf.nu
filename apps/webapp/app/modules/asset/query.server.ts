@@ -1,7 +1,10 @@
 import { Prisma } from "@prisma/client";
 import type { CustomFieldType } from "@prisma/client";
 
+import type { BarcodeType } from "@prisma/client";
+
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
+import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
@@ -785,10 +788,19 @@ function addRelationFilter(
   if (filter.name.startsWith("barcode_")) {
     const barcodeType = filter.name.split("_")[1]; // Extract the barcode type (Code128, Code39, DataMatrix, etc.)
 
-    // Normalize filter value to uppercase to match how barcodes are stored
+    // Normalize the filter value the SAME way the value is stored
+    // (`normalizeBarcodeValue`): ExternalQR preserves its original case while
+    // every other type is uppercased. Unconditionally uppercasing here broke
+    // exact-match operators (is/isNot/matchesAny) for ExternalQR, whose codes
+    // are stored case-sensitively, so `b.value = '813E1AE5'` never matched a
+    // stored '813e1ae5'. (contains/containsAny were unaffected — ILIKE is
+    // case-insensitive.)
+    const normalizeForType = (value: string) =>
+      normalizeBarcodeValue(barcodeType as BarcodeType, value);
+
     const normalizedValue =
       typeof filter.value === "string"
-        ? filter.value.toUpperCase()
+        ? normalizeForType(filter.value)
         : filter.value;
 
     switch (filter.operator) {
@@ -801,7 +813,7 @@ function addRelationFilter(
       case "matchesAny": {
         const values = (filter.value as string)
           .split(",")
-          .map((v) => v.trim().toUpperCase());
+          .map((v) => normalizeForType(v.trim()));
         const valuesArray = Prisma.join(
           values.map((v) => Prisma.sql`${v}`),
           ", "
@@ -811,7 +823,7 @@ function addRelationFilter(
       case "containsAny": {
         const values = (filter.value as string)
           .split(",")
-          .map((v) => v.trim().toUpperCase());
+          .map((v) => normalizeForType(v.trim()));
         const likeConditions = values.map(
           (value) => Prisma.sql`b.value ILIKE ${`%${value}%`}`
         );
