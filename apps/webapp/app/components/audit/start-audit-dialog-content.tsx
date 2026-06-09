@@ -16,7 +16,7 @@
  */
 
 import type { ChangeEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useNavigate } from "react-router";
 
 import AuditTeamMemberSelector from "~/components/audit/audit-team-member-selector";
@@ -25,44 +25,63 @@ import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
 
-/** Maximum length of the optional audit description. */
+/**
+ * Maximum length (in characters) of the optional audit description field.
+ *
+ * Enforces the textarea `maxLength` and drives the live character counter
+ * shown beneath the description input.
+ */
 export const AUDIT_DESCRIPTION_MAX_LENGTH = 1000;
 
-/** Shape of the fetcher response returned by `/api/audits/start`. */
+/**
+ * Shape of the fetcher response returned by `/api/audits/start`.
+ *
+ * @property success - Whether the audit was created successfully.
+ * @property redirectTo - URL of the newly-created audit to navigate to on success.
+ */
 export type StartAuditFetcherData = {
   success?: boolean;
   redirectTo?: string;
 };
 
-/** Props for {@link StartAuditDialogContent}. */
+/**
+ * Props for the {@link StartAuditDialogContent} component.
+ *
+ * @property disabled - Whether the dialog action is in flight (from the bulk-dialog harness).
+ * @property handleCloseDialog - Closes the parent dialog.
+ * @property fetcherError - Server error to surface (shown under the description field).
+ * @property fetcherData - Fetcher response; on success the form navigates to `redirectTo`.
+ * @property nameField - Zorm field name for the audit name input.
+ * @property descriptionField - Zorm field name for the description input.
+ * @property dueDateField - Zorm field name for the due-date input.
+ * @property nameError - Validation error for the name field.
+ * @property descriptionError - Validation error for the description field.
+ * @property dueDateError - Validation error for the due-date field.
+ * @property assigneeError - Validation error for the assignee selector.
+ */
 export type StartAuditDialogContentProps = {
-  /** Whether the dialog action is in flight (from the bulk-dialog harness). */
   disabled: boolean;
-  /** Closes the parent dialog. */
   handleCloseDialog: () => void;
-  /** Server error to surface (shown under the description field). */
   fetcherError?: string;
-  /** Fetcher response; on success we navigate to `redirectTo`. */
   fetcherData?: StartAuditFetcherData;
-  /** Zorm field name for the audit name input. */
   nameField: string;
-  /** Zorm field name for the description input. */
   descriptionField: string;
-  /** Zorm field name for the due-date input. */
   dueDateField: string;
-  /** Validation error for the name field. */
   nameError?: string;
-  /** Validation error for the description field. */
   descriptionError?: string;
-  /** Validation error for the due-date field. */
   dueDateError?: string;
-  /** Validation error for the assignee selector. */
   assigneeError?: string;
 };
 
 /**
- * The shared inner form for the bulk "Create audit" dialog. On a successful
- * fetcher response it navigates to the newly-created audit.
+ * Shared inner form for the bulk "Create audit" dialogs (assets, locations, …).
+ *
+ * Renders the audit name, description (with a live character counter), and
+ * due-date inputs plus the assignee selector and footer buttons. On a
+ * successful fetcher response it navigates to the newly-created audit.
+ *
+ * @param props - See {@link StartAuditDialogContentProps}.
+ * @returns The dialog's form fields and footer buttons.
  */
 export function StartAuditDialogContent({
   disabled,
@@ -81,6 +100,10 @@ export function StartAuditDialogContent({
   const isNavigating = useDisabled();
   const formDisabled = disabled || isNavigating;
   const [descriptionLength, setDescriptionLength] = useState(0);
+  // Unique id so the description input can reference its character counter via
+  // aria-describedby — the dialog body is shared and may render in multiple
+  // contexts, so a static id could collide.
+  const descriptionCounterId = useId();
 
   const handleDescriptionChange = (
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -122,8 +145,13 @@ export function StartAuditDialogContent({
             disabled={formDisabled}
             className="mb-1"
             onChange={handleDescriptionChange}
+            aria-describedby={descriptionCounterId}
           />
-          <div className="text-right text-xs text-gray-500">
+          <div
+            id={descriptionCounterId}
+            className="text-right text-xs text-gray-500"
+            aria-live="polite"
+          >
             {descriptionLength}/{AUDIT_DESCRIPTION_MAX_LENGTH}
           </div>
 
