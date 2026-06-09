@@ -445,23 +445,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const allCategories = [...assetCategories, ...kitCategories];
 
-    // Calculate partial check-in progress
-    // For progress calculation, we need the TOTAL set of assets in the booking,
-    // not the filtered count from booking.assets (which may be filtered by status).
-    // We fetch the unfiltered assets with their kitId so we can compute either
-    // asset-based or unit-based (kit-as-one) progress depending on the workspace
-    // `countKitsAsSingleUnit` setting.
-    const bookingAssetsForProgress = await db.asset.findMany({
-      where: {
-        bookings: {
-          some: { id: booking.id },
-        },
-        // SECURITY (cross-org IDOR): scope to the caller's organizationId,
-        // matching the other booking-asset queries in this loader.
-        organizationId,
-      },
-      select: { id: true, kitId: true },
-    });
+    // Calculate partial check-in progress.
+    // `booking.assets` is already the FULL, unfiltered booking asset set — its
+    // `getBooking` include applies no status/search filter (those are page
+    // concerns handled in-memory), and each row carries `id` + `kitId`. So we
+    // reuse it for the progress input instead of a second org-scoped round-trip.
+    // It is org-scoped transitively via the org-scoped `getBooking` fetch.
+    const bookingAssetsForProgress = enhancedBooking.assets.map((asset) => ({
+      id: asset.id,
+      kitId: asset.kitId,
+    }));
     const totalBookingAssets = bookingAssetsForProgress.length;
 
     // Read the workspace setting with a lean query. We intentionally avoid
