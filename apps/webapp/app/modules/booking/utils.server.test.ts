@@ -57,7 +57,9 @@ describe("calculateUnitCheckinProgress", () => {
     expect(result.checkedInCount).toBe(0);
     expect(result.uncheckedCount).toBe(1);
     expect(result.progressPercentage).toBe(0);
-    expect(result.hasPartialCheckins).toBe(false);
+    // The kit unit is not "checked in", but asset-level check-ins exist, so the
+    // booking page must still surface the progress section + per-asset columns.
+    expect(result.hasPartialCheckins).toBe(true);
   });
 
   it("counts a fully checked-in kit as 1 of 1", () => {

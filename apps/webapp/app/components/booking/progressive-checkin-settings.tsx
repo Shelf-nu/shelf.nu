@@ -55,6 +55,10 @@ export function ProgressiveCheckinSettings({
   const fetcher = useFetcher();
   const disabled = useDisabled();
   const zo = useZorm("CountKitsAsUnitForm", CountKitsAsUnitSettingsSchema);
+  // Bind the (visually hidden) label to the Switch via a shared id so the
+  // control has a reliable, programmatically-associated accessible name.
+  const countKitsField = zo.fields.countKitsAsSingleUnit();
+  const countKitsFieldId = `countKitsAsSingleUnit-${countKitsField}`;
 
   return (
     <Card>
@@ -80,15 +84,13 @@ export function ProgressiveCheckinSettings({
           >
             <div className="flex flex-col items-center gap-2">
               <Switch
-                name={zo.fields.countKitsAsSingleUnit()}
+                id={countKitsFieldId}
+                name={countKitsField}
                 disabled={disabled}
                 defaultChecked={defaultValue}
                 title="Count each kit as a single unit"
               />
-              <label
-                htmlFor={`countKitsAsSingleUnit-${zo.fields.countKitsAsSingleUnit()}`}
-                className=" hidden text-gray-500"
-              >
+              <label htmlFor={countKitsFieldId} className="sr-only">
                 Count each kit as a single unit
               </label>
             </div>

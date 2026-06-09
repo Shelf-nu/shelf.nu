@@ -456,6 +456,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookings: {
           some: { id: booking.id },
         },
+        // SECURITY (cross-org IDOR): scope to the caller's organizationId,
+        // matching the other booking-asset queries in this loader.
+        organizationId,
       },
       select: { id: true, kitId: true },
     });

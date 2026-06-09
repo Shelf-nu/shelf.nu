@@ -192,7 +192,13 @@ export function calculateUnitCheckinProgress(
   const uncheckedCount = totalAssets - checkedInCount;
   const progressPercentage =
     totalAssets > 0 ? Math.round((checkedInCount / totalAssets) * 100) : 0;
-  const hasPartialCheckins = checkedInCount > 0;
+  // `hasPartialCheckins` is deliberately ASSET-level, not unit-level: it drives
+  // whether the booking page shows the check-in progress section and the
+  // per-asset "checked in on/by" columns. A kit with some (but not all) of its
+  // assets checked in produces a unit `checkedInCount` of 0, yet there ARE
+  // asset-level check-ins to surface — basing this on the kit-unit count would
+  // hide that detail. See BookingAssetsColumn / BookingStatistics.
+  const hasPartialCheckins = checkedInAssetIds.length > 0;
 
   return {
     totalAssets,

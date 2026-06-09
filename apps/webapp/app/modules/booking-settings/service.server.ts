@@ -171,6 +171,7 @@ export async function updateBookingSettings({
         maxBookingLengthSkipClosedDays,
         autoArchiveBookings,
         autoArchiveDays,
+        countKitsAsSingleUnit,
       },
       label,
     });

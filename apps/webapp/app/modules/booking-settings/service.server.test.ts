@@ -293,6 +293,54 @@ describe("updateBookingSettings", () => {
     expect(result).toEqual(updatedSettings);
   });
 
+  it("should update countKitsAsSingleUnit to true", async () => {
+    expect.assertions(2);
+    const updatedSettings = {
+      ...mockBookingSettingsData,
+      countKitsAsSingleUnit: true,
+    };
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+
+    const result = await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      countKitsAsSingleUnit: true,
+    });
+
+    // Assert only the mutating intent (where + data) — the select shape is an
+    // implementation detail covered elsewhere.
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: mockOrganizationId },
+        data: { countKitsAsSingleUnit: true },
+      })
+    );
+    expect(result).toEqual(updatedSettings);
+  });
+
+  it("should update countKitsAsSingleUnit to false", async () => {
+    expect.assertions(2);
+    const updatedSettings = {
+      ...mockBookingSettingsData,
+      countKitsAsSingleUnit: false,
+    };
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+
+    const result = await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      countKitsAsSingleUnit: false,
+    });
+
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: mockOrganizationId },
+        data: { countKitsAsSingleUnit: false },
+      })
+    );
+    expect(result).toEqual(updatedSettings);
+  });
+
   it("should update maxBookingLength only", async () => {
     expect.assertions(2);
     const updatedSettings = {
