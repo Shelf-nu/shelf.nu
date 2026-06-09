@@ -13,6 +13,7 @@
  * @see {@link file://./context-helpers.server.ts}
  */
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { resolveAssetIdsForLocationSelection } from "./context-helpers.server";
 
 // why: the resolver (and the org guard it calls) hit the global Prisma client;
@@ -31,7 +32,6 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 const ORG = "org-1";
-const ALL_SELECTED = "all-selected"; // mirrors ALL_SELECTED_KEY in ~/utils/list
 
 beforeEach(() => {
   locationFindMany.mockReset();
@@ -84,7 +84,7 @@ describe("resolveAssetIdsForLocationSelection", () => {
 
     const result = await resolveAssetIdsForLocationSelection({
       organizationId: ORG,
-      locationIds: [ALL_SELECTED],
+      locationIds: [ALL_SELECTED_KEY],
       currentSearchParams: "s=seaham",
     });
 
