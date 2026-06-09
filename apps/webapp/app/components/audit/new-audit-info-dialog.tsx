@@ -64,12 +64,13 @@ export function NewAuditInfoDialog() {
                   </div>
                   <div className="flex-1">
                     <h4 className="mb-1 font-medium text-gray-900">
-                      From Location page
+                      From Locations
                     </h4>
                     <p className="mb-3 text-sm text-gray-600">
-                      Audit all assets assigned to a specific location. Ideal
-                      for room-by-room or area-based inventory checks. Use the
-                      actions menu on the Location page to get started.
+                      Audit the assets across one or more locations. Ideal for
+                      room-by-room or area-based inventory checks. Select the
+                      locations you want on the Locations page, then choose
+                      Actions → Create audit.
                     </p>
                     <Button
                       to="/locations"
@@ -93,8 +94,9 @@ export function NewAuditInfoDialog() {
                     <h4 className="mb-1 font-medium text-gray-900">From Kit</h4>
                     <p className="mb-3 text-sm text-gray-600">
                       Audit all assets within a specific kit. Great for
-                      verifying that kit contents are complete. Use the actions
-                      menu on the Kit page to get started.
+                      verifying that kit contents are complete. Open the kit you
+                      want from the Kits page, then choose Actions → Create
+                      audit.
                     </p>
                     <Button
                       to="/kits"

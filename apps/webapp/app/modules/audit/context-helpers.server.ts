@@ -1,6 +1,9 @@
 import { db } from "~/database/db.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
+import { getLocationsWhereInput } from "~/modules/location/utils.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
+import { assertLocationsBelongToOrg } from "~/utils/org-validation.server";
 
 /** Context type for audit creation */
 export type AuditContextType = "location" | "kit" | "user";
@@ -200,5 +203,81 @@ export async function getAssetsForUserContext({
   });
 
   // Return just the asset IDs
+  return assets.map((asset) => asset.id);
+}
+
+/**
+ * Resolves the asset IDs to audit from a multi-select of locations on the
+ * Locations index (the bulk "Create audit" action).
+ *
+ * - "Select all" (when `locationIds` contains {@link ALL_SELECTED_KEY}) resolves
+ *   the full set of locations matching the current list filter, mirroring what
+ *   the user sees — see {@link getLocationsWhereInput}.
+ * - An explicit selection is proven to belong to the caller's org first (IDOR
+ *   guard) before use.
+ *
+ * Asset→location is 1:1, so the union across locations needs no dedup. The
+ * asset query is org-scoped, so a tampered/foreign location ID can never leak
+ * another org's assets.
+ *
+ * @param organizationId - The caller's (validated) organization ID
+ * @param locationIds - Selected location IDs (may contain ALL_SELECTED_KEY)
+ * @param currentSearchParams - Serialized Locations-list search params (for select-all)
+ * @returns Asset IDs across the selected locations
+ * @throws {ShelfError} 400 if no locations resolve, or none of them contain assets
+ */
+export async function resolveAssetIdsForLocationSelection({
+  organizationId,
+  locationIds,
+  currentSearchParams,
+}: {
+  organizationId: string;
+  locationIds: string[];
+  currentSearchParams?: string | null;
+}): Promise<string[]> {
+  // Resolve which locations to include in the audit
+  let resolvedLocationIds: string[];
+
+  if (locationIds.includes(ALL_SELECTED_KEY)) {
+    // "Select all" — resolve the full filtered set (org-scoped by construction)
+    const locations = await db.location.findMany({
+      where: getLocationsWhereInput({ organizationId, currentSearchParams }),
+      select: { id: true },
+    });
+    resolvedLocationIds = locations.map((location) => location.id);
+  } else {
+    // Explicit selection from request input — prove org ownership before use
+    await assertLocationsBelongToOrg({ locationIds, organizationId });
+    resolvedLocationIds = locationIds;
+  }
+
+  if (resolvedLocationIds.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "No locations selected for the audit.",
+      status: 400,
+      label: "Audit",
+      shouldBeCaptured: false,
+    });
+  }
+
+  // Union of assets across the selected locations (asset→location is 1:1, so
+  // findMany already returns each asset once — no dedup needed).
+  const assets = await db.asset.findMany({
+    where: { organizationId, locationId: { in: resolvedLocationIds } },
+    select: { id: true },
+  });
+
+  if (assets.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "None of the selected locations contain assets. Add assets before starting an audit.",
+      status: 400,
+      label: "Audit",
+      shouldBeCaptured: false,
+    });
+  }
+
   return assets.map((asset) => asset.id);
 }
