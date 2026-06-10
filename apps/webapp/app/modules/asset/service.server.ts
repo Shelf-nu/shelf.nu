@@ -583,7 +583,12 @@ export async function getAssets(params: {
     // we re-run with the full clause held here — the number may be embedded in
     // a title, description, or custom field rather than being a real ID.
     let shouldFallbackToFullSearch = false;
-    let fullSearchOr: Prisma.AssetWhereInput["OR"] | undefined;
+    let fullSearchOr: Prisma.AssetWhereInput[] | undefined;
+    // Number of OR entries the narrow search contributed. Later filters
+    // (uncategorized / untagged / without-location / team-member) also append
+    // to `where.OR`, so the fallback re-query replaces only these first
+    // entries with `fullSearchOr` and preserves the appended filter clauses.
+    let narrowSearchOrCount = 0;
 
     if (availableToBookOnly) {
       where.availableToBook = true;
@@ -698,6 +703,9 @@ export async function getAssets(params: {
               },
             },
           ]);
+          // Remember how many entries belong to the search so the fallback can
+          // swap them out without disturbing filter clauses appended later.
+          narrowSearchOrCount = where.OR.length;
         } else {
           where.OR = fullSearchOr;
         }
@@ -869,6 +877,15 @@ export async function getAssets(params: {
       where.kit = { isNot: null };
     }
 
+    /**
+     * Runs the paginated asset query and its total count for a given `where`
+     * clause. Extracted so the ID-shaped-search fallback can re-run the same
+     * query shape with a different `where.OR` without duplicating the include
+     * and ordering config.
+     *
+     * @param assetWhere - The Prisma where clause to fetch and count against
+     * @returns A tuple of `[assets, totalAssets]`
+     */
     const fetchAssetsForWhere = (assetWhere: Prisma.AssetWhereInput) =>
       Promise.all([
         db.asset.findMany({
@@ -893,9 +910,15 @@ export async function getAssets(params: {
     // Fallback: an ID-shaped search ran the narrow clause but matched no
     // assets. The term may be embedded in a title, description, or custom
     // field rather than being a real identifier, so re-run with the full
-    // search clause before giving up.
+    // search clause before giving up. Only the narrow search entries are
+    // swapped for `fullSearchOr`; any filter clauses appended to `where.OR`
+    // afterwards (uncategorized / untagged / without-location / team-member)
+    // are kept so the fallback honours the same filters as the first query.
     if (shouldFallbackToFullSearch && totalAssets === 0 && fullSearchOr) {
-      where.OR = fullSearchOr;
+      const appendedFilterOr = Array.isArray(where.OR)
+        ? where.OR.slice(narrowSearchOrCount)
+        : [];
+      where.OR = [...fullSearchOr, ...appendedFilterOr];
       [assets, totalAssets] = await fetchAssetsForWhere(where);
     }
 
