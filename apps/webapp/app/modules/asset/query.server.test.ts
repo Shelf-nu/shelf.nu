@@ -633,3 +633,74 @@ describe("assetQueryFragment", () => {
     });
   });
 });
+
+describe("generateWhereClause - barcode value case normalization", () => {
+  const orgId = "test-org-id";
+
+  /**
+   * ExternalQR barcodes are stored with their original case (see
+   * `normalizeBarcodeValue`), so an exact-match filter must NOT uppercase the
+   * supplied value — otherwise `b.value = ...` never matches a lowercase code.
+   * Regression test for the `is` operator dropping ExternalQR matches.
+   */
+  it("preserves original case for ExternalQR with the 'is' operator", () => {
+    const filter: Filter = {
+      name: "barcode_ExternalQR",
+      type: "string",
+      operator: "is",
+      value: "813e1ae5",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    // The interpolated value must keep its original case for ExternalQR
+    expect(result.values).toContain("813e1ae5");
+    expect(result.values).not.toContain("813E1AE5");
+  });
+
+  it("preserves original case for ExternalQR with the 'isNot' operator", () => {
+    const filter: Filter = {
+      name: "barcode_ExternalQR",
+      type: "string",
+      operator: "isNot",
+      value: "813e1ae5",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(result.values).toContain("813e1ae5");
+    expect(result.values).not.toContain("813E1AE5");
+  });
+
+  it("preserves original case for ExternalQR with the 'matchesAny' operator", () => {
+    const filter: Filter = {
+      name: "barcode_ExternalQR",
+      type: "string",
+      operator: "matchesAny",
+      value: "813e1ae5,abc9Def0",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(result.values).toContain("813e1ae5");
+    expect(result.values).toContain("abc9Def0");
+  });
+
+  /**
+   * Non-ExternalQR barcode types (Code128, Code39, …) are stored uppercased,
+   * so their exact-match filters must continue to uppercase the supplied value.
+   */
+  it("uppercases the value for Code128 with the 'is' operator", () => {
+    const filter: Filter = {
+      name: "barcode_Code128",
+      type: "string",
+      operator: "is",
+      value: "abc123",
+    };
+
+    const result = generateWhereClause(orgId, null, [filter]);
+
+    expect(result.values).toContain("ABC123");
+    expect(result.values).not.toContain("abc123");
+  });
+});

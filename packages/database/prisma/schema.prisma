@@ -1308,6 +1308,9 @@ model BookingSettings {
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
 
+  // Progressive check-in/out settings
+  countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it
+
   // Notification settings
   notifyBookingCreator     Boolean @default(true) // Whether the booking creator receives email notifications
   notifyAdminsOnNewBooking Boolean @default(true) // Whether all admins receive a notification when a booking is reserved
