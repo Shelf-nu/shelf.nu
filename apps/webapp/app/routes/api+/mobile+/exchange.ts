@@ -18,6 +18,7 @@ import {
 } from "~/modules/auth/mobile-sso.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 
 const ExchangeSchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
@@ -64,6 +65,18 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
+    // why: this resource route returns failures as JSON (the companion app
+    // parses `{ error }`) and never re-throws, so without an explicit log a
+    // genuine 5xx (Supabase mint outage, broken auth contract, DB/migration
+    // fault) would never reach Sentry — exactly how a prod migration-drift 500
+    // once went unnoticed. Capture server faults as errors; keep a sampled,
+    // non-alerting trail of the expected 4xx (expired / invalid / already-used
+    // code) for diagnostics. A missing status defaults to 500 (server fault).
+    if ((reason.status ?? 500) >= 500) {
+      Logger.error(reason);
+    } else {
+      Logger.handledClientError(reason);
+    }
     return data(
       { error: { message: reason.message } },
       { status: reason.status }

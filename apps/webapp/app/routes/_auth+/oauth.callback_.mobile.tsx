@@ -13,6 +13,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod, parseData, payload } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 
 /**
@@ -138,6 +139,17 @@ export async function action({ request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
+    // why: the client component renders `result.error` and never re-throws, so
+    // without an explicit log a genuine 5xx (refresh-token exchange, user/org
+    // provisioning, or code mint failing) would never reach Sentry. Capture
+    // server faults as errors; keep a sampled, non-alerting trail of the
+    // expected 4xx (SSO disabled, malformed callback payload) for diagnostics.
+    // A missing status defaults to 500 (server fault).
+    if ((reason.status ?? 500) >= 500) {
+      Logger.error(reason);
+    } else {
+      Logger.handledClientError(reason);
+    }
     return data(
       { error: { message: reason.message } },
       { status: reason.status }
