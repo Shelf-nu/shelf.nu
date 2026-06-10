@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { signInViaWeb } from "@/lib/web-auth";
 import ShelfIcon from "@/components/brand/shelf-icon";
 import ShelfWordmark from "@/components/brand/shelf-wordmark";
 
@@ -31,6 +32,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
 
   // ── iOS credential autofill detection ──────────────────────────────
   // Face ID autofill sets each field exactly once (count=1).
@@ -72,6 +74,19 @@ export default function LoginScreen() {
 
     if (signInError) {
       setError(signInError);
+    }
+  };
+
+  const handleSsoLogin = async () => {
+    Keyboard.dismiss();
+    setError(null);
+    setIsSsoSubmitting(true);
+    // Opens the web SSO flow in the system browser; resolves once the app
+    // receives the callback and installs the session (or the user cancels).
+    const { error: ssoError } = await signInViaWeb();
+    setIsSsoSubmitting(false);
+    if (ssoError) {
+      setError(ssoError);
     }
   };
 
@@ -193,6 +208,32 @@ export default function LoginScreen() {
                 <Text style={styles.buttonText}>Sign In</Text>
               )}
             </TouchableOpacity>
+
+            {/* ── SSO (web-delegated) ─────────────────────────────── */}
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              testID="sso-sign-in-button"
+              style={[
+                styles.ssoButton,
+                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+              ]}
+              onPress={handleSsoLogin}
+              disabled={isSubmitting || isSsoSubmitting}
+              activeOpacity={0.8}
+              accessibilityLabel="Sign in with SSO"
+              accessibilityRole="button"
+            >
+              {isSsoSubmitting ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
+              )}
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.footer}>
@@ -286,6 +327,36 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   buttonText: {
     color: colors.primaryForeground,
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+  },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.gray300,
+  },
+  dividerText: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  ssoButton: {
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    borderRadius: borderRadius.xl,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: spacing.xl,
+    backgroundColor: colors.white,
+    ...shadows.sm,
+  },
+  ssoButtonText: {
+    color: colors.foreground,
     fontSize: fontSize.lg,
     fontWeight: "600",
   },
