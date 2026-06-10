@@ -32,6 +32,16 @@ vi.mock("~/integrations/supabase/client", () => ({
   })),
 }));
 
+// why: control Supabase error classification (transient/retryable vs
+// deterministic) by tagging mock errors, rather than constructing real
+// AuthError instances. mobile-sso.server only imports these two helpers.
+vi.mock("@supabase/supabase-js", () => ({
+  isAuthApiError: (err: unknown) =>
+    typeof err === "object" && err !== null && "__authApiError" in err,
+  isAuthRetryableFetchError: (err: unknown) =>
+    typeof err === "object" && err !== null && "__retryable" in err,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -151,7 +161,8 @@ describe("redeemMobileAuthCode", () => {
     supabaseMocks.generateLink
       .mockResolvedValueOnce({
         data: null,
-        error: { status: 503, message: "upstream unavailable" },
+        // __retryable → classified as a transient AuthRetryableFetchError
+        error: { __retryable: true, status: 503, message: "upstream" },
       })
       .mockResolvedValueOnce({
         data: { properties: { hashed_token: "hash_123" } },
@@ -183,11 +194,28 @@ describe("redeemMobileAuthCode", () => {
     });
     supabaseMocks.generateLink.mockResolvedValue({
       data: null,
-      error: { status: 429, message: "Email rate limit exceeded" },
+      error: { code: "over_email_send_rate_limit", message: "rate limited" },
     });
 
     await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
       status: 429,
+    });
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
+  });
+
+  it("does not retry a deterministic Supabase error (4xx)", async () => {
+    dbMocks.updateMany.mockResolvedValue({ count: 1 });
+    dbMocks.findUniqueOrThrow.mockResolvedValue({
+      user: { email: "sso@acme.com" },
+    });
+    // AuthApiError 4xx (not retryable, not rate-limit) — must fail fast.
+    supabaseMocks.generateLink.mockResolvedValue({
+      data: null,
+      error: { __authApiError: true, status: 422, message: "invalid" },
+    });
+
+    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
+      status: 500,
     });
     expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
   });

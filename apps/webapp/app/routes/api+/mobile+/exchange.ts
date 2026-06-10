@@ -12,7 +12,10 @@
  */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { redeemMobileAuthCode } from "~/modules/auth/mobile-sso.server";
+import {
+  deleteExpiredMobileAuthCodes,
+  redeemMobileAuthCode,
+} from "~/modules/auth/mobile-sso.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod } from "~/utils/http.server";
 
@@ -50,6 +53,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const authSession = await redeemMobileAuthCode(parsed.data.code);
+
+    // Opportunistic cleanup of expired codes (no app-level cron in this repo).
+    // Fire-and-forget: a cleanup failure must never affect the exchange.
+    void deleteExpiredMobileAuthCodes().catch(() => undefined);
 
     return data({
       accessToken: authSession.accessToken,

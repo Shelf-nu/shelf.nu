@@ -21,6 +21,10 @@
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
  */
 import { createHash, randomBytes } from "node:crypto";
+import {
+  isAuthApiError,
+  isAuthRetryableFetchError,
+} from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -63,26 +67,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Whether a Supabase failure is a rate-limit (HTTP 429, or a "rate limit" code
- * or message). Supabase throttles magic-link generation per email, so retrying
- * inside the window is pointless — we surface a clear, user-retryable error.
+ * Whether a Supabase failure is a rate-limit. Mirrors `service.server.ts`: the
+ * OTP-specific `over_email_send_rate_limit` code plus the generic HTTP 429
+ * `AuthApiError` (which can carry a different code). Supabase throttles
+ * magic-link generation per email, so retrying inside the window is pointless —
+ * we surface a clear, user-retryable error instead.
  *
  * @param cause - The error thrown by a Supabase admin call
  * @returns true if the failure is a rate-limit
  */
 function isRateLimitError(cause: unknown): boolean {
-  const err = cause as
-    | { status?: number; code?: string; message?: string }
-    | null
-    | undefined;
-  if (!err) {
-    return false;
-  }
-  if (err.status === 429) {
-    return true;
-  }
+  const code =
+    typeof cause === "object" && cause !== null && "code" in cause
+      ? (cause as { code: unknown }).code
+      : undefined;
   return (
-    /rate.?limit/i.test(err.code ?? "") || /rate limit/i.test(err.message ?? "")
+    code === "over_email_send_rate_limit" ||
+    (isAuthApiError(cause) && cause.status === 429)
   );
 }
 
@@ -144,10 +145,11 @@ async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
  * pattern. The resulting session is a brand-new token family, decoupled from
  * the user's web session.
  *
- * Resilience: transient failures (Supabase 5xx / network) are retried up to
- * {@link MINT_MAX_ATTEMPTS} times with a short backoff. Rate-limit failures are
- * NOT retried — they surface as a clear 429 so the client can prompt the user
- * to wait. Deterministic failures (no token/session) fail fast.
+ * Resilience: only transient Supabase failures (504s / network, surfaced as
+ * `AuthRetryableFetchError`) are retried — up to {@link MINT_MAX_ATTEMPTS} times
+ * with a short backoff. Rate-limits surface as a clear 429 (not retried — the
+ * window won't clear in time). Deterministic failures (4xx, or our own
+ * no-token/no-session errors) fail fast, since retrying can't change the result.
  *
  * SECURITY: this hands out a full session for `email` with no further checks —
  * it must ONLY be called after the caller has independently authorized the
@@ -156,17 +158,14 @@ async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
  *
  * @param email - The already-authenticated user's email
  * @returns A mapped auth session (fresh access + refresh tokens)
- * @throws {ShelfError} 429 when rate-limited; 500 when the mint keeps failing
+ * @throws {ShelfError} 429 when rate-limited; otherwise re-throws the underlying
+ *   cause, which {@link redeemMobileAuthCode} maps to a captured 500
  */
 async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
-  let lastCause: unknown = null;
-
   for (let attempt = 1; attempt <= MINT_MAX_ATTEMPTS; attempt++) {
     try {
       return await mintMobileSessionOnce(email);
     } catch (cause) {
-      lastCause = cause;
-
       // Rate-limited: retrying inside the window won't help. Surface a clear,
       // user-retryable 429 instead of a generic 500.
       if (isRateLimitError(cause)) {
@@ -180,22 +179,25 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
         });
       }
 
-      // Our own deterministic failures (missing token / null session) won't
-      // change on retry — fail fast.
-      if (isLikeShelfError(cause)) {
-        throw cause;
+      // Only transient Supabase failures (504s / network) are worth retrying;
+      // deterministic 4xx errors and our own ShelfErrors won't change on retry.
+      const canRetry =
+        attempt < MINT_MAX_ATTEMPTS && isAuthRetryableFetchError(cause);
+      if (canRetry) {
+        await sleep(attempt * MINT_RETRY_BASE_MS);
+        continue;
       }
 
-      // Otherwise treat as a transient blip and retry with a short backoff.
-      if (attempt < MINT_MAX_ATTEMPTS) {
-        await sleep(attempt * MINT_RETRY_BASE_MS);
-      }
+      // Deterministic failure, or a transient one that exhausted its retries.
+      // redeemMobileAuthCode re-throws ShelfErrors as-is and wraps anything
+      // else (raw Supabase / DB errors) in a captured 500.
+      throw cause;
     }
   }
 
-  // Every attempt failed on transient errors — capture for debugging (Sentry).
+  // Unreachable: every iteration returns or throws. Satisfies the compiler.
   throw new ShelfError({
-    cause: lastCause,
+    cause: null,
     message: "Could not establish a mobile session. Please try again.",
     label,
     status: 500,
