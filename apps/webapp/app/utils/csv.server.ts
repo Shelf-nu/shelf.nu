@@ -26,6 +26,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   BarcodeField,
   Column,
@@ -42,6 +43,7 @@ import {
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
@@ -183,13 +185,18 @@ export const buildCsvBackupDataFromAssets = ({
        * This needs to be done for all one-to-one relations
        */
       if (value === null) {
-        if (["custody", "location", "category"].includes(key)) {
+        if (["custody", "location", "category", "assetModel"].includes(key)) {
           return toExport.push("{}");
         }
         return toExport.push("");
       }
 
-      /** Special handling for category and location */
+      /** Special handling for category and location.
+       *
+       * Phase A5: `assetModel` is included here — backup-export emits it
+       * as a JSON `{ name }` object so the backup-import path can resolve
+       * (or create) the model by name on restore (symmetric with the
+       * `category` / `location` handling above). */
       switch (key) {
         case "location":
         case "category":
@@ -199,6 +206,7 @@ export const buildCsvBackupDataFromAssets = ({
         case "organization":
         case "valuation":
         case "customFields":
+        case "assetModel":
           toExport.push(
             JSON.stringify(value, (_key, value) => {
               /** Custom replacer function.
@@ -232,6 +240,11 @@ const keysToSkip = [
   "customFieldId",
   "mainImage",
   "mainImageExpiration",
+  // Phase A5: backup-export now emits the resolved `assetModel` object
+  // (`{ name }`) so cross-org restore can find / create the model by
+  // name. The opaque FK column would only resolve in the source org and
+  // can be safely dropped from the backup.
+  "assetModelId",
 ];
 
 export async function exportAssetsBackupToCsv({
@@ -417,11 +430,13 @@ export const buildCsvExportDataFromAssets = ({
           case "kit":
             value = asset.kit?.name;
             break;
-          case "custody":
-            value = asset.custody
-              ? resolveTeamMemberName(asset.custody.custodian)
+          case "custody": {
+            const primaryCustody = getPrimaryCustody(asset.custody);
+            value = primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
               : "";
             break;
+          }
           case "tags":
             value = asset.tags?.map((t) => t.name).join(", ") ?? "";
             break;
@@ -486,6 +501,23 @@ export const buildCsvExportDataFromAssets = ({
             break;
           }
 
+          case "quantity":
+            value =
+              isQuantityTracked(asset) && asset.quantity != null
+                ? `${asset.quantity}${
+                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
+                  }`
+                : "";
+            break;
+          case "type":
+            // Handled by default column logic — asset.type is a direct string field
+            value = isQuantityTracked(asset)
+              ? "Tracked by quantity"
+              : "Individual";
+            break;
+          case "assetModel":
+            value = asset.assetModelName ?? "";
+            break;
           case "actions":
             value = "";
             break;
@@ -676,12 +708,25 @@ export async function exportBookingsFromIndexToCsv({
         where: { id: { in: bookingsIds }, organizationId },
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          assets: {
+          bookingAssets: {
             select: {
-              // `id` is required to match each asset against the booking's
-              // partial check-ins for the per-asset check-in status column.
-              id: true,
-              title: true,
+              /**
+               * `quantity` and `asset.type` are needed so the CSV builder
+               * can render `"Title × N"` for QUANTITY_TRACKED assets.
+               * Without these the row would silently show just the
+               * title and drop the booked quantity. `asset.id` is
+               * required to match each row against the booking's
+               * partial check-ins for the per-asset check-in status
+               * column added by the booking export checkin-status feature.
+               */
+              quantity: true,
+              asset: {
+                select: {
+                  id: true,
+                  title: true,
+                  type: true,
+                },
+              },
             },
           },
           tags: { select: { name: true } },
@@ -914,11 +959,16 @@ type FlexibleAsset = Partial<Asset> & {
 
 /**
  * Normalized booking shape the CSV builder consumes, regardless of which fetch
- * path (by-id vs. select-all) produced it: a booking with its custodians,
- * {@link FlexibleAsset} list, and name-only tags.
+ * path (by-id vs. select-all) produced it: a booking with its custodians, the
+ * BookingAsset pivot list (each with optional `quantity` + {@link FlexibleAsset}),
+ * and name-only tags.
+ *
+ * `quantity` is optional so the type accepts bookings fetched without it
+ * (falls back to "no quantity annotation" in the renderer), but both query
+ * paths in `exportBookingsFromIndexToCsv` now populate it.
  */
-type FlexibleBooking = Omit<BookingWithCustodians, "assets"> & {
-  assets: FlexibleAsset[];
+type FlexibleBooking = Omit<BookingWithCustodians, "bookingAssets"> & {
+  bookingAssets: { quantity?: number; asset: FlexibleAsset }[];
   tags: Pick<Tag, "name">[];
 };
 
@@ -998,6 +1048,29 @@ async function buildBookingCheckinMap(
  *   status/date columns and the booking-level checked-in rollup.
  * @returns Array of string arrays representing CSV rows, including headers
  */
+/**
+ * Render a booking-asset row label for the CSV "Assets" column.
+ *
+ * For QUANTITY_TRACKED assets we append `" × N"` so the exported sheet
+ * shows the booked quantity — matching the display convention used in
+ * booking emails and the booking PDF. INDIVIDUAL assets render as just
+ * the title (quantity is implicitly 1).
+ *
+ * Falls back gracefully when the asset type or quantity is missing
+ * (e.g. older tests or legacy fixtures that don't provide those fields).
+ */
+const formatBookingAssetForCsv = (ba: {
+  quantity?: number;
+  asset: FlexibleAsset;
+}): string => {
+  const title = ba.asset.title || "Unnamed Asset";
+  const isQtyTracked = ba.asset.type === "QUANTITY_TRACKED";
+  if (isQtyTracked && ba.quantity != null && ba.quantity > 0) {
+    return `${title} × ${ba.quantity}`;
+  }
+  return title;
+};
+
 export const buildCsvExportDataFromBookings = (
   bookings: FlexibleBooking[],
   request: Request,
@@ -1039,34 +1112,57 @@ export const buildCsvExportDataFromBookings = (
   const rows: string[][] = [];
 
   bookings.forEach((booking) => {
-    // Normalize to a non-empty list so a booking with no assets still emits a
-    // single row. The placeholder has no id, so its check-in columns stay blank.
-    const assets =
-      booking.assets && booking.assets.length > 0
-        ? booking.assets
-        : [{ id: undefined, title: "No assets" } as FlexibleAsset];
+    // Normalise to a non-empty list of BookingAsset pivot rows so a booking
+    // with no assets still emits a single row. The placeholder has no asset
+    // id, so its check-in / status columns stay blank.
+    const bookingAssetRows =
+      booking.bookingAssets && booking.bookingAssets.length > 0
+        ? booking.bookingAssets
+        : [
+            {
+              quantity: undefined,
+              asset: {
+                id: undefined as unknown as string | undefined,
+                title: "No assets",
+              } as FlexibleAsset,
+            },
+          ];
 
     // Per-booking partial check-in state. `calculatePartialCheckinProgress` is
     // the same helper that powers the booking detail "X / Y checked in" bar, so
-    // the export rollup matches what users see in-app.
+    // the export rollup matches what users see in-app. Count UNIQUE assets
+    // (not slices) — a qty-tracked asset with one standalone + one kit-driven
+    // slice is still one asset for progress purposes.
     const checkinInfo = checkinsByBooking.get(booking.id);
     const checkedInAssetIds =
       checkinInfo?.checkedInAssetIds ?? new Set<string>();
+    const uniqueAssetIdCount = new Set(
+      (booking.bookingAssets ?? [])
+        .map((ba) => ba.asset.id)
+        .filter((id): id is string => Boolean(id))
+    ).size;
     const progress = calculatePartialCheckinProgress(
-      booking.assets?.length ?? 0,
+      uniqueAssetIdCount,
       [...checkedInAssetIds],
       booking.status
     );
 
-    assets.forEach((asset, index) => {
-      // The first asset shares the booking's "main" row; the rest get their
-      // own rows with booking-level columns blanked.
+    bookingAssetRows.forEach((ba, index) => {
+      // The first BookingAsset row shares the booking's "main" row; the rest
+      // get their own rows with booking-level columns blanked.
       const isMainRow = index === 0;
+      const asset = ba.asset;
 
       const row = Object.keys(headers).map((column) => {
         // --- Per-asset columns: populated on every row for that asset ---
         if (column === "asset") {
-          return formatValueForCsv(asset.title || "Unnamed Asset", false);
+          // formatBookingAssetForCsv adds the "× N" suffix for qty-tracked.
+          return formatValueForCsv(
+            asset.id
+              ? formatBookingAssetForCsv(ba)
+              : asset.title ?? "No assets",
+            false
+          );
         }
         if (column === "assetCheckinStatus") {
           const label = asset.id

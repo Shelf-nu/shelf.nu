@@ -232,6 +232,62 @@ export const ImportContent = () => {
           </div>
         </When>
 
+        {/* Asset model + quantity-tracked columns (Phase A4) */}
+        <div className="flex gap-3">
+          <Icon
+            icon="asset"
+            size="xs"
+            className="mt-0.5 shrink-0 text-gray-500"
+          />
+          <div>
+            <h5 className="font-semibold">
+              Asset model + quantity-tracked columns
+            </h5>
+            <p className="text-[14px] text-gray-600">
+              Five optional columns let you onboard a fleet of qty-tracked stock
+              items or link new assets to an existing asset model:
+            </p>
+            <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
+              <li>
+                <b>assetModel</b> — reference an asset model by name
+                (case-insensitive). Missing models are auto-created. The model's{" "}
+                <b>defaultCategory</b> and <b>defaultValuation</b> apply when
+                those columns are blank. <b>INDIVIDUAL rows only</b> — leave
+                blank for QUANTITY_TRACKED rows (models group multiple
+                distinguishable items; qty-tracked is itself one stock pool).
+              </li>
+              <li>
+                <b>type</b> — <code>INDIVIDUAL</code> (default) or{" "}
+                <code>QUANTITY_TRACKED</code>. Omit for "track each item
+                separately".
+              </li>
+              <li>
+                <b>quantity</b> — required (and ≥ 1) for{" "}
+                <code>QUANTITY_TRACKED</code> rows; must be empty or{" "}
+                <code>1</code> for <code>INDIVIDUAL</code>.
+              </li>
+              <li>
+                <b>minQuantity</b> — optional low-stock threshold for
+                qty-tracked rows.
+              </li>
+              <li>
+                <b>unitOfMeasure</b> — free-form label (<code>boxes</code>,{" "}
+                <code>kg</code>, …) for qty-tracked rows.
+              </li>
+              <li>
+                <b>consumptionType</b> — required for qty-tracked rows.{" "}
+                <code>TWO_WAY</code> (returned with a consumption report) or{" "}
+                <code>ONE_WAY</code> (consumed on checkout, no return).
+              </li>
+            </ul>
+            <p className="mt-1 text-[14px] text-gray-600">
+              <b>Tip:</b> the downloaded template above already contains one{" "}
+              <code>INDIVIDUAL</code> and one <code>QUANTITY_TRACKED</code>{" "}
+              example row.
+            </p>
+          </div>
+        </div>
+
         {/* Extra considerations */}
         <div className="flex gap-3">
           <Icon

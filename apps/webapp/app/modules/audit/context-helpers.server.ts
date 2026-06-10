@@ -126,7 +126,7 @@ export async function getAssetsForLocationContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      locationId: { in: locationIds },
+      assetLocations: { some: { locationId: { in: locationIds } } },
     },
     select: {
       id: true,
@@ -157,7 +157,7 @@ export async function getAssetsForKitContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      kitId,
+      assetKits: { some: { kitId } },
     },
     select: {
       id: true,
@@ -189,8 +189,10 @@ export async function getAssetsForUserContext({
     where: {
       organizationId,
       custody: {
-        custodian: {
-          userId: custodianUserId,
+        some: {
+          custodian: {
+            userId: custodianUserId,
+          },
         },
       },
     },

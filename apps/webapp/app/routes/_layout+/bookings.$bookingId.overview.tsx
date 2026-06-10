@@ -30,6 +30,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import {
   primeBookingOverviewCache,
   readBookingOverviewCache,
@@ -39,6 +40,7 @@ import {
   archiveBooking,
   cancelBooking,
   checkinAssets,
+  attributeCategorizedDispositionsByBookingAsset,
   checkinBooking,
   checkoutBooking,
   deleteBooking,
@@ -241,7 +243,48 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Check if there might be partial check-ins by looking at asset statuses OR booking status
     // We need to check both AVAILABLE assets (already partially checked in) AND
     // ONGOING/OVERDUE bookings (could have partial check-ins)
-    const hasAvailableAssets = booking.assets.some(
+    /**
+     * Flatten bookingAssets pivot to a plain assets array for downstream
+     * use. Preserves `bookedQuantity` from the pivot so quantity-tracked
+     * assets display how many units were booked.
+     *
+     * Kit attribution reads `BookingAsset.assetKitId` (per-row
+     * discriminator) rather than `asset.assetKits[0]?.kitId` (asset's
+     * incidental kit memberships). A qty-tracked asset can have both
+     * a standalone slice (`assetKitId IS NULL`) and a kit-driven
+     * slice in the same booking; each appears as its own row.
+     *
+     * The row's `kitId`/`kit` keep their old field names so the
+     * downstream grouping helper (`groupAndSortAssetsByKit`) and the
+     * pagination logic below need no changes — but their *meaning*
+     * shifts: now it's "the kit this row was booked under", not "any
+     * kit this asset happens to belong to".
+     *
+     * A `bookingAssetId` field is added so the UI can render two rows
+     * for the same asset (standalone + kit-driven) without key
+     * collisions in React.
+     */
+    const bookingAssets = booking.bookingAssets.map((ba) => {
+      // Match the BookingAsset's `assetKitId` against the asset's set of
+      // AssetKit memberships to resolve which specific kit this row
+      // was booked under. Multi-kit qty-tracked assets can have several
+      // memberships; only the one whose `id` matches contributes here.
+      const sourceKit = ba.assetKitId
+        ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId) ?? null
+        : null;
+      return {
+        ...ba.asset,
+        bookingAssetId: ba.id,
+        bookedQuantity: ba.quantity,
+        // Null when standalone — UI groups these as individual items
+        // outside of any kit. Non-null surfaces the kit's name in the
+        // detail list and groups other slices of the same kit together.
+        kitId: sourceKit?.kitId ?? null,
+        kit: sourceKit?.kit ?? null,
+      };
+    });
+
+    const hasAvailableAssets = bookingAssets.some(
       (asset) => asset.status === "AVAILABLE"
     );
     const canHavePartialCheckins = ["ONGOING", "OVERDUE"].includes(
@@ -254,15 +297,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
-    // `booking` already has full asset+kit light data; alias for clarity.
-    const enhancedBooking = booking;
-
-    // Derive all asset IDs and all kit IDs from the booking (no pagination yet).
-    const allBookingAssetIds = booking.assets.map((a) => a.id);
+    // `booking` already has full asset+kit light data via the BookingAsset pivot.
+    // Derive all asset IDs and all (current-booking) kit IDs from the
+    // BookingAsset pivot. A single asset can have multiple BookingAsset
+    // slices (one standalone + N kit-driven, Polish-6 multi-row) so we
+    // dedupe by assetId before enrichment. Kit ids come from each slice's
+    // `assetKitId` resolved through `asset.assetKits` so the slice's kit
+    // identity stays correct for qty-tracked assets in multiple kits.
+    const allBookingAssetIds = [
+      ...new Set(booking.bookingAssets.map((ba) => ba.assetId)),
+    ];
     const allBookingKitIds = [
       ...new Set(
-        booking.assets
-          .map((a) => a.kitId)
+        booking.bookingAssets
+          .map((ba) => {
+            if (!ba.assetKitId) return null;
+            return (
+              ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kitId ??
+              null
+            );
+          })
           .filter((id): id is string => id !== null)
       ),
     ];
@@ -319,9 +373,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           category: true,
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
-          kit: true,
-          // Asset's pickup location — rendered in the booking Location column.
-          location: LOCATION_WITH_HIERARCHY,
+          // Pivot-aware kit relation — kits live on the `AssetKit` pivot
+          // post-4a, so include each membership with its full kit + the
+          // kit's pickup location (rendered on the booking page kit row).
+          assetKits: {
+            include: {
+              kit: { include: { location: LOCATION_WITH_HIERARCHY } },
+            },
+          },
+          // Asset's pickup location lives on the `AssetLocation` pivot
+          // post-4b. Rendered in the booking Location column via
+          // `getPrimaryLocation` at the loader boundary.
+          assetLocations: {
+            include: { location: LOCATION_WITH_HIERARCHY },
+          },
           // Code-resolution relations — required for AssetCodeBadge on the
           // booking detail page rows. Scalar fields (sequentialId,
           // preferredBarcodeId) come in automatically via `include`; the
@@ -329,44 +394,49 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // `~/modules/barcode/display.ts`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
-          bookings: {
+          bookingAssets: {
             where: {
-              ...(booking.from && booking.to
-                ? {
-                    OR: [
-                      // Rule 1: RESERVED bookings always conflict
-                      {
-                        status: "RESERVED",
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                      // Rule 2: ONGOING/OVERDUE bookings (filtered by asset status in isAssetAlreadyBooked logic)
-                      {
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                        id: { not: booking.id }, // Exclude current booking from conflicts
-                        OR: [
-                          {
-                            from: { lte: booking.to },
-                            to: { gte: booking.from },
-                          },
-                          {
-                            from: { gte: booking.from },
-                            to: { lte: booking.to },
-                          },
-                        ],
-                      },
-                    ],
-                  }
-                : {}),
+              booking: {
+                ...(booking.from && booking.to
+                  ? {
+                      OR: [
+                        // Rule 1: RESERVED bookings always conflict
+                        {
+                          status: "RESERVED",
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                        // Rule 2: ONGOING/OVERDUE bookings
+                        {
+                          status: { in: ["ONGOING", "OVERDUE"] },
+                          id: { not: booking.id },
+                          OR: [
+                            {
+                              from: { lte: booking.to },
+                              to: { gte: booking.from },
+                            },
+                            {
+                              from: { gte: booking.from },
+                              to: { lte: booking.to },
+                            },
+                          ],
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
+            include: {
+              booking: true,
             },
           },
         },
@@ -375,7 +445,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       /** Calculate booking flags considering all assets */
       getBookingFlags({
         id: booking.id,
-        assetIds: booking.assets.map((a) => a.id),
+        assetIds: bookingAssets.map((a) => a.id),
+        // An "empty" booking with only model-level reservations must
+        // still be reservable. Passing the count lets the flags helper
+        // surface `hasModelRequests` for the Reserve disable check.
+        modelRequestCount: booking.modelRequests?.length ?? 0,
         from: booking.from,
         to: booking.to,
         organizationId,
@@ -403,18 +477,56 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // and `.claude/rules/code-bearing-entity-list-consistency.md`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
-          // Kit's pickup location — rendered on the kit row.
+          // Kit's pickup location — rendered on the kit row (kits keep a
+          // direct `locationId` FK; the pivot is asset-side only).
           location: LOCATION_WITH_HIERARCHY,
-          _count: { select: { assets: true } },
+          // Member count via the `AssetKit` pivot post-4a.
+          _count: { select: { assetKits: true } },
         },
       }),
     ]);
+
+    // Index the enriched assets for lookup during per-slice projection below
+    // (`shapeBookingAssets` consumes `rawKits` directly, so we don't index it
+    // here — main's helper builds its own kits map internally).
+    const assetDetailsMap = new Map(rawAssets.map((a) => [a.id, a]));
+
+    /**
+     * Build the view-asset array `shapeBookingAssets` consumes: one entry
+     * PER BookingAsset slice. A qty-tracked asset can have one standalone
+     * (`assetKitId IS NULL`) + N kit-driven slices in the same booking
+     * (Polish-6 multi-row); each must render in its own kit group so the
+     * page mirrors the booking's structure exactly.
+     *
+     * Each entry carries the singular `kitId` / `kit` / `location` /
+     * `category` shape the in-memory filter / sort / group helpers expect
+     * (pre-pivot main authored those against `Asset.kitId` / `Asset.location`).
+     * `bookingAssetId` + `bookedQuantity` come straight off the pivot row
+     * so downstream qty enrichment can attribute dispositions per-row.
+     */
+    const enrichedAssetsForView = booking.bookingAssets.map((ba) => {
+      const detail = assetDetailsMap.get(ba.assetId);
+      const base = detail ?? ba.asset;
+      const matchedAssetKit = ba.assetKitId
+        ? (detail ?? ba.asset).assetKits.find(
+            (ak) => ak.id === ba.assetKitId
+          ) ?? null
+        : null;
+      return {
+        ...base,
+        kitId: matchedAssetKit?.kitId ?? null,
+        kit: matchedAssetKit?.kit ?? null,
+        location: getPrimaryLocation(base) ?? null,
+        bookingAssetId: ba.id,
+        bookedQuantity: ba.quantity ?? 1,
+      };
+    });
 
     // Delegate filter → sort → group-by-kit → paginate to the shared pure
     // shapeBookingAssets helper. The same function runs in clientLoader for
     // subsequent navigations (no server round-trip).
     const view = shapeBookingAssets({
-      rawAssets,
+      rawAssets: enrichedAssetsForView,
       rawKits,
       search,
       orderBy,
@@ -424,9 +536,148 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       partialCheckinDetails,
     });
 
+    /**
+     * Sum already-dispositioned units per qty-tracked asset for this
+     * booking (RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows).
+     * Attached per-row to each enriched view item below so the row UI can:
+     *   - show "Partially checked in" when `dispositioned > 0 && remaining > 0`
+     *   - render `remaining / booked` in the Qty column for partials
+     *   - show the fully-reconciled state once `dispositioned == booked`
+     *
+     * Only queries qty-tracked asset ids (empty query short-circuits).
+     */
+    const qtyAssetIdsInBooking = booking.bookingAssets
+      .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
+      .map((ba) => ba.assetId);
+
+    /**
+     * Per-row attribution. With Polish-6 multi-row slices, an asset
+     * can have a kit-driven row AND a standalone row in the same
+     * booking; ConsumptionLog now carries `bookingAssetId` so each
+     * disposition can be attributed exactly. Legacy logs
+     * (`bookingAssetId IS NULL`) get greedy-attributed by
+     * `attributeCategorizedDispositionsByBookingAsset` — kit-driven rows
+     * fill first, then standalone.
+     */
+    const dispositionLogs =
+      qtyAssetIdsInBooking.length > 0
+        ? await db.consumptionLog.findMany({
+            where: {
+              bookingId: booking.id,
+              assetId: { in: qtyAssetIdsInBooking },
+              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
+            },
+            select: {
+              assetId: true,
+              category: true,
+              quantity: true,
+              bookingAssetId: true,
+            },
+          })
+        : [];
+
+    type DispositionBreakdown = {
+      returned: number;
+      consumed: number;
+      lost: number;
+      damaged: number;
+    };
+    const emptyBreakdown = (): DispositionBreakdown => ({
+      returned: 0,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+    });
+
+    /**
+     * Map<assetId, BookingAsset[]> for the greedy attribution fallback.
+     * Built once and shared across all four category attributions so the
+     * kit-driven-fills-first ordering stays consistent.
+     */
+    const bookingAssetRowsByAsset = new Map<
+      string,
+      Array<{
+        id: string;
+        quantity: number;
+        assetKitId: string | null;
+      }>
+    >();
+    for (const ba of booking.bookingAssets) {
+      if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
+      const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
+      arr.push({
+        id: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId ?? null,
+      });
+      bookingAssetRowsByAsset.set(ba.assetId, arr);
+    }
+
+    /** Logs grouped by assetId (each carries its own category). */
+    const logsByAsset = new Map<
+      string,
+      Array<{
+        bookingAssetId: string | null;
+        category: "RETURN" | "CONSUME" | "LOSS" | "DAMAGE";
+        quantity: number;
+      }>
+    >();
+    for (const log of dispositionLogs) {
+      const arr = logsByAsset.get(log.assetId) ?? [];
+      arr.push({
+        bookingAssetId: log.bookingAssetId ?? null,
+        category: log.category as "RETURN" | "CONSUME" | "LOSS" | "DAMAGE",
+        quantity: log.quantity,
+      });
+      logsByAsset.set(log.assetId, arr);
+    }
+
+    const breakdownByBookingAsset = new Map<string, DispositionBreakdown>();
+    const dispositionedByBookingAsset = new Map<string, number>();
+    for (const [assetId, rows] of bookingAssetRowsByAsset) {
+      for (const row of rows) {
+        breakdownByBookingAsset.set(row.id, emptyBreakdown());
+        dispositionedByBookingAsset.set(row.id, 0);
+      }
+      // Shared-capacity attribution across all categories — prevents a
+      // kit-driven row from being independently refilled by each category
+      // (which over-counted before, surfacing wrong totals + breakdowns).
+      const attributed = attributeCategorizedDispositionsByBookingAsset({
+        bookingAssetRows: rows,
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const [bookingAssetId, b] of attributed) {
+        breakdownByBookingAsset.set(bookingAssetId, b);
+        dispositionedByBookingAsset.set(
+          bookingAssetId,
+          b.returned + b.consumed + b.lost + b.damaged
+        );
+      }
+    }
+
+    // Attach per-row qty disposition data onto the shaped view items so
+    // the UI gets the Polish-6 / Phase 4 enrichment alongside main's
+    // clientLoader-cache architecture.
+    const enrichedItems = view.items.map((item) => ({
+      ...item,
+      assets: item.assets.map((asset) => {
+        const bookingAssetId = (asset as { bookingAssetId?: string })
+          .bookingAssetId;
+        return {
+          ...asset,
+          dispositionedQuantity: bookingAssetId
+            ? dispositionedByBookingAsset.get(bookingAssetId) ?? 0
+            : 0,
+          dispositionBreakdown:
+            (bookingAssetId && breakdownByBookingAsset.get(bookingAssetId)) ||
+            emptyBreakdown(),
+        };
+      }),
+    }));
+
     // Category options computed from the full booking (not just the current page).
-    const assetCategories = enhancedBooking.assets
-      .map((asset) => asset.category)
+    const assetCategories = booking.bookingAssets
+      .map((ba) => ba.asset.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
         (category, index, self) =>
@@ -446,12 +697,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const allCategories = [...assetCategories, ...kitCategories];
 
     // Calculate partial check-in progress.
-    // `booking.assets` is already the FULL, unfiltered booking asset set — its
-    // `getBooking` include applies no status/search filter (those are page
-    // concerns handled in-memory), and each row carries `id` + `kitId`. So we
-    // reuse it for the progress input instead of a second org-scoped round-trip.
-    // It is org-scoped transitively via the org-scoped `getBooking` fetch.
-    const bookingAssetsForProgress = enhancedBooking.assets.map((asset) => ({
+    //
+    // Main's PR #2615 derived this from `enhancedBooking.assets` (the
+    // pre-pivot legacy shape). On feat-quantities `Booking.assets` no longer
+    // exists — its replacement is the per-pivot projection in
+    // `enrichedAssetsForView` (built at line ~507 from `booking.bookingAssets`
+    // with `kitId` resolved through `assetKit.kit.id`). Same shape main fed
+    // in (`{ id, kitId }[]`), no second DB round-trip, and the in-memory
+    // basis is already org-scoped via the org-scoped `getBooking` fetch.
+    const bookingAssetsForProgress = enrichedAssetsForView.map((asset) => ({
       id: asset.id,
       kitId: asset.kitId,
     }));
@@ -496,12 +750,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         currentOrganization,
         header,
-        booking: enhancedBooking,
+        booking,
         modelName,
-        // Shaped view for first paint (same field names the component reads):
-        items: view.items,
+        // Shaped view for first paint (same field names the component reads),
+        // post-enriched with per-row qty disposition data (Polish-6 multi-row).
+        items: enrichedItems,
         page,
-        totalItems: view.totalPaginationItems,
+        // `totalItems` drives the `ListTitle` header count. We include
+        // outstanding `BookingModelRequest` rows on top of the paginated
+        // asset/kit items because the Assets & Kits list now renders a
+        // model-request row per outstanding request (Phase 3d-Polish).
+        // `totalPaginationItems` stays at `view.totalPaginationItems` so
+        // pagination arithmetic over the concrete asset/kit list is
+        // unaffected.
+        totalItems:
+          view.totalPaginationItems +
+          (booking.modelRequests ?? []).filter(
+            (req) => req.fulfilledAt === null
+          ).length,
         totalPaginationItems: view.totalPaginationItems,
         perPage,
         totalPages: view.totalPages,
@@ -510,7 +776,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingFlags,
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
-          assets: enhancedBooking.assets,
+          assets: bookingAssets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
@@ -522,9 +788,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
-        // Raw enriched data + shaping inputs so clientLoader can re-shape
-        // without a server round-trip on search/sort/pagination navigations.
-        rawAssets,
+        // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
+        // so clientLoader can re-shape without a server round-trip on
+        // search/sort/pagination navigations. `rawAssets` here is the per-
+        // BookingAsset-slice projection (one entry per slice, with singular
+        // `kitId`/`kit`/`location`) — exactly what `shapeBookingAssets`
+        // expects from main's perf rewrite, adapted to our pivot model.
+        rawAssets: enrichedAssetsForView,
         rawKits,
         // Current search string so the search input pre-fills on first paint /
         // hard refresh (SearchForm reads `search` from loader data).
@@ -771,7 +1041,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         content: `${actor} deleted booking ${deletedBookingLink}.`,
         type: "UPDATE",
         userId: userId,
-        assetIds: deletedBooking.assets.map((a) => a.id),
+        assetIds: [
+          ...new Set(
+            deletedBooking.bookingAssets.map(
+              (ba: { asset: { id: string } }) => ba.asset.id
+            )
+          ),
+        ],
         organizationId,
       });
 
@@ -943,7 +1219,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked out asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: [...new Set(booking.bookingAssets.map((ba) => ba.assetId))],
           organizationId,
         });
 
@@ -1017,7 +1293,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           content: `${actor} checked in asset with ${bookingLink}.`,
           type: "UPDATE",
           userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
+          assetIds: [
+            ...new Set(booking.bookingAssets.map((ba) => ba.asset.id)),
+          ],
           organizationId,
         });
 
@@ -1132,7 +1410,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }`,
           type: "UPDATE",
           userId,
-          assetIds: cancelledBooking.assets.map((a) => a.id),
+          assetIds: [
+            ...new Set(
+              cancelledBooking.bookingAssets.map(
+                (ba: { assetId: string }) => ba.assetId
+              )
+            ),
+          ],
           organizationId,
         });
 
@@ -1157,12 +1441,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           select: {
             id: true,
             name: true,
-            assets: { select: { id: true } },
+            assetKits: { select: { asset: { select: { id: true } } } },
           },
         });
 
         const b = await removeAssets({
-          booking: { id, assetIds: kit.assets.map((a) => a.id) },
+          booking: {
+            id,
+            assetIds: kit.assetKits.map((ak) => ak.asset.id),
+          },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           userId,
@@ -1296,12 +1583,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const kits = await db.kit.findMany({
           where: { id: { in: assetOrKitIds }, organizationId },
-          select: { id: true, name: true, assets: { select: { id: true } } },
+          select: {
+            id: true,
+            name: true,
+            assetKits: { select: { asset: { select: { id: true } } } },
+          },
         });
 
         // Get asset IDs that belong to the selected kits
         const kitAssetIds = kits.flatMap((kit) =>
-          kit.assets.map((asset) => asset.id)
+          kit.assetKits.map((ak) => ak.asset.id)
         );
 
         // Filter out assets that belong to the selected kits to avoid double-counting
@@ -1371,6 +1662,7 @@ export default function BookingPage() {
   const shouldRenderOutlet = [
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
+    "booking.overview.fulfil-and-checkout",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

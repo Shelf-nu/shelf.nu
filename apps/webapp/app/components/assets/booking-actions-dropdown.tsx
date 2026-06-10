@@ -1,5 +1,6 @@
 import { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { getPrimaryKit } from "~/modules/asset/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isPersonalOrg } from "~/utils/organization";
 import { Button } from "../shared/button";
@@ -13,13 +14,14 @@ export default function BookingActionsDropdown() {
 
   if (isPersonalOrg(organization)) return null;
 
-  const disabled = asset.kit
+  const assetKit = getPrimaryKit<{ id: string; name: string }>(asset);
+  const disabled = assetKit
     ? {
         reason: (
           <>
             Cannot book this asset directly because it's part of a kit. Please
             book the{" "}
-            <Button to={`/kits/${asset.kit.id}`} target="_blank" variant="link">
+            <Button to={`/kits/${assetKit.id}`} target="_blank" variant="link">
               kit
             </Button>{" "}
             instead.

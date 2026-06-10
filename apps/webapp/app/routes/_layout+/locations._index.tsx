@@ -186,7 +186,7 @@ const ListItemContent = ({
       )}
     </Td>
     <Td>{item._count.children}</Td>
-    <Td>{item._count.assets}</Td>
+    <Td>{item._count.assetLocations}</Td>
     <Td>{item._count.kits}</Td>
     <Td>
       <LocationQuickActions

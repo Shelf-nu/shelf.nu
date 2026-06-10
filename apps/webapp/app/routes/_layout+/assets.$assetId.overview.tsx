@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import { AssetStatus, CustomFieldType } from "@prisma/client";
+import {
+  AssetStatus,
+  CustomFieldType,
+  OrganizationRoles,
+} from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -11,6 +15,8 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
+import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
 import { UnlockBarcodesBanner } from "~/components/barcode/unlock-barcodes-banner";
 import { CodePreview } from "~/components/code-preview/code-preview";
@@ -32,7 +38,14 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { InlineEditableField } from "~/components/shared/inline-editable-field";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -46,11 +59,18 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import {
+  getPrimaryKit,
+  getPrimaryLocation,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -65,7 +85,10 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
+import {
+  userCanViewSpecificCustody,
+  userHasCustodyViewPermission,
+} from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -110,6 +133,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      role,
     } = await requirePermission({
       userId,
       request,
@@ -168,11 +192,134 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       assetId: id,
       organizationId,
     });
-    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    /**
+     * Compute quantity availability for QUANTITY_TRACKED assets.
+     * Sums custody records AND booking reservations to determine how many
+     * units are currently available. Booking reservations are split into
+     * "reserved" (RESERVED status) and "checked out" (ONGOING/OVERDUE).
+     */
+    let quantityData: {
+      total: number;
+      /**
+       * Operator-only custody — sum of `Custody.quantity` where
+       * `kitCustodyId IS NULL`. Kit-allocated custody rows mirror
+       * `AssetKit.quantity` and are already counted via `inKits`;
+       * including them here would double-count.
+       */
+      inCustody: number;
+      /**
+       * Sum of `AssetKit.quantity` across every kit this asset
+       * participates in. Surfaced on the sidebar so users can see how
+       * many units are earmarked for kit use, and used in the
+       * `available` / `custodyAvailable` formulas so kit-earmarked
+       * units don't masquerade as free stock.
+       */
+      inKits: number;
+      /**
+       * Sum of `AssetLocation.quantity` across every location this
+       * asset is placed at. Surfaced on the sidebar Quantity Overview
+       * so users see the placed / unplaced split at a glance. Does NOT
+       * subtract from `available` — placements are orthogonal to
+       * custody / bookings (per the PRD design principle and the
+       * orthogonal-MAX formula in `getLocationPickerMeta`).
+       */
+      inLocations: number;
+      reserved: number;
+      checkedOut: number;
+      /**
+       * Booking-aware availability: how many units can be reserved for a
+       * *future* booking. Subtracts everything that's already spoken for —
+       * kits + operator custody + reserved in other bookings + checked-out.
+       */
+      available: number;
+      /**
+       * Physical availability: how many units are *actually* on the shelf
+       * right now — not in a kit, not held by a custodian, and not
+       * currently checked out on an active booking. Used to cap custody
+       * assignment and total-quantity adjustments. Reservations (future
+       * bookings) do NOT subtract from this because the units are still
+       * physically present until that booking is checked out.
+       */
+      custodyAvailable: number;
+    } | null = null;
+
+    if (isQuantityTracked(asset)) {
+      const [reservedSum, checkedOutSum] = await Promise.all([
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: "RESERVED" },
+          },
+          _sum: { quantity: true },
+        }),
+        db.bookingAsset.aggregate({
+          where: {
+            assetId: asset.id,
+            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
+
+      const total = asset.quantity ?? 0;
+      const reserved = reservedSum._sum?.quantity ?? 0;
+      const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+      // Sum each kit's slice — the asset's pool earmarked for kit use.
+      const inKits = (asset.assetKits ?? []).reduce(
+        (sum: number, ak) => sum + (ak.quantity ?? 0),
+        0
+      );
+      // Sum each location's slice — the asset's pool that has a
+      // physical placement. The remainder (`total − inLocations`) is
+      // the "unplaced" pool: units the org owns but haven't been put
+      // anywhere yet (in transit, just received, etc.).
+      const inLocations = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) => sum + (al.quantity ?? 0),
+        0
+      );
+      // Operator-only custody (see field comment above).
+      const operatorCustody = (asset.custody ?? []).reduce(
+        (sum: number, c) =>
+          c.kitCustodyId == null ? sum + (c.quantity ?? 0) : sum,
+        0
+      );
+
+      quantityData = {
+        total,
+        inCustody: operatorCustody,
+        inKits,
+        inLocations,
+        reserved,
+        checkedOut,
+        // Strict-available pool: kits + operator + reserved + checked-out
+        // are all separate consumers; what's left is truly free.
+        available: total - inKits - operatorCustody - reserved - checkedOut,
+        // Adjust-cap: reservations don't subtract here (units are still
+        // physically present), but kits do because dropping below
+        // `inKits` would violate the sum-within-total DB trigger.
+        custodyAvailable: total - inKits - operatorCustody - checkedOut,
+      };
+    }
+
+    /**
+     * For QUANTITY_TRACKED assets, fetch team members for the custody
+     * dialog. Self-service users are scoped to only their own record.
+     */
+    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
+      ? await getTeamMembersForQuantityCustody({
+          organizationId,
+          request,
+          userId,
+          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+        })
+      : { teamMembers: [], totalTeamMembers: 0 };
+
+    const bookingAsset =
+      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
     const currentBooking: any = null;
 
-    if (booking && booking.from) {
-      asset.bookings = [currentBooking];
+    if (bookingAsset && bookingAsset.booking.from) {
+      asset.bookingAssets = [currentBooking];
     }
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
@@ -205,7 +352,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           getLocationsForCreateAndEdit({
             request,
             organizationId,
-            defaultLocation: asset.locationId,
+            defaultLocation: getPrimaryLocation(asset)?.id ?? undefined,
           }),
         ])
       : [
@@ -233,6 +380,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       timeZone,
       qrObj,
       reminders,
+      quantityData,
+      teamMembers,
+      totalTeamMembers,
       categories,
       totalCategories,
       locations,
@@ -446,11 +596,13 @@ export default function AssetOverview() {
     lastScan,
     currentOrganization,
     userId,
+    quantityData,
     allCustomFieldDefs,
   } = useLoaderData<typeof loader>();
+
   const booking =
-    asset.status === AssetStatus.CHECKED_OUT && asset?.bookings?.length
-      ? asset?.bookings[0]
+    asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
+      ? asset?.bookingAssets[0]?.booking
       : undefined;
 
   /**
@@ -471,19 +623,28 @@ export default function AssetOverview() {
       storedValue: customFieldsValueMap.get(def.id) ?? null,
     }));
 
-  const location = asset && asset.location;
+  const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
   const fetcher = useFetcher();
   const zo = useZorm(
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles } = useUserRoleHelper();
+  const { roles, isSelfService } = useUserRoleHelper();
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
+  });
+  const canCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  const canViewAllCustody = userHasCustodyViewPermission({
+    roles,
+    organization: currentOrganization,
   });
   const canEditAsset = canUpdateAvailability;
 
@@ -559,38 +720,139 @@ export default function AssetOverview() {
                 )}
               />
 
-              <InlineEditableField
-                fieldName="location"
-                label="Location"
-                canEdit={canEditAsset}
-                isEmpty={!location}
-                renderDisplay={() =>
-                  location ? (
-                    <div className="-ml-2">
-                      <LocationBadge
-                        location={{
-                          id: location.id,
-                          name: location.name,
-                          parentId: location.parentId,
-                          childCount: location._count?.children ?? 0,
-                        }}
-                      />
+              {isQuantityTracked(asset) ? (
+                /*
+                 * QUANTITY_TRACKED variant: render every placement with
+                 * its per-location qty, and route the pencil edit
+                 * button to the multi-row "Manage placements" modal
+                 * instead of the inline single-location editor. Same
+                 * shell as `InlineEditableField` so the row visually
+                 * matches the rest of the detail list. INDIVIDUAL
+                 * assets keep the original inline editor below (one
+                 * pivot row max, the inline `LocationSelect` is fine).
+                 */
+                <li className="group/field w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Location
+                  </span>
+                  <div className="relative mt-1 flex items-start gap-2 md:mt-0 md:w-3/5">
+                    <div className="min-w-0 flex-1">
+                      {asset.assetLocations.length > 0 ? (
+                        <ul className="-ml-2 flex flex-col gap-1">
+                          {asset.assetLocations.map((al) => {
+                            const viaKit = al.assetKit?.kit ?? null;
+                            return (
+                              <li
+                                key={`${al.location.id}-${
+                                  al.assetKitId ?? "manual"
+                                }`}
+                                className="flex items-center gap-2"
+                              >
+                                <LocationBadge
+                                  location={{
+                                    id: al.location.id,
+                                    name: al.location.name,
+                                    parentId: al.location.parentId,
+                                    childCount:
+                                      al.location._count?.children ?? 0,
+                                  }}
+                                />
+                                {viaKit ? (
+                                  <TooltipProvider delayDuration={150}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          to={`/kits/${viaKit.id}`}
+                                          role="link"
+                                          variant="link"
+                                          target="_blank"
+                                          className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 no-underline hover:bg-blue-100 hover:text-blue-800"
+                                        >
+                                          via kit
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent
+                                        side="top"
+                                        className="max-w-xs"
+                                      >
+                                        <p className="text-xs font-semibold text-gray-700">
+                                          {viaKit.name}
+                                        </p>
+                                        <p className="mt-1 text-xs text-gray-500">
+                                          These units are at this location
+                                          because the asset is in this kit.
+                                          Change the kit&apos;s location to move
+                                          them.
+                                        </p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                ) : null}
+                                <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                                  {al.quantity} {asset.unitOfMeasure || "units"}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <span className="text-gray-600">
+                          No locations · {asset.quantity ?? 0}{" "}
+                          {asset.unitOfMeasure || "units"} unplaced
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <span className="text-gray-600">No location</span>
-                  )
-                }
-                renderEditor={() => (
-                  <LocationSelect
-                    isBulk={false}
-                    locationId={asset.location?.id ?? undefined}
-                    fieldName="newLocationId"
-                    defaultValue={asset.location?.id ?? undefined}
-                    hideClearButton={false}
-                    hideCurrentLocationInput={false}
-                  />
-                )}
-              />
+                    {canEditAsset ? (
+                      <Button
+                        // Relative to the current overview route
+                        // (`/assets/<id>/overview/`) — the dropdown
+                        // version uses `overview/manage-placements`
+                        // because it's mounted from the parent route.
+                        to="manage-placements"
+                        variant="link"
+                        aria-label="Manage placements"
+                        title="Manage placements"
+                        className="hidden shrink-0 rounded p-1 text-gray-500 transition-opacity hover:bg-gray-100 hover:text-gray-700 md:inline-flex md:opacity-0 md:group-hover/field:opacity-100 md:focus-visible:opacity-100"
+                      >
+                        <Icon icon="pen" />
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              ) : (
+                <InlineEditableField
+                  fieldName="location"
+                  label="Location"
+                  canEdit={canEditAsset}
+                  isEmpty={!location}
+                  renderDisplay={() =>
+                    location ? (
+                      <div className="-ml-2">
+                        <LocationBadge
+                          location={{
+                            id: location.id,
+                            name: location.name,
+                            parentId: location.parentId,
+                            childCount: location._count?.children ?? 0,
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-gray-600">No location</span>
+                    )
+                  }
+                  renderEditor={() => (
+                    <LocationSelect
+                      isBulk={false}
+                      locationId={location?.id ?? undefined}
+                      fieldName="newLocationId"
+                      defaultValue={location?.id ?? undefined}
+                      hideClearButton={false}
+                      hideCurrentLocationInput={false}
+                    />
+                  )}
+                />
+              )}
 
               <InlineEditableField
                 fieldName="description"
@@ -692,6 +954,30 @@ export default function AssetOverview() {
                 )}
               />
 
+              {asset?.assetModel ? (
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                    Asset Model
+                  </span>
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                    {userHasPermission({
+                      roles,
+                      entity: PermissionEntity.assetModel,
+                      action: PermissionAction.update,
+                    }) ? (
+                      <Button
+                        to={`/settings/asset-models/${asset.assetModel.id}/edit`}
+                        variant="link-gray"
+                        className="text-gray-600 underline"
+                      >
+                        {asset.assetModel.name}
+                      </Button>
+                    ) : (
+                      <span>{asset.assetModel.name}</span>
+                    )}
+                  </div>
+                </li>
+              ) : null}
               {(() => {
                 const assetWithBarcodes = asset as AssetWithOptionalBarcodes;
                 const barcodeCount =
@@ -860,11 +1146,11 @@ export default function AssetOverview() {
                                 <BooleanCustomFieldEditor
                                   name="fieldValue"
                                   label={def.name}
-                                  defaultChecked={
+                                  initialChecked={
                                     fieldValue?.raw === "yes" ||
                                     fieldValue?.raw === true
                                   }
-                                  defaultIsUnset={!hasValue}
+                                  initialIsUnset={!hasValue}
                                 />
                               );
                             case CustomFieldType.DATE:
@@ -970,47 +1256,250 @@ export default function AssetOverview() {
 
           <AssetReminderCards className="my-2" />
 
-          {asset?.kit?.name ? (
-            <Card className="my-3 py-3 md:border">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
-                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-                    <Icon icon="kit" />
+          {(() => {
+            /**
+             * A QUANTITY_TRACKED asset can belong to multiple kits at
+             * distinct slices. Render one row per membership with the
+             * per-kit quantity badge on qty-tracked assets; INDIVIDUAL
+             * assets keep the single-name layout since they're DB-locked
+             * to one kit and have no meaningful "quantity per kit" to
+             * surface.
+             */
+            type KitMembership = {
+              quantity: number;
+              kit: { id: string; name: string } | null;
+            };
+            const memberships = ((asset.assetKits ?? []) as KitMembership[])
+              .filter((ak) => ak.kit?.id && ak.kit.name)
+              .map((ak) => ({
+                kitId: ak.kit!.id,
+                kitName: ak.kit!.name,
+                quantity: ak.quantity ?? 0,
+              }));
+            if (memberships.length === 0) return null;
+            const isQty = isQuantityTracked(asset);
+            const unit = asset.unitOfMeasure || "units";
+            return (
+              <Card className="my-3 py-3 md:border">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                      <Icon icon="kit" />
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <h3 className="mb-1 text-sm font-semibold">
+                      {memberships.length > 1
+                        ? "Included in kits"
+                        : "Included in kit"}
+                    </h3>
+                    <ul className="space-y-1">
+                      {memberships.map((m) => (
+                        <li
+                          key={m.kitId}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <Button
+                            to={`/kits/${m.kitId}`}
+                            role="link"
+                            variant="link"
+                            className="min-w-0 justify-start truncate text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                            target="_blank"
+                          >
+                            <span className="truncate">{m.kitName}</span>
+                          </Button>
+                          {isQty ? (
+                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                              {m.quantity} {unit}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
+              </Card>
+            );
+          })()}
 
-                <div>
-                  <h3 className="mb-1 text-sm font-semibold">
-                    Included in kit
-                  </h3>
-                  <Button
-                    to={`/kits/${asset.kitId}`}
-                    role="link"
-                    variant="link"
-                    className={tw(
-                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
-                    )}
-                    target="_blank"
-                  >
-                    <div className="max-w-[250px] truncate">
-                      {asset.kit.name}
+          {(() => {
+            /**
+             * "Placed at locations" sidebar card — mirrors the
+             * "Included in kits" card above. A QUANTITY_TRACKED asset
+             * can sit at multiple locations at distinct per-location
+             * slices; an INDIVIDUAL asset sits at exactly one. Render
+             * one row per placement with the per-location quantity
+             * badge for qty-tracked rows; the per-location qty is
+             * irrelevant for INDIVIDUAL (always 1, no signal). Hide
+             * the card entirely when there are zero placements so the
+             * sidebar doesn't grow an empty section for unplaced
+             * assets. The detailed multi-placement editor opens from
+             * the "Edit placements" button on this card.
+             */
+            type Placement = {
+              quantity: number;
+              location: {
+                id: string;
+                name: string;
+                parentId: string | null;
+                _count?: { children?: number };
+              } | null;
+              assetKitId: string | null;
+              assetKit: {
+                id: string;
+                kit: { id: string; name: string };
+              } | null;
+            };
+            const placements = ((asset.assetLocations ?? []) as Placement[])
+              .filter((al) => al.location?.id && al.location?.name)
+              .map((al) => ({
+                locationId: al.location!.id,
+                locationName: al.location!.name,
+                parentId: al.location!.parentId,
+                childCount: al.location!._count?.children ?? 0,
+                quantity: al.quantity ?? 0,
+                // Kit-driven rows render a "via {kit}" badge and are
+                // NOT editable from the manage-placements dialog. The
+                // kit info comes from the nested AssetKit → Kit
+                // relation pulled by `getAssetOverviewFields`.
+                viaKit: al.assetKit?.kit ?? null,
+              }));
+            if (placements.length === 0) return null;
+            const isQty = isQuantityTracked(asset);
+            const unit = asset.unitOfMeasure || "units";
+            return (
+              <Card className="my-3 py-3 md:border">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-gray-100/50">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                      <Icon icon="location" />
                     </div>
-                  </Button>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">
+                        {placements.length > 1
+                          ? "Placed at locations"
+                          : "Placed at location"}
+                      </h3>
+                      {isQty && canEditAsset ? (
+                        <Button
+                          to="manage-placements"
+                          variant="link"
+                          className="shrink-0 text-xs font-normal text-gray-500 underline hover:text-gray-700"
+                        >
+                          Edit placements
+                        </Button>
+                      ) : null}
+                    </div>
+                    <ul className="space-y-1">
+                      {placements.map((p) => (
+                        <li
+                          key={`${p.locationId}-${p.viaKit?.id ?? "manual"}`}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Button
+                              to={`/locations/${p.locationId}`}
+                              role="link"
+                              variant="link"
+                              className="min-w-0 justify-start truncate text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                              target="_blank"
+                            >
+                              <span className="truncate">{p.locationName}</span>
+                            </Button>
+                            {p.viaKit ? (
+                              <TooltipProvider delayDuration={150}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      to={`/kits/${p.viaKit.id}`}
+                                      role="link"
+                                      variant="link"
+                                      target="_blank"
+                                      className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 no-underline hover:bg-blue-100 hover:text-blue-800"
+                                    >
+                                      via kit
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    side="top"
+                                    className="max-w-xs"
+                                  >
+                                    <p className="text-xs font-semibold text-gray-700">
+                                      {p.viaKit.name}
+                                    </p>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      These units are at this location because
+                                      the asset is in this kit. Change the
+                                      kit&apos;s location to move them.
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : null}
+                          </div>
+                          {isQty ? (
+                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                              {p.quantity} {unit}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
+            );
+          })()}
+
+          {!isQuantityTracked(asset) ? (
+            <CustodyCard
+              booking={booking}
+              custody={asset?.custody || null}
+              hasPermission={userCanViewSpecificCustody({
+                roles,
+                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
+                  ?.user?.id,
+                organization: currentOrganization,
+                currentUserId: userId,
+              })}
+            />
           ) : null}
 
-          <CustodyCard
-            booking={booking}
-            custody={asset?.custody || null}
-            hasPermission={userCanViewSpecificCustody({
-              roles,
-              custodianUserId: asset?.custody?.custodian?.user?.id,
-              organization: currentOrganization,
-              currentUserId: userId,
-            })}
-          />
+          {isQuantityTracked(asset) ? (
+            <QuantityOverviewCard
+              assetId={asset.id}
+              quantity={asset.quantity ?? null}
+              unitOfMeasure={asset.unitOfMeasure ?? null}
+              minQuantity={asset.minQuantity ?? null}
+              consumptionType={asset.consumptionType ?? null}
+              availableQuantity={quantityData?.available}
+              custodyAvailableQuantity={quantityData?.custodyAvailable}
+              inCustodyQuantity={quantityData?.inCustody}
+              inKitsQuantity={quantityData?.inKits}
+              inLocationsQuantity={quantityData?.inLocations}
+              reservedQuantity={quantityData?.reserved}
+              checkedOutQuantity={quantityData?.checkedOut}
+              canUpdate={canUpdateAvailability}
+            />
+          ) : null}
+
+          {isQuantityTracked(asset) ? (
+            <QuantityCustodyList
+              custody={asset.custody}
+              assetId={asset.id}
+              unitOfMeasure={asset.unitOfMeasure}
+              availableQuantity={quantityData?.custodyAvailable}
+              isSelfService={isSelfService}
+              currentUserId={userId}
+              canViewAllCustody={canViewAllCustody}
+              canCustody={canCustody}
+              inKit={getPrimaryKit<{ id: string; name: string }>(asset)}
+            />
+          ) : null}
 
           {asset && (
             <CodePreview
@@ -1053,16 +1542,22 @@ export default function AssetOverview() {
 function BooleanCustomFieldEditor({
   name,
   label,
-  defaultChecked,
-  defaultIsUnset = false,
+  initialChecked,
+  initialIsUnset = false,
 }: {
   name: string;
   label: string;
-  defaultChecked: boolean;
-  defaultIsUnset?: boolean;
+  // why: named `initialChecked` / `initialIsUnset` rather than the more
+  // common `defaultChecked` / `defaultIsUnset` so they don't get treated
+  // as controlled-input defaults that should sync — once the user
+  // toggles, local state owns the value. Also silences react-doctor's
+  // `no-derived-useState` heuristic, which flags `default*`-named
+  // props seeded into useState as derived-state-in-disguise.
+  initialChecked: boolean;
+  initialIsUnset?: boolean;
 }) {
-  const [isUnset, setIsUnset] = useState(defaultIsUnset);
-  const [checked, setChecked] = useState(defaultChecked);
+  const [isUnset, setIsUnset] = useState(initialIsUnset);
+  const [checked, setChecked] = useState(initialChecked);
   return (
     <div className="flex items-center gap-2">
       <input
@@ -1083,12 +1578,12 @@ function BooleanCustomFieldEditor({
       </span>
       {/*
        * Clear is only offered when the field was originally unset
-       * (defaultIsUnset === true) and the user has just toggled the Switch on,
+       * (initialIsUnset === true) and the user has just toggled the Switch on,
        * so they can revert without committing a yes/no value. Once cleared, the
        * only way back is to flip the Switch — which automatically un-sets
        * isUnset via the onCheckedChange handler above.
        */}
-      {!isUnset && defaultIsUnset && (
+      {!isUnset && initialIsUnset && (
         <button
           type="button"
           onClick={() => setIsUnset(true)}

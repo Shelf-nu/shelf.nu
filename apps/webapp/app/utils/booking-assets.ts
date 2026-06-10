@@ -25,11 +25,25 @@ export type KitWithStatus = {
 };
 
 /**
- * Asset status as surfaced in a booking context: the persisted {@link AssetStatus}
- * plus the synthetic `"PARTIALLY_CHECKED_IN"` state, which only exists relative
- * to a specific booking and is never stored on the asset itself.
+ * Booking-context status extensions beyond the raw Prisma `AssetStatus`:
+ *
+ * - `PARTIALLY_CHECKED_IN` — INDIVIDUAL-asset flow OR a fully-reconciled
+ *   QUANTITY_TRACKED row (`dispositioned >= booked` for THIS row). Rendered
+ *   as "Already checked in" (blue). Synthetic — only meaningful relative
+ *   to a specific booking and never stored on the asset itself.
+ * - `PARTIALLY_CHECKED_IN_QTY` — legacy Phase 3c label. Kept for callers
+ *   that need the "Partially checked in" wording. Rendered amber.
+ * - `PARTIALLY_CHECKED_OUT_QTY` — QUANTITY_TRACKED, this row has SOME
+ *   units dispositioned but `remaining > 0`. Rendered as "Partially
+ *   checked out" (violet) to emphasise that work is still outstanding.
+ *   Booking rows use this in preference to `PARTIALLY_CHECKED_IN_QTY`
+ *   so the user sees "still partly out" rather than "already partly in".
  */
-export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
+export type ExtendedAssetStatus =
+  | AssetStatus
+  | "PARTIALLY_CHECKED_IN"
+  | "PARTIALLY_CHECKED_IN_QTY"
+  | "PARTIALLY_CHECKED_OUT_QTY";
 
 /**
  * Kit status as surfaced in a booking context: the persisted {@link KitStatus}
@@ -39,14 +53,21 @@ export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
 export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
 
 /**
- * Context-aware asset status resolver for booking operations
+ * Context-aware asset status resolver for booking operations.
  *
  * Determines the effective status of an asset within a booking context:
- * - If asset has partial check-in details AND booking is ONGOING/OVERDUE -> PARTIALLY_CHECKED_IN
- * - If asset has partial check-in details AND booking is COMPLETE -> AVAILABLE
- * - Otherwise -> original database status
+ * - INDIVIDUAL asset, partial check-in + booking ONGOING/OVERDUE → PARTIALLY_CHECKED_IN
+ * - INDIVIDUAL asset, otherwise → raw `Asset.status`
  *
- * This ensures consistent logic across validation, display, and business operations
+ * QUANTITY_TRACKED assets need a different treatment for DRAFT/RESERVED
+ * bookings. The global `Asset.status` (e.g. `CHECKED_OUT`) can reflect
+ * state from a *different* active booking or stale data from a prior
+ * cancellation — neither is relevant to a DRAFT/RESERVED row in the
+ * current booking, and surfacing "Checked out" there is misleading
+ * ("this booking hasn't checked anything out yet"). So for qty-tracked
+ * assets we hard-override to `AVAILABLE` when the booking is
+ * DRAFT/RESERVED, letting the row focus on this booking's own progress
+ * (reserved qty, disposition indicator) rather than global pool state.
  */
 export function getBookingContextAssetStatus(
   asset: AssetWithStatus,
@@ -64,6 +85,21 @@ export function getBookingContextAssetStatus(
     ["ONGOING", "OVERDUE"].includes(bookingStatus)
   ) {
     return "PARTIALLY_CHECKED_IN";
+  }
+
+  /**
+   * QUANTITY_TRACKED + DRAFT/RESERVED: the per-row badge should reflect
+   * *this* booking's state, not the shared pool's. "Checked out" leaking
+   * in from a prior booking (or from stale data) is noise at best and
+   * incorrect at worst. Force AVAILABLE; the qty progress indicator
+   * elsewhere in the row surfaces whatever real signal exists.
+   */
+  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
+  if (
+    isQtyTracked &&
+    (bookingStatus === "DRAFT" || bookingStatus === "RESERVED")
+  ) {
+    return AssetStatus.AVAILABLE;
   }
 
   return asset.status as AssetStatus;
@@ -179,12 +215,32 @@ export function getBookingContextKitStatus(
   const kitAssetsInBooking =
     kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
 
-  // Check if ALL kit assets in booking are partially checked in
+  /**
+   * "All checked in" needs per-row awareness for QUANTITY_TRACKED kit
+   * members. `partialCheckinDetails` is keyed by `assetId` and only
+   * surfaces an asset when it's fully reconciled across the whole
+   * booking — but with Polish-6 multi-row slices a qty-tracked member
+   * can have its kit-driven slice fully reconciled (the only slice
+   * relevant to this kit) while a parallel standalone slice still has
+   * outstanding units. Fall back to per-row `bookedQuantity` vs
+   * `dispositionedQuantity` when those are available on the asset.
+   * INDIVIDUAL members keep the original `partialCheckinDetails` check.
+   */
   const allAssetsCheckedIn =
     kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
+    kitAssetsInBooking.every((asset) => {
+      const a = asset as AssetWithStatus & {
+        type?: string;
+        bookedQuantity?: number;
+        dispositionedQuantity?: number;
+      };
+      if (a.type === "QUANTITY_TRACKED") {
+        const booked = a.bookedQuantity ?? 0;
+        const dispositioned = a.dispositionedQuantity ?? 0;
+        return booked > 0 && dispositioned >= booked;
+      }
+      return Boolean(partialCheckinDetails[asset.id]);
+    });
 
   // Only show as PARTIALLY_CHECKED_IN for active bookings
   // For COMPLETE bookings, kits should show as AVAILABLE
@@ -230,22 +286,13 @@ export function isKitPartiallyCheckedIn(
   bookingAssetIds: Set<string>,
   bookingStatus: string
 ): boolean {
-  const kitAssetsInBooking =
-    kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
-
-  // Check if ALL kit assets in booking are checked in
-  const allAssetsCheckedIn =
-    kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
-
-  if (!allAssetsCheckedIn) {
-    return false;
-  }
-
-  // Only consider as "partially checked in" for active bookings
-  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
+  const contextStatus = getBookingContextKitStatus(
+    kit,
+    partialCheckinDetails,
+    bookingAssetIds,
+    bookingStatus
+  );
+  return contextStatus === "PARTIALLY_CHECKED_IN";
 }
 
 /**

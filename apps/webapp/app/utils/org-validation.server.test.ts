@@ -15,11 +15,13 @@
 import { ShelfError } from "./error";
 import {
   assertAssetsBelongToOrg,
+  assertAssetKitsBelongToOrg,
+  assertAssetModelBelongsToOrg,
+  assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
+  assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
-  assertCategoryBelongsToOrg,
-  assertLocationBelongsToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
 
@@ -39,6 +41,8 @@ function txWith(overrides: Record<string, any>) {
     location: { findFirst: vitest.fn().mockResolvedValue(null) },
     customField: { findMany: vitest.fn().mockResolvedValue([]) },
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
+    assetKit: { findMany: vitest.fn().mockResolvedValue([]) },
+    assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
   } as any;
 }
@@ -106,6 +110,70 @@ describe("assertAssetsBelongToOrg", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.title).toBe("Invalid assets");
+  });
+});
+
+describe("assertAssetKitsBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({});
+    await expect(
+      assertAssetKitsBelongToOrg({ assetKitIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every AssetKit belongs to the org and scopes by organizationId", async () => {
+    const tx = txWith({
+      assetKit: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "ak1" }, { id: "ak2" }]),
+      },
+    });
+
+    await expect(
+      assertAssetKitsBelongToOrg(
+        { assetKitIds: ["ak1", "ak2"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak1", "ak2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("dedupes input so duplicate IDs don't inflate the expected count", async () => {
+    const tx = txWith({
+      assetKit: { findMany: vitest.fn().mockResolvedValue([{ id: "ak1" }]) },
+    });
+
+    await expect(
+      assertAssetKitsBelongToOrg(
+        { assetKitIds: ["ak1", "ak1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak1"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any AssetKit id is foreign/missing", async () => {
+    // ak2 belongs to another org → org-scoped findMany returns only ak1
+    const tx = txWith({
+      assetKit: { findMany: vitest.fn().mockResolvedValue([{ id: "ak1" }]) },
+    });
+
+    const err = await assertAssetKitsBelongToOrg(
+      { assetKitIds: ["ak1", "ak2"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid kits");
   });
 });
 
@@ -271,6 +339,38 @@ describe("single-entity guards reject foreign/missing with 404", () => {
     });
     await expect(
       assertLocationBelongsToOrg({ locationId: "l-1", organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+  });
+
+  it("assertAssetModelBelongsToOrg throws 404 when foreign/missing", async () => {
+    const tx = txWith({
+      assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
+    });
+    const err = await assertAssetModelBelongsToOrg(
+      { assetModelId: "am-foreign", organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(404);
+    expect(err.title).toBe("Invalid asset model");
+    expect(tx.assetModel.findFirst).toHaveBeenCalledWith({
+      where: { id: "am-foreign", organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("assertAssetModelBelongsToOrg resolves when the model is in the org", async () => {
+    const tx = txWith({
+      assetModel: {
+        findFirst: vitest.fn().mockResolvedValue({ id: "am-1" }),
+      },
+    });
+    await expect(
+      assertAssetModelBelongsToOrg(
+        { assetModelId: "am-1", organizationId: ORG },
+        tx
+      )
     ).resolves.toBeUndefined();
   });
 });

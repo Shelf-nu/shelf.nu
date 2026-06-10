@@ -3,11 +3,16 @@ import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
-import { selectedBulkItemsCountAtom } from "~/atoms/list";
+import {
+  selectedBulkItemsAtom,
+  selectedBulkItemsCountAtom,
+} from "~/atoms/list";
 import useApiQuery from "~/hooks/use-api-query";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import KitSelector from "../kits/kit-selector";
 import { Button } from "../shared/button";
+import { WarningBox } from "../shared/warning-box";
 
 export const BulkAddToKitSchema = z.object({
   assetIds: z.string().array().min(1),
@@ -18,6 +23,14 @@ export default function BulkAddToKitDialog() {
   const zo = useZorm("BulkAddToKit", BulkAddToKitSchema);
 
   const selectedAssets = useAtomValue(selectedBulkItemsCountAtom);
+  const selectedItems = useAtomValue(selectedBulkItemsAtom);
+  // why: bulk add-to-kit can't carry a per-asset quantity input, so qty-tracked
+  // assets in the selection are silently skipped server-side (mirrors the
+  // bulk-update-location pattern — see `bulkUpdateAssetLocation`). Surfacing
+  // the count here lets the user know up-front how many rows will be skipped.
+  const quantityTrackedCount = selectedItems.filter((item) =>
+    isQuantityTracked(item)
+  ).length;
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
 
   const isOpen = bulkDialogOpenState["add-to-kit"] === true;
@@ -42,6 +55,18 @@ export default function BulkAddToKitDialog() {
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <div className="modal-content-wrapper">
+          {quantityTrackedCount > 0 ? (
+            <div className="mb-4">
+              <WarningBox>
+                <span>
+                  {quantityTrackedCount} quantity-tracked asset(s) in your
+                  selection will be skipped. Quantity-tracked assets must be
+                  added to a kit individually with a specific quantity from the
+                  kit's manage-assets page.
+                </span>
+              </WarningBox>
+            </div>
+          ) : null}
           <div className="relative z-50 mb-8">
             <KitSelector
               name={zo.fields.kit()}
@@ -50,14 +75,6 @@ export default function BulkAddToKitDialog() {
               isLoading={isLoading}
               error={zo.errors.kit()?.message || error || fetcherError}
             />
-          </div>
-
-          <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 p-3">
-            <p className="text-sm text-blue-800">
-              <strong>Location Update Notice:</strong> Adding assets to a kit
-              will automatically update the asset locations to match the kit's
-              location (if the kit has one).
-            </p>
           </div>
 
           <div className="flex gap-3">

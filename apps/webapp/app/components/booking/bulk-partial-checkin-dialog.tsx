@@ -43,7 +43,10 @@ export default function BulkPartialCheckinDialog({
 
   // Create a map for quick asset lookup
   const bookingAssetsMap = new Map(
-    booking.assets.map((asset) => [asset.id, asset])
+    booking.bookingAssets.map((ba: { asset: { id: string } }) => [
+      ba.asset.id,
+      ba.asset,
+    ])
   );
 
   // Enrich selection data with booking asset information and filter for CHECKED_OUT
@@ -103,10 +106,12 @@ export default function BulkPartialCheckinDialog({
   const checkedInAssetIds = new Set(
     partialCheckinProgress?.checkedInAssetIds || []
   );
-  const remainingCheckedOutAssets = booking.assets.filter(
-    (asset) =>
-      asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
-  );
+  const remainingCheckedOutAssets = booking.bookingAssets
+    .map((ba: { asset: { id: string; status: string } }) => ba.asset)
+    .filter(
+      (asset: { id: string; status: string }) =>
+        asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
+    );
   // Count only individual assets (exclude kit IDs) for final check-in detection
   const selectedAssetIds = selectedItems
     .filter((item: any) => item.title && !item._count) // Only assets, not kits

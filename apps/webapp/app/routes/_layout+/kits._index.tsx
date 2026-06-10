@@ -110,28 +110,32 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           qrCodes: { select: { id: true } },
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              availableToBook: true,
-              status: true,
-              ...(view === "availability" && {
-                bookings: {
-                  where: {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                  },
-                  select: {
-                    id: true,
-                    name: true,
-                    status: true,
-                    from: true,
-                    to: true,
-                    description: true,
-                    custodianTeamMember: true,
-                    custodianUser: true,
-                  },
+              asset: {
+                select: {
+                  id: true,
+                  availableToBook: true,
+                  status: true,
+                  ...(view === "availability" && {
+                    bookings: {
+                      where: {
+                        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                      },
+                      select: {
+                        id: true,
+                        name: true,
+                        status: true,
+                        from: true,
+                        to: true,
+                        description: true,
+                        custodianTeamMember: true,
+                        custodianUser: true,
+                      },
+                    },
+                  }),
                 },
-              }),
+              },
             },
           },
           category: true,
@@ -389,8 +393,12 @@ function ListContent({
       typeof KITS_INCLUDE_FIELDS,
       {
         qrCodes: { select: { id: true } };
-        assets: {
-          select: { id: true; availableToBook: true; status: true };
+        assetKits: {
+          select: {
+            asset: {
+              select: { id: true; availableToBook: true; status: true };
+            };
+          };
         };
         category: true;
         location: typeof LOCATION_WITH_HIERARCHY;
@@ -445,7 +453,9 @@ function ListContent({
               <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
-                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
+                  availableToBook={
+                    !item.assetKits.some((ak) => !ak.asset.availableToBook)
+                  }
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
@@ -481,7 +491,7 @@ function ListContent({
           />
         ) : null}
       </Td>
-      <Td>{item._count.assets}</Td>
+      <Td>{item._count.assetKits}</Td>
       <Td>
         <TeamMemberBadge teamMember={item?.custody?.custodian} />
       </Td>

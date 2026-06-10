@@ -29,23 +29,42 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
     },
   },
   _count: {
-    select: { assets: true },
+    select: { bookingAssets: true },
   },
 };
 
 /**
  * Extended include for reservation emails — adds minimal asset fields
- * for displaying booked items in the email.
+ * (via the BookingAsset pivot) for displaying booked items in the email.
  * Only used in reserveBooking(), NOT in other email flows.
+ *
+ * Also pulls `modelRequests` (Book-by-Model intent rows) with the
+ * related `assetModel` so the reservation email can render a
+ * "Requested models" section alongside the booked items list.
  */
 export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
   ...BOOKING_INCLUDE_FOR_EMAIL,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      category: {
+  bookingAssets: {
+    include: {
+      asset: {
         select: {
+          id: true,
+          title: true,
+          type: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  modelRequests: {
+    include: {
+      assetModel: {
+        select: {
+          id: true,
           name: true,
         },
       },
@@ -54,18 +73,27 @@ export const BOOKING_INCLUDE_FOR_RESERVATION_EMAIL = {
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets for reservation email, inferred from Prisma include
+ * Type for a booking with bookingAssets for reservation email, inferred from Prisma include
  */
 type BookingForReservationEmail = Prisma.BookingGetPayload<{
   include: typeof BOOKING_INCLUDE_FOR_RESERVATION_EMAIL;
 }>;
 
 /**
- * Type for assets as returned in reservation emails.
+ * Type for a single BookingAsset pivot row as returned in reservation emails.
  * Inferred from the Prisma include to ensure type safety.
  */
 export type ReservationEmailAsset =
-  BookingForReservationEmail["assets"][number];
+  BookingForReservationEmail["bookingAssets"][number];
+
+/**
+ * Type for a single outstanding `BookingModelRequest` row as returned
+ * in reservation emails (Book-by-Model). Inferred from the Prisma
+ * include so the email renderer can rely on `assetModel.name` without
+ * restating the shape.
+ */
+export type ReservationEmailModelRequest =
+  BookingForReservationEmail["modelRequests"][number];
 
 /** Max number of assets to display in booking email notifications */
 export const BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT = 10;
@@ -79,51 +107,93 @@ export const BOOKING_COMMON_INCLUDE = {
 
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
-  assets: {
-    select: {
-      id: true,
-      title: true,
-      availableToBook: true,
-      status: true,
-      kitId: true,
-      valuation: true,
-      // Asset-code resolution fields — see `app/modules/barcode/display.ts`
-      // for the canonical select shape. Tight `take: 1` + narrow `select`
-      // keeps query weight minimal even with hundreds of booking assets.
-      sequentialId: true,
-      preferredBarcodeId: true,
-      qrCodes: { take: 1, select: { id: true } },
-      barcodes: { select: { id: true, type: true, value: true } },
-      // Tag names — searchable in-memory by filterBookingAssets (assets only).
-      tags: { select: { name: true } },
-      category: {
+  bookingAssets: {
+    // `assetKitId` is the per-row discriminator (`null` = standalone
+    // slice, non-null = kit-driven slice). Booking UI grouping reads
+    // this instead of `asset.assetKits[0]?.kit` so a standalone scan
+    // of a qty-tracked asset doesn't get rendered under a kit it
+    // doesn't belong to in this booking. The id is the FK to
+    // `AssetKit`; the corresponding kit's name/id are resolved via
+    // the asset's `assetKits` array below (same source data).
+    include: {
+      asset: {
         select: {
           id: true,
-          name: true,
-          color: true,
-        },
-      },
-      // Asset's own location — drives the Location column sort and search.
-      location: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      kit: {
-        select: {
-          name: true,
-          // Kit's own location + category — needed for kit-group location
-          // sorting and kit-level search. Kits have no sequentialId/tags.
-          location: {
+          title: true,
+          type: true,
+          consumptionType: true,
+          unitOfMeasure: true,
+          availableToBook: true,
+          status: true,
+          valuation: true,
+          // Asset-code resolution fields — see `app/modules/barcode/display.ts`
+          // for the canonical select shape. Tight `take: 1` + narrow `select`
+          // keeps query weight minimal even with hundreds of booking assets.
+          sequentialId: true,
+          preferredBarcodeId: true,
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
+          // `mainImage`/`thumbnailImage` are consumed by the partial
+          // check-in drawer's "expected assets" list (see the loader in
+          // `bookings.$bookingId.overview.checkin-assets.tsx`) and by
+          // the synthetic scanned-item payload produced by
+          // `quickCheckinQtyAssetAtom`. Selecting them here keeps those
+          // flows on the existing booking query rather than issuing a
+          // second round-trip for images.
+          mainImage: true,
+          thumbnailImage: true,
+          // Tag names — searchable in-memory by filterBookingAssets (assets only).
+          tags: { select: { name: true } },
+          category: {
             select: {
               id: true,
               name: true,
+              color: true,
             },
           },
-          category: {
+          // Asset's location lives on the `AssetLocation` pivot post-4b.
+          // Each row carries a `quantity` so we can surface "X units at L"
+          // for qty-tracked assets; for INDIVIDUAL there's exactly one
+          // row. Consumers normalise to a singular `location` via the
+          // primary-location helper at the loader boundary, feeding the
+          // Location column / sort / search added in main's perf rewrite.
+          assetLocations: {
             select: {
-              name: true,
+              id: true,
+              quantity: true,
+              location: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+          // `kit.id`/`kit.image` are needed by the partial check-in
+          // drawer so we can render a kit summary row grouped from
+          // `booking.bookingAssets`. `location` + `category` are needed
+          // for kit-group location sorting and kit-level search added
+          // by main's perf rewrite — surfaced here under the pivot so
+          // the slice's kit identity stays correct for qty-tracked.
+          assetKits: {
+            select: {
+              // `id` lets the booking grouping logic match
+              // `BookingAsset.assetKitId` against the asset's set of
+              // AssetKit memberships so we can resolve the specific
+              // kit a row was booked under (qty-tracked assets can be
+              // in multiple kits).
+              id: true,
+              kitId: true,
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                  location: {
+                    select: { id: true, name: true },
+                  },
+                  category: {
+                    select: { name: true },
+                  },
+                },
+              },
             },
           },
         },
@@ -136,24 +206,35 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
     // order) so the in-memory sorts receive the exact same input as before —
     // preserving the booking page's default ordering 1:1.
     orderBy: [
-      { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
-      { createdAt: "asc" }, // Then by creation order as fallback
+      { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
+      { asset: { createdAt: "asc" } }, // Then by creation order as fallback
     ],
+  },
+  // Surface any outstanding `BookingModelRequest` rows (Book-by-Model
+  // intent rows) alongside concrete `bookingAssets` so every loader
+  // reusing this include can render the "unassigned model reservations"
+  // section and the checkout guard can enforce fulfilment. Intentionally
+  // kept cheap — `assetModel` selects just enough for UI/error
+  // messaging; no deep graph traversal required.
+  modelRequests: {
+    include: {
+      assetModel: true,
+    },
   },
 } satisfies Prisma.BookingInclude;
 
 /**
- * Type for a booking with assets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
+ * Type for a booking with bookingAssets included, inferred from BOOKING_WITH_ASSETS_INCLUDE
  */
 type BookingWithAssets = Prisma.BookingGetPayload<{
   include: typeof BOOKING_WITH_ASSETS_INCLUDE;
 }>;
 
 /**
- * Type for assets as returned by BOOKING_WITH_ASSETS_INCLUDE
- * Inferred from the Prisma include to ensure type safety
+ * Type for a single BookingAsset pivot row as returned by BOOKING_WITH_ASSETS_INCLUDE.
+ * Inferred from the Prisma include to ensure type safety.
  */
-export type BookingAsset = BookingWithAssets["assets"][number];
+export type BookingAsset = BookingWithAssets["bookingAssets"][number];
 
 /**
  * This enum represents the types of different events that can be scheduled for a booking using PgBoss

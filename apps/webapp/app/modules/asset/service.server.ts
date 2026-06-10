@@ -16,7 +16,9 @@ import type {
 } from "@prisma/client";
 import {
   AssetStatus,
+  AssetType,
   BookingStatus,
+  ConsumptionType,
   ErrorCorrection,
   KitStatus,
   OrganizationRoles,
@@ -33,6 +35,7 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -43,6 +46,7 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
+import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
@@ -61,6 +65,11 @@ import {
   getTeamMemberForCustodianFilter,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import {
+  assetQtyMeta,
+  formatUnitCount,
+  sanitizeUnitOfMeasureLabel,
+} from "~/utils/asset-quantity";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -85,7 +94,6 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
-  VALIDATION_ERROR,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -99,11 +107,13 @@ import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
   wrapAssetsWithDataForNote,
+  wrapAssetWithCountForNote,
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertAssetModelBelongsToOrg,
   assertCustomFieldsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
@@ -145,13 +155,20 @@ import {
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
+import {
+  createAssetModelsIfNotExists,
+  getAssetModel,
+} from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
+import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createAssetCategoryChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
+  createAssetQuantityChangeNote,
   createAssetValuationChangeNote,
   createNote,
   createTagChangeNoteIfNeeded,
@@ -173,6 +190,10 @@ const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
     },
   },
   valuation: true,
+  quantity: true,
+  minQuantity: true,
+  consumptionType: true,
+  unitOfMeasure: true,
   organization: {
     select: {
       currency: true,
@@ -297,8 +318,8 @@ async function validateKitCustodyConflicts({
     ...new Set(conflictCandidates.map((asset) => asset.kit)),
   ].filter(Boolean) as string[];
 
-  // Fetch existing kits and their custody status in one query
-  const existingKits = await db.kit.findMany({
+  // Fetch existing kits and their custody status in one query.
+  const existingKitsRaw = await db.kit.findMany({
     where: {
       name: { in: kitNames },
       organizationId,
@@ -316,13 +337,20 @@ async function validateKitCustodyConflicts({
           },
         },
       },
-      assets: {
+      assetKits: {
         select: {
-          id: true,
+          asset: { select: { id: true } },
         },
       },
     },
   });
+
+  // Flatten pivot rows into the in-memory `assets` shape the existing
+  // conflict logic expects.
+  const existingKits = existingKitsRaw.map((kit) => ({
+    ...kit,
+    assets: kit.assetKits.map((ak) => ak.asset),
+  }));
 
   // Find conflicts: existing kits without custody that would receive assets with custody
   const conflicts: Array<{
@@ -619,29 +647,47 @@ export async function getAssets(params: {
             { description: { contains: term, mode: "insensitive" } },
             // Search in related category
             { category: { name: { contains: term, mode: "insensitive" } } },
-            // Search in related location
-            { location: { name: { contains: term, mode: "insensitive" } } },
+            // Search in related location — traverses the AssetLocation pivot
+            // since an asset can be placed at multiple locations.
+            {
+              assetLocations: {
+                some: {
+                  location: { name: { contains: term, mode: "insensitive" } },
+                },
+              },
+            },
             // Search in related tags
             {
               tags: { some: { name: { contains: term, mode: "insensitive" } } },
             },
-            // Search in custodian names
+            // Search in custodian names — custody is a list relation, so
+            // traverse it with `some`.
             {
               custody: {
-                custodian: {
-                  OR: [
-                    { name: { contains: term, mode: "insensitive" } },
-                    {
-                      user: {
-                        OR: [
-                          {
-                            firstName: { contains: term, mode: "insensitive" },
-                          },
-                          { lastName: { contains: term, mode: "insensitive" } },
-                        ],
+                some: {
+                  custodian: {
+                    OR: [
+                      { name: { contains: term, mode: "insensitive" } },
+                      {
+                        user: {
+                          OR: [
+                            {
+                              firstName: {
+                                contains: term,
+                                mode: "insensitive",
+                              },
+                            },
+                            {
+                              lastName: {
+                                contains: term,
+                                mode: "insensitive",
+                              },
+                            },
+                          ],
+                        },
                       },
-                    },
-                  ],
+                    ],
+                  },
                 },
               },
             },
@@ -677,7 +723,31 @@ export async function getAssets(params: {
     }
 
     if (status) {
-      where.status = status;
+      // why: Asset.status flips to IN_CUSTODY/CHECKED_OUT for QUANTITY_TRACKED
+      // assets as soon as ANY unit is allocated, even if other units remain
+      // available. Filtering with `where.status = AVAILABLE` would incorrectly
+      // exclude qty-tracked rows that still have free stock. Treat AVAILABLE
+      // as inclusive of all qty-tracked rows; row.status keeps the existing
+      // strict semantic for IN_CUSTODY / CHECKED_OUT (which are already
+      // truthful for qty-tracked — the row enters those states whenever ANY
+      // unit does).
+      if (status === AssetStatus.AVAILABLE) {
+        where.AND = [
+          ...(Array.isArray(where.AND)
+            ? where.AND
+            : where.AND
+            ? [where.AND]
+            : []),
+          {
+            OR: [
+              { type: "INDIVIDUAL", status: AssetStatus.AVAILABLE },
+              { type: "QUANTITY_TRACKED" },
+            ],
+          },
+        ];
+      } else {
+        where.status = status;
+      }
     }
 
     if (categoriesIds?.length) {
@@ -695,44 +765,78 @@ export async function getAssets(params: {
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;
-      //not assigned to team meber
-      where.custody = null;
+      /**
+       * For INDIVIDUAL assets, exclude those with active custody.
+       * For QUANTITY_TRACKED assets, always show them — partial availability
+       * is checked at booking time based on available quantity.
+       */
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
+        },
+      ];
       if (bookingFrom && bookingTo) {
+        /**
+         * Booking overlap filters only apply to INDIVIDUAL assets.
+         * QUANTITY_TRACKED assets can have multiple overlapping bookings
+         * as long as total reserved doesn't exceed available quantity.
+         * Availability is validated at booking time, not at filter time.
+         */
         where.AND = [
-          // Rule 1: Exclude assets from RESERVED bookings (all assets unavailable)
-          {
-            bookings: {
-              none: {
-                ...(unhideAssetsBookigIds?.length && {
-                  id: { notIn: unhideAssetsBookigIds },
-                }),
-                status: BookingStatus.RESERVED,
-                OR: [
-                  { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                  { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                ],
-              },
-            },
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT assets
+          ...(Array.isArray(where.AND)
+            ? where.AND
+            : where.AND
+            ? [where.AND]
+            : []),
+          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
           {
             OR: [
+              { type: "QUANTITY_TRACKED" },
+              {
+                bookingAssets: {
+                  none: {
+                    booking: {
+                      ...(unhideAssetsBookigIds?.length && {
+                        id: { notIn: unhideAssetsBookigIds },
+                      }),
+                      status: BookingStatus.RESERVED,
+                      OR: [
+                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
+          {
+            OR: [
+              { type: "QUANTITY_TRACKED" },
               // Either asset is AVAILABLE (checked in from partial check-in)
               { status: AssetStatus.AVAILABLE },
               // Or asset has no conflicting ONGOING/OVERDUE bookings
               {
-                bookings: {
+                bookingAssets: {
                   none: {
-                    ...(unhideAssetsBookigIds?.length && {
-                      id: { notIn: unhideAssetsBookigIds },
-                    }),
-                    status: {
-                      in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                    booking: {
+                      ...(unhideAssetsBookigIds?.length && {
+                        id: { notIn: unhideAssetsBookigIds },
+                      }),
+                      status: {
+                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                      },
+                      OR: [
+                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+                      ],
                     },
-                    OR: [
-                      { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                      { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                    ],
                   },
                 },
               },
@@ -783,62 +887,85 @@ export async function getAssets(params: {
       if (locationIds.includes("without-location")) {
         where.OR = [
           ...(where.OR ?? []),
-          { locationId: { in: locationIds } },
-          { locationId: null },
+          { assetLocations: { some: { locationId: { in: locationIds } } } },
+          { assetLocations: { none: {} } },
         ];
       } else {
-        where.location = {
-          id: { in: locationIds },
+        where.assetLocations = {
+          some: { locationId: { in: locationIds } },
         };
       }
     }
 
     /**
-     * User should only see the assets without kits for hideUnavailable true
+     * `hideUnavailable` filters INDIVIDUAL assets that are in any kit out
+     * of the picker (those are managed via the kit, not picked directly).
+     * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
+     * is a slice, not whole-asset exclusion — the free pool stays bookable
+     * as a standalone slice. Picker's availability math subtracts the
+     * kit-committed sum downstream so the displayed "Available" count is
+     * already correct.
      */
     if (hideUnavailable === true) {
-      where.kit = null;
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
+        },
+      ];
     }
 
     if (teamMemberIds && teamMemberIds.length) {
       where.OR = [
         ...(where.OR ?? []),
         {
-          custody: { teamMemberId: { in: teamMemberIds } },
+          custody: { some: { teamMemberId: { in: teamMemberIds } } },
         },
-        { custody: { custodian: { userId: { in: teamMemberIds } } } },
         {
-          bookings: {
+          custody: {
+            some: { custodian: { userId: { in: teamMemberIds } } },
+          },
+        },
+        {
+          bookingAssets: {
             some: {
-              custodianTeamMemberId: { in: teamMemberIds },
-              /** We only get them if the booking is ongoing */
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianTeamMemberId: { in: teamMemberIds },
+                /** We only get them if the booking is ongoing */
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         {
-          bookings: {
+          bookingAssets: {
             some: {
-              custodianUserId: { in: teamMemberIds },
-              /** We only get them if the booking is ongoing */
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              booking: {
+                custodianUserId: { in: teamMemberIds },
+                /** We only get them if the booking is ongoing */
+                status: {
+                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                },
               },
             },
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
+          ? [{ custody: { none: {} } }]
           : []),
       ];
     }
 
     if (assetKitFilter === "NOT_IN_KIT") {
-      where.kit = null;
+      where.assetKits = { none: {} };
     } else if (assetKitFilter === "IN_OTHER_KITS") {
-      where.kit = { isNot: null };
+      where.assetKits = { some: {} };
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -957,7 +1084,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
         ${customFieldSelect}
         ${assetQueryJoins}
         ${whereClause}
-        GROUP BY a.id, k.id, k.name, c.id, c.name, c.color, l.id, l."parentId", l.name, cu.id, tm.name, u.id, u."firstName", u."lastName", u."profilePicture", u.email, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
+        -- Note: custody_agg.custody / kits_agg.kits / locations_agg.locations
+        -- must be in GROUP BY because the SELECT references them. They are
+        -- per-asset aggregated jsonb arrays from lateral subqueries; jsonb
+        -- supports equality so this is safe and produces one group per
+        -- asset row.
       ), 
       sorted_asset_query AS (
         SELECT * FROM asset_query
@@ -1021,6 +1153,12 @@ export async function createAsset({
   mainImageExpiration,
   barcodes,
   id: assetId, // Add support for passing an ID
+  type,
+  quantity,
+  minQuantity,
+  consumptionType,
+  unitOfMeasure,
+  assetModelId,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -1037,7 +1175,49 @@ export async function createAsset({
   id?: Asset["id"]; // Make ID optional
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
+  type?: Asset["type"];
+  quantity?: Asset["quantity"];
+  minQuantity?: Asset["minQuantity"];
+  consumptionType?: Asset["consumptionType"];
+  unitOfMeasure?: Asset["unitOfMeasure"];
+  assetModelId?: string;
 }) {
+  // Server-side validation for quantity-tracked assets
+  if (isQuantityTracked(type)) {
+    if (!quantity || quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity is required for quantity-tracked assets",
+        label,
+        status: 400,
+      });
+    }
+    if (!consumptionType) {
+      throw new ShelfError({
+        cause: null,
+        message: "Consumption type is required for quantity-tracked assets",
+        label,
+        status: 400,
+      });
+    }
+    // AssetModel is an INDIVIDUAL-only concept: a model groups N
+    // distinguishable units of the same template (e.g. 100 MacBook Pro
+    // 2025 laptops). A QUANTITY_TRACKED asset is itself one record
+    // representing a stock pool, so a model link makes no semantic
+    // sense — reject up-front rather than silently dropping it.
+    if (assetModelId) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not allowed",
+        message:
+          "Asset models can only be linked to individually tracked assets. Remove the model or change the tracking method to INDIVIDUAL.",
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
   let attempts = 0;
   const maxAttempts = 3;
 
@@ -1100,6 +1280,11 @@ export async function createAsset({
         availableToBook,
         mainImage,
         mainImageExpiration,
+        type,
+        quantity,
+        minQuantity,
+        consumptionType,
+        unitOfMeasure,
       };
 
       /** If a kitId is passed, link the kit to the asset. */
@@ -1124,16 +1309,28 @@ export async function createAsset({
         });
       }
 
-      /** If a locationId is passed, link the location to the asset. */
-      if (locationId) {
+      /** If an assetModelId is passed, link the asset model to the asset.
+       * Org-scope-guard before the connect — Prisma's FK only enforces
+       * that the row exists, not that it belongs to the caller's
+       * organization, so without this check a user in Org A could
+       * link their new asset to Org B's model (hex-security r3341845640
+       * / r3350881506). Same pattern as the other org-scope guards
+       * in this file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
+       */
+      if (assetModelId) {
+        await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
         Object.assign(data, {
-          location: {
+          assetModel: {
             connect: {
-              id: locationId,
+              id: assetModelId,
             },
           },
         });
       }
+
+      // Placement can't be set inline in the asset create (the AssetLocation
+      // pivot needs the assetId), so it's created in the tx below right
+      // after the asset row.
 
       /** If a tags is passed, link the category to the asset. */
       if (tags && tags?.set?.length > 0) {
@@ -1245,11 +1442,26 @@ export async function createAsset({
         const created = await tx.asset.create({
           data,
           include: {
-            location: true,
+            assetLocations: { include: { location: true } },
             user: true,
             custody: true,
           },
         });
+
+        // Create the AssetLocation pivot row now that we have the assetId.
+        // Quantity is type-aware to match the sum-within-total trigger
+        // semantics: qty-tracked = full pool, INDIVIDUAL = 1.
+        if (locationId) {
+          await tx.assetLocation.create({
+            data: {
+              assetId: created.id,
+              locationId,
+              organizationId,
+              quantity:
+                type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
+            },
+          });
+        }
 
         // Activity event must be inside transaction for atomicity
         await recordEvent(
@@ -1264,7 +1476,19 @@ export async function createAsset({
           tx
         );
 
-        return created;
+        // Re-read so the returned shape has the pivot we just created
+        // (the initial create's include came back empty for it).
+        return locationId
+          ? tx.asset.findUniqueOrThrow({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row
+              where: { id: created.id },
+              include: {
+                assetLocations: { include: { location: true } },
+                user: true,
+                custody: true,
+              },
+            })
+          : created;
       });
 
       // Successfully created asset, exit the retry loop
@@ -1319,6 +1543,313 @@ export async function createAsset({
   });
 }
 
+/**
+ * Hard cap on `bulkCreateAssetsFromModel` batch size. Tuned to keep a single
+ * synchronous request comfortable (each underlying `createAsset` opens its
+ * own tx); for higher counts users should reach for CSV import.
+ */
+export const BULK_CREATE_MAX = 100;
+
+const BULK_NAME_TEMPLATE_TOKEN = /\{i\}/g;
+
+/**
+ * Renders the title for the Nth bulk-created asset from a template string.
+ *
+ * - If the template contains the literal `{i}` token, every occurrence is
+ *   replaced with `indexValue`. Multiple tokens are supported (e.g.
+ *   `"Batt-{i}-{i}"` with `5` → `"Batt-5-5"`).
+ * - If the template contains no `{i}` token, `indexValue` is appended with
+ *   a single space separator (mirrors the spreadsheet-fill convention).
+ *
+ * Final string is trimmed.
+ *
+ * @param template - User-supplied template (already sanitised against
+ *   Markdoc injection by the caller)
+ * @param indexValue - The number to substitute / append (typically
+ *   `startNumber + i` from the bulk-create loop)
+ */
+export function renderBulkAssetTitle(
+  template: string,
+  indexValue: number
+): string {
+  if (template.includes("{i}")) {
+    return template
+      .replace(BULK_NAME_TEMPLATE_TOKEN, String(indexValue))
+      .trim();
+  }
+  return `${template.trim()} ${indexValue}`.trim();
+}
+
+/**
+ * Bulk-creates N `INDIVIDUAL` assets from an `AssetModel` template.
+ *
+ * The use case is "I want 20 separate distinguishable Dell Latitudes" —
+ * each asset gets its own row, QR code, sequential ID, and (if SAM
+ * barcodes are enabled at the workspace level) auto-allocated barcode.
+ * All N assets share the same model-derived defaults (category +
+ * valuation) and any caller-supplied overrides (location, kit, tags,
+ * custom fields, description, valuation override, image) — values are
+ * applied uniformly across the batch.
+ *
+ * **`QUANTITY_TRACKED` is intentionally NOT supported via this primitive.**
+ * A stock pool is one asset with `Asset.quantity = N`, not N assets. Users
+ * onboarding stock should reach for single-create + restock instead.
+ *
+ * **Transaction semantics — pragmatic, not all-or-nothing.** Each underlying
+ * `createAsset` opens its own `db.$transaction` with a sequential-ID retry
+ * loop; nesting these under one outer transaction would break the retry
+ * semantics. So on a mid-loop failure at index K, indices `[0..K-1]` stay
+ * committed and the caller receives `failedAt: K + error`. Aggressive
+ * up-front validation makes mid-loop failures rare in practice (most
+ * recoverable conditions trip the synchronous validators first).
+ *
+ * @param params.assetModelId - The AssetModel to inherit defaults from
+ * @param params.count - Batch size; must be between 2 and `BULK_CREATE_MAX`
+ * @param params.nameTemplate - Title template; supports `{i}` token, falls
+ *   back to `"{template} {i}"` if absent. Sanitised against Markdoc
+ *   injection.
+ * @param params.startNumber - First value substituted for `{i}` (default 1)
+ * @param params.organizationId - Caller's validated org id
+ * @param params.userId - Authoring user id
+ * @param params.categoryId - Optional override; defaults to model's
+ *   `defaultCategoryId`
+ * @param params.valuation - Optional override; defaults to model's
+ *   `defaultValuation`
+ * @param params.locationId - Optional shared primary location
+ * @param params.kitId - Optional shared kit membership
+ * @param params.tags - Optional shared tag set
+ * @param params.customFieldsValues - Optional shared custom-field values
+ * @param params.description - Optional shared description
+ * @param params.mainImage / mainImageExpiration - Optional shared cover image
+ * @param params.availableToBook - Optional override (default true)
+ * @returns On full success: `{ createdAssetIds }`. On partial failure at
+ *   index K: `{ createdAssetIds: [the K already-committed], failedAt: K,
+ *   error }` — recovery is re-running for the remainder.
+ * @throws {ShelfError} 400 for pre-validation failures (count out of range,
+ *   empty / malformed template, duplicate titles within batch, foreign org
+ *   IDs). These happen BEFORE any writes.
+ */
+export async function bulkCreateAssetsFromModel({
+  assetModelId,
+  count,
+  nameTemplate,
+  startNumber = 1,
+  organizationId,
+  userId,
+  categoryId,
+  valuation,
+  description,
+  locationId,
+  kitId,
+  tags,
+  customFieldsValues,
+  mainImage,
+  mainImageExpiration,
+  availableToBook,
+}: {
+  assetModelId: string;
+  count: number;
+  nameTemplate: string;
+  startNumber?: number;
+  organizationId: Organization["id"];
+  userId: User["id"];
+  categoryId?: Category["id"];
+  valuation?: number | null;
+  description?: string | null;
+  locationId?: Location["id"];
+  kitId?: Kit["id"];
+  tags?: { set: { id: string }[] };
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
+  availableToBook?: boolean;
+}): Promise<{
+  createdAssetIds: Asset["id"][];
+  failedAt?: number;
+  error?: ShelfError;
+}> {
+  // ── Synchronous pre-validation ────────────────────────────────────────
+  // Everything that can be rejected without a DB write gets rejected
+  // here. After this block, mid-loop failures are rare (mostly transient
+  // DB issues).
+
+  if (!Number.isInteger(count) || count < 2 || count > BULK_CREATE_MAX) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid count",
+      message: `Asset count must be a whole number between 2 and ${BULK_CREATE_MAX}.`,
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { count, max: BULK_CREATE_MAX },
+    });
+  }
+
+  if (!Number.isInteger(startNumber) || startNumber < 0) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid start number",
+      message: "Start number must be a non-negative whole number.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { startNumber },
+    });
+  }
+
+  // Strip Markdoc tokens (`{`, `%`, `}`) without destroying whitespace
+  // adjacent to the `{i}` substitution token. The earlier chunked
+  // implementation used `sanitizeUnitOfMeasureLabel` per-chunk, which
+  // also `.trim()`-ed each chunk — so `"Asset {i}"` collapsed to
+  // `"Asset{i}"` (trailing space on the left chunk dropped). Fix:
+  // protect `{i}` with a private-use placeholder, strip Markdoc chars
+  // globally, then restore.
+  const rawTemplate = (nameTemplate ?? "").toString();
+  const I_TOKEN_PLACEHOLDER = "I_TOKEN";
+  const protectedTemplate = rawTemplate.replace(/\{i\}/g, I_TOKEN_PLACEHOLDER);
+  const strippedTemplate = protectedTemplate.replace(/[{%}]/g, "");
+  const sanitisedTemplate = strippedTemplate.replace(
+    new RegExp(I_TOKEN_PLACEHOLDER, "g"),
+    "{i}"
+  );
+  const trimmedTemplate = sanitisedTemplate.trim();
+  if (!trimmedTemplate || trimmedTemplate === "{i}") {
+    // Pure `{i}` alone with no surrounding text would produce raw integers
+    // ("1", "2", ...) as titles — almost certainly a user mistake.
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid name template",
+      message:
+        'Name template must include some text alongside the {i} number token (e.g. "Battery {i}").',
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const titles = Array.from({ length: count }, (_, i) =>
+    renderBulkAssetTitle(trimmedTemplate, startNumber + i)
+  );
+  if (titles.some((t) => t.length === 0)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid name template",
+      message:
+        "The name template produced an empty title for one or more assets.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+  if (new Set(titles).size !== titles.length) {
+    // Duplicates only happen when the template has no `{i}` token AND the
+    // user supplied a fixed suffix, OR (theoretical) when startNumber
+    // arithmetic collides. Either way the result would be confusing.
+    throw new ShelfError({
+      cause: null,
+      title: "Duplicate titles",
+      message:
+        "The name template produced duplicate titles within the batch. Include {i} so each asset gets a distinct name.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  // ── Org-scope all entity references ──────────────────────────────────
+
+  await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+
+  if (locationId) {
+    await assertLocationBelongsToOrg({ locationId, organizationId });
+  }
+
+  if (tags?.set && tags.set.length > 0) {
+    await assertTagsBelongToOrg({
+      tagIds: tags.set.map((t) => t.id),
+      organizationId,
+    });
+  }
+  // kitId + customFieldsValues + categoryId — createAsset's connect will
+  // throw a 400 on cross-org id (Prisma surfaces a foreign-key violation).
+  // Could harden with explicit asserts in a future polish.
+
+  // ── Read model + resolve defaults ────────────────────────────────────
+
+  const model = await getAssetModel({ id: assetModelId, organizationId });
+  const resolvedCategoryId: string | null =
+    categoryId ?? model.defaultCategoryId ?? null;
+  const resolvedValuation: number | null =
+    valuation ?? model.defaultValuation ?? null;
+
+  // ── Sequential create loop ──────────────────────────────────────────
+  // Each `createAsset` runs its own transaction with sequential-ID retry.
+  // Nesting under an outer tx would break that retry; instead we accept
+  // partial-success semantics and surface `failedAt` on mid-loop failure.
+
+  const createdAssetIds: Asset["id"][] = [];
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i];
+    try {
+      const created = await createAsset({
+        title,
+        description: description ?? null,
+        userId,
+        organizationId,
+        assetModelId,
+        categoryId: resolvedCategoryId,
+        valuation: resolvedValuation,
+        kitId,
+        locationId,
+        tags,
+        customFieldsValues,
+        mainImage,
+        mainImageExpiration,
+        availableToBook: availableToBook ?? true,
+        type: AssetType.INDIVIDUAL,
+      });
+      createdAssetIds.push(created.id);
+    } catch (cause) {
+      const error = isLikeShelfError(cause)
+        ? (cause as ShelfError)
+        : new ShelfError({
+            cause,
+            title: "Bulk create failed",
+            message:
+              "Something went wrong while creating one of the assets in the batch. Earlier assets in the batch were saved successfully.",
+            label,
+            additionalData: {
+              assetModelId,
+              organizationId,
+              failedAtIndex: i,
+            },
+          });
+      return { createdAssetIds, failedAt: i, error };
+    }
+  }
+
+  return { createdAssetIds };
+}
+
+/**
+ * Resolves the `AssetLocation.quantity` to write when the asset-overview
+ * "Update location" dialog rewrites the asset's single primary placement.
+ *
+ * QUANTITY_TRACKED honours the submitted dialog value (already validated
+ * against `Asset.quantity` upstream). When the dialog omitted the input
+ * (legacy callers — bulk update, scan drawer, mobile API), falls back to
+ * the asset's full pool. INDIVIDUAL ignores the input entirely — that
+ * type's pivot row is always 1 unit per the BEFORE trigger.
+ */
+function resolveNewLocationQuantity(
+  asset: { type: AssetType; quantity: number | null },
+  submitted?: number
+): number {
+  if (asset.type !== AssetType.QUANTITY_TRACKED) return 1;
+  if (typeof submitted === "number") return submitted;
+  return asset.quantity ?? 1;
+}
+
 export async function updateAsset({
   title,
   description,
@@ -1326,10 +1857,12 @@ export async function updateAsset({
   mainImageExpiration,
   thumbnailImage,
   categoryId,
+  assetModelId,
   tags,
   id,
   newLocationId,
   currentLocationId,
+  newLocationQuantity,
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
@@ -1337,29 +1870,93 @@ export async function updateAsset({
   preferredBarcodeId,
   organizationId,
   request,
+  quantity,
+  minQuantity,
+  consumptionType,
+  unitOfMeasure,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
+    /**
+     * The asset-overview "Update location" dialog surfaces a per-asset
+     * qty input for QUANTITY_TRACKED rows. Setting a new qty (with or
+     * without changing the target location) is also a placement edit
+     * — both branches share the kit-guard and the pivot rewrite.
+     * INDIVIDUAL submissions ignore the qty entirely (forced to 1 at
+     * write time).
+     */
+    const isSettingNewQuantity = newLocationQuantity != null;
+    const shouldUpdatePlacement = isChangingLocation || isSettingNewQuantity;
 
-    // Check if asset belongs to a kit and prevent location updates
-    if (isChangingLocation) {
+    // Check if asset belongs to a kit and prevent location updates.
+    // the parent kit (today: ≤1 pivot row per asset) through
+    // `assetKits.kit` and read it as `assetWithKit?.assetKits[0]?.kit`.
+    // Also pull `type` + `quantity` so the qty validator below has the
+    // asset's total without a second round-trip.
+    let assetForValidation: {
+      type: AssetType;
+      quantity: number | null;
+    } | null = null;
+    if (shouldUpdatePlacement) {
       const assetWithKit = await db.asset.findUnique({
         where: { id, organizationId },
         select: {
-          kit: {
-            select: { id: true, name: true },
+          type: true,
+          quantity: true,
+          assetKits: {
+            select: { kit: { select: { id: true, name: true } } },
           },
         },
       });
 
-      if (assetWithKit?.kit) {
+      // Defensive `?.` on `assetKits` itself tolerates fixtures /
+      // payloads that omit the pivot relation entirely.
+      const parentKit = assetWithKit?.assetKits?.[0]?.kit;
+      if (parentKit) {
         throw new ShelfError({
           cause: null,
-          message: `This asset's location is managed by its parent kit "${assetWithKit.kit.name}". Please update the kit's location instead.`,
+          message: `This asset's location is managed by its parent kit "${parentKit.name}". Please update the kit's location instead.`,
           additionalData: {
             assetId: id,
-            kitId: assetWithKit.kit.id,
-            kitName: assetWithKit.kit.name,
+            kitId: parentKit.id,
+            kitName: parentKit.name,
+          },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      assetForValidation = assetWithKit
+        ? { type: assetWithKit.type, quantity: assetWithKit.quantity }
+        : null;
+    }
+
+    /**
+     * Validate the submitted qty against the asset's pool. The dialog
+     * collapses any existing multi-placement back to one row at this
+     * location, so the bound is simply `Asset.quantity`. No "other
+     * locations" subtraction (those rows get cleared in the transaction
+     * below). INDIVIDUAL submissions ignore the qty — write path forces
+     * it to 1.
+     */
+    if (
+      isSettingNewQuantity &&
+      newLocationId &&
+      assetForValidation?.type === AssetType.QUANTITY_TRACKED
+    ) {
+      const totalQty = assetForValidation.quantity ?? 0;
+      if (
+        typeof newLocationQuantity === "number" &&
+        newLocationQuantity > totalQty
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Quantity exceeds available pool",
+          message: `Requested ${newLocationQuantity} but the asset has only ${totalQty} units total.`,
+          additionalData: {
+            assetId: id,
+            newLocationQuantity,
+            totalQty,
           },
           label: "Assets",
           status: 400,
@@ -1375,6 +1972,10 @@ export async function updateAsset({
         typeof description !== "undefined" ||
         typeof categoryId !== "undefined" ||
         typeof valuation !== "undefined" ||
+        typeof quantity !== "undefined" ||
+        typeof minQuantity !== "undefined" ||
+        typeof consumptionType !== "undefined" ||
+        typeof unitOfMeasure !== "undefined" ||
         typeof preferredBarcodeId !== "undefined"
     );
 
@@ -1400,6 +2001,14 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
+      // Quantity-tracked fields (type is immutable, never updated here)
+      // TODO(Phase 2): Route quantity changes through an audited adjustment
+      // path that writes to ConsumptionLog. Direct mutation here bypasses
+      // the full-attribution audit trail required by the PRD.
+      quantity,
+      minQuantity,
+      consumptionType,
+      unitOfMeasure,
     };
 
     /** If uncategorized is passed, disconnect the category */
@@ -1426,6 +2035,54 @@ export async function updateAsset({
       });
     }
 
+    /** If assetModelId is null, disconnect the asset model */
+    if (assetModelId === null) {
+      Object.assign(data, {
+        assetModel: {
+          disconnect: true,
+        },
+      });
+    } else if (assetModelId) {
+      // Org-scope guard before the connect — Prisma's FK only enforces
+      // that the AssetModel row exists, not that it belongs to the
+      // caller's org, so without this check a user in Org A could
+      // link their asset to Org B's model (hex-security r3341845640
+      // / r3350881506). Runs before the type-check below so a
+      // cross-org id is rejected with the "not in your workspace"
+      // 404 instead of leaking a "not allowed for qty-tracked" 400.
+      await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+
+      // AssetModel is INDIVIDUAL-only (see the matching guard in
+      // createAsset). Block the connect for a QUANTITY_TRACKED asset
+      // with a labelled 400 rather than letting it silently link.
+      // Reads `type` directly off the asset row — sub-millisecond
+      // org-scoped index lookup, only on the link branch.
+      const currentAsset = await db.asset.findUnique({
+        where: { id, organizationId },
+        select: { type: true },
+      });
+      if (currentAsset && currentAsset.type === AssetType.QUANTITY_TRACKED) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset model not allowed",
+          message:
+            "Asset models can only be linked to individually tracked assets. This asset is tracked by quantity.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId: id, assetModelId },
+        });
+      }
+      /** If assetModelId is a valid ID, connect the asset model */
+      Object.assign(data, {
+        assetModel: {
+          connect: {
+            id: assetModelId,
+          },
+        },
+      });
+    }
+
     /** Connect the new location id */
     if (newLocationId) {
       // why: same IDOR concern as category — verify the location is in this
@@ -1447,23 +2104,13 @@ export async function updateAsset({
           shouldBeCaptured: false,
         });
       }
-      Object.assign(data, {
-        location: {
-          connect: {
-            id: newLocationId,
-          },
-        },
-      });
+      // We can't inline a `connect` on `data` for location anymore — the
+      // AssetLocation pivot write happens in the $transaction below
+      // alongside the asset update.
     }
 
     /** disconnecting location relation if a user clears locations */
-    if (currentLocationId && !newLocationId) {
-      Object.assign(data, {
-        location: {
-          disconnect: true,
-        },
-      });
-    }
+    // (no-op here too; the pivot deleteMany happens in the tx below.)
 
     /** If a tags is passed, link the category to the asset. */
     if (isTagUpdate) {
@@ -1689,15 +2336,83 @@ export async function updateAsset({
       }
     }
 
-    const asset = await db.asset.update({
-      where: { id, organizationId },
-      data,
-      include: {
-        location: true,
-        tags: true,
-        category: true,
-        organization: true,
-      },
+    // The per-row `AssetLocation.quantity` affected by this placement edit,
+    // used to label the qty-tracked location note/event ("placed 50 units").
+    // For a placement it's the qty written to the new pivot row; for a
+    // removal it's the MANUAL row qty dropped (read pre-delete from the
+    // captured `assetLocations`). Captured inside the tx so the removal qty
+    // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
+    let locationChangeQuantity: number | null = null;
+
+    // Bundle the asset update and AssetLocation pivot ops in a single tx
+    // so a location change is atomic (and so the sum-within-total trigger
+    // sees the final state at COMMIT).
+    const asset = await db.$transaction(async (tx) => {
+      const updated = await tx.asset.update({
+        where: { id, organizationId },
+        data,
+        include: {
+          assetLocations: { include: { location: true } },
+          tags: true,
+          category: true,
+          organization: true,
+        },
+      });
+
+      if (shouldUpdatePlacement) {
+        if (newLocationId) {
+          locationChangeQuantity = resolveNewLocationQuantity(
+            updated,
+            newLocationQuantity
+          );
+        } else {
+          // Removal: name the manual row being dropped at the prior
+          // location. `updated.assetLocations` is the pre-delete snapshot.
+          locationChangeQuantity =
+            updated.assetLocations.find(
+              (al) =>
+                al.locationId === currentLocationId && al.assetKitId == null
+            )?.quantity ?? null;
+        }
+
+        // Clear existing MANUAL primary placement(s) first. Kit-driven
+        // rows (`assetKitId IS NOT NULL`) are owned by the kit's flow
+        // and stay untouched — the user editing the asset-overview
+        // single-location dialog can replace their manual placement
+        // without nuking the kit-driven row. INDIVIDUAL is capped at
+        // 1 manual row by trigger; QUANTITY_TRACKED multi-placement
+        // edits go through the manage-placements dialog or the
+        // location picker.
+        await tx.assetLocation.deleteMany({
+          where: { assetId: id, assetKitId: null },
+        });
+        if (newLocationId) {
+          await tx.assetLocation.create({
+            data: {
+              assetId: id,
+              locationId: newLocationId,
+              organizationId,
+              quantity: resolveNewLocationQuantity(
+                updated,
+                newLocationQuantity
+              ),
+            },
+          });
+        }
+      }
+
+      // Re-read so the returned `assetLocations` reflects the pivot ops.
+      return shouldUpdatePlacement
+        ? tx.asset.findUniqueOrThrow({
+            where: { id, organizationId },
+            include: {
+              assetLocations: { include: { location: true } },
+              tags: true,
+              category: true,
+              organization: true,
+            },
+          })
+        : updated;
     });
 
     /** If barcodes are passed, update existing barcodes efficiently */
@@ -1847,6 +2562,12 @@ export async function updateAsset({
         userId,
         organizationId,
         isRemoving: newLocationId === null,
+        // Qty-tracked: name the units placed / moved / removed at this
+        // location (sourced from the affected pivot row). INDIVIDUAL keeps
+        // the original phrasing via `formatUnitCount`.
+        type: asset.type,
+        unitOfMeasure: asset.unitOfMeasure,
+        quantity: locationChangeQuantity,
       });
 
       // Activity event for the asset-level location change.
@@ -1861,6 +2582,9 @@ export async function updateAsset({
         field: "locationId",
         fromValue: currentLocation?.id ?? null,
         toValue: newLocation?.id ?? null,
+        // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
+        // INDIVIDUAL.
+        meta: assetQtyMeta(asset, locationChangeQuantity),
       });
 
       // Create location activity notes
@@ -1869,14 +2593,25 @@ export async function updateAsset({
         firstName: user.firstName,
         lastName: user.lastName,
       });
-      const assetData = [{ id: asset.id, title: asset.title }];
+      // Single-asset location-timeline note. `wrapAssetWithCountForNote`
+      // prefixes the qty-tracked unit count ("50 units of {asset}");
+      // INDIVIDUAL renders the bare link, so phrasing is unchanged.
+      const assetForCount = {
+        id: asset.id,
+        title: asset.title,
+        type: asset.type,
+        unitOfMeasure: asset.unitOfMeasure,
+      };
 
       if (newLocation) {
         const newLocLink = wrapLinkForNote(
           `/locations/${newLocation.id}`,
           newLocation.name
         );
-        const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
+        const assetMarkup = wrapAssetWithCountForNote(
+          assetForCount,
+          locationChangeQuantity
+        );
         const movedFrom = currentLocation
           ? ` Moved from ${wrapLinkForNote(
               `/locations/${currentLocation.id}`,
@@ -1895,7 +2630,10 @@ export async function updateAsset({
           `/locations/${currentLocation.id}`,
           currentLocation.name
         );
-        const assetMarkup = wrapAssetsWithDataForNote(assetData, "removed");
+        const assetMarkup = wrapAssetWithCountForNote(
+          assetForCount,
+          locationChangeQuantity
+        );
         const movedTo = newLocation
           ? ` Moved to ${wrapLinkForNote(
               `/locations/${newLocation.id}`,
@@ -1950,6 +2688,20 @@ export async function updateAsset({
           newValuation: asset.valuation,
           currency: assetBeforeUpdate.organization.currency,
           locale: getLocale(request),
+          loadUserForNotes,
+        }),
+        createAssetQuantityChangeNote({
+          assetId: asset.id,
+          organizationId,
+          userId,
+          previousQuantity: assetBeforeUpdate.quantity,
+          newQuantity: quantity,
+          previousMinQuantity: assetBeforeUpdate.minQuantity,
+          newMinQuantity: minQuantity,
+          previousConsumptionType: assetBeforeUpdate.consumptionType,
+          newConsumptionType: consumptionType,
+          previousUnitOfMeasure: assetBeforeUpdate.unitOfMeasure,
+          newUnitOfMeasure: unitOfMeasure,
           loadUserForNotes,
         }),
       ]);
@@ -2132,11 +2884,12 @@ export async function updateAsset({
 
     return asset;
   } catch (cause) {
-    // If it's already a ShelfError with validation errors, re-throw as is
-    if (
-      cause instanceof ShelfError &&
-      cause.additionalData?.[VALIDATION_ERROR]
-    ) {
+    // If it's already a ShelfError (kit guard, qty validator, org-scope
+    // guard, etc.), re-throw as-is so the upstream status / title /
+    // message survive. `isLikeShelfError` includes a duck-type fallback
+    // so re-mocked / re-imported error classes still match. Only unknown
+    // errors get wrapped as a 500-ish unique-constraint guess.
+    if (isLikeShelfError(cause)) {
       throw cause;
     }
 
@@ -2191,6 +2944,417 @@ export async function deleteAsset({
       message: "Something went wrong while deleting asset",
       additionalData: { id, organizationId },
       label,
+    });
+  }
+}
+
+/**
+ * Replaces an asset's full set of placements atomically.
+ *
+ * Called by the asset-overview "Manage placements" dialog. Diff'd
+ * against current pivot rows so unchanged placements keep their
+ * `createdAt` (preserves the primary-pick LATERAL ordering used by
+ * the asset-index column rendering). New placements are created;
+ * removed placements are deleted; qty edits update the existing row
+ * in place.
+ *
+ * **Validation invariants** (all enforced before the transaction so a
+ * bad submission returns a clean 400 instead of a trigger-fired 500):
+ *
+ *  - INDIVIDUAL assets cap at exactly one placement with `quantity = 1`
+ *    — submitted qty is ignored, count > 1 is rejected.
+ *  - QUANTITY_TRACKED: `sum(placements[].quantity) <= Asset.quantity`
+ *    (the DEFERRED `enforce_asset_location_sum_within_total` trigger
+ *    is the underlying guard; the explicit check here gives a
+ *    user-friendly message).
+ *  - Each `locationId` must belong to the caller's org.
+ *  - No duplicate `locationId` entries in the submitted list.
+ *  - Assets that belong to a kit can't have placements edited from the
+ *    asset side — the kit-location cascade owns it. Mirrors the
+ *    kit-guard in `updateAsset`.
+ *
+ * @see {@link file://./../../routes/_layout+/assets.$assetId.overview.manage-placements.tsx}
+ */
+export async function replaceAssetPlacements({
+  assetId,
+  organizationId,
+  userId,
+  placements,
+}: {
+  assetId: string;
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+  /**
+   * Full desired placement set. Empty array means "unplace this asset"
+   * (all pivot rows removed). The service deduplicates / validates
+   * before any DB write.
+   */
+  placements: Array<{ locationId: string; quantity: number }>;
+}) {
+  try {
+    // 1. Fetch the asset's current state — total qty, type, manual
+    //    placements only (kit-driven rows are owned by the kit's flow
+    //    and stay read-only from this dialog), and the kit-driven
+    //    placements separately so the sum-within-total math accounts
+    //    for them. Manual placements coexist with kit-driven rows on
+    //    different `assetKitId` values — the manage-placements dialog
+    //    edits manual rows only, kit-driven rows are owned by the
+    //    kit's flow.
+    const asset = await db.asset.findUniqueOrThrow({
+      where: { id: assetId, organizationId },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        quantity: true,
+        // unitOfMeasure labels the qty-tracked unit count in per-row
+        // placement notes ("placed 50 boxes at L").
+        unitOfMeasure: true,
+        assetLocations: {
+          select: {
+            locationId: true,
+            quantity: true,
+            assetKitId: true,
+            location: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    // Split manual vs kit-driven. The diff math below operates only on
+    // manual rows; the kit-driven sum is added to the sum-within-total
+    // pre-check so a submitted set that "fits" against manual rows
+    // alone but exceeds Asset.quantity once kit rows are counted gets
+    // rejected up-front instead of failing at the DEFERRED trigger.
+    const manualPlacements = asset.assetLocations.filter(
+      (al) => al.assetKitId === null
+    );
+    const kitDrivenSum = asset.assetLocations
+      .filter((al) => al.assetKitId !== null)
+      .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
+
+    // 3. Shape validation — duplicate ids + per-row qty bounds.
+    const seenLocationIds = new Set<string>();
+    for (const p of placements) {
+      if (!p.locationId || typeof p.locationId !== "string") {
+        throw new ShelfError({
+          cause: null,
+          message: "Each placement must reference a location.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      if (!Number.isInteger(p.quantity) || p.quantity < 1) {
+        throw new ShelfError({
+          cause: null,
+          message: `Each placement quantity must be a positive integer (got ${p.quantity} for ${p.locationId}).`,
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      if (seenLocationIds.has(p.locationId)) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Duplicate location in the submitted placements — each location can appear at most once per asset.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId, placements },
+          shouldBeCaptured: false,
+        });
+      }
+      seenLocationIds.add(p.locationId);
+    }
+
+    // 4. INDIVIDUAL constraint — at most one row, qty forced to 1.
+    if (asset.type !== AssetType.QUANTITY_TRACKED) {
+      if (placements.length > 1) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "INDIVIDUAL assets can only be placed at one location. Remove the extra rows or change the asset type.",
+          status: 400,
+          label: "Assets",
+          additionalData: { assetId },
+          shouldBeCaptured: false,
+        });
+      }
+      // Force qty to 1 — the picker UI shouldn't render a qty input
+      // for INDIVIDUAL, but a tampered submission still gets corrected.
+      placements = placements.map((p) => ({ ...p, quantity: 1 }));
+    }
+
+    // 5. Sum-within-total — explicit pre-check so the user gets a
+    //    nice message; the DEFERRED trigger is the ultimate guard.
+    //    Includes the kit-driven sum because those rows survive this
+    //    update — the submitted manual set plus the unchanged kit-
+    //    driven rows must together fit within `Asset.quantity`.
+    if (asset.type === AssetType.QUANTITY_TRACKED) {
+      const total = asset.quantity ?? 0;
+      const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
+      const projectedSum = submittedSum + kitDrivenSum;
+      if (projectedSum > total) {
+        throw new ShelfError({
+          cause: null,
+          title: "Quantity exceeds available pool",
+          message:
+            kitDrivenSum > 0
+              ? `Submitted manual placements (${submittedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum} but the asset has only ${total} units total.`
+              : `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
+          status: 400,
+          label: "Assets",
+          additionalData: {
+            assetId,
+            submittedSum,
+            kitDrivenSum,
+            projectedSum,
+            total,
+          },
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    // 6. Cross-org guard — every locationId must belong to this org.
+    //    Use findMany (not count) so we can reuse the (id, name) pairs
+    //    when rendering per-row "placed N units at L" notes after the tx.
+    //    The dialog only offers org-scoped locations, so tampering is
+    //    the only way to land a foreign id here.
+    const submittedLocations = new Map<string, { id: string; name: string }>();
+    if (placements.length > 0) {
+      const orgLocations = await db.location.findMany({
+        where: {
+          id: { in: placements.map((p) => p.locationId) },
+          organizationId,
+        },
+        select: { id: true, name: true },
+      });
+      if (orgLocations.length !== placements.length) {
+        throw new ShelfError({
+          cause: null,
+          message: "One or more locations don't belong to your organization.",
+          status: 403,
+          label: "Assets",
+          additionalData: { assetId, organizationId },
+          shouldBeCaptured: true,
+        });
+      }
+      for (const l of orgLocations) submittedLocations.set(l.id, l);
+    }
+
+    // 7. Compute diff against current MANUAL pivot rows only. Kit-
+    //    driven rows aren't editable from this dialog; they're indexed
+    //    by `assetKitId` and survive untouched. A submitted entry at
+    //    the same location as a kit-driven row creates a SECOND row
+    //    (manual, `assetKitId = null`) — the two coexist.
+    const currentByLocation = new Map(
+      manualPlacements.map((al) => [al.locationId, al])
+    );
+    const submittedByLocation = new Map(
+      placements.map((p) => [p.locationId, p])
+    );
+
+    const toCreate = placements.filter(
+      (p) => !currentByLocation.has(p.locationId)
+    );
+    const toDelete = manualPlacements.filter(
+      (al) => !submittedByLocation.has(al.locationId)
+    );
+    const toUpdate = placements.filter((p) => {
+      const existing = currentByLocation.get(p.locationId);
+      return existing != null && existing.quantity !== p.quantity;
+    });
+
+    // 8. Apply the diff in one tx. The DEFERRED sum-within-total
+    //    trigger re-checks at COMMIT — covers any race where another
+    //    request modified `Asset.quantity` between our validation and
+    //    the write.
+    await db.$transaction(async (tx) => {
+      if (toDelete.length > 0) {
+        // Manual-row only delete. Kit-driven rows at the same
+        // (assetId, locationId) aren't on the diff set (we never
+        // included them) — `assetKitId: null` scopes this to manual
+        // rows alongside the `IN locationId` filter.
+        await tx.assetLocation.deleteMany({
+          where: {
+            assetId,
+            assetKitId: null,
+            locationId: { in: toDelete.map((al) => al.locationId) },
+          },
+        });
+      }
+      // Manual-row only updates. The (assetId, locationId) composite
+      // isn't unique on its own (a manual + kit-driven row can coexist
+      // at the same location), so we use `updateMany` scoped to
+      // `assetKitId IS NULL`. The partial unique
+      // `AssetLocation_manual_unique` guarantees at most one matching
+      // row per (assetId, locationId) for manual placements.
+      for (const u of toUpdate) {
+        await tx.assetLocation.updateMany({
+          where: { assetId, locationId: u.locationId, assetKitId: null },
+          data: { quantity: u.quantity },
+        });
+      }
+      if (toCreate.length > 0) {
+        await tx.assetLocation.createMany({
+          data: toCreate.map((p) => ({
+            assetId,
+            locationId: p.locationId,
+            organizationId,
+            quantity: p.quantity,
+          })),
+        });
+      }
+
+      // Activity events — one ASSET_LOCATION_CHANGED per net add /
+      // remove. Qty-only edits don't emit an event today (deliberate
+      // gap). Mirrors the `updateLocationAssets` event pattern.
+      // `meta.quantity` carries the per-row placement qty (this is the
+      // QUANTITY_TRACKED multi-placement editor, so the count is
+      // always meaningful here); `assetQtyMeta` no-ops for INDIVIDUAL.
+      const events: Parameters<typeof recordEvents>[0] = [
+        ...toCreate.map((p) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          locationId: p.locationId,
+          field: "locationId",
+          fromValue: null,
+          toValue: p.locationId,
+          meta: assetQtyMeta(asset, p.quantity),
+        })),
+        ...toDelete.map((al) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+          field: "locationId",
+          fromValue: al.locationId,
+          toValue: null,
+          meta: assetQtyMeta(asset, al.quantity),
+        })),
+      ];
+      if (events.length > 0) {
+        await recordEvents(events, tx);
+      }
+    });
+
+    // Per-row notes emitted AFTER the tx commits. Following the same
+    // pattern as `updateLocationAssets`: notes capture intent and don't
+    // need to be atomic with the placement diff — a markdoc hiccup
+    // shouldn't roll back the actual placement write. Three shapes:
+    //   • toCreate → "placed N units at L"
+    //   • toDelete → "removed N units from L"
+    //   • toUpdate → "changed quantity at L from X to Y units"
+    // (Activity events on the toUpdate path are still the deliberate
+    // gap — revisit when ASSET_LOCATION_CHANGED gets a "quantity-only"
+    // variant.)
+    if (toCreate.length > 0 || toDelete.length > 0 || toUpdate.length > 0) {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+      const firstName = user?.firstName ?? "";
+      const lastName = user?.lastName ?? "";
+
+      // Resolve location ids for the toUpdate set (same locations as
+      // their pre-update manual rows; they survived the diff). We pull
+      // names from the manualPlacements snapshot so we don't need a
+      // second query.
+      const manualByLocation = new Map(
+        manualPlacements.map((al) => [al.locationId, al])
+      );
+
+      // The qty-change note is inline (not via `createLocationChangeNote`)
+      // because the helper handles add / move / remove, not a "same
+      // location, different quantity" case. INDIVIDUAL is also
+      // structurally never on this path — qty was forced to 1 above,
+      // so an INDIVIDUAL "qty change" diff entry can't reach here.
+      const qtyChangeNoteCalls = toUpdate.flatMap((p) => {
+        const existing = manualByLocation.get(p.locationId);
+        const locationMeta = submittedLocations.get(p.locationId);
+        if (!existing || !locationMeta) return [];
+        const fromCount = formatUnitCount(asset, existing.quantity);
+        const toCount = formatUnitCount(asset, p.quantity);
+        if (!fromCount || !toCount) return [];
+        const actor = wrapUserLinkForNote({
+          id: userId,
+          firstName,
+          lastName,
+        });
+        const locationLink = wrapLinkForNote(
+          `/locations/${locationMeta.id}`,
+          locationMeta.name.trim()
+        );
+        return [
+          createNote({
+            content: `${actor} changed quantity at ${locationLink} from ${fromCount} to ${toCount}.`,
+            type: "UPDATE",
+            userId,
+            assetId,
+            organizationId,
+          }),
+        ];
+      });
+
+      await Promise.all([
+        ...toCreate.map((p) => {
+          const location = submittedLocations.get(p.locationId);
+          if (!location) return Promise.resolve();
+          return createLocationChangeNote({
+            currentLocation: null,
+            newLocation: location,
+            firstName,
+            lastName,
+            assetId,
+            userId,
+            isRemoving: false,
+            organizationId,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
+            quantity: p.quantity,
+          });
+        }),
+        ...toDelete.map((al) =>
+          createLocationChangeNote({
+            currentLocation: al.location,
+            newLocation: null,
+            firstName,
+            lastName,
+            assetId,
+            userId,
+            isRemoving: true,
+            organizationId,
+            type: asset.type,
+            unitOfMeasure: asset.unitOfMeasure,
+            quantity: al.quantity,
+          })
+        ),
+        ...qtyChangeNoteCalls,
+      ]);
+    }
+
+    return { ok: true as const };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating asset placements.",
+      additionalData: { assetId, userId, organizationId },
+      label: "Assets",
     });
   }
 }
@@ -2495,6 +3659,8 @@ export async function duplicateAsset({
       custody: { include: { custodian: true } };
       tags: true;
       customFields: true;
+      // Needed so the duplicate can copy the primary placement.
+      assetLocations: { select: { location: { select: { id: true } } } };
     };
   }>;
   userId: string;
@@ -2523,7 +3689,7 @@ export async function duplicateAsset({
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
-      locationId: asset.locationId ?? undefined,
+      locationId: getPrimaryLocation(asset)?.id ?? undefined,
       tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
     };
@@ -2682,7 +3848,9 @@ export async function getPaginatedAndFilterableAssets({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  kitId?: Prisma.AssetWhereInput["kitId"];
+  // `AssetKit` pivot. Callers still pass a plain `kitId` string here
+  // for filtering; the where-builder will map it onto `assetKits.some`.
+  kitId?: string | null;
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
@@ -2887,7 +4055,11 @@ export async function fetchAssetsForExport({
       },
       include: {
         category: true,
-        location: true,
+        assetLocations: { include: { location: true } },
+        // Phase A5: include the model so backup-export can emit
+        // assetModel.name (round-trippable across orgs). Without it,
+        // re-import would only get the opaque assetModelId.
+        assetModel: { select: { name: true } },
         notes: true,
         custody: {
           include: {
@@ -2910,6 +4082,197 @@ export async function fetchAssetsForExport({
       label,
     });
   }
+}
+
+/**
+ * Parsed shape of the quantity-tracked + AssetModel columns for a single
+ * CSV import row. All fields are optional: a row with none of these
+ * columns falls back to `type=INDIVIDUAL, quantity=1` at the createAsset
+ * boundary.
+ *
+ * @see {@link parseQtyTrackedCsvRow}
+ */
+type ParsedQtyTrackedCsvRow = {
+  type: AssetType | undefined;
+  quantity: number | undefined;
+  minQuantity: number | undefined;
+  unitOfMeasure: string | undefined;
+  consumptionType: ConsumptionType | undefined;
+};
+
+const CSV_ASSET_TYPES = new Set<string>([
+  AssetType.INDIVIDUAL,
+  AssetType.QUANTITY_TRACKED,
+]);
+const CSV_CONSUMPTION_TYPES = new Set<string>([
+  ConsumptionType.ONE_WAY,
+  ConsumptionType.TWO_WAY,
+]);
+
+/**
+ * Parses + validates the quantity-tracked columns
+ * (`type`, `quantity`, `minQuantity`, `unitOfMeasure`, `consumptionType`)
+ * and the AssetModel reference from a single CSV import row.
+ *
+ * Throws a labelled `ShelfError` (HTTP 400) with row-identifying context
+ * on any malformed value so the importer surfaces "row 14: quantity must
+ * be a positive integer" rather than a generic 500 deeper in the chain.
+ *
+ * Validation rules:
+ * - `type` (optional): must be `INDIVIDUAL` or `QUANTITY_TRACKED`; missing → INDIVIDUAL
+ * - `quantity` (required for QUANTITY_TRACKED, ≥1): non-negative integer
+ * - `quantity > 1` is rejected for INDIVIDUAL (matches the DB invariant)
+ * - `minQuantity` (optional): non-negative integer
+ * - `unitOfMeasure` (optional): plain string, sanitised against Markdoc tokens
+ * - `consumptionType` (required for QUANTITY_TRACKED): `ONE_WAY` | `TWO_WAY`
+ *
+ * @param asset - The parsed CSV row (raw string values + injected `key`)
+ * @returns Typed object ready to spread into the createAsset payload
+ * @throws {ShelfError} 400 on any column-format failure
+ */
+function parseQtyTrackedCsvRow(
+  asset: CreateAssetFromContentImportPayload
+): ParsedQtyTrackedCsvRow {
+  const rowLabel = `asset "${asset.title}"`;
+
+  // ── type ────────────────────────────────────────────────────────────
+  const rawType =
+    typeof asset.type === "string" ? asset.type.trim().toUpperCase() : "";
+  let parsedType: AssetType | undefined;
+  if (rawType === "") {
+    parsedType = undefined; // createAsset will default to INDIVIDUAL via DB
+  } else if (CSV_ASSET_TYPES.has(rawType)) {
+    parsedType = rawType as AssetType;
+  } else {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid asset type",
+      message: `Invalid type "${asset.type}" for ${rowLabel}. Must be "INDIVIDUAL" or "QUANTITY_TRACKED".`,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetKey: asset.key, type: asset.type },
+    });
+  }
+  const effectiveType = parsedType ?? AssetType.INDIVIDUAL;
+
+  // ── quantity ────────────────────────────────────────────────────────
+  const rawQty =
+    typeof asset.quantity === "string" ? asset.quantity.trim() : "";
+  let parsedQty: number | undefined;
+  if (rawQty !== "") {
+    const n = Number(rawQty);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid quantity",
+        message: `Invalid quantity "${asset.quantity}" for ${rowLabel}. Must be a non-negative whole number.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, quantity: asset.quantity },
+      });
+    }
+    parsedQty = n;
+  }
+
+  if (effectiveType === AssetType.QUANTITY_TRACKED) {
+    if (parsedQty === undefined || parsedQty <= 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Quantity required",
+        message: `Quantity is required (and must be > 0) for QUANTITY_TRACKED ${rowLabel}.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key },
+      });
+    }
+  } else if (effectiveType === AssetType.INDIVIDUAL) {
+    if (parsedQty !== undefined && parsedQty > 1) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid quantity for INDIVIDUAL",
+        message: `INDIVIDUAL assets must have quantity 1 (or omit the column). Got "${asset.quantity}" for ${rowLabel}. To track stock, set type=QUANTITY_TRACKED.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, quantity: asset.quantity },
+      });
+    }
+  }
+
+  // ── minQuantity ─────────────────────────────────────────────────────
+  const rawMin =
+    typeof asset.minQuantity === "string" ? asset.minQuantity.trim() : "";
+  let parsedMin: number | undefined;
+  if (rawMin !== "") {
+    const n = Number(rawMin);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid min quantity",
+        message: `Invalid minQuantity "${asset.minQuantity}" for ${rowLabel}. Must be a non-negative whole number.`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: { assetKey: asset.key, minQuantity: asset.minQuantity },
+      });
+    }
+    parsedMin = n;
+  }
+
+  // ── unitOfMeasure ───────────────────────────────────────────────────
+  // Sanitised to strip Markdoc tokens — see Phase 4e Hex follow-up.
+  const rawUnit =
+    typeof asset.unitOfMeasure === "string"
+      ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+      : "";
+  const parsedUnit = rawUnit === "" ? undefined : rawUnit;
+
+  // ── consumptionType ─────────────────────────────────────────────────
+  const rawCt =
+    typeof asset.consumptionType === "string"
+      ? asset.consumptionType.trim().toUpperCase()
+      : "";
+  let parsedCt: ConsumptionType | undefined;
+  if (rawCt !== "") {
+    if (!CSV_CONSUMPTION_TYPES.has(rawCt)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid consumption type",
+        message: `Invalid consumptionType "${asset.consumptionType}" for ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: {
+          assetKey: asset.key,
+          consumptionType: asset.consumptionType,
+        },
+      });
+    }
+    parsedCt = rawCt as ConsumptionType;
+  }
+
+  if (effectiveType === AssetType.QUANTITY_TRACKED && !parsedCt) {
+    throw new ShelfError({
+      cause: null,
+      title: "Consumption type required",
+      message: `Consumption type is required for QUANTITY_TRACKED ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetKey: asset.key },
+    });
+  }
+
+  return {
+    type: parsedType,
+    quantity: parsedQty,
+    minQuantity: parsedMin,
+    unitOfMeasure: parsedUnit,
+    consumptionType: parsedCt,
+  };
 }
 
 /**
@@ -2980,38 +4343,50 @@ export async function createAssetsFromContentImport({
     });
 
     // Create all required related entities
-    const [kits, categories, locations, teamMembers, tags, { customFields }] =
-      await Promise.all([
-        createKitsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createCategoriesIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createLocationsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createTeamMemberIfNotExists({
-          data,
-          organizationId,
-        }),
-        createTagsIfNotExists({
-          data,
-          userId,
-          organizationId,
-        }),
-        createCustomFieldsIfNotExists({
-          data,
-          organizationId,
-          userId,
-        }),
-      ]);
+    const [
+      kits,
+      categories,
+      locations,
+      teamMembers,
+      tags,
+      { customFields },
+      assetModels,
+    ] = await Promise.all([
+      createKitsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createCategoriesIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createLocationsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createTeamMemberIfNotExists({
+        data,
+        organizationId,
+      }),
+      createTagsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+      createCustomFieldsIfNotExists({
+        data,
+        organizationId,
+        userId,
+      }),
+      createAssetModelsIfNotExists({
+        data,
+        userId,
+        organizationId,
+      }),
+    ]);
 
     // Process assets sequentially to handle image uploads
     for (const asset of data) {
@@ -3204,6 +4579,48 @@ export async function createAssetsFromContentImport({
         });
       }
 
+      // ── AssetModel column → resolved model id ──────────────────────
+      const modelKey = asset.assetModel?.trim();
+      const assetModelId =
+        modelKey && assetModels?.[modelKey] ? assetModels[modelKey] : undefined;
+      if (modelKey && !assetModelId) {
+        // The createAssetModelsIfNotExists pre-resolve should have
+        // populated every non-empty key. If we land here, something
+        // went wrong upstream (e.g. an upsert failed silently).
+        throw new ShelfError({
+          cause: null,
+          message: `Asset model "${modelKey}" could not be resolved for asset "${asset.title}". Please verify the assetModel column values in your CSV.`,
+          additionalData: {
+            assetKey: asset.key,
+            assetTitle: asset.title,
+            assetModel: modelKey,
+          },
+          label: "Assets",
+          shouldBeCaptured: false,
+        });
+      }
+
+      // ── Quantity-tracked columns → typed + validated ───────────────
+      const { type, quantity, minQuantity, unitOfMeasure, consumptionType } =
+        parseQtyTrackedCsvRow(asset);
+
+      // AssetModel is INDIVIDUAL-only — a model represents N
+      // distinguishable units of the same template, whereas a
+      // QUANTITY_TRACKED asset is a stock pool. Reject the row up-front
+      // with a row-friendly message rather than silently dropping the
+      // model link or relying on createAsset's downstream guard.
+      if (type === AssetType.QUANTITY_TRACKED && assetModelId) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset model not allowed",
+          message: `Asset "${asset.title}": models can only be linked to INDIVIDUAL assets. Remove the assetModel cell or change type to INDIVIDUAL.`,
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetKey: asset.key, assetTitle: asset.title },
+        });
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -3230,6 +4647,14 @@ export async function createAssetsFromContentImport({
         mainImageExpiration: mainImageExpiration || null,
         // Add barcodes if present
         barcodes: assetBarcodes.length > 0 ? assetBarcodes : undefined,
+        // AssetModel + qty-tracked fields (default INDIVIDUAL, quantity=1
+        // when columns are absent or empty).
+        assetModelId,
+        type,
+        quantity,
+        minQuantity,
+        unitOfMeasure,
+        consumptionType,
       });
     }
 
@@ -3302,6 +4727,43 @@ export async function createAssetsFromBackupImport({
     //TODO use concurrency control or it will overload the server
     await Promise.all(
       data.map(async (asset) => {
+        /** Quantity-tracked + assetModel fields — passed through from
+         * the backup payload. Backup export emits these as raw string
+         * values (per-Asset scalar columns); on restore we read them
+         * back so round-trip preserves the qty-tracked semantics. The
+         * content-import path validates these aggressively; for backup
+         * import we trust the source (it came from our own exporter)
+         * but still coerce types defensively. */
+        const backupType =
+          typeof asset.type === "string" &&
+          (asset.type === AssetType.INDIVIDUAL ||
+            asset.type === AssetType.QUANTITY_TRACKED)
+            ? (asset.type as AssetType)
+            : undefined;
+        const backupQuantity =
+          typeof asset.quantity === "string" && asset.quantity.trim() !== ""
+            ? Number(asset.quantity)
+            : typeof asset.quantity === "number"
+            ? asset.quantity
+            : undefined;
+        const backupMinQuantity =
+          typeof asset.minQuantity === "string" &&
+          asset.minQuantity.trim() !== ""
+            ? Number(asset.minQuantity)
+            : typeof asset.minQuantity === "number"
+            ? asset.minQuantity
+            : undefined;
+        const backupUnit =
+          typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
+            ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+            : undefined;
+        const backupCt =
+          typeof asset.consumptionType === "string" &&
+          (asset.consumptionType === ConsumptionType.ONE_WAY ||
+            asset.consumptionType === ConsumptionType.TWO_WAY)
+            ? (asset.consumptionType as ConsumptionType)
+            : undefined;
+
         /** Base data from asset */
         const d = {
           data: {
@@ -3326,8 +4788,53 @@ export async function createAssetsFromBackupImport({
               ],
             },
             valuation: asset.valuation ? +asset.valuation : null,
+            ...(backupType !== undefined ? { type: backupType } : {}),
+            ...(backupQuantity !== undefined
+              ? { quantity: backupQuantity }
+              : {}),
+            ...(backupMinQuantity !== undefined
+              ? { minQuantity: backupMinQuantity }
+              : {}),
+            ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
+            ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
           },
         };
+
+        /** AssetModel by name — mirrors the category block below.
+         * Skip linkage entirely when the row is QUANTITY_TRACKED:
+         * models are INDIVIDUAL-only by design. Importing a backup that
+         * predates this rule should not block (we just drop the model
+         * connect) — the user can clean up the export upstream or
+         * re-import the model link manually after fixing the type. */
+        if (
+          asset.assetModel &&
+          typeof asset.assetModel === "object" &&
+          (asset.assetModel as any).name &&
+          backupType !== AssetType.QUANTITY_TRACKED
+        ) {
+          const modelPayload = asset.assetModel as { name: string };
+          const existingModel = await db.assetModel.findFirst({
+            where: {
+              organizationId,
+              name: {
+                equals: modelPayload.name.trim(),
+                mode: "insensitive",
+              },
+            },
+          });
+          if (existingModel) {
+            Object.assign(d.data, { assetModelId: existingModel.id });
+          } else {
+            const newModel = await db.assetModel.create({
+              data: {
+                name: modelPayload.name.trim(),
+                createdBy: { connect: { id: userId } },
+                organization: { connect: { id: organizationId } },
+              },
+            });
+            Object.assign(d.data, { assetModelId: newModel.id });
+          }
+        }
 
         /** Category */
         if (asset.category && Object.keys(asset?.category).length > 0) {
@@ -3425,17 +4932,13 @@ export async function createAssetsFromBackupImport({
 
             Object.assign(d.data, {
               custody: {
-                create: {
-                  teamMemberId: newCustodian.id,
-                },
+                create: [{ teamMemberId: newCustodian.id }],
               },
             });
           } else {
             Object.assign(d.data, {
               custody: {
-                create: {
-                  teamMemberId: existingCustodian.id,
-                },
+                create: [{ teamMemberId: existingCustodian.id }],
               },
             });
           }
@@ -3581,20 +5084,24 @@ export async function updateAssetBookingAvailability({
  * data is included in the initial asset query via `assetIndexFields`, so this function
  * just reads the active booking from `asset.bookings` directly — no DB call needed.
  *
- * @param assets - Assets with `bookings` already included from the initial query
+ * @param assets - Assets with `bookingAssets` already included from the initial query
  * @returns The same assets array with `custody.custodian` added for checked-out assets
  */
 export function updateAssetsWithBookingCustodians<
   T extends Asset & {
-    bookings?: Array<{
-      id: string;
-      custodianTeamMember?: { name: string } | null;
-      custodianUser?: {
-        firstName: string | null;
-        lastName: string | null;
-        displayName: string | null;
-        profilePicture: string | null;
-      } | null;
+    bookingAssets?: Array<{
+      booking?: {
+        id: string;
+        status?: string;
+        custodianTeamMember?: { name: string } | null;
+        custodianUser?: {
+          firstName: string | null;
+          lastName: string | null;
+          displayName: string | null;
+          profilePicture: string | null;
+        } | null;
+        [key: string]: unknown;
+      };
       [key: string]: unknown;
     }>;
   },
@@ -3608,7 +5115,7 @@ export function updateAssetsWithBookingCustodians<
   }
 
   /**
-   * Map over assets and use the already-included bookings data
+   * Map over assets and use the already-included bookingAssets data
    * to build the same custody shape the UI expects.
    */
   return assets.map((a) => {
@@ -3616,13 +5123,17 @@ export function updateAssetsWithBookingCustodians<
       return a;
     }
 
-    // When the availability view is active, bookings may include RESERVED
+    // When the availability view is active, bookingAssets may include RESERVED
     // entries alongside ONGOING/OVERDUE. Pick the active checkout explicitly.
-    const booking =
-      a.bookings?.find(
-        (b) =>
-          "status" in b && (b.status === "ONGOING" || b.status === "OVERDUE")
-      ) ?? a.bookings?.[0];
+    const bookingAsset =
+      a.bookingAssets?.find(
+        (ba) =>
+          "booking" in ba &&
+          ba.booking &&
+          "status" in ba.booking &&
+          (ba.booking.status === "ONGOING" || ba.booking.status === "OVERDUE")
+      ) ?? a.bookingAssets?.[0];
+    const booking = bookingAsset?.booking;
     const custodianUser = booking?.custodianUser;
     const custodianTeamMember = booking?.custodianTeamMember;
 
@@ -3978,14 +5489,17 @@ export async function bulkDeleteAssets({
     });
 
     /**
-     * We have to remove the images of assets so we have to make this query first
+     * We have to remove the images of assets so we have to make this query first.
+     * `title` is also selected so we can attach it as `meta.title` on the
+     * `ASSET_DELETED` activity events emitted post-delete (useful for
+     * activity feeds where the asset row no longer exists to JOIN against).
      */
     const assets = await db.asset.findMany({
       where: {
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, mainImage: true },
+      select: { id: true, mainImage: true, title: true },
     });
 
     try {
@@ -3996,9 +5510,11 @@ export async function bulkDeleteAssets({
       // matching the booking-checkout precedent.
       await db.$transaction(
         async (tx) => {
-          // Activity events — one ASSET_DELETED per asset, emitted before the
-          // delete so the rows still exist for any cross-ref checks. Mirrors
-          // singular `deleteAsset`.
+          // Activity events — one ASSET_DELETED per asset, emitted in the
+          // same tx as the deleteMany so a rollback nukes both. Emitted
+          // BEFORE the delete so the rows still exist for cross-ref checks
+          // (mirrors singular `deleteAsset`); `meta.title` survives the
+          // row delete so activity feeds can render the name later.
           if (assets.length > 0) {
             await recordEvents(
               assets.map((asset) => ({
@@ -4008,6 +5524,7 @@ export async function bulkDeleteAssets({
                 entityType: "ASSET" as const,
                 entityId: asset.id,
                 assetId: asset.id,
+                meta: { title: asset.title },
               })),
               tx
             );
@@ -4072,7 +5589,7 @@ export async function bulkDeleteAssets({
  * @throws {ShelfError} If the custodian does not belong to `organizationId`,
  *   or if any selected asset is not AVAILABLE
  */
-export async function bulkAssignCustody({
+export async function bulkCheckOutAssets({
   userId,
   role,
   assetIds,
@@ -4085,7 +5602,10 @@ export async function bulkAssignCustody({
   userId: User["id"];
   /**
    * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route.
+   * here for EVERY caller (web + mobile), not duplicated in each route. When
+   * `SELF_SERVICE` the service rejects assignments to anyone other than the
+   * calling user — symmetric counterpart on the release side lives in the
+   * route today (see `routes/api+/assets.bulk-release-custody.ts`).
    */
   role: OrganizationRoles;
   assetIds: Asset["id"][];
@@ -4107,13 +5627,13 @@ export async function bulkAssignCustody({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user, custodianTeamMember] = await Promise.all([
+    const [allAssets, user, custodianTeamMember] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: resolvedIds },
           organizationId,
         },
-        select: { id: true, title: true, status: true },
+        select: { id: true, title: true, status: true, type: true },
       }),
       getUserByID(userId, {
         select: {
@@ -4143,9 +5663,12 @@ export async function bulkAssignCustody({
       }),
     ]);
 
-    // Self-service users may only assign custody to themselves. Enforced in the
-    // service so every caller (web + mobile) is covered; previously this lived
-    // only in the web route and the mobile routes bypassed it.
+    /**
+     * SELF_SERVICE guard: a self-service user can only assign custody to
+     * themselves. Centralised in the service so every caller (web + mobile)
+     * is covered — previously this lived only in the web route and the mobile
+     * routes bypassed it. Both routes just pass `role` through.
+     */
     if (
       role === OrganizationRoles.SELF_SERVICE &&
       custodianTeamMember?.user?.id !== userId
@@ -4157,6 +5680,23 @@ export async function bulkAssignCustody({
         additionalData: { userId, assetIds, custodianId },
         label: "Assets",
         status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
+     * Filter out QUANTITY_TRACKED assets — they require per-asset
+     * quantity input and cannot participate in bulk custody operations.
+     */
+    const assets = allAssets.filter((a) => a.type !== "QUANTITY_TRACKED");
+    const skippedQuantityTracked = allAssets.length - assets.length;
+
+    if (assets.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must be assigned custody individually with a specific quantity.",
+        label: "Assets",
         shouldBeCaptured: false,
       });
     }
@@ -4224,6 +5764,9 @@ export async function bulkAssignCustody({
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
         : `**${custodianName.trim()}**`;
 
+      // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
+      // above (they have no Custody.quantity in this path), so no unit count
+      // is surfaced here. Qty-tracked grants go through `checkOutQuantity`.
       await tx.note.createMany({
         data: assets.map((asset) => ({
           content: `${actor} granted ${custodianDisplay} custody.`,
@@ -4234,6 +5777,8 @@ export async function bulkAssignCustody({
       });
 
       // Activity events — one CUSTODY_ASSIGNED per asset, inside the tx.
+      // why: individual-only (qty-tracked filtered out above), so no
+      // meta.quantity — the qty-tracked path is `checkOutQuantity`.
       await recordEvents(
         assets.map((asset) => ({
           organizationId,
@@ -4249,12 +5794,12 @@ export async function bulkAssignCustody({
       );
     });
 
-    return true;
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while assigning custody.";
+        : "Something went wrong while bulk checking out assets.";
 
     throw new ShelfError({
       cause,
@@ -4275,7 +5820,7 @@ export async function bulkAssignCustody({
  * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
  * (via `currentSearchParams` + `settings`).
  */
-export async function bulkReleaseCustody({
+export async function bulkCheckInAssets({
   userId,
   role,
   assetIds,
@@ -4286,7 +5831,9 @@ export async function bulkReleaseCustody({
   userId: User["id"];
   /**
    * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route.
+   * here for EVERY caller (web + mobile), not duplicated in each route — when
+   * `SELF_SERVICE` the service rejects release of custody assigned to anyone
+   * other than the calling user.
    */
   role: OrganizationRoles;
   assetIds: Asset["id"][];
@@ -4306,7 +5853,7 @@ export async function bulkReleaseCustody({
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
-    const [assets, user] = await Promise.all([
+    const [allAssets, user] = await Promise.all([
       db.asset.findMany({
         where: {
           id: { in: resolvedIds },
@@ -4315,6 +5862,7 @@ export async function bulkReleaseCustody({
         select: {
           id: true,
           title: true,
+          type: true,
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
@@ -4330,7 +5878,26 @@ export async function bulkReleaseCustody({
       }),
     ]);
 
-    const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
+    /**
+     * Filter out QUANTITY_TRACKED assets — they require per-asset
+     * quantity input and cannot participate in bulk custody operations.
+     */
+    const assets = allAssets.filter((a) => a.type !== "QUANTITY_TRACKED");
+    const skippedQuantityTracked = allAssets.length - assets.length;
+
+    if (assets.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must have custody released individually.",
+        label: "Assets",
+        shouldBeCaptured: false,
+      });
+    }
+
+    const hasAssetsWithoutCustody = assets.some(
+      (asset) => !hasCustody(asset.custody)
+    );
 
     if (hasAssetsWithoutCustody) {
       throw new ShelfError({
@@ -4343,10 +5910,15 @@ export async function bulkReleaseCustody({
     }
 
     // Self-service users may only release custody of assets assigned to them.
-    // Enforced in the service so every caller (web + mobile) is covered.
+    // `Asset.custody` is a `Custody[]` post Phase 2 widening (multi-custodian
+    // for QUANTITY_TRACKED). For INDIVIDUAL there's exactly one row; for
+    // qty-tracked we'd reject if ANY row belongs to someone else — but
+    // qty-tracked rows are filtered out above anyway.
     if (
       role === OrganizationRoles.SELF_SERVICE &&
-      assets.some((asset) => asset.custody?.custodian?.userId !== userId)
+      assets.some((asset) =>
+        (asset.custody ?? []).some((c) => c.custodian?.userId !== userId)
+      )
     ) {
       throw new ShelfError({
         cause: null,
@@ -4370,20 +5942,7 @@ export async function bulkReleaseCustody({
       /** Deleting custodies over assets */
       await tx.custody.deleteMany({
         where: {
-          id: {
-            in: assets.map((asset) => {
-              /** This case should not happen but in case */
-              if (!asset.custody) {
-                throw new ShelfError({
-                  cause: null,
-                  label: "Assets",
-                  message: "Could not find custody over asset.",
-                });
-              }
-
-              return asset.custody.id;
-            }),
-          },
+          assetId: { in: assets.map((asset) => asset.id) },
         },
       });
 
@@ -4395,40 +5954,56 @@ export async function bulkReleaseCustody({
       });
 
       /** Creating notes for the assets */
+      // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
+      // above (they have no Custody.quantity in this path), so no unit count
+      // is surfaced here. Qty-tracked releases go through the per-unit path.
       await tx.note.createMany({
-        data: assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${
-            user.lastName
-          }** has released **${resolveTeamMemberName(
-            asset.custody!.custodian
-          )}'s** custody over **${asset.title?.trim()}**`,
-          type: "UPDATE",
-          userId,
-          assetId: asset.id,
-        })),
+        data: assets.map((asset) => {
+          const primaryCustody = getPrimaryCustody(asset.custody);
+          return {
+            content: `**${user.firstName?.trim()} ${
+              user.lastName
+            }** has released **${
+              primaryCustody
+                ? resolveTeamMemberName(primaryCustody.custodian)
+                : "Unknown Custodian"
+            }'s** custody over **${asset.title?.trim()}**`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
       });
 
       // Activity events — one CUSTODY_RELEASED per asset, inside the tx.
+      // Phase 2 turned `Asset.custody` into a `Custody[]` array, so we
+      // use the same `getPrimaryCustody` helper as the note above to pick
+      // a representative custodian for the event.
+      // why: individual-only (qty-tracked filtered out above), so no
+      // meta.quantity — the qty-tracked release path is per-unit.
       await recordEvents(
-        assets.map((asset) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: asset.id,
-          assetId: asset.id,
-          teamMemberId: asset.custody!.custodian.id,
-        })),
+        assets.map((asset) => {
+          const primaryCustody = getPrimaryCustody(asset.custody);
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: asset.id,
+            assetId: asset.id,
+            teamMemberId: primaryCustody?.custodian?.id,
+          };
+        }),
         tx
       );
     });
 
-    return true;
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
         ? cause.message
-        : "Something went wrong while releasing custody.";
+        : "Something went wrong while bulk checking in assSets.";
 
     throw new ShelfError({
       cause,
@@ -4473,8 +6048,17 @@ export async function bulkUpdateAssetLocation({
         select: {
           id: true,
           title: true,
-          location: true,
-          kit: { select: { id: true, name: true } },
+          type: true,
+          quantity: true,
+          // We only care about the primary placement here (the bulk
+          // location update sets a single new location per asset).
+          assetLocations: {
+            select: {
+              locationId: true,
+              location: { select: { id: true, name: true } },
+            },
+          },
+          assetKits: { select: { kit: { select: { id: true, name: true } } } },
         },
       }),
       getUserByID(userId, {
@@ -4487,11 +6071,48 @@ export async function bulkUpdateAssetLocation({
       }),
     ]);
 
-    // Check if any assets belong to kits and prevent bulk location updates
-    const assetsInKits = assets.filter((asset) => asset.kit);
+    /**
+     * Filter out QUANTITY_TRACKED assets FIRST — they always skip the
+     * bulk path (no per-asset qty input here), so they shouldn't be
+     * counted against the kit-guard below. A qty-tracked asset that
+     * happens to be in a kit would otherwise trip the kit-guard error
+     * even though it would have been skipped anyway. Mirror of the
+     * bulk-custody pattern (`bulkCheckOutAssets` line ~4099-4113):
+     * silently skip qty-tracked rows, throw early when the whole
+     * selection is qty-tracked. The dialog shows a `WarningBox`
+     * summarising the skip so users know what happened.
+     */
+    const nonQtyTracked = assets.filter(
+      (a) => a.type !== AssetType.QUANTITY_TRACKED
+    );
+    const skippedQuantityTracked = assets.length - nonQtyTracked.length;
+    if (nonQtyTracked.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "All selected assets are quantity-tracked. Quantity-tracked assets must have their placements managed individually with a per-location quantity.",
+        additionalData: {
+          userId,
+          organizationId,
+          skippedQuantityTracked,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Kit-guard applies only to INDIVIDUAL assets that survive the
+    // qty-tracked filter above. INDIVIDUAL in a kit really IS a
+    // conflict — the kit owns its location and the BEFORE trigger
+    // caps an INDIVIDUAL at one AssetLocation row, so we can't
+    // additively place it elsewhere via this bulk path.
+    const assetsInKits = nonQtyTracked.filter(
+      (asset) => asset.assetKits?.[0]?.kit
+    );
     if (assetsInKits.length > 0) {
       const kitNames = Array.from(
-        new Set(assetsInKits.map((asset) => asset.kit?.name))
+        new Set(assetsInKits.map((asset) => asset.assetKits?.[0]?.kit?.name))
       ).join(", ");
       throw new ShelfError({
         cause: null,
@@ -4524,27 +6145,55 @@ export async function bulkUpdateAssetLocation({
       });
     }
 
-    // Filter out assets already at the target location
-    const assetsToUpdate = assets.filter(
-      (a) => a.location?.id !== newLocation?.id
+    // Filter out assets already at the target location (qty-tracked
+    // already filtered above; only INDIVIDUAL reach this point).
+    const assetsToUpdate = nonQtyTracked.filter(
+      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
     );
 
     await db.$transaction(async (tx) => {
       if (assetsToUpdate.length > 0) {
-        /** Updating location of assets to newLocation */
-        await tx.asset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsToUpdate is derived from `assets` fetched on lines 4088-4092 with where { id in resolvedIds, organizationId }; every id is already org-proven
-          where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
-          data: { locationId: newLocation?.id ? newLocation.id : null },
+        // Per-asset MANUAL pivot replace. Drop the asset's existing
+        // manual rows (kit-driven rows survive — they're owned by the
+        // kit's flow), then create the new one (skipped when
+        // clearing). The DEFERRED sum-within-total trigger re-checks
+        // at COMMIT. INDIVIDUAL-only at this point — qty-tracked were
+        // filtered out above.
+        await tx.assetLocation.deleteMany({
+          where: {
+            assetId: { in: assetsToUpdate.map((a) => a.id) },
+            assetKitId: null,
+          },
         });
+        if (newLocation) {
+          await tx.assetLocation.createMany({
+            data: assetsToUpdate.map((asset) => ({
+              assetId: asset.id,
+              locationId: newLocation.id,
+              organizationId,
+              quantity:
+                asset.type === AssetType.QUANTITY_TRACKED && asset.quantity
+                  ? asset.quantity
+                  : 1,
+            })),
+          });
+        }
 
-        /** Creating notes for the assets */
+        /**
+         * Creating notes for the assets.
+         *
+         * why: `assetsToUpdate` is derived from `nonQtyTracked` — this bulk
+         * path filters out QUANTITY_TRACKED assets entirely (see the
+         * `nonQtyTracked` filter above; they must manage placements per-row
+         * with a quantity). So these notes/events are INDIVIDUAL-only and
+         * intentionally carry no unit count.
+         */
         await tx.note.createMany({
           data: assetsToUpdate.map((asset) => {
             const isRemoving = !newLocationId;
 
             const content = getLocationUpdateNoteContent({
-              currentLocation: asset.location,
+              currentLocation: getPrimaryLocation(asset),
               newLocation,
               userId,
               firstName: user?.firstName ?? "",
@@ -4561,7 +6210,9 @@ export async function bulkUpdateAssetLocation({
           }),
         });
 
-        // Activity events — one ASSET_LOCATION_CHANGED per asset, inside the tx.
+        // Activity events — one ASSET_LOCATION_CHANGED per asset, inside the
+        // tx. INDIVIDUAL-only (qty-tracked filtered out above), so no
+        // `meta.quantity`.
         await recordEvents(
           assetsToUpdate.map((asset) => ({
             organizationId,
@@ -4572,7 +6223,7 @@ export async function bulkUpdateAssetLocation({
             assetId: asset.id,
             locationId: newLocation?.id ?? undefined,
             field: "locationId",
-            fromValue: asset.location?.id ?? null,
+            fromValue: getPrimaryLocation(asset)?.id ?? null,
             toValue: newLocation?.id ?? null,
           })),
           tx
@@ -4588,26 +6239,27 @@ export async function bulkUpdateAssetLocation({
     });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
-      (a) => a.location?.id !== newLocation?.id
+      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
     );
     const assetData = actuallyChanged.map((a) => ({
       id: a.id,
       title: a.title,
     }));
 
-    // Group assets by their previous location
+    // Group assets by their previous (primary) location
     const byPrevLocation = new Map<
       string,
       { name: string; assets: typeof assetData }
     >();
     for (const asset of actuallyChanged) {
-      if (!asset.location) continue;
-      const existing = byPrevLocation.get(asset.location.id);
+      const prev = getPrimaryLocation(asset);
+      if (!prev) continue;
+      const existing = byPrevLocation.get(prev.id);
       if (existing) {
         existing.assets.push({ id: asset.id, title: asset.title });
       } else {
-        byPrevLocation.set(asset.location.id, {
-          name: asset.location.name,
+        byPrevLocation.set(prev.id, {
+          name: prev.name,
           assets: [{ id: asset.id, title: asset.title }],
         });
       }
@@ -4940,6 +6592,11 @@ export async function bulkAssignAssetTags({
       )
     );
 
+    // ASSET_TAGS_CHANGED events are emitted inside the $transaction above
+    // (per the use-record-event rule — the tx-wrapped emission is the
+    // authoritative one). Pre-merge HEAD had a second post-tx emission for
+    // the same events; that was a duplicate left over from before PR
+    // #2495 wrapped the tag updates in a transaction. Dropped here.
     return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
@@ -5181,12 +6838,14 @@ export async function getEntitiesWithSelectedValues({
   selectedTagIds = [],
   selectedCategoryIds = [],
   selectedLocationIds = [],
+  selectedAssetModelIds = [],
 }: {
   organizationId: Organization["id"];
   allSelectedEntries: AllowedModelNames[];
   selectedTagIds: Array<Tag["id"]>;
   selectedCategoryIds: Array<Category["id"]>;
   selectedLocationIds: Array<Location["id"]>;
+  selectedAssetModelIds?: string[];
 }) {
   const [
     // Categories
@@ -5203,6 +6862,11 @@ export async function getEntitiesWithSelectedValues({
     locationExcludedSelected,
     selectedLocations,
     totalLocations,
+
+    // Asset Models
+    assetModelExcludedSelected,
+    selectedAssetModels,
+    totalAssetModels,
   ] = await Promise.all([
     /** Categories start */
     db.category.findMany({
@@ -5266,6 +6930,18 @@ export async function getEntitiesWithSelectedValues({
       : Promise.resolve([]),
     db.location.count({ where: { organizationId } }),
     /** Location end */
+
+    /** Asset Models start */
+    db.assetModel.findMany({
+      where: { organizationId, id: { notIn: selectedAssetModelIds } },
+      take: allSelectedEntries.includes("assetModel") ? undefined : 12,
+      orderBy: { updatedAt: "desc" },
+    }),
+    db.assetModel.findMany({
+      where: { organizationId, id: { in: selectedAssetModelIds } },
+    }),
+    db.assetModel.count({ where: { organizationId } }),
+    /** Asset Models end */
   ]);
 
   return {
@@ -5275,6 +6951,8 @@ export async function getEntitiesWithSelectedValues({
     totalTags,
     locations: [...selectedLocations, ...locationExcludedSelected],
     totalLocations,
+    assetModels: [...selectedAssetModels, ...assetModelExcludedSelected],
+    totalAssetModels,
   };
 }
 
@@ -5433,6 +7111,459 @@ export async function getLocationsForCreateAndEdit({
       cause,
       message: "Something went wrong while fetching tags",
       additionalData: { organizationId, defaultLocation },
+      label,
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Quantity-Aware Custody Operations                     */
+/* -------------------------------------------------------------------------- */
+
+/** Arguments for checking out a quantity of a QUANTITY_TRACKED asset to a custodian. */
+type CheckOutQuantityArgs = {
+  /** The asset to check out from */
+  assetId: string;
+  /** The team member receiving custody */
+  teamMemberId: string;
+  /** Number of units to check out (must be positive integer) */
+  quantity: number;
+  /** The user performing the checkout */
+  userId: string;
+  /** The organization owning the asset (used for validation) */
+  organizationId: string;
+  /** Optional note explaining the checkout */
+  note?: string;
+};
+
+/**
+ * Checks out a quantity of units from a QUANTITY_TRACKED asset to a custodian.
+ *
+ * Runs inside an interactive transaction with a row-level lock to prevent
+ * concurrent modifications. Validates that the asset is QUANTITY_TRACKED,
+ * belongs to the given organization, and that enough units are available.
+ *
+ * Creates or increments a Custody record for the asset-teamMember pair
+ * and logs an immutable CHECKOUT consumption log entry.
+ *
+ * @param args - The checkout details
+ * @returns The updated Asset record
+ * @throws {ShelfError} If the asset is not QUANTITY_TRACKED, does not belong
+ *   to the organization, or there are insufficient available units
+ */
+export async function checkOutQuantity({
+  assetId,
+  teamMemberId,
+  quantity,
+  userId,
+  organizationId,
+  note,
+}: CheckOutQuantityArgs) {
+  try {
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be greater than zero.",
+        label,
+        status: 400,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Step 1: Acquire row-level lock to prevent concurrent modifications */
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      /** Step 2: Validate asset belongs to the organization */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /** Step 3: Validate the asset is quantity-tracked */
+      if (asset.type !== "QUANTITY_TRACKED") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only quantity-tracked assets support quantity custody operations.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /**
+       * Step 4: Compute available quantity within the transaction.
+       *
+       * `available = total − inCustody − checkedOutViaBooking`
+       *
+       * Units currently checked out via an ONGOING/OVERDUE booking are
+       * semantically held by that booking's custodian (even if no
+       * `Custody` row exists for them — qty-tracked bookings track the
+       * commitment on the `BookingAsset` pivot, not via `Custody`). They
+       * must be subtracted so we never double-allocate the same physical
+       * unit to a direct custody assignment AND an active booking.
+       *
+       * Reservations (RESERVED bookings) are NOT subtracted — those
+       * units are still physically present until their booking is
+       * checked out, so they're valid targets for custody assignment
+       * right now. The booking will re-validate availability at its own
+       * checkout time.
+       */
+      const totalQuantity = asset.quantity ?? 0;
+      const [custodySum, bookingCheckedOutSum] = await Promise.all([
+        tx.custody.aggregate({
+          where: { assetId },
+          _sum: { quantity: true },
+        }),
+        tx.bookingAsset.aggregate({
+          where: {
+            assetId,
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+            },
+          },
+          _sum: { quantity: true },
+        }),
+      ]);
+      const inCustody = custodySum._sum.quantity ?? 0;
+      const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
+      const available = totalQuantity - inCustody - checkedOut;
+
+      /** Step 5: Validate sufficient availability */
+      if (quantity > available) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${checkedOut} checked out on active bookings).`,
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            quantity,
+            available,
+            inCustody,
+            checkedOut,
+          },
+        });
+      }
+
+      /**
+       * Step 6: Upsert the OPERATOR-allocated custody row (kitCustodyId
+       * IS NULL). Find-then-branch instead of `prisma.upsert` because
+       * the composite (assetId, teamMemberId) uniqueness is now split
+       * into two partial uniques (operator + kit-allocated) — Prisma's
+       * `upsert` needs a single declared unique. The operator partial
+       * still guarantees at most one matching row, so the find +
+       * create/update sequence is safe inside this tx.
+       */
+      const existingOperatorCustody = await tx.custody.findFirst({
+        where: { assetId, teamMemberId, kitCustodyId: null },
+        select: { id: true },
+      });
+      if (existingOperatorCustody) {
+        await tx.custody.update({
+          where: { id: existingOperatorCustody.id },
+          data: { quantity: { increment: quantity } },
+        });
+      } else {
+        await tx.custody.create({
+          data: { assetId, teamMemberId, quantity },
+        });
+      }
+
+      /**
+       * Step 6b: Flip `Asset.status` to `IN_CUSTODY`. Symmetric counterpart
+       * to the conditional flip-to-`AVAILABLE` in `releaseQuantity` (Step
+       * 6b there). Without this the row-level status drifts away from the
+       * actual Custody table state — every kit-assign / picker filter /
+       * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
+       * the asset as available even though it has units in custody, which
+       * (e.g.) lets the kit-assign route bypass its
+       * `someUnavailableAsset` guard. Always a write because the asset
+       * status is no longer guaranteed to be `AVAILABLE` (could be a
+       * second checkout into the same asset), but the value is constant
+       * so it's a no-op in the already-`IN_CUSTODY` case.
+       */
+      await tx.asset.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        where: { id: assetId },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+
+      /** Step 7: Create an immutable audit log entry */
+      await createConsumptionLog({
+        assetId,
+        category: "CHECKOUT",
+        quantity,
+        userId,
+        custodianId: teamMemberId,
+        note,
+        tx,
+      });
+
+      /**
+       * Step 8: Activity event — emit `CUSTODY_ASSIGNED` inside the tx so
+       * it commits atomically with the custody upsert. The `viaQuantity`
+       * meta flag distinguishes qty-tracked custody slices from
+       * INDIVIDUAL-asset custody assignments.
+       */
+      const custodianTeamMember = await tx.teamMember.findFirst({
+        // org-scoped: teamMemberId is request input, so scope the lookup to
+        // the caller's org (cross-org IDOR guard).
+        where: { id: teamMemberId, organizationId },
+        select: { user: { select: { id: true } } },
+      });
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_ASSIGNED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          teamMemberId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { quantity, viaQuantity: true },
+        },
+        tx
+      );
+
+      /** Step 9: Return the refreshed asset */
+      return tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        where: { id: assetId },
+      });
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while checking out quantity. Please try again or contact support.",
+      additionalData: { assetId, teamMemberId, quantity, organizationId },
+      label,
+    });
+  }
+}
+
+/** Arguments for releasing (returning) a quantity from a custodian back to the available pool. */
+type ReleaseQuantityArgs = {
+  /** The asset to release units for */
+  assetId: string;
+  /** The team member releasing custody */
+  teamMemberId: string;
+  /** Number of units to release (must be positive integer) */
+  quantity: number;
+  /** The user performing the release */
+  userId: string;
+  /** The organization owning the asset (used for validation) */
+  organizationId: string;
+  /** Optional note explaining the release */
+  note?: string;
+};
+
+/**
+ * Releases a quantity of units from a custodian back to the available pool.
+ *
+ * Runs inside an interactive transaction with a row-level lock to prevent
+ * concurrent modifications. Validates that a custody record exists for the
+ * asset-teamMember pair and that the release quantity does not exceed what
+ * the custodian currently holds.
+ *
+ * If releasing the full custodied amount, the Custody record is deleted.
+ * Otherwise, the quantity is decremented. An immutable RETURN consumption
+ * log entry is always created.
+ *
+ * @param args - The release details
+ * @returns The updated Asset record
+ * @throws {ShelfError} If no custody record exists or the release quantity
+ *   exceeds the custodied amount
+ */
+export async function releaseQuantity({
+  assetId,
+  teamMemberId,
+  quantity,
+  userId,
+  organizationId,
+  note,
+}: ReleaseQuantityArgs) {
+  try {
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be greater than zero.",
+        label,
+        status: 400,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Step 1: Acquire row-level lock to prevent concurrent modifications */
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      /** Step 2: Validate asset belongs to the organization */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /** Step 3: Validate the asset is quantity-tracked */
+      if (asset.type !== "QUANTITY_TRACKED") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only quantity-tracked assets support quantity custody operations.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /**
+       * Step 4: Find the OPERATOR-allocated custody row for this
+       * (asset, teamMember) pair. `findFirst` filtered to
+       * `kitCustodyId: null` because the composite (assetId, teamMemberId)
+       * uniqueness was split into two partial uniques — a custodian can
+       * legitimately hold both an operator-allocated row AND one-or-more
+       * kit-allocated rows on the same asset, and only the operator row
+       * is releasable from this endpoint. The kit-allocated rows are
+       * released by releasing the kit's custody (which cascade-deletes
+       * them via `KitCustody.id` → `Custody.kitCustodyId`).
+       */
+      const custody = await tx.custody.findFirst({
+        where: { assetId, teamMemberId, kitCustodyId: null },
+      });
+
+      if (!custody) {
+        throw new ShelfError({
+          cause: null,
+          message: "No custody record found for this team member and asset.",
+          label,
+          status: 404,
+          additionalData: { assetId, teamMemberId },
+        });
+      }
+
+      /** Step 5: Validate the release quantity does not exceed custodied amount */
+      if (quantity > custody.quantity) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot release ${quantity} units. The custodian only holds ${custody.quantity} units.`,
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            teamMemberId,
+            quantity,
+            custodied: custody.quantity,
+          },
+        });
+      }
+
+      /**
+       * Step 6: Delete the custody record if releasing full amount, else
+       * decrement. Target by `Custody.id` (primary key) since the global
+       * composite unique is gone — the row we already loaded via
+       * `findFirst` above is the authoritative reference.
+       */
+      if (quantity === custody.quantity) {
+        await tx.custody.delete({
+          where: { id: custody.id },
+        });
+      } else {
+        await tx.custody.update({
+          where: { id: custody.id },
+          data: { quantity: { decrement: quantity } },
+        });
+      }
+
+      /**
+       * Step 6b: If this release removed the last Custody row on the asset,
+       * flip Asset.status back to AVAILABLE. Without this, the asset stays
+       * stuck at IN_CUSTODY even after every unit has been returned —
+       * matching the conditional-flip pattern used by the kit-custody
+       * flows (`releaseCustody` / `bulkRemoveAssetsFromKits` /
+       * `updateKitAssets` removal). We only flip when zero rows remain so
+       * an asset that still has other operator or kit-allocated custody
+       * keeps its IN_CUSTODY status.
+       */
+      const remainingCustodyCount = await tx.custody.count({
+        where: { assetId },
+      });
+      if (remainingCustodyCount === 0) {
+        await tx.asset.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+          where: { id: assetId },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+      }
+
+      /** Step 7: Create an immutable audit log entry */
+      await createConsumptionLog({
+        assetId,
+        category: "RETURN",
+        quantity,
+        userId,
+        custodianId: teamMemberId,
+        note,
+        tx,
+      });
+
+      /**
+       * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
+       * it commits atomically with the custody decrement/delete. Mirrors
+       * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
+       * qty-tracked releases from INDIVIDUAL-asset custody releases.
+       */
+      const custodianTeamMember = await tx.teamMember.findFirst({
+        // org-scoped: teamMemberId is request input, so scope the lookup to
+        // the caller's org (cross-org IDOR guard).
+        where: { id: teamMemberId, organizationId },
+        select: { user: { select: { id: true } } },
+      });
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "CUSTODY_RELEASED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          teamMemberId,
+          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          meta: { quantity, viaQuantity: true },
+        },
+        tx
+      );
+
+      /** Step 9: Return the refreshed asset */
+      return tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        where: { id: assetId },
+      });
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while releasing quantity. Please try again or contact support.",
+      additionalData: { assetId, teamMemberId, quantity, organizationId },
       label,
     });
   }

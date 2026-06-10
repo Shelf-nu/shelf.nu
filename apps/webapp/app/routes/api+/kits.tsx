@@ -46,25 +46,27 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         name: true,
         image: true,
         imageExpiration: true,
-        assets: {
+        assetKits: {
           select: {
-            id: true,
-            title: true,
-            mainImage: true,
-            mainImageExpiration: true,
-            category: {
+            asset: {
               select: {
-                name: true,
+                id: true,
+                title: true,
+                mainImage: true,
+                mainImageExpiration: true,
+                category: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
-          orderBy: {
-            title: "asc",
-          },
+          orderBy: { asset: { title: "asc" } },
         },
         _count: {
           select: {
-            assets: true,
+            assetKits: true,
           },
         },
       },
