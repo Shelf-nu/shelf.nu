@@ -7,8 +7,9 @@ import { vi } from "vitest";
  */
 
 // why: provides proper type-safe args for testing loaders with all required React Router 7
-// properties. `pattern` and `url` were renamed to `unstable_pattern` / `unstable_url` in
-// 7.16 (they'll graduate to stable names on a future release).
+// properties. `pattern` and `url` were briefly renamed to `unstable_*` in early 7.16, then
+// stabilized back to plain `pattern` / `url` in a later 7.16 patch (which is what's
+// resolved by the current lockfile and what CI runs against).
 export function createLoaderArgs(
   args: Partial<LoaderFunctionArgs>
 ): LoaderFunctionArgs {
@@ -17,13 +18,12 @@ export function createLoaderArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern ?? "*",
-    unstable_url: args.unstable_url ?? new URL(request.url),
+    pattern: args.pattern ?? "*",
+    url: args.url ?? new URL(request.url),
   };
 }
 
-// why: same as `createLoaderArgs` — react-router 7.16 renamed `pattern` / `url` to
-// `unstable_pattern` / `unstable_url` on `ActionFunctionArgs`.
+// why: same as `createLoaderArgs` — `pattern` / `url` stabilized in 7.16's later patch.
 export function createActionArgs(
   args: Partial<ActionFunctionArgs>
 ): ActionFunctionArgs {
@@ -33,8 +33,8 @@ export function createActionArgs(
     request,
     params: args.params || {},
     context: args.context || {},
-    unstable_pattern: args.unstable_pattern ?? "*",
-    unstable_url: args.unstable_url ?? new URL(request.url),
+    pattern: args.pattern ?? "*",
+    url: args.url ?? new URL(request.url),
   };
 }
 

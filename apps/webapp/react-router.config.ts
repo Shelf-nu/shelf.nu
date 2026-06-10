@@ -14,10 +14,12 @@ export default {
     // `true` deliberately as part of the eventual v8 migration.
     v8_middleware: false,
     v8_splitRouteModules: false,
-    // `v8_passThroughRequests` was dropped from `FutureConfig` in
-    // react-router 7.16; `unstable_` is the current name for the
-    // trailing-slash-aware flag (will graduate to `v8_` on release).
-    unstable_trailingSlashAwareDataRequests: false,
+    // The `unstable_trailingSlashAwareDataRequests` flag stabilized
+    // as `v8_trailingSlashAwareDataRequests` in @react-router/dev
+    // 7.16's later patches — the runtime config loader throws when
+    // it sees the `unstable_` name now. `v8_passThroughRequests`
+    // stayed dropped from `FutureConfig`, so only this one remains.
+    v8_trailingSlashAwareDataRequests: false,
   },
   buildEnd: async ({ reactRouterConfig }) => {
     const sentryInstrument = `instrument.server`;
