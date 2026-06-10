@@ -53,7 +53,10 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
-import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import {
+  calculatePartialCheckinProgress,
+  calculateUnitCheckinProgress,
+} from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -442,23 +445,39 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const allCategories = [...assetCategories, ...kitCategories];
 
-    // Calculate partial check-in progress
-    // For progress calculation, we need the TOTAL number of assets in the booking,
-    // not the filtered count from booking.assets (which may be filtered by status)
-    // So we need to get the unfiltered asset count
-    const totalBookingAssets = await db.asset.count({
-      where: {
-        bookings: {
-          some: { id: booking.id },
-        },
-      },
-    });
+    // Calculate partial check-in progress.
+    // `booking.assets` is already the FULL, unfiltered booking asset set — its
+    // `getBooking` include applies no status/search filter (those are page
+    // concerns handled in-memory), and each row carries `id` + `kitId`. So we
+    // reuse it for the progress input instead of a second org-scoped round-trip.
+    // It is org-scoped transitively via the org-scoped `getBooking` fetch.
+    const bookingAssetsForProgress = enhancedBooking.assets.map((asset) => ({
+      id: asset.id,
+      kitId: asset.kitId,
+    }));
+    const totalBookingAssets = bookingAssetsForProgress.length;
 
-    const partialCheckinProgress = calculatePartialCheckinProgress(
-      totalBookingAssets,
-      checkedInAssetIds,
-      booking.status
-    );
+    // Read the workspace setting with a lean query. We intentionally avoid
+    // getBookingSettingsForOrganization here because that performs an upsert
+    // write, which is undesirable in a read-only loader path.
+    const bookingSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { countKitsAsSingleUnit: true },
+    });
+    const countKitsAsSingleUnit =
+      bookingSettings?.countKitsAsSingleUnit ?? false;
+
+    const partialCheckinProgress = countKitsAsSingleUnit
+      ? calculateUnitCheckinProgress(
+          bookingAssetsForProgress,
+          checkedInAssetIds,
+          booking.status
+        )
+      : calculatePartialCheckinProgress(
+          totalBookingAssets,
+          checkedInAssetIds,
+          booking.status
+        );
 
     const modelName = {
       singular: "item",

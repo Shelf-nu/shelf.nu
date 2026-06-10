@@ -286,6 +286,14 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
 export function error(cause: ShelfError, shouldSendNotification = true) {
   if (cause.label !== "Request aborted") {
     Logger.error(cause);
+
+    // Handled client errors (4xx) are dropped from the Sentry error pipeline
+    // (see handleBeforeSendError); record them as a low-severity log trail
+    // instead so we keep visibility without burning the error quota. No-op for
+    // non-4xx errors. Kept inside the abort guard so client disconnects
+    // (status 499 "Request aborted") aren't reintroduced as log noise — they're
+    // intentionally suppressed from both Logger.error and beforeSend.
+    Logger.handledClientError(cause);
   }
 
   if (

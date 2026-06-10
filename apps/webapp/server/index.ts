@@ -177,6 +177,7 @@ export default createHonoServer<ServerEnv>({
           "/login",
           "/sso-login",
           "/oauth/callback",
+          "/oauth/callback/mobile", // Native-app SSO callback (web-delegated)
           "/logout",
           "/otp",
           "/resend-otp",
