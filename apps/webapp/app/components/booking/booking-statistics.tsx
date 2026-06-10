@@ -67,10 +67,10 @@ export function BookingStatistics({
                     {partialCheckinProgress.totalAssets}
                     {partialCheckinProgress.countMode === "units" ? (
                       <>
-                        <span className="text-gray-500">units</span>
+                        <span className="text-gray-500">items</span>
                         <InfoTooltip
                           iconClassName="size-4"
-                          content={<p>Kits count as one unit</p>}
+                          content={<p>Kits count as one item</p>}
                         />
                       </>
                     ) : (
