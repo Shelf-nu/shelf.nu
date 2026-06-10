@@ -500,15 +500,21 @@ const unavailableBookingStatuses = [
  *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
  *     digits, matching the format produced by getNextSequentialId
  *
- * Used by getAssets to route ID-shaped queries down a narrower OR clause
- * (sequentialId / barcodes.value / qrCodes.id) instead of the full
+ * Used by getAssets to run ID-shaped queries against a narrower OR clause
+ * (sequentialId / barcodes.value / qrCodes.id) first, instead of the full
  * 10-branch chain. The narrower clause skips the slow paths — custodian
- * name traversal and the unindexed customFields JSON ILIKE — while
- * still covering every place an ID-shaped value can legitimately live.
+ * name traversal and the unindexed customFields JSON ILIKE — while still
+ * covering every place an ID-shaped value is *most likely* to live.
  *
- * Loose terms like "lab-12" or "AS1000" fall through to the full search
- * because they don't match canonical sequentialId format and could be
- * substrings of asset titles, custom fields, etc.
+ * Because a bare number can equally be a real barcode OR a value embedded
+ * in a title / description / custom field (indistinguishable by shape),
+ * getAssets falls back to the full search when this narrow clause returns
+ * zero rows — so nothing is ever silently missed. See the fallback re-query
+ * in {@link getAssets}.
+ *
+ * Loose terms like "lab-12" or "AS1000" don't match here and go straight to
+ * the full search, since they're more likely substrings of titles, custom
+ * fields, etc.
  */
 function looksLikeAssetId(term: string): boolean {
   return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
@@ -573,6 +579,12 @@ export async function getAssets(params: {
 
     const where: Prisma.AssetWhereInput = { organizationId };
 
+    // When an ID-shaped search uses the narrow fast path but returns nothing,
+    // we re-run with the full clause held here — the number may be embedded in
+    // a title, description, or custom field rather than being a real ID.
+    let shouldFallbackToFullSearch = false;
+    let fullSearchOr: Prisma.AssetWhereInput["OR"] | undefined;
+
     if (availableToBookOnly) {
       where.availableToBook = true;
     }
@@ -585,31 +597,15 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      // Fast path: when every term looks like an asset identifier — either
-      // bare digits ("21035", a UPC barcode) or canonical sequentialId
-      // ("SAM-0001") — narrow the OR clause to the three columns where an
-      // ID-shaped value can legitimately live: sequentialId, barcode value,
-      // and QR id. All three are covered by trigram GIN indexes added in
-      // migration 20260525110348, so the planner stays on indexed scans.
-      // Skipping title/description/category/location/tag/custodian/customFields
-      // is intentional — they can still match via the full path below for
-      // non-ID-shaped terms.
-      if (searchTerms.length > 0 && searchTerms.every(looksLikeAssetId)) {
-        where.OR = searchTerms.flatMap((term) => [
-          { sequentialId: { contains: term, mode: "insensitive" } },
-          {
-            barcodes: {
-              some: { value: { contains: term, mode: "insensitive" } },
-            },
-          },
-          {
-            qrCodes: {
-              some: { id: { contains: term, mode: "insensitive" } },
-            },
-          },
-        ]);
-      } else {
-        where.OR = searchTerms.map((term) => ({
+      if (searchTerms.length > 0) {
+        // The full multi-column clause: matches a term anywhere it can
+        // legitimately live — title, sequentialId, description, category,
+        // location, tags, custodian names, QR/barcode, and custom fields. It
+        // is the slow path (custodian relation traversal + an unindexed
+        // customFields JSON ILIKE), so for ID-shaped searches we run the
+        // narrow clause first and only fall back to this when it finds
+        // nothing (see the fallback re-query further down).
+        fullSearchOr = searchTerms.map((term) => ({
           OR: [
             // Search in asset fields
             { title: { contains: term, mode: "insensitive" } },
@@ -673,6 +669,38 @@ export async function getAssets(params: {
             },
           ],
         }));
+
+        // Fast path: when every term looks like an asset identifier — either
+        // bare digits ("21035", a UPC barcode) or canonical sequentialId
+        // ("SAM-0001") — narrow the OR clause to the three columns where an
+        // ID-shaped value can legitimately live: sequentialId, barcode value,
+        // and QR id. All three are covered by trigram GIN indexes added in
+        // migration 20260525110348, so the planner stays on indexed scans and
+        // a real ID lookup (the common case) returns immediately.
+        //
+        // A bare number can ALSO be embedded in a title, description, or
+        // custom field (e.g. "Armchair (Old SKU: 103468)"), and the shape
+        // alone cannot tell those apart from a real barcode. So we flag the
+        // query for fallback: if this narrow clause returns zero rows,
+        // getAssets re-runs with `fullSearchOr` below.
+        if (searchTerms.every(looksLikeAssetId)) {
+          shouldFallbackToFullSearch = true;
+          where.OR = searchTerms.flatMap((term) => [
+            { sequentialId: { contains: term, mode: "insensitive" } },
+            {
+              barcodes: {
+                some: { value: { contains: term, mode: "insensitive" } },
+              },
+            },
+            {
+              qrCodes: {
+                some: { id: { contains: term, mode: "insensitive" } },
+              },
+            },
+          ]);
+        } else {
+          where.OR = fullSearchOr;
+        }
       }
     }
 
@@ -841,23 +869,35 @@ export async function getAssets(params: {
       where.kit = { isNot: null };
     }
 
-    const [assets, totalAssets] = await Promise.all([
-      db.asset.findMany({
-        skip,
-        take,
-        where,
-        include: {
-          ...assetIndexFields({
-            bookingFrom,
-            bookingTo,
-            unavailableBookingStatuses,
-          }),
-          ...extraInclude,
-        },
-        orderBy: { [orderBy]: orderDirection },
-      }),
-      db.asset.count({ where }),
-    ]);
+    const fetchAssetsForWhere = (assetWhere: Prisma.AssetWhereInput) =>
+      Promise.all([
+        db.asset.findMany({
+          skip,
+          take,
+          where: assetWhere,
+          include: {
+            ...assetIndexFields({
+              bookingFrom,
+              bookingTo,
+              unavailableBookingStatuses,
+            }),
+            ...extraInclude,
+          },
+          orderBy: { [orderBy]: orderDirection },
+        }),
+        db.asset.count({ where: assetWhere }),
+      ]);
+
+    let [assets, totalAssets] = await fetchAssetsForWhere(where);
+
+    // Fallback: an ID-shaped search ran the narrow clause but matched no
+    // assets. The term may be embedded in a title, description, or custom
+    // field rather than being a real identifier, so re-run with the full
+    // search clause before giving up.
+    if (shouldFallbackToFullSearch && totalAssets === 0 && fullSearchOr) {
+      where.OR = fullSearchOr;
+      [assets, totalAssets] = await fetchAssetsForWhere(where);
+    }
 
     return { assets, totalAssets };
   } catch (cause) {
