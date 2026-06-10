@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   buildSecurityHeaders,
+  hostFromUrl,
   securityHeaders,
   CONTENT_SECURITY_POLICY_REPORT_ONLY,
   PERMISSIONS_POLICY,
@@ -11,7 +12,10 @@ import {
 
 describe("buildSecurityHeaders", () => {
   it("always sets the baseline static headers", () => {
-    const headers = buildSecurityHeaders({ isHttps: false });
+    const headers = buildSecurityHeaders({
+      isHttps: false,
+      isCanonicalHost: true,
+    });
 
     expect(headers["X-Frame-Options"]).toBe("DENY");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
@@ -22,13 +26,16 @@ describe("buildSecurityHeaders", () => {
     );
   });
 
-  it("omits HSTS over http and includes it over https", () => {
-    expect(
-      buildSecurityHeaders({ isHttps: false })["Strict-Transport-Security"]
-    ).toBeUndefined();
-    expect(
-      buildSecurityHeaders({ isHttps: true })["Strict-Transport-Security"]
-    ).toBe(STRICT_TRANSPORT_SECURITY);
+  it("sets HSTS only when the request is HTTPS AND for the canonical host", () => {
+    const hsts = (isHttps: boolean, isCanonicalHost: boolean) =>
+      buildSecurityHeaders({ isHttps, isCanonicalHost })[
+        "Strict-Transport-Security"
+      ];
+
+    expect(hsts(true, true)).toBe(STRICT_TRANSPORT_SECURITY);
+    expect(hsts(false, true)).toBeUndefined(); // http
+    expect(hsts(true, false)).toBeUndefined(); // non-canonical host (e.g. shortener)
+    expect(hsts(false, false)).toBeUndefined();
   });
 
   it("allows camera + geolocation for self and blocks unused sensors", () => {
@@ -52,7 +59,34 @@ describe("buildSecurityHeaders", () => {
   });
 });
 
+describe("hostFromUrl", () => {
+  it("returns the lowercased host (with port if present)", () => {
+    expect(hostFromUrl("https://app.shelf.nu")).toBe("app.shelf.nu");
+    expect(hostFromUrl("https://APP.Shelf.NU/login")).toBe("app.shelf.nu");
+    expect(hostFromUrl("http://localhost:3000")).toBe("localhost:3000");
+  });
+
+  it("returns null for missing or unparseable input", () => {
+    expect(hostFromUrl(undefined)).toBeNull();
+    expect(hostFromUrl("")).toBeNull();
+    expect(hostFromUrl("not a url")).toBeNull();
+  });
+});
+
 describe("securityHeaders middleware", () => {
+  // why: securityHeaders() reads SERVER_URL once when constructed to resolve the
+  // canonical host, so each test sets it before calling makeApp(). Saved/restored
+  // to avoid leaking between tests.
+  const originalServerUrl = process.env.SERVER_URL;
+
+  beforeEach(() => {
+    process.env.SERVER_URL = "https://app.shelf.nu";
+  });
+
+  afterEach(() => {
+    process.env.SERVER_URL = originalServerUrl;
+  });
+
   /**
    * A tiny Hono app mirroring the real pipeline: `securityHeaders()` registered
    * first (as the `beforeAll` hook does), then a short-circuiting static-like
@@ -70,7 +104,7 @@ describe("securityHeaders middleware", () => {
   }
 
   it("sets headers on a normal dynamic response", async () => {
-    const res = await makeApp().request("/login");
+    const res = await makeApp().request("https://app.shelf.nu/login");
 
     expect(res.headers.get("X-Frame-Options")).toBe("DENY");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
@@ -84,23 +118,36 @@ describe("securityHeaders middleware", () => {
   });
 
   it("sets headers on a short-circuiting static-like response", async () => {
-    const res = await makeApp().request("/static/app.js");
+    const res = await makeApp().request("https://app.shelf.nu/static/app.js");
 
     expect(res.headers.get("X-Frame-Options")).toBe("DENY");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
-  it("emits HSTS only when x-forwarded-proto is https", async () => {
-    const app = makeApp();
-
-    const httpRes = await app.request("/login");
-    expect(httpRes.headers.get("Strict-Transport-Security")).toBeNull();
-
-    const httpsRes = await app.request("/login", {
+  it("emits HSTS for the canonical host over HTTPS", async () => {
+    const res = await makeApp().request("https://app.shelf.nu/login", {
       headers: { "x-forwarded-proto": "https" },
     });
-    expect(httpsRes.headers.get("Strict-Transport-Security")).toBe(
+
+    expect(res.headers.get("Strict-Transport-Security")).toBe(
       STRICT_TRANSPORT_SECURITY
     );
+  });
+
+  it("omits HSTS over http even on the canonical host", async () => {
+    const res = await makeApp().request("https://app.shelf.nu/login");
+
+    expect(res.headers.get("Strict-Transport-Security")).toBeNull();
+  });
+
+  it("omits HSTS on a non-canonical host (e.g. the URL-shortener) even over HTTPS", async () => {
+    // Same server, different host (the short domain) — must NOT be HSTS-pinned.
+    const res = await makeApp().request("https://eam.sh/abc123", {
+      headers: { "x-forwarded-proto": "https" },
+    });
+
+    expect(res.headers.get("Strict-Transport-Security")).toBeNull();
+    // ...but the host-independent headers are still applied.
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
   });
 });

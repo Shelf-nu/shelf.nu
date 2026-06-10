@@ -16,10 +16,15 @@
  * responses, which is why neither is used here.)
  *
  * Header choices:
- * - `Strict-Transport-Security` is only sent over HTTPS (detected via the
- *   `x-forwarded-proto` header set by the Cloudflare/Fly proxy layer) so local
- *   http dev and internal health checks never pin HSTS. `preload` is
- *   intentionally deferred — it's a hard-to-reverse commitment.
+ * - `Strict-Transport-Security` is sent ONLY for the canonical app host
+ *   (the host of `SERVER_URL`) and ONLY over HTTPS (detected via the
+ *   `x-forwarded-proto` header set by the Cloudflare/Fly proxy layer). This is
+ *   deliberately narrow: the same Hono server also answers for the
+ *   URL-shortener host (`process.env.URL_SHORTENER`, handled in
+ *   {@link file://./index.ts}), and for raw platform hosts (e.g. `*.fly.dev`)
+ *   and http health checks. Emitting `includeSubDomains` on any of those would
+ *   pin a domain we don't intend to. `preload` is intentionally deferred — it's
+ *   a hard-to-reverse commitment.
  * - `Content-Security-Policy` ships in **Report-Only** mode with just
  *   `frame-ancestors 'none'`. A full enforcing policy needs per-request script
  *   nonces, which are not yet wired into `entry.server.tsx`, so enforcing mode
@@ -78,13 +83,18 @@ export const STRICT_TRANSPORT_SECURITY = "max-age=63072000; includeSubDomains";
  * Builds the security-header name→value map for a single response.
  *
  * @param opts.isHttps - whether the original client connection used HTTPS
- *   (derived from `x-forwarded-proto`). HSTS is only included when `true`.
- * @returns header name → value pairs to set on the response
+ *   (derived from `x-forwarded-proto`).
+ * @param opts.isCanonicalHost - whether the request targeted the canonical app
+ *   host (the host of `SERVER_URL`).
+ * @returns header name → value pairs to set on the response. HSTS is included
+ *   only when the request is BOTH HTTPS and for the canonical app host.
  */
 export function buildSecurityHeaders({
   isHttps,
+  isCanonicalHost,
 }: {
   isHttps: boolean;
+  isCanonicalHost: boolean;
 }): Record<string, string> {
   const headers: Record<string, string> = {
     "X-Frame-Options": "DENY",
@@ -94,9 +104,11 @@ export function buildSecurityHeaders({
     "Content-Security-Policy-Report-Only": CONTENT_SECURITY_POLICY_REPORT_ONLY,
   };
 
-  // Only assert HSTS over HTTPS: browsers ignore it over http anyway, and
-  // emitting it on local http dev could pin HSTS for "localhost".
-  if (isHttps) {
+  // Assert HSTS only for the canonical app host over HTTPS. The same server
+  // also answers for the URL-shortener host (and raw platform hosts / http
+  // health checks); emitting `includeSubDomains` there would pin domains we
+  // don't intend to. Browsers ignore HSTS over http anyway.
+  if (isHttps && isCanonicalHost) {
     headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY;
   }
 
@@ -117,22 +129,52 @@ function isHttpsRequest(forwardedProto: string | undefined): boolean {
 }
 
 /**
+ * Extracts the lowercased host (`host:port`) from a URL string.
+ *
+ * @param url - a URL string (e.g. `SERVER_URL`)
+ * @returns the lowercased host, or `null` when absent/unparseable
+ */
+export function hostFromUrl(url: string | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Hono middleware that sets the baseline security headers on every response.
  *
  * Headers are set *after* `await next()` (matching the existing `cache()` idiom
  * in {@link file://./middleware.ts}) so they apply to whatever response
  * downstream produced — including `serveStatic` short-circuits, redirects from
- * the `protect` middleware, and rendered error pages. `.set()` (rather than
- * append/default) ensures our baseline always wins.
+ * the `protect`/`urlShortener` middleware, and rendered error pages. `.set()`
+ * (rather than append/default) ensures our baseline always wins.
+ *
+ * The canonical app host is resolved once from `SERVER_URL` (fixed at boot) and
+ * used to scope HSTS — see {@link buildSecurityHeaders}.
  *
  * @returns a Hono middleware handler
  */
 export function securityHeaders() {
+  const canonicalHost = hostFromUrl(process.env.SERVER_URL);
+
   return createMiddleware(async (c, next) => {
     await next();
 
+    // Prefer the Host header — authoritative behind the Cloudflare/Fly proxy,
+    // and what the urlShortener middleware keys on — falling back to the
+    // request URL's host if the header is somehow absent.
+    const requestHost =
+      c.req.header("host")?.toLowerCase() ?? hostFromUrl(c.req.url);
+
     const headers = buildSecurityHeaders({
       isHttps: isHttpsRequest(c.req.header("x-forwarded-proto")),
+      isCanonicalHost: canonicalHost !== null && requestHost === canonicalHost,
     });
 
     for (const [name, value] of Object.entries(headers)) {
