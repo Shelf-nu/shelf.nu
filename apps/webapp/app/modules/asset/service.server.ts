@@ -579,15 +579,16 @@ export async function getAssets(params: {
 
     const where: Prisma.AssetWhereInput = { organizationId };
 
-    // When an ID-shaped search uses the narrow fast path but returns nothing,
-    // we re-run with the full clause held here — the number may be embedded in
-    // a title, description, or custom field rather than being a real ID.
+    // Lazily builds the full multi-column search clause. Held as a builder
+    // (not a prebuilt value) so a successful narrow ID lookup never pays to
+    // construct the 10-branch clause it won't use; it is only invoked by the
+    // non-ID path or by the fallback re-query when the narrow query is empty.
     let shouldFallbackToFullSearch = false;
-    let fullSearchOr: Prisma.AssetWhereInput[] | undefined;
+    let buildFullSearchOr: (() => Prisma.AssetWhereInput[]) | undefined;
     // Number of OR entries the narrow search contributed. Later filters
     // (uncategorized / untagged / without-location / team-member) also append
     // to `where.OR`, so the fallback re-query replaces only these first
-    // entries with `fullSearchOr` and preserves the appended filter clauses.
+    // entries with the full clause and preserves the appended filter clauses.
     let narrowSearchOrCount = 0;
 
     if (availableToBookOnly) {
@@ -603,77 +604,86 @@ export async function getAssets(params: {
         .filter(Boolean);
 
       if (searchTerms.length > 0) {
-        // The full multi-column clause: matches a term anywhere it can
-        // legitimately live — title, sequentialId, description, category,
+        // Builder for the full multi-column clause: matches a term anywhere it
+        // can legitimately live — title, sequentialId, description, category,
         // location, tags, custodian names, QR/barcode, and custom fields. It
         // is the slow path (custodian relation traversal + an unindexed
         // customFields JSON ILIKE), so for ID-shaped searches we run the
-        // narrow clause first and only fall back to this when it finds
-        // nothing (see the fallback re-query further down).
-        fullSearchOr = searchTerms.map((term) => ({
-          OR: [
-            // Search in asset fields
-            { title: { contains: term, mode: "insensitive" } },
-            // Search in asset sequential id
-            { sequentialId: { contains: term, mode: "insensitive" } },
-            // Search in asset description
-            { description: { contains: term, mode: "insensitive" } },
-            // Search in related category
-            { category: { name: { contains: term, mode: "insensitive" } } },
-            // Search in related location
-            { location: { name: { contains: term, mode: "insensitive" } } },
-            // Search in related tags
-            {
-              tags: { some: { name: { contains: term, mode: "insensitive" } } },
-            },
-            // Search in custodian names
-            {
-              custody: {
-                custodian: {
-                  OR: [
-                    { name: { contains: term, mode: "insensitive" } },
-                    {
-                      user: {
-                        OR: [
-                          {
-                            firstName: { contains: term, mode: "insensitive" },
-                          },
-                          { lastName: { contains: term, mode: "insensitive" } },
-                        ],
+        // narrow clause first and only build/use this when it finds nothing
+        // (see the fallback re-query further down). Defined as a closure so the
+        // clause is constructed only when actually needed.
+        buildFullSearchOr = () =>
+          searchTerms.map((term) => ({
+            OR: [
+              // Search in asset fields
+              { title: { contains: term, mode: "insensitive" } },
+              // Search in asset sequential id
+              { sequentialId: { contains: term, mode: "insensitive" } },
+              // Search in asset description
+              { description: { contains: term, mode: "insensitive" } },
+              // Search in related category
+              { category: { name: { contains: term, mode: "insensitive" } } },
+              // Search in related location
+              { location: { name: { contains: term, mode: "insensitive" } } },
+              // Search in related tags
+              {
+                tags: {
+                  some: { name: { contains: term, mode: "insensitive" } },
+                },
+              },
+              // Search in custodian names
+              {
+                custody: {
+                  custodian: {
+                    OR: [
+                      { name: { contains: term, mode: "insensitive" } },
+                      {
+                        user: {
+                          OR: [
+                            {
+                              firstName: {
+                                contains: term,
+                                mode: "insensitive",
+                              },
+                            },
+                            {
+                              lastName: { contains: term, mode: "insensitive" },
+                            },
+                          ],
+                        },
                       },
-                    },
-                  ],
+                    ],
+                  },
                 },
               },
-            },
-            // Search qr code id
-            {
-              qrCodes: {
-                some: { id: { contains: term, mode: "insensitive" } },
-              },
-            },
-            // Search barcode values
-            {
-              barcodes: {
-                some: { value: { contains: term, mode: "insensitive" } },
-              },
-            },
-            // Search in custom fields
-            {
-              customFields: {
-                some: {
-                  OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                    value: {
-                      path: [jsonPath],
-                      string_contains: term,
-                      mode: "insensitive",
-                    },
-                  })),
+              // Search qr code id
+              {
+                qrCodes: {
+                  some: { id: { contains: term, mode: "insensitive" } },
                 },
               },
-            },
-          ],
-        }));
+              // Search barcode values
+              {
+                barcodes: {
+                  some: { value: { contains: term, mode: "insensitive" } },
+                },
+              },
+              // Search in custom fields
+              {
+                customFields: {
+                  some: {
+                    OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                      value: {
+                        path: [jsonPath],
+                        string_contains: term,
+                        mode: "insensitive",
+                      },
+                    })),
+                  },
+                },
+              },
+            ],
+          }));
 
         // Fast path: when every term looks like an asset identifier — either
         // bare digits ("21035", a UPC barcode) or canonical sequentialId
@@ -687,7 +697,7 @@ export async function getAssets(params: {
         // custom field (e.g. "Armchair (Old SKU: 103468)"), and the shape
         // alone cannot tell those apart from a real barcode. So we flag the
         // query for fallback: if this narrow clause returns zero rows,
-        // getAssets re-runs with `fullSearchOr` below.
+        // getAssets builds and re-runs with the full clause below.
         if (searchTerms.every(looksLikeAssetId)) {
           shouldFallbackToFullSearch = true;
           where.OR = searchTerms.flatMap((term) => [
@@ -707,7 +717,8 @@ export async function getAssets(params: {
           // swap them out without disturbing filter clauses appended later.
           narrowSearchOrCount = where.OR.length;
         } else {
-          where.OR = fullSearchOr;
+          // Not an ID-shaped search — go straight to the full clause.
+          where.OR = buildFullSearchOr();
         }
       }
     }
@@ -911,14 +922,14 @@ export async function getAssets(params: {
     // assets. The term may be embedded in a title, description, or custom
     // field rather than being a real identifier, so re-run with the full
     // search clause before giving up. Only the narrow search entries are
-    // swapped for `fullSearchOr`; any filter clauses appended to `where.OR`
+    // swapped for the full clause; any filter clauses appended to `where.OR`
     // afterwards (uncategorized / untagged / without-location / team-member)
     // are kept so the fallback honours the same filters as the first query.
-    if (shouldFallbackToFullSearch && totalAssets === 0 && fullSearchOr) {
+    if (shouldFallbackToFullSearch && totalAssets === 0 && buildFullSearchOr) {
       const appendedFilterOr = Array.isArray(where.OR)
         ? where.OR.slice(narrowSearchOrCount)
         : [];
-      where.OR = [...fullSearchOr, ...appendedFilterOr];
+      where.OR = [...buildFullSearchOr(), ...appendedFilterOr];
       [assets, totalAssets] = await fetchAssetsForWhere(where);
     }
 
