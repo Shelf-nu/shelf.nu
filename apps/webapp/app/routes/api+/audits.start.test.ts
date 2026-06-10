@@ -5,8 +5,8 @@
  *
  * The `.refine` is load-bearing: it decides which "create audit" entry points
  * are accepted (asset-index bulk, single-context detail page, and the locations
- * multi-select). These tests lock that contract so the new location branch and
- * the legacy forms can't silently regress.
+ * and kits multi-selects). These tests lock that contract so the new location
+ * and kit branches and the legacy forms can't silently regress.
  *
  * @see {@link file://./audits.start.ts}
  */
@@ -42,6 +42,24 @@ describe("StartAuditSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts a kit multi-selection (contextType=kit + kitIds)", () => {
+    const result = StartAuditSchema.safeParse({
+      ...base,
+      contextType: "kit",
+      kitIds: ["k1", "k2"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the select-all sentinel inside kitIds", () => {
+    const result = StartAuditSchema.safeParse({
+      ...base,
+      contextType: "kit",
+      kitIds: ["all-selected"],
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("still accepts the legacy single-context form (contextType + contextId)", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
@@ -68,6 +86,21 @@ describe("StartAuditSchema", () => {
     // why: locationIds only counts when contextType is explicitly "location",
     // so a stray array without the discriminator must not pass validation.
     const result = StartAuditSchema.safeParse({ ...base, locationIds: ["l1"] });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects contextType=kit with neither contextId nor kitIds", () => {
+    const result = StartAuditSchema.safeParse({
+      ...base,
+      contextType: "kit",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects kitIds supplied without contextType=kit", () => {
+    // why: kitIds only counts when contextType is explicitly "kit", so a stray
+    // array without the discriminator must not pass validation.
+    const result = StartAuditSchema.safeParse({ ...base, kitIds: ["k1"] });
     expect(result.success).toBe(false);
   });
 

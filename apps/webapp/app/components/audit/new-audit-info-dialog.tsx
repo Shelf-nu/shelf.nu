@@ -93,10 +93,9 @@ export function NewAuditInfoDialog() {
                   <div className="flex-1">
                     <h4 className="mb-1 font-medium text-gray-900">From Kit</h4>
                     <p className="mb-3 text-sm text-gray-600">
-                      Audit all assets within a specific kit. Great for
-                      verifying that kit contents are complete. Open the kit you
-                      want from the Kits page, then choose Actions → Create
-                      audit.
+                      Audit the assets across one or more kits. Great for
+                      verifying that kit contents are complete. Select kits on
+                      the Kits page, then choose Actions → Create audit.
                     </p>
                     <Button
                       to="/kits"
