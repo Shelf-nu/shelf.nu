@@ -6,8 +6,9 @@
  * Covers the security- and correctness-critical behaviors:
  * - explicit multi-location selection → org-scoped union of asset IDs
  * - the IDOR guard rejects a foreign/tampered location ID before any asset read
- * - "select all" resolves the filtered location set (honoring the name search)
- *   and skips the per-ID guard (the set is org-scoped by construction)
+ * - "select all" matches assets via a location relation filter (honoring the
+ *   name search) in a single query, skipping the per-ID guard (org-scoped by
+ *   construction)
  * - an empty union surfaces a clear 400 instead of creating an empty audit
  *
  * @see {@link file://./context-helpers.server.ts}
@@ -94,9 +95,7 @@ describe("resolveAssetIdsForLocationSelection", () => {
     expect(assetFindMany).not.toHaveBeenCalled();
   });
 
-  it("select all: resolves the filtered location set honoring the search, with no per-ID guard", async () => {
-    // resolver resolves all matching locations, then their assets
-    locationFindMany.mockResolvedValueOnce([{ id: "l1" }, { id: "l2" }]);
+  it("select all: matches assets via a location relation filter honoring the search (single query, no per-ID guard)", async () => {
     assetFindMany.mockResolvedValueOnce([{ id: "a1" }]);
 
     const result = await resolveAssetIdsForLocationSelection({
@@ -106,14 +105,20 @@ describe("resolveAssetIdsForLocationSelection", () => {
     });
 
     expect(result).toEqual(["a1"]);
-    // location set honors the active name search (mirrors the list filter)
-    expect(locationFindMany).toHaveBeenCalledWith({
+    // one asset query; its `location` relation mirrors the active list filter
+    expect(assetFindMany).toHaveBeenCalledWith({
       where: {
         organizationId: ORG,
-        name: { contains: "seaham", mode: "insensitive" },
+        location: {
+          organizationId: ORG,
+          name: { contains: "seaham", mode: "insensitive" },
+        },
       },
       select: { id: true },
     });
+    // select-all is org-scoped by construction — no separate location lookup
+    // and no per-ID guard
+    expect(locationFindMany).not.toHaveBeenCalled();
   });
 
   it("throws a clear 400 when none of the selected locations contain assets", async () => {
