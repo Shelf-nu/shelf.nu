@@ -262,7 +262,7 @@ export async function assertTagsBelongToOrg(
  * @param params.teamMemberId - Team member ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
- * @throws {ShelfError} 404 if the team member is missing or in another org
+ * @throws {ShelfError} 400 if the team member is missing or in another org
  */
 export async function assertTeamMemberBelongsToOrg(
   {
@@ -284,7 +284,7 @@ export async function assertTeamMemberBelongsToOrg(
       title: "Team member not found",
       message: "The selected team member could not be found in your workspace.",
       label,
-      status: 404,
+      status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, teamMemberId },
     });
@@ -297,7 +297,7 @@ export async function assertTeamMemberBelongsToOrg(
  * @param params.categoryId - Category ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
- * @throws {ShelfError} 404 if the category is missing or in another org
+ * @throws {ShelfError} 400 if the category is missing or in another org
  */
 export async function assertCategoryBelongsToOrg(
   {
@@ -320,7 +320,7 @@ export async function assertCategoryBelongsToOrg(
       message:
         "The selected category could not be found in your workspace. Please reload and try again.",
       label,
-      status: 404,
+      status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, categoryId },
     });
@@ -333,7 +333,7 @@ export async function assertCategoryBelongsToOrg(
  * @param params.locationId - Location ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
- * @throws {ShelfError} 404 if the location is missing or in another org
+ * @throws {ShelfError} 400 if the location is missing or in another org
  */
 export async function assertLocationBelongsToOrg(
   {
@@ -356,7 +356,7 @@ export async function assertLocationBelongsToOrg(
       message:
         "The selected location could not be found in your workspace. Please reload and try again.",
       label,
-      status: 404,
+      status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, locationId },
     });
@@ -374,7 +374,7 @@ export async function assertLocationBelongsToOrg(
  * @param params.userId - User ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
- * @throws {ShelfError} 404 if the user is not a member of the organization
+ * @throws {ShelfError} 400 if the user is not a member of the organization
  */
 export async function assertUserBelongsToOrg(
   { userId, organizationId }: { userId: User["id"]; organizationId: string },
@@ -394,7 +394,7 @@ export async function assertUserBelongsToOrg(
       message:
         "The selected custodian user is not a member of this workspace. Please reload and try again.",
       label,
-      status: 404,
+      status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, userId },
     });

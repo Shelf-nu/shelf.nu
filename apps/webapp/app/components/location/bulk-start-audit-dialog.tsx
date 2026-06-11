@@ -12,6 +12,7 @@
  */
 
 import { useAtomValue } from "jotai";
+import { InfoIcon } from "lucide-react";
 import { DateTime } from "luxon";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -90,6 +91,19 @@ export default function LocationsBulkStartAuditDialog() {
         <>
           {/* Routes the request to the location branch of /api/audits/start */}
           <input type="hidden" name="contextType" value="location" />
+          {/* Set expectations: the audit covers assets directly assigned to the
+              selected locations only — assets in their sub-locations are not
+              pulled in (the resolver does not walk the location tree here). */}
+          <div className="border-t px-6 py-3">
+            <div className="flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+              <InfoIcon className="mt-0.5 size-4 shrink-0 text-gray-400" />
+              <p>
+                The audit will include every asset directly assigned to the
+                selected location{displayCount === 1 ? "" : "s"}. Assets in
+                sub-locations aren&apos;t included.
+              </p>
+            </div>
+          </div>
           <StartAuditDialogContent
             disabled={disabled}
             handleCloseDialog={handleCloseDialog}
