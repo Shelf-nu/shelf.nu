@@ -15,6 +15,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetReminderCards } from "~/components/assets/asset-reminder-cards";
+import { MoveUnitsDialog } from "~/components/assets/move-units-dialog";
 import { QuantityCustodyList } from "~/components/assets/quantity-custody-list";
 import { QuantityOverviewCard } from "~/components/assets/quantity-overview-card";
 import { BarcodeCard } from "~/components/barcode/barcode-card";
@@ -50,11 +51,17 @@ import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
+  MOVE_UNITS_INTENT_FIELD,
+  type MoveAxis,
+} from "~/modules/asset/move-units.types";
+import {
   getActiveCustomFieldsForAsset,
   getAsset,
   getCategoriesForCreateAndEdit,
   getLocationsForCreateAndEdit,
+  moveAssetLocationUnits,
   parseAssetValuation,
+  placeUnplacedUnits,
   updateAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
@@ -67,6 +74,7 @@ import {
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
@@ -367,6 +375,56 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: `${asset.title}'s overview`,
     };
 
+    /**
+     * Move-units destinations: org-wide list of `{ id, name }` shapes for the
+     * `MoveUnitsDialog` destination picker (split/merge UX).
+     *
+     * Returned unfiltered — render-time logic filters out the current source
+     * row per dialog instance so the picker never offers the source as a
+     * destination. Tight `select` keeps payload small even on orgs with
+     * thousands of locations or kits.
+     *
+     * Only meaningful for QUANTITY_TRACKED assets; the dialogs themselves
+     * are gated by `isQuantityTracked(asset)` in the JSX below.
+     */
+    const [allOrgLocations, allOrgKits] = isQuantityTracked(asset)
+      ? await Promise.all([
+          db.location.findMany({
+            where: { organizationId },
+            select: { id: true, name: true },
+            orderBy: { name: "asc" },
+          }),
+          db.kit.findMany({
+            where: { organizationId },
+            select: { id: true, name: true },
+            orderBy: { name: "asc" },
+          }),
+        ])
+      : [[], []];
+
+    const moveDestinations = {
+      locations: allOrgLocations,
+      kits: allOrgKits,
+    };
+
+    /**
+     * Unplaced quantity = `Asset.quantity` − Σ `AssetLocation.quantity` for
+     * MANUAL pivot rows (`assetKitId IS NULL`). Kit-driven AssetLocation
+     * rows are derived from `AssetKit.quantity` and would double-count.
+     * Always `0` for INDIVIDUAL assets.
+     */
+    const unplacedQuantity = isQuantityTracked(asset)
+      ? Math.max(
+          0,
+          (asset.quantity ?? 0) -
+            (asset.assetLocations ?? []).reduce(
+              (sum: number, al) =>
+                al.assetKitId == null ? sum + (al.quantity ?? 0) : sum,
+              0
+            )
+        )
+      : 0;
+
     return payload({
       asset: {
         ...asset,
@@ -388,6 +446,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       allCustomFieldDefs,
+      moveDestinations,
+      unplacedQuantity,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -419,6 +479,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
+
+    /**
+     * Move-units intents (`MoveAxis`) are dispatched off a separate hidden
+     * field — `MOVE_UNITS_INTENT_FIELD` — so we can keep the existing
+     * `intent` enum dispatch below untouched. The `MoveUnitsDialog` component
+     * always sends this field; if present, take that branch and return.
+     */
+    const moveUnitsIntentRaw = formData.get(MOVE_UNITS_INTENT_FIELD);
+    if (typeof moveUnitsIntentRaw === "string" && moveUnitsIntentRaw) {
+      const moveResult = await handleMoveUnitsIntent({
+        formData,
+        assetId: id,
+        organizationId,
+        userId,
+      });
+      return moveResult;
+    }
+
     const { intent } = parseData(
       formData,
       z.object({ intent: z.enum(["toggle", "updateField"]) })
@@ -586,6 +664,133 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Zod schemas for the three move-units intents. Each schema carries the
+ * discriminator literal so we can narrow off it after parse.
+ *
+ * - `location`       — manual AssetLocation → AssetLocation move
+ * - `kit`            — AssetKit → AssetKit move (cascades to bookings)
+ * - `place-unplaced` — one-sided placement of unplaced units
+ *
+ * `toId` is the destination row id submitted by the dialog's hidden mirror
+ * (axis-agnostic). The server maps it to `toLocationId` / `toKitId` per axis.
+ */
+const moveUnitsLocationSchema = z.object({
+  [MOVE_UNITS_INTENT_FIELD]: z.literal("location"),
+  fromLocationId: z.string().cuid("Invalid source location."),
+  toId: z.string().cuid("Please pick a destination."),
+  quantity: z.coerce
+    .number()
+    .int("Quantity must be a whole number.")
+    .positive("Quantity must be greater than zero."),
+});
+
+const moveUnitsKitSchema = z.object({
+  [MOVE_UNITS_INTENT_FIELD]: z.literal("kit"),
+  fromKitId: z.string().cuid("Invalid source kit."),
+  toId: z.string().cuid("Please pick a destination."),
+  quantity: z.coerce
+    .number()
+    .int("Quantity must be a whole number.")
+    .positive("Quantity must be greater than zero."),
+});
+
+const placeUnplacedSchema = z.object({
+  [MOVE_UNITS_INTENT_FIELD]: z.literal("place-unplaced"),
+  toId: z.string().cuid("Please pick a destination."),
+  quantity: z.coerce
+    .number()
+    .int("Quantity must be a whole number.")
+    .positive("Quantity must be greater than zero."),
+});
+
+/**
+ * Handle a `MoveUnitsDialog` submission. Dispatches on the axis discriminator,
+ * validates the form body with axis-specific Zod schema, and calls the matching
+ * Wave 1 service. Errors are wrapped with `error()` so `getValidationErrors`
+ * on the client can surface per-field messages.
+ *
+ * @param args.formData      - Parsed request form data
+ * @param args.assetId       - Asset id from the route params
+ * @param args.organizationId - Caller's active organization
+ * @param args.userId        - Acting user id (for note + event authorship)
+ * @returns A `data()` response wrapping `{ success: true }` or an error.
+ */
+async function handleMoveUnitsIntent({
+  formData,
+  assetId,
+  organizationId,
+  userId,
+}: {
+  formData: FormData;
+  assetId: string;
+  organizationId: string;
+  userId: string;
+}) {
+  /**
+   * Narrow off the axis discriminator with a small enum parse first so we
+   * give a clear error for malformed inputs before running the axis-specific
+   * schema.
+   */
+  const moveAxisEnum: z.ZodType<MoveAxis> = z.enum([
+    "location",
+    "kit",
+    "place-unplaced",
+  ]);
+  const { [MOVE_UNITS_INTENT_FIELD]: axis } = parseData(
+    formData,
+    z.object({
+      [MOVE_UNITS_INTENT_FIELD]: moveAxisEnum,
+    })
+  );
+
+  try {
+    switch (axis) {
+      case "location": {
+        const parsed = parseData(formData, moveUnitsLocationSchema);
+        await moveAssetLocationUnits({
+          assetId,
+          organizationId,
+          userId,
+          fromLocationId: parsed.fromLocationId,
+          toLocationId: parsed.toId,
+          quantity: parsed.quantity,
+        });
+        return payload({ success: true });
+      }
+      case "kit": {
+        const parsed = parseData(formData, moveUnitsKitSchema);
+        await moveAssetKitUnits({
+          assetId,
+          organizationId,
+          userId,
+          fromKitId: parsed.fromKitId,
+          toKitId: parsed.toId,
+          quantity: parsed.quantity,
+        });
+        return payload({ success: true });
+      }
+      case "place-unplaced": {
+        const parsed = parseData(formData, placeUnplacedSchema);
+        await placeUnplacedUnits({
+          assetId,
+          organizationId,
+          userId,
+          toLocationId: parsed.toId,
+          quantity: parsed.quantity,
+        });
+        return payload({ success: true });
+      }
+      default:
+        checkExhaustiveSwitch(axis);
+        return payload(null);
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId, axis });
+    return data(error(reason), { status: reason.status });
+  }
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AssetOverview() {
   const {
@@ -598,7 +803,12 @@ export default function AssetOverview() {
     userId,
     quantityData,
     allCustomFieldDefs,
+    moveDestinations,
+    unplacedQuantity,
   } = useLoaderData<typeof loader>();
+
+  /** Route URL used by all three `MoveUnitsDialog` form submissions. */
+  const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
 
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
@@ -1309,11 +1519,45 @@ export default function AssetOverview() {
                           >
                             <span className="truncate">{m.kitName}</span>
                           </Button>
-                          {isQty ? (
-                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
-                              {m.quantity} {unit}
-                            </span>
-                          ) : null}
+                          <div className="flex shrink-0 items-center gap-2">
+                            {isQty ? (
+                              <span className="text-xs tabular-nums text-gray-500">
+                                {m.quantity} {unit}
+                              </span>
+                            ) : null}
+                            {/*
+                             * Move-units affordance for kit allocations.
+                             * QUANTITY_TRACKED-only — INDIVIDUAL assets are
+                             * DB-locked to a single kit so the "move between
+                             * kits" flow is not meaningful for them.
+                             */}
+                            {isQty && canEditAsset ? (
+                              <MoveUnitsDialog
+                                axis="kit"
+                                assetId={asset.id}
+                                assetTitle={asset.title}
+                                unitOfMeasure={asset.unitOfMeasure}
+                                fromKit={{
+                                  id: m.kitId,
+                                  name: m.kitName,
+                                  quantity: m.quantity,
+                                }}
+                                destinations={moveDestinations.kits.filter(
+                                  (k) => k.id !== m.kitId
+                                )}
+                                actionUrl={moveUnitsActionUrl}
+                                trigger={
+                                  <Button
+                                    type="button"
+                                    variant="link"
+                                    className="text-xs font-normal text-gray-500 underline hover:text-gray-700"
+                                  >
+                                    Move
+                                  </Button>
+                                }
+                              />
+                            ) : null}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -1441,11 +1685,46 @@ export default function AssetOverview() {
                               </TooltipProvider>
                             ) : null}
                           </div>
-                          {isQty ? (
-                            <span className="shrink-0 text-xs tabular-nums text-gray-500">
-                              {p.quantity} {unit}
-                            </span>
-                          ) : null}
+                          <div className="flex shrink-0 items-center gap-2">
+                            {isQty ? (
+                              <span className="text-xs tabular-nums text-gray-500">
+                                {p.quantity} {unit}
+                              </span>
+                            ) : null}
+                            {/*
+                             * Move-units affordance — manual rows only. Kit-driven
+                             * rows (`viaKit`) must be moved via the `kit` axis
+                             * because their quantity is derived from `AssetKit`,
+                             * not editable directly. Gated on edit permission +
+                             * QUANTITY_TRACKED so INDIVIDUAL assets don't see it.
+                             */}
+                            {isQty && canEditAsset && !p.viaKit ? (
+                              <MoveUnitsDialog
+                                axis="location"
+                                assetId={asset.id}
+                                assetTitle={asset.title}
+                                unitOfMeasure={asset.unitOfMeasure}
+                                fromLocation={{
+                                  id: p.locationId,
+                                  name: p.locationName,
+                                  quantity: p.quantity,
+                                }}
+                                destinations={moveDestinations.locations.filter(
+                                  (l) => l.id !== p.locationId
+                                )}
+                                actionUrl={moveUnitsActionUrl}
+                                trigger={
+                                  <Button
+                                    type="button"
+                                    variant="link"
+                                    className="text-xs font-normal text-gray-500 underline hover:text-gray-700"
+                                  >
+                                    Move
+                                  </Button>
+                                }
+                              />
+                            ) : null}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -1485,6 +1764,43 @@ export default function AssetOverview() {
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}
             />
+          ) : null}
+
+          {/*
+           * Place-unplaced CTA. Sits outside QuantityOverviewCard because
+           * that card is read-only and shared by other surfaces — adding
+           * an action would broaden its prop surface. Renders only when
+           * there are unplaced units AND the user can edit the asset.
+           */}
+          {isQuantityTracked(asset) && canEditAsset && unplacedQuantity > 0 ? (
+            <Card className="my-3 px-4 py-3 md:border">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-600">
+                  <span className="font-semibold text-gray-900">
+                    {unplacedQuantity} {asset.unitOfMeasure || "units"}
+                  </span>{" "}
+                  currently unplaced.
+                </p>
+                <MoveUnitsDialog
+                  axis="place-unplaced"
+                  assetId={asset.id}
+                  assetTitle={asset.title}
+                  unitOfMeasure={asset.unitOfMeasure}
+                  unplacedQuantity={unplacedQuantity}
+                  destinations={moveDestinations.locations}
+                  actionUrl={moveUnitsActionUrl}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="py-1 text-xs"
+                    >
+                      Place them
+                    </Button>
+                  }
+                />
+              </div>
+            </Card>
           ) : null}
 
           {isQuantityTracked(asset) ? (

@@ -1,6 +1,7 @@
 import {
   AssetType,
   BarcodeType,
+  BookingStatus,
   KitStatus,
   AssetStatus,
   ErrorCorrection,
@@ -24,8 +25,10 @@ import {
   getAvailableKitAssetForBooking,
   updateKitsWithBookingCustodians,
   bulkRemoveAssetsFromKits,
+  moveAssetKitUnits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
+import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createNotes } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 
@@ -61,6 +64,14 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: `moveAssetKitUnits` (Phase 4c) reads the source AssetKit
+      // row via `findFirst({ assetId, kitId })`, deletes-on-zero or
+      // updates the source, and upserts the destination on the
+      // `assetId_kitId` partial unique. Defaults to null/no-op so tests
+      // opt in to the allocation state they need.
+      findFirst: vitest.fn().mockResolvedValue(null),
+      delete: vitest.fn().mockResolvedValue({}),
+      upsert: vitest.fn().mockResolvedValue({}),
     },
     // Location mutations go through this delegate instead of asset.updateMany,
     // since placement lives on the AssetLocation pivot. Includes
@@ -98,6 +109,10 @@ vitest.mock("~/database/db.server", () => ({
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: `moveAssetKitUnits` blocks the move when the source kit is
+      // in operator custody — it looks up the inherited Custody row via
+      // `findFirst({ assetId, kitCustody: { kitId: fromKitId } })`.
+      findFirst: vitest.fn().mockResolvedValue(null),
     },
     note: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -121,7 +136,24 @@ vitest.mock("~/database/db.server", () => ({
     category: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
+    // why: `moveAssetKitUnits` loads the actor's firstName/lastName via
+    // `tx.user.findUnique` inside the tx to carry forward to the
+    // post-tx note write. Default returns a generic actor so the
+    // happy-path tests don't have to set it up every time.
+    user: {
+      findUnique: vitest
+        .fn()
+        .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
+    },
   },
+}));
+
+// why: `moveAssetKitUnits` runs a raw SELECT ... FOR UPDATE via the
+// shared `lockAssetForQuantityUpdate` helper. We can't execute the raw
+// query against a mocked tx — stub the helper so each test can return
+// a controlled asset snapshot.
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vitest.fn(),
 }));
 
 // why: ensuring predictable ID generation for consistent test assertions
@@ -154,6 +186,10 @@ vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
   createNotes: vitest.fn().mockResolvedValue({}),
   createBulkKitChangeNotes: vitest.fn().mockResolvedValue({}),
+  // why: `moveAssetKitUnits` writes a paired "moved N units from
+  // {KitX} to {KitY}" note via `createKitMoveNote` after the tx
+  // commits. Stubbed so the move tests don't depend on note formatting.
+  createKitMoveNote: vitest.fn().mockResolvedValue({}),
 }));
 
 // why: testing kit service without executing actual activity event recording
@@ -2848,5 +2884,324 @@ describe("updateKitAssets - server-side strict-available validation", () => {
         request: new Request("http://test.com"),
       })
     ).resolves.not.toThrow();
+  });
+});
+
+describe("moveAssetKitUnits", () => {
+  // Typed handles for the mocks we drive directly.
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+  const mockKitFindFirst = db.kit.findFirst as ReturnType<typeof vitest.fn>;
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockAssetKitFindFirst = db.assetKit.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetKitUpdate = db.assetKit.update as ReturnType<typeof vitest.fn>;
+  const mockAssetKitDelete = db.assetKit.delete as ReturnType<typeof vitest.fn>;
+  const mockAssetKitUpsert = db.assetKit.upsert as ReturnType<typeof vitest.fn>;
+  const mockBookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockBookingAssetUpdateMany = db.bookingAsset.updateMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyFindFirst = db.custody.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+
+  /** Realistic QUANTITY_TRACKED locked asset stub. */
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: AssetType.QUANTITY_TRACKED,
+    quantity: 100,
+    unitOfMeasure: "boxes",
+  };
+
+  const baseArgs = {
+    assetId: "asset-1",
+    organizationId: "org-1",
+    userId: "user-1",
+    fromKitId: "kit-from",
+    toKitId: "kit-to",
+    quantity: 10,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: `assertAssetsBelongToOrg` runs `db.asset.findMany` with
+    // `{ id: { in: [assetId] }, organizationId }`. Echo the input so
+    // the guard passes by default.
+    mockAssetFindMany.mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id })))
+    );
+    // Default: both source + destination kits resolve in the org with
+    // a synthetic name based on the id.
+    mockKitFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id, name: where.id })
+    );
+    // Default: source AssetKit has 50 units allocated; tests override
+    // when they need a different starting state.
+    mockAssetKitFindFirst.mockResolvedValue({ id: "ak-src", quantity: 50 });
+    // Default upsert result — destination has accumulated `dest.quantity`
+    // after the move. Tests that care assert against the actual value.
+    mockAssetKitUpsert.mockResolvedValue({ id: "ak-dst", quantity: 10 });
+    // No active bookings on source or operator custody by default.
+    mockBookingAssetFindMany.mockResolvedValue([]);
+    mockCustodyFindFirst.mockResolvedValue(null);
+  });
+
+  it("moves 10 of 50 units to a fresh destination kit", async () => {
+    mockAssetKitFindFirst.mockResolvedValue({ id: "ak-src", quantity: 50 });
+    mockAssetKitUpsert.mockResolvedValue({ id: "ak-dst", quantity: 10 });
+
+    const result = await moveAssetKitUnits(baseArgs);
+
+    expect(result.fromQuantity).toBe(40);
+    expect(result.toQuantity).toBe(10);
+    expect(result.sourceRowDeleted).toBe(false);
+    expect(result.moveCorrelationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+
+    // Source decremented (not deleted) — 50 - 10 = 40.
+    expect(mockAssetKitUpdate).toHaveBeenCalledWith({
+      where: { id: "ak-src" },
+      data: { quantity: 40 },
+    });
+    expect(mockAssetKitDelete).not.toHaveBeenCalled();
+    // Destination upserted on the (assetId, kitId) partial unique.
+    expect(mockAssetKitUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assetId_kitId: { assetId: "asset-1", kitId: "kit-to" } },
+        create: expect.objectContaining({ quantity: 10 }),
+        update: { quantity: { increment: 10 } },
+      })
+    );
+  });
+
+  it("deletes the source AssetKit row when the move exhausts it", async () => {
+    // Source allocation matches move quantity exactly — row should be
+    // deleted to keep reads clean.
+    mockAssetKitFindFirst.mockResolvedValue({ id: "ak-src", quantity: 10 });
+    mockAssetKitUpsert.mockResolvedValue({ id: "ak-dst", quantity: 10 });
+
+    const result = await moveAssetKitUnits(baseArgs);
+
+    expect(result.fromQuantity).toBe(0);
+    expect(result.sourceRowDeleted).toBe(true);
+    expect(mockAssetKitDelete).toHaveBeenCalledWith({
+      where: { id: "ak-src" },
+    });
+    expect(mockAssetKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cascades the new dest qty to active BookingAsset slices on the destination kit", async () => {
+    mockAssetKitUpsert.mockResolvedValue({ id: "ak-dst", quantity: 15 });
+
+    await moveAssetKitUnits(baseArgs);
+
+    // The cascade keeps active kit-driven BookingAsset slices on the
+    // DEST kit in sync with the new allocation. Verify the where-shape
+    // filters to active statuses, and the data sets the slice qty to
+    // the upserted dest quantity (NOT the move quantity).
+    expect(mockBookingAssetUpdateMany).toHaveBeenCalledWith({
+      where: {
+        assetKitId: "ak-dst",
+        booking: {
+          status: {
+            in: [
+              BookingStatus.DRAFT,
+              BookingStatus.RESERVED,
+              BookingStatus.ONGOING,
+              BookingStatus.OVERDUE,
+            ],
+          },
+        },
+      },
+      data: { quantity: 15 },
+    });
+  });
+
+  it("emits two paired ASSET_KIT_CHANGED events sharing a moveCorrelationId", async () => {
+    await moveAssetKitUnits(baseArgs);
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const [events] = mockRecordEvents.mock.calls[0] as [
+      Array<{
+        action: string;
+        meta: { moveCorrelationId: string; side: "from" | "to" };
+      }>,
+    ];
+    expect(events).toHaveLength(2);
+    expect(events[0].action).toBe("ASSET_KIT_CHANGED");
+    expect(events[1].action).toBe("ASSET_KIT_CHANGED");
+    expect(events[0].meta.side).toBe("from");
+    expect(events[1].meta.side).toBe("to");
+    expect(events[0].meta.moveCorrelationId).toBe(
+      events[1].meta.moveCorrelationId
+    );
+  });
+
+  it("BLOCKS the move when the source kit has active bookings and surfaces the booking names", async () => {
+    // Two active bookings on the source kit — these would otherwise
+    // get their slice qty silently shrunk.
+    mockBookingAssetFindMany.mockResolvedValue([
+      {
+        bookingId: "b-1",
+        quantity: 5,
+        booking: { name: "Photo Shoot", status: BookingStatus.RESERVED },
+      },
+      {
+        bookingId: "b-2",
+        quantity: 5,
+        booking: { name: "Field Demo", status: BookingStatus.ONGOING },
+      },
+    ]);
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    // Booking names must be present so the user knows which ones to
+    // release first.
+    expect((err as ShelfError).message).toContain("Photo Shoot");
+    expect((err as ShelfError).message).toContain("Field Demo");
+    expect((err as ShelfError).message).toMatch(/Release these bookings/);
+    // No mutations leaked.
+    expect(mockAssetKitDelete).not.toHaveBeenCalled();
+    expect(mockAssetKitUpdate).not.toHaveBeenCalled();
+    expect(mockAssetKitUpsert).not.toHaveBeenCalled();
+  });
+
+  it("BLOCKS the move when the source kit is in operator custody (kit-inherited)", async () => {
+    // Source kit is in custody to Alice → asset has an inherited
+    // Custody row that would be orphaned by the move.
+    mockCustodyFindFirst.mockResolvedValue({
+      id: "cust-1",
+      kitCustody: { custodian: { name: "Alice" } },
+    });
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("Alice");
+    expect((err as ShelfError).message).toMatch(/Release custody/);
+    expect(mockAssetKitDelete).not.toHaveBeenCalled();
+    expect(mockAssetKitUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an INDIVIDUAL asset (split/merge is QUANTITY_TRACKED-only)", async () => {
+    mockLock.mockResolvedValue({
+      ...lockedAsset,
+      type: AssetType.INDIVIDUAL,
+    });
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("quantity-tracked");
+  });
+
+  it("rejects when source and destination kits are the same", async () => {
+    const err = await moveAssetKitUnits({
+      ...baseArgs,
+      toKitId: baseArgs.fromKitId,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("different");
+  });
+
+  it("rejects a non-positive quantity", async () => {
+    const err = await moveAssetKitUnits({
+      ...baseArgs,
+      quantity: 0,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+  });
+
+  it("rejects an over-move and surfaces the available allocation", async () => {
+    // Source has only 5 units; user tries to move 10.
+    mockAssetKitFindFirst.mockResolvedValue({ id: "ak-src", quantity: 5 });
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toMatch(/Only/);
+    expect((err as ShelfError).message).toMatch(/5/);
+    expect(mockAssetKitDelete).not.toHaveBeenCalled();
+    expect(mockAssetKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the asset is not allocated to the source kit", async () => {
+    mockAssetKitFindFirst.mockResolvedValue(null);
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("not allocated");
+  });
+
+  it("rejects a cross-org asset (assertAssetsBelongToOrg)", async () => {
+    mockAssetFindMany.mockResolvedValue([]);
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect(mockLock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing/cross-org source kit", async () => {
+    mockKitFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === "kit-from" ? null : { id: where.id, name: where.id }
+        )
+    );
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("source kit");
+  });
+
+  it("rejects a missing/cross-org destination kit", async () => {
+    mockKitFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === "kit-to" ? null : { id: where.id, name: where.id }
+        )
+    );
+
+    const err = await moveAssetKitUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("destination kit");
+  });
+
+  it("does not touch AssetLocation rows (orthogonal-axes invariant)", async () => {
+    await moveAssetKitUnits(baseArgs);
+
+    // The move acts on the kit axis only — manual AssetLocation rows
+    // must stay untouched. (Kit-driven AssetLocation rows are managed
+    // by the DB-level cascade and aren't this service's concern.)
+    expect(db.assetLocation.createMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+    expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
   });
 });

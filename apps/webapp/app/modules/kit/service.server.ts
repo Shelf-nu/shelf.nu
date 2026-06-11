@@ -53,6 +53,7 @@ import {
 } from "~/utils/markdoc-wrappers";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import {
+  assertAssetsBelongToOrg,
   assertCategoryBelongsToOrg,
   assertLocationBelongsToOrg,
   assertTeamMemberBelongsToOrg,
@@ -68,6 +69,10 @@ import {
 import { getKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
+import type {
+  MoveAssetKitUnitsArgs,
+  MoveUnitsResult,
+} from "../asset/move-units.types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
@@ -75,9 +80,14 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import { createSystemBookingNote } from "../booking-note/service.server";
+import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { getPrimaryCustody, hasCustody } from "../custody/utils";
 import { createSystemLocationNote } from "../location-note/service.server";
-import { createBulkKitChangeNotes, createNote } from "../note/service.server";
+import {
+  createBulkKitChangeNotes,
+  createKitMoveNote,
+  createNote,
+} from "../note/service.server";
 import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -5066,6 +5076,411 @@ export async function bulkRemoveAssetsFromKits({
       message: "Failed to bulk remove assets from kits",
       additionalData: { assetIds, organizationId, userId },
       label: "Kit",
+    });
+  }
+}
+
+/**
+ * Move N units of a `QUANTITY_TRACKED` asset between two `AssetKit` pivot
+ * rows in a single transaction.
+ *
+ * Symmetric to `moveAssetLocationUnits` (on the location axis) but with the
+ * extra cascade and guard work the kit axis demands:
+ *
+ *   - Cascades the new dest-kit quantity to any **active** kit-driven
+ *     `BookingAsset` rows on the destination kit (mirrors the existing
+ *     `updateKitAssets` cascade pattern).
+ *   - **Blocks** the move when the source kit has active booking slices
+ *     (`DRAFT` / `RESERVED` / `ONGOING` / `OVERDUE`) — the user is told to
+ *     release those bookings first rather than have us silently shrink the
+ *     slices out from under an in-flight booking (decision 2026-06-10).
+ *   - **Blocks** the move when the source kit is in operator custody
+ *     (`KitCustody` → inherited `Custody` on this asset) — release custody
+ *     first rather than orphan units.
+ *
+ * Emits two paired `ASSET_KIT_CHANGED` activity events (`meta.moveCorrelationId`
+ * pairs them) and two paired Notes (`createKitMoveNote` — new phrasing
+ * "moved {N units} from kit {KitX} to kit {KitY}").
+ *
+ * @param args - `MoveAssetKitUnitsArgs`: assetId, organizationId, userId,
+ *   fromKitId, toKitId, quantity
+ * @returns `MoveUnitsResult` — post-tx quantities + the deleted-source flag
+ *   + the correlation id (so the action handler can surface a paired toast)
+ * @throws {ShelfError} 400 when validation fails (qty <= 0, same source/dest,
+ *   asset is INDIVIDUAL, asset not allocated to source kit, qty exceeds
+ *   source allocation, active bookings on source, active custody on source)
+ * @throws {ShelfError} 403 implicitly via `assertAssetsBelongToOrg` on a
+ *   cross-org IDOR attempt
+ */
+export async function moveAssetKitUnits(
+  args: MoveAssetKitUnitsArgs
+): Promise<MoveUnitsResult> {
+  const { assetId, organizationId, userId, fromKitId, toKitId, quantity } =
+    args;
+
+  // Cheap pre-tx guards — keeps the tx body focused on row work.
+  if (quantity <= 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "Quantity must be greater than zero.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetId, quantity },
+    });
+  }
+
+  if (fromKitId === toKitId) {
+    throw new ShelfError({
+      cause: null,
+      message: "Source and destination kits must be different.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { assetId, fromKitId, toKitId },
+    });
+  }
+
+  try {
+    const txResult = await db.$transaction(async (tx) => {
+      // 1. Org-scope guards — every ID came from form input, prove it
+      //    belongs to the caller's org before any read/write touches it.
+      //    Per `.claude/rules/org-scope-user-supplied-ids.md`.
+      await assertAssetsBelongToOrg(
+        { assetIds: [assetId], organizationId },
+        tx
+      );
+
+      const [fromKit, toKit] = await Promise.all([
+        tx.kit.findFirst({
+          where: { id: fromKitId, organizationId },
+          select: { id: true, name: true },
+        }),
+        tx.kit.findFirst({
+          where: { id: toKitId, organizationId },
+          select: { id: true, name: true },
+        }),
+      ]);
+
+      if (!fromKit) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "The source kit could not be found in your workspace. Please reload and try again.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { organizationId, fromKitId },
+        });
+      }
+      if (!toKit) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "The destination kit could not be found in your workspace. Please reload and try again.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { organizationId, toKitId },
+        });
+      }
+
+      // 2. Lock the asset row for the duration of the tx — serializes
+      //    concurrent moves on the same asset (Phase 2 pattern).
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      // Defence-in-depth: lock helper doesn't org-scope; assert again.
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      // 3. Refuse for INDIVIDUAL — split/merge is qty-tracked-only.
+      if (asset.type !== AssetType.QUANTITY_TRACKED) {
+        throw new ShelfError({
+          cause: null,
+          message: "Split/merge is only available for quantity-tracked assets.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      // 4. Load source AssetKit pivot row — the source of truth for what
+      //    "currently allocated" means.
+      const source = await tx.assetKit.findFirst({
+        where: { assetId, kitId: fromKitId },
+        select: { id: true, quantity: true },
+      });
+      if (!source) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset is not allocated to the source kit.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, fromKitId },
+        });
+      }
+
+      // 5. Refuse over-move — we can't move more than the source has.
+      const unitLabel = (asset.unitOfMeasure ?? "").trim() || "units";
+      if (quantity > source.quantity) {
+        throw new ShelfError({
+          cause: null,
+          message: `Only ${source.quantity} ${unitLabel} allocated to ${fromKit.name}.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: {
+            assetId,
+            fromKitId,
+            requested: quantity,
+            available: source.quantity,
+          },
+        });
+      }
+
+      // 6. Active-booking block (decision 2026-06-10). Shrinking the
+      //    source kit's allocation would silently shrink any kit-driven
+      //    BookingAsset slice on an active booking out from under the
+      //    user. Block with a helpful error instead.
+      const activeBookingSlices = await tx.bookingAsset.findMany({
+        where: {
+          assetId,
+          assetKitId: source.id,
+          booking: {
+            status: {
+              in: [
+                BookingStatus.DRAFT,
+                BookingStatus.RESERVED,
+                BookingStatus.ONGOING,
+                BookingStatus.OVERDUE,
+              ],
+            },
+          },
+        },
+        select: {
+          bookingId: true,
+          quantity: true,
+          booking: { select: { name: true, status: true } },
+        },
+      });
+
+      if (activeBookingSlices.length > 0) {
+        const activeBookingsCount = activeBookingSlices.length;
+        const plural = activeBookingsCount === 1 ? "" : "s";
+        const names = activeBookingSlices.map((s) => s.booking.name);
+        const shown = names.slice(0, 3).join(", ");
+        const overflow = names.length > 3 ? ", …" : "";
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot move — ${fromKit.name} is currently allocated to ${activeBookingsCount} active booking${plural}: ${shown}${overflow}. Release these bookings first.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: {
+            assetId,
+            fromKitId,
+            activeBookings: activeBookingSlices.map((s) => ({
+              bookingId: s.bookingId,
+              name: s.booking.name,
+              status: s.booking.status,
+              quantity: s.quantity,
+            })),
+          },
+        });
+      }
+
+      // 7. Kit-inherited custody block. If the source kit is in operator
+      //    custody, the asset has an inherited Custody row pointing at
+      //    the source's KitCustody — moving units out from under that
+      //    would orphan the custody bookkeeping. Block instead.
+      const inheritedCustody = await tx.custody.findFirst({
+        where: { assetId, kitCustody: { kitId: fromKitId } },
+        select: {
+          id: true,
+          kitCustody: {
+            select: { custodian: { select: { name: true } } },
+          },
+        },
+      });
+      if (inheritedCustody) {
+        const custodianName =
+          inheritedCustody.kitCustody?.custodian.name ?? "an operator";
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot move — ${fromKit.name} is currently in ${custodianName}'s custody. Release custody first.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, fromKitId, custodianName },
+        });
+      }
+
+      // 8. Decrement (or delete-on-zero) the source AssetKit row.
+      const newSourceQty = source.quantity - quantity;
+      const sourceRowDeleted = newSourceQty === 0;
+      if (sourceRowDeleted) {
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset+kit-scoped findFirst above, inside this same tx
+        await tx.assetKit.delete({ where: { id: source.id } });
+      } else {
+        await tx.assetKit.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset+kit-scoped findFirst above, inside this same tx
+          where: { id: source.id },
+          data: { quantity: newSourceQty },
+        });
+      }
+
+      // 9. Upsert destination AssetKit row on the (assetId, kitId)
+      //    partial-unique. Bump if exists, create at N otherwise.
+      const dest = await tx.assetKit.upsert({
+        where: { assetId_kitId: { assetId, kitId: toKitId } },
+        create: {
+          assetId,
+          kitId: toKitId,
+          organizationId,
+          quantity,
+        },
+        update: { quantity: { increment: quantity } },
+        select: { id: true, quantity: true },
+      });
+
+      // 10. Cascade to active kit-driven BookingAsset rows on the DEST
+      //     kit — keep them in sync with the new slice quantity (mirrors
+      //     the `updateKitAssets` pattern at lines ~4127-4133). Only
+      //     active bookings need the cascade; historical (COMPLETE /
+      //     ARCHIVED / CANCELLED) slices are frozen records and stay
+      //     untouched. Source-side cascade is unreachable here because
+      //     step 6 already blocked when the source had active slices.
+      await tx.bookingAsset.updateMany({
+        where: {
+          assetKitId: dest.id,
+          booking: {
+            status: {
+              in: [
+                BookingStatus.DRAFT,
+                BookingStatus.RESERVED,
+                BookingStatus.ONGOING,
+                BookingStatus.OVERDUE,
+              ],
+            },
+          },
+        },
+        data: { quantity: dest.quantity },
+      });
+
+      // 11. Paired ASSET_KIT_CHANGED events. `moveCorrelationId` lets
+      //     reports rebuild the move from the two halves.
+      const moveCorrelationId = crypto.randomUUID();
+      await recordEvents(
+        [
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_KIT_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            kitId: fromKitId,
+            field: "kitId",
+            fromValue: fromKitId,
+            toValue: null,
+            meta: {
+              quantity,
+              moveCorrelationId,
+              side: "from" as const,
+              fromKitId,
+              toKitId,
+            },
+          },
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_KIT_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: assetId,
+            assetId,
+            kitId: toKitId,
+            field: "kitId",
+            fromValue: null,
+            toValue: toKitId,
+            meta: {
+              quantity,
+              moveCorrelationId,
+              side: "to" as const,
+              fromKitId,
+              toKitId,
+            },
+          },
+        ],
+        tx
+      );
+
+      // Load the acting user once for the post-tx note write. Reads
+      //     are part of the tx so a rolled-back move never produces a
+      //     stale `firstName`/`lastName` for the note.
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      });
+
+      return {
+        fromQuantity: sourceRowDeleted ? 0 : newSourceQty,
+        toQuantity: dest.quantity,
+        sourceRowDeleted,
+        moveCorrelationId,
+        // Carry forward the data the post-tx note writer needs so it
+        // can land only if the tx actually committed.
+        noteContext: {
+          firstName: user?.firstName ?? "",
+          lastName: user?.lastName ?? "",
+          assetType: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          fromKit,
+          toKit,
+        },
+      };
+    });
+
+    // 12. Paired notes (post-tx). Mirrors `createBulkKitChangeNotes` at
+    //     line ~4200 — kit notes land outside the tx so a rolled-back
+    //     move leaves the activity feed clean.
+    await createKitMoveNote({
+      fromKit: txResult.noteContext.fromKit,
+      toKit: txResult.noteContext.toKit,
+      firstName: txResult.noteContext.firstName,
+      lastName: txResult.noteContext.lastName,
+      assetId,
+      userId,
+      organizationId,
+      type: txResult.noteContext.assetType,
+      unitOfMeasure: txResult.noteContext.unitOfMeasure,
+      quantity,
+    });
+
+    return {
+      fromQuantity: txResult.fromQuantity,
+      toQuantity: txResult.toQuantity,
+      sourceRowDeleted: txResult.sourceRowDeleted,
+      moveCorrelationId: txResult.moveCorrelationId,
+    };
+  } catch (cause) {
+    // Pass through ShelfErrors with their context; wrap unknown causes.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Failed to move units between kits",
+      additionalData: { assetId, fromKitId, toKitId, quantity, userId },
+      label,
     });
   }
 }

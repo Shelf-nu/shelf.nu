@@ -114,6 +114,7 @@ import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
+  assertAssetsBelongToOrg,
   assertCustomFieldsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
@@ -127,6 +128,12 @@ import {
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { assetIndexFields } from "./fields";
+import type {
+  MoveAssetLocationUnitsArgs,
+  MoveUnitsResult,
+  PlaceUnplacedUnitsArgs,
+  PlaceUnplacedUnitsResult,
+} from "./move-units.types";
 import {
   CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
@@ -7564,6 +7571,690 @@ export async function releaseQuantity({
       message:
         "Something went wrong while releasing quantity. Please try again or contact support.",
       additionalData: { assetId, teamMemberId, quantity, organizationId },
+      label,
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Quantity-Aware Location Moves                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Moves N units of a QUANTITY_TRACKED asset between two manual
+ * `AssetLocation` pivot rows (rows where `assetKitId IS NULL`).
+ *
+ * Runs inside an interactive transaction with a row-level lock on the
+ * asset (matching `checkOutQuantity` / `releaseQuantity`) so concurrent
+ * placement edits can't race the source/destination quantities. Source
+ * row is decremented (or deleted when fully drained); destination row is
+ * upserted. Only the location axis is touched — kit, custody, and
+ * booking pivots are intentionally untouched (orthogonal-axes design).
+ *
+ * Emits two paired `ASSET_LOCATION_CHANGED` activity events (one
+ * `from`-side, one `to`-side) sharing a `moveCorrelationId` UUID so
+ * reports can re-pair them. Writes a single asset-side "moved N units
+ * from L1 to L2" note via `createLocationChangeNote`, plus two
+ * location-timeline notes (one per location), mirroring the existing
+ * single-location-update note pattern.
+ *
+ * @see modules/asset/move-units.types.ts for the contract
+ *
+ * @param args - Move arguments (see `MoveAssetLocationUnitsArgs`)
+ * @returns The post-tx pivot quantities + correlation id
+ * @throws {ShelfError} 400 if the asset is INDIVIDUAL, source/dest are
+ *   the same, quantity is non-positive, the asset is not placed at the
+ *   source location, or the move would over-draw the source row
+ * @throws {ShelfError} 404 if either location is not in the org
+ */
+export async function moveAssetLocationUnits(
+  args: MoveAssetLocationUnitsArgs
+): Promise<MoveUnitsResult> {
+  const {
+    assetId,
+    organizationId,
+    userId,
+    fromLocationId,
+    toLocationId,
+    quantity,
+  } = args;
+
+  try {
+    /**
+     * Reject obviously-invalid request shapes BEFORE opening a tx so we
+     * don't waste a connection on input we'd reject anyway. The asset
+     * existence / type / org / placement checks all need the tx (they
+     * touch the locked row), so they live inside the `$transaction`.
+     */
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be a positive integer.",
+        label,
+        status: 400,
+        additionalData: { assetId, quantity },
+      });
+    }
+
+    if (fromLocationId === toLocationId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Source and destination must be different.",
+        label,
+        status: 400,
+        additionalData: { assetId, fromLocationId, toLocationId },
+      });
+    }
+
+    /** UUID pairing the two halves of the move (from-side + to-side). */
+    const moveCorrelationId = crypto.randomUUID();
+
+    const txResult = await db.$transaction(async (tx) => {
+      /**
+       * Step 1: Cross-org IDOR guard for the asset id. Belt-and-braces:
+       * the row-level lock below ALSO surfaces the asset's
+       * `organizationId`, but running the shared helper first matches
+       * `.claude/rules/org-scope-user-supplied-ids.md` and gives a
+       * uniform 400 message instead of the 403 thrown by the post-lock
+       * org check.
+       */
+      await assertAssetsBelongToOrg(
+        { assetIds: [assetId], organizationId },
+        tx
+      );
+
+      /** Step 2: Lock the asset row so concurrent placement edits serialize. */
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      /**
+       * Step 3: Defense-in-depth org check. The `assertAssetsBelongToOrg`
+       * above already guards request input, but `lockAssetForQuantityUpdate`
+       * does NOT scope by org — so we re-check the locked row's
+       * `organizationId` to make absolutely sure we're not mutating
+       * another tenant's data.
+       */
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /**
+       * Step 4: Refuse INDIVIDUAL. Split/merge is a QUANTITY_TRACKED-only
+       * concept — INDIVIDUAL assets live at exactly one location and
+       * have no per-row `quantity` semantics.
+       */
+      if (asset.type !== AssetType.QUANTITY_TRACKED) {
+        throw new ShelfError({
+          cause: null,
+          message: "Split/merge is only available for quantity-tracked assets.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /** Step 5: Org-scope the two location ids (request input). */
+      await assertLocationBelongsToOrg(
+        { locationId: fromLocationId, organizationId },
+        tx
+      );
+      await assertLocationBelongsToOrg(
+        { locationId: toLocationId, organizationId },
+        tx
+      );
+
+      /**
+       * Step 6: Load the manual source row (`assetKitId IS NULL`). Kit-
+       * driven rows are moved by editing the kit's `locationId`, not
+       * this endpoint — they're deliberately invisible to this query.
+       */
+      const source = await tx.assetLocation.findFirst({
+        where: { assetId, locationId: fromLocationId, assetKitId: null },
+        select: { id: true, quantity: true },
+      });
+
+      if (!source) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset is not placed at the source location.",
+          label,
+          status: 400,
+          additionalData: { assetId, fromLocationId },
+        });
+      }
+
+      /**
+       * Step 7: Refuse over-move. Use `formatUnitCount` so the error
+       * surfaces the asset's `unitOfMeasure` ("Only 12 boxes available
+       * at Storage A") rather than a bare integer.
+       */
+      if (quantity > source.quantity) {
+        const sourceLocation = await tx.location.findFirst({
+          where: { id: fromLocationId, organizationId },
+          select: { name: true },
+        });
+        const available =
+          formatUnitCount(asset, source.quantity) ?? `${source.quantity} units`;
+        const sourceLocationName = sourceLocation?.name ?? "the source";
+        throw new ShelfError({
+          cause: null,
+          message: `Only ${available} available at ${sourceLocationName}.`,
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            fromLocationId,
+            requested: quantity,
+            available: source.quantity,
+          },
+        });
+      }
+
+      /**
+       * Step 8: Decrement (or delete) the source manual row. Deleting
+       * at zero keeps the manual-placement reads clean — an empty
+       * `AssetLocation` row would otherwise show up in placement lists
+       * as "0 units here", which the existing UI doesn't expect.
+       */
+      const sourceRowDeleted = quantity === source.quantity;
+      if (sourceRowDeleted) {
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset-scoped findFirst in step 6 above, inside this same tx
+        await tx.assetLocation.delete({ where: { id: source.id } });
+      } else {
+        await tx.assetLocation.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset-scoped findFirst in step 6 above, inside this same tx
+          where: { id: source.id },
+          data: { quantity: source.quantity - quantity },
+        });
+      }
+
+      /**
+       * Step 9: Upsert the manual destination row. Manual + kit-driven
+       * rows can coexist at the same `(assetId, locationId)` (different
+       * `assetKitId`s), so `findFirst` filtered to `assetKitId: null`
+       * is the only way to surface the right one. The
+       * `AssetLocation_manual_unique` partial unique guarantees at most
+       * one match.
+       */
+      const existingDest = await tx.assetLocation.findFirst({
+        where: { assetId, locationId: toLocationId, assetKitId: null },
+        select: { id: true, quantity: true },
+      });
+
+      let destNewQuantity: number;
+      if (existingDest) {
+        destNewQuantity = existingDest.quantity + quantity;
+        await tx.assetLocation.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: existingDest.id came from the org+asset-scoped findFirst above, inside this same tx
+          where: { id: existingDest.id },
+          data: { quantity: destNewQuantity },
+        });
+      } else {
+        destNewQuantity = quantity;
+        await tx.assetLocation.create({
+          data: {
+            assetId,
+            locationId: toLocationId,
+            organizationId,
+            quantity,
+            // assetKitId left null → manual placement.
+          },
+        });
+      }
+
+      /**
+       * Step 10: Emit two paired `ASSET_LOCATION_CHANGED` events
+       * (one per side) sharing a `moveCorrelationId`. Reports re-pair
+       * them via `meta.moveCorrelationId`; the `side` discriminator
+       * makes the from/to direction explicit without a `fromValue`
+       * lookup. Using `recordEvents` (plural) keeps both writes on one
+       * DB round-trip inside the tx.
+       */
+      await recordEvents(
+        [
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: fromLocationId,
+            field: "locationId",
+            fromValue: fromLocationId,
+            toValue: null,
+            meta: {
+              quantity,
+              moveCorrelationId,
+              side: "from",
+              locationId: fromLocationId,
+            },
+          },
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: toLocationId,
+            field: "locationId",
+            fromValue: null,
+            toValue: toLocationId,
+            meta: {
+              quantity,
+              moveCorrelationId,
+              side: "to",
+              locationId: toLocationId,
+            },
+          },
+        ],
+        tx
+      );
+
+      /** Returned to the caller so we can write notes outside the tx. */
+      return {
+        fromQuantity: sourceRowDeleted ? 0 : source.quantity - quantity,
+        toQuantity: destNewQuantity,
+        sourceRowDeleted,
+        assetSnapshot: {
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          title: asset.title,
+        },
+      };
+    });
+
+    /**
+     * Step 11: Notes. Written OUTSIDE the tx — `createNote` /
+     * `createLocationChangeNote` / `createSystemLocationNote` all use
+     * the global `db` client; nesting them inside an interactive tx
+     * wouldn't make them rollback-atomic anyway, and the existing
+     * `updateAssetMainImage` / placement-editor flows already use the
+     * "tx commits placement, then notes" sequence. A note write
+     * failure does NOT roll back the placement move — same trade-off
+     * as the existing flows.
+     *
+     * Three notes mirror the existing single-location-update pattern:
+     *   1. One asset-side note via `createLocationChangeNote` with
+     *      BOTH `currentLocation` and `newLocation` set, which renders
+     *      "{user} moved 50 units from L1 to L2." via
+     *      `getLocationUpdateNoteContent`.
+     *   2. A "removed N units from L1. Moved to L2." note on L1's
+     *      timeline.
+     *   3. An "added N units to L2. Moved from L1." note on L2's
+     *      timeline.
+     */
+    const [user, fromLocation, toLocation] = await Promise.all([
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      db.location.findFirst({
+        where: { id: fromLocationId, organizationId },
+        select: { id: true, name: true },
+      }),
+      db.location.findFirst({
+        where: { id: toLocationId, organizationId },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    if (user && fromLocation && toLocation) {
+      const firstName = user.firstName ?? "";
+      const lastName = user.lastName ?? "";
+
+      // Asset-side bidirectional note. The helper recognises the
+      // "current + new both set" shape and emits the "moved …" phrasing.
+      await createLocationChangeNote({
+        currentLocation: fromLocation,
+        newLocation: toLocation,
+        firstName,
+        lastName,
+        assetId,
+        userId,
+        isRemoving: false,
+        organizationId,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+        quantity,
+      });
+
+      // Per-location timeline notes (one each side) — same shape as
+      // the single-location update path at ~line 2596.
+      const userLink = wrapUserLinkForNote({
+        id: userId,
+        firstName,
+        lastName,
+      });
+      const assetForCount = {
+        id: assetId,
+        title: txResult.assetSnapshot.title,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+      };
+      const assetMarkup = wrapAssetWithCountForNote(assetForCount, quantity);
+      const fromLink = wrapLinkForNote(
+        `/locations/${fromLocation.id}`,
+        fromLocation.name
+      );
+      const toLink = wrapLinkForNote(
+        `/locations/${toLocation.id}`,
+        toLocation.name
+      );
+
+      await Promise.all([
+        createSystemLocationNote({
+          locationId: fromLocation.id,
+          content: `${userLink} removed ${assetMarkup} from ${fromLink}. Moved to ${toLink}.`,
+          userId,
+        }),
+        createSystemLocationNote({
+          locationId: toLocation.id,
+          content: `${userLink} added ${assetMarkup} to ${toLink}. Moved from ${fromLink}.`,
+          userId,
+        }),
+      ]);
+    }
+
+    return {
+      fromQuantity: txResult.fromQuantity,
+      toQuantity: txResult.toQuantity,
+      sourceRowDeleted: txResult.sourceRowDeleted,
+      moveCorrelationId,
+    };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while moving asset units between locations. Please try again or contact support.",
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        fromLocationId,
+        toLocationId,
+        quantity,
+      },
+      label,
+    });
+  }
+}
+
+/**
+ * Places N unplaced units of a QUANTITY_TRACKED asset at a destination
+ * location. One-sided variant of `moveAssetLocationUnits` — there is no
+ * source row to decrement; this just fills the gap between
+ * `Asset.quantity` and `sum(AssetLocation.quantity WHERE assetKitId IS NULL)`.
+ *
+ * Reuses the same lock + org-guard + INDIVIDUAL-refusal stack. Emits one
+ * `ASSET_LOCATION_CHANGED` event (to-side only) with a
+ * `meta.moveCorrelationId` so reports can still pair it conceptually with
+ * future moves out of the same destination. Writes one asset-side
+ * "placed N units at L" note + one location-timeline "added N units"
+ * note, matching the Phase 4e wording fix at
+ * `getLocationUpdateNoteContent`.
+ *
+ * @see modules/asset/move-units.types.ts for the contract
+ *
+ * @param args - Arguments (see `PlaceUnplacedUnitsArgs`)
+ * @returns Post-tx destination quantity + correlation id
+ * @throws {ShelfError} 400 if the asset is INDIVIDUAL, quantity is
+ *   non-positive, or `quantity` exceeds the asset's unplaced pool
+ * @throws {ShelfError} 403 if the asset belongs to another org
+ * @throws {ShelfError} 404 if the destination location is not in the org
+ */
+export async function placeUnplacedUnits(
+  args: PlaceUnplacedUnitsArgs
+): Promise<PlaceUnplacedUnitsResult> {
+  const { assetId, organizationId, userId, toLocationId, quantity } = args;
+
+  try {
+    if (quantity <= 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Quantity must be a positive integer.",
+        label,
+        status: 400,
+        additionalData: { assetId, quantity },
+      });
+    }
+
+    const moveCorrelationId = crypto.randomUUID();
+
+    const txResult = await db.$transaction(async (tx) => {
+      await assertAssetsBelongToOrg(
+        { assetIds: [assetId], organizationId },
+        tx
+      );
+
+      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+
+      if (asset.organizationId !== organizationId) {
+        throw new ShelfError({
+          cause: null,
+          message: "Asset does not belong to this organization.",
+          label,
+          status: 403,
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      if (asset.type !== AssetType.QUANTITY_TRACKED) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Placing unplaced units is only available for quantity-tracked assets.",
+          label,
+          status: 400,
+          additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      await assertLocationBelongsToOrg(
+        { locationId: toLocationId, organizationId },
+        tx
+      );
+
+      /**
+       * Compute the current unplaced pool from manual rows only. Kit-
+       * driven rows (`assetKitId IS NOT NULL`) live on the orthogonal
+       * AssetKit axis and don't count toward the location-axis sum (per
+       * the trigger realignment in migration
+       * `20260602100000_assetlocation_sum_exclude_kit_driven`).
+       */
+      const manualPlacements = await tx.assetLocation.aggregate({
+        where: { assetId, assetKitId: null },
+        _sum: { quantity: true },
+      });
+      const placed = manualPlacements._sum.quantity ?? 0;
+      /**
+       * `Asset.quantity` is nullable in the schema (legacy from before
+       * QUANTITY_TRACKED was an explicit type). For a QUANTITY_TRACKED
+       * asset it should always be set — but if it isn't, `null - placed`
+       * silently evaluates to `NaN`, which would let the `quantity > unplaced`
+       * check below pass and write the row. Coerce to 0 explicitly so a
+       * misconfigured asset rejects the request with a clear 400 instead.
+       */
+      const totalQuantity = asset.quantity ?? 0;
+      const unplaced = totalQuantity - placed;
+
+      if (quantity > unplaced) {
+        const available =
+          formatUnitCount(asset, unplaced) ?? `${unplaced} units`;
+        throw new ShelfError({
+          cause: null,
+          message: `Only ${available} unplaced.`,
+          label,
+          status: 400,
+          additionalData: {
+            assetId,
+            requested: quantity,
+            available: unplaced,
+          },
+        });
+      }
+
+      /**
+       * Upsert the manual destination row, scoped by the
+       * `assetKitId IS NULL` partial-unique. A kit-driven row may coexist
+       * at the same `(assetId, locationId)` — we must not collide with it.
+       */
+      const existingDest = await tx.assetLocation.findFirst({
+        where: { assetId, locationId: toLocationId, assetKitId: null },
+        select: { id: true, quantity: true },
+      });
+
+      let destNewQuantity: number;
+      if (existingDest) {
+        destNewQuantity = existingDest.quantity + quantity;
+        await tx.assetLocation.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: existingDest.id came from the org+asset-scoped findFirst above, inside this same tx
+          where: { id: existingDest.id },
+          data: { quantity: destNewQuantity },
+        });
+      } else {
+        destNewQuantity = quantity;
+        await tx.assetLocation.create({
+          data: {
+            assetId,
+            locationId: toLocationId,
+            organizationId,
+            quantity,
+            // assetKitId left null → manual placement.
+          },
+        });
+      }
+
+      /**
+       * One `ASSET_LOCATION_CHANGED` event for the to-side. We still
+       * stamp `meta.moveCorrelationId` so the activity feed can render
+       * this as a deliberate placement; `placeUnplaced: true` lets
+       * reports distinguish the one-sided variant from a paired move.
+       */
+      await recordEvents(
+        [
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: toLocationId,
+            field: "locationId",
+            fromValue: null,
+            toValue: toLocationId,
+            meta: {
+              quantity,
+              moveCorrelationId,
+              side: "to",
+              locationId: toLocationId,
+              placeUnplaced: true,
+            },
+          },
+        ],
+        tx
+      );
+
+      return {
+        toQuantity: destNewQuantity,
+        assetSnapshot: {
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          title: asset.title,
+        },
+      };
+    });
+
+    const [user, toLocation] = await Promise.all([
+      getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        } satisfies Prisma.UserSelect,
+      }),
+      db.location.findFirst({
+        where: { id: toLocationId, organizationId },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    if (user && toLocation) {
+      const firstName = user.firstName ?? "";
+      const lastName = user.lastName ?? "";
+
+      await createLocationChangeNote({
+        currentLocation: null,
+        newLocation: toLocation,
+        firstName,
+        lastName,
+        assetId,
+        userId,
+        isRemoving: false,
+        organizationId,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+        quantity,
+      });
+
+      const userLink = wrapUserLinkForNote({
+        id: userId,
+        firstName,
+        lastName,
+      });
+      const assetForCount = {
+        id: assetId,
+        title: txResult.assetSnapshot.title,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+      };
+      const assetMarkup = wrapAssetWithCountForNote(assetForCount, quantity);
+      const toLink = wrapLinkForNote(
+        `/locations/${toLocation.id}`,
+        toLocation.name
+      );
+
+      await createSystemLocationNote({
+        locationId: toLocation.id,
+        content: `${userLink} placed ${assetMarkup} at ${toLink}.`,
+        userId,
+      });
+    }
+
+    return {
+      toQuantity: txResult.toQuantity,
+      moveCorrelationId,
+    };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while placing unplaced asset units. Please try again or contact support.",
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        toLocationId,
+        quantity,
+      },
       label,
     });
   }

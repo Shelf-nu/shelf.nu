@@ -1561,6 +1561,194 @@ Two options were considered at follow-up time:
 Either way, the asset overview / booking sidebar needs a UX cue: the
 qty for a kit-included asset is locked because the kit owns it.
 
+**Verification 2026-06-10 — option (1) is shipped & verified.** Walked the
+flow live on booking `cmpy2ooas004lomhqd0szuu28` ("4e add-asset retest"):
+the kit `Kittington 2` (containing `Pencils` with `AssetKit.quantity = 22`)
+was added to the booking via `manage-kits`, and the booking sidebar
+rendered the Pencils row with `× 22`, not `× 1`. Server materialisation
+path traced (Phase 1 read): `manage-kits.tsx:438` writes `kitSlices`
+with `quantity: ak.quantity`; the raw-SQL insert at
+`booking/service.server.ts:4806` uses `unnest(${kitQuantities}::int[])`;
+edits cascade through `kit/service.server.ts:4127-4133`; and the
+adjust-asset-quantity API at
+`routes/api+/bookings.$bookingId.adjust-asset-quantity.ts:83-101`
+already scopes its `findFirst` to `assetKitId: null` so direct edits
+to a kit-driven slice 404. The UX cue is also already in place — at
+`list-asset-content.tsx:101-128` `canSeeActions` returns `false` when
+`isPartOfKit`, which hides the entire row-actions dropdown (including
+"Adjust quantity") for any kit-member asset row. A defence-in-depth
+frontend gate (`AssetRowActionsDropdown.isKitDriven`) was sketched and
+reverted: `canSeeActions` already shadows it 100% on this branch.
+
+#### Pending backlog after this PR (snapshot 2026-06-10)
+
+Captured for the team's reference so the scope boundary at PR-merge is
+unambiguous. All items below are **deliberately out of this PR** —
+either explicitly deferred during planning or post-Phase-4 cleanup work.
+
+**🟡 Must-fix-before-release on `feat-quantities`:** none. PRD blocker
+(Phase 4d follow-up — kit-included qty materialisation) is closed and
+verified. No outstanding correctness bugs in "Known Issues" (line 2052+).
+Validate green at 2421 / 2422 (one pre-existing skip, unchanged from
+main).
+
+**🔵 Post-release backlog — deferred, NOT in this PR:**
+
+| Item                                                                             | Where (CLAUDE-CONTEXT.md) | Status                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10** — brought forward from post-release; see "Phase 4c — Split / merge UX (STAGED)" section below for the full report.                                                              |
+| **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Mostly not started. Sub-items: kit checkout/check-in qty polish, model grouping tool, import/export with qty columns, bulk-ops asset-type awareness.                                                     |
+| **Phase 4d — Rebalance kit allocation**                                          | line 1529-1533            | **Explicitly deferred 2026-06-10** (release pressure). Asset's `Assign` button stays disabled for fully-kit-allocated qty-tracked assets. `QuantityCustodyDialog` copy stays as-is.                      |
+| **Phase 4e — Booking-notes sweep (original scope tail)**                         | line 1698-1700            | Possibly residual. 4e landed the Custody / Kit / Location / Activity-feed axes; the "booking checkout / partial / final check-in" note-writer audit was not explicitly ticked. Worth a grep before ship. |
+| **Sub-phase 3e — Calendar + Polish**                                             | line 710-720              | Deferred until after Phase 4c (entangled with split/merge mechanic).                                                                                                                                     |
+| **Sub-phase 3d follow-ups**                                                      | line 645-708              | Deferred until after Phase 4.                                                                                                                                                                            |
+| **Reports end-to-end verification**                                              | line 2068-2083            | `TESTING-REPORTS.md` scaffold ready; deferred to post-Phase-4 to avoid double-walkthrough.                                                                                                               |
+| **Backfill verification on prod snapshot** (KitCustody, 628 prod rows)           | line 2088-2091            | `TESTING-KIT-CUSTODY-CORRECTNESS.md` Path B. Pre-prod-merge task — has to happen before the migration ships to prod, doesn't block PR merge.                                                             |
+
+#### Phase 4c — Split / merge UX (2026-06-10) — STAGED (uncommitted, awaiting approval)
+
+**Brought forward from post-release backlog** under release pressure. Pure
+UX layer on top of the 4a + 4b pivot schema — no migrations, no new
+constraints. Three services + one axis-parameterized dialog + one route's
+worth of wiring.
+
+**Implementation plan + dependency graph:**
+`superpowers/PHASE-4C-SPLIT-MERGE-UX.md` (delete before PR merge).
+
+**Build cadence (multi-agent parallel execution):**
+
+- **Wave 0 (sequential):** shared contracts at
+  `apps/webapp/app/modules/asset/move-units.types.ts` (`MoveAxis`,
+  `MoveAssetLocationUnitsArgs`, `MoveAssetKitUnitsArgs`,
+  `PlaceUnplacedUnitsArgs`, `MoveUnitsResult`, `PlaceUnplacedUnitsResult`,
+  `MOVE_UNITS_INTENT_FIELD` constant).
+- **Wave 1 (4 parallel agents):** `moveAssetLocationUnits`,
+  `moveAssetKitUnits`, `MoveUnitsDialog`, `TESTING-PHASE-4C.md` skeleton.
+- **Wave 2 (2 parallel agents):** asset detail page UI+action wiring
+  combined into one agent (`assets.$assetId.overview.tsx` editor would
+  collide if split), service-level unit tests as a second agent
+  (different files, no collision).
+- **Wave 3 (sequential, 1 human):** `placeUnplacedUnits` one-sided
+  variant of `moveAssetLocationUnits`, cross-axis sanity sweep.
+- **Wave 4:** `pnpm webapp:validate` → 2588 / 2589 tests pass.
+
+**Three flows shipped:**
+
+- **Move N units between two locations.** `moveAssetLocationUnits` at
+  `asset/service.server.ts:7608`. Decrements (or deletes-on-zero) the
+  source AssetLocation row, upserts the destination row. Emits two
+  paired `ASSET_LOCATION_CHANGED` events sharing a
+  `meta.moveCorrelationId` UUID. One asset-side bidirectional "moved
+  N units from L1 to L2" note via `createLocationChangeNote` + two
+  per-location timeline notes (one "removed … moved to", one "added …
+  moved from") — mirrors the single-location-update precedent at
+  `service.server.ts:2596-2648`.
+- **Move N units between two kits.** `moveAssetKitUnits` at
+  `kit/service.server.ts:5115`. Same shape, plus **two BLOCK
+  conditions decided 2026-06-10** (chose option (a) — block with
+  helpful error — over silent cascade or confirm prompt):
+
+  - **Active booking holds source kit** (status in
+    DRAFT/RESERVED/ONGOING/OVERDUE) → 400 with the conflicting
+    booking names + IDs in `additionalData`. User must release those
+    bookings before moving.
+  - **Source kit is in kit-inherited operator custody**
+    (`Custody.kitCustody.kitId === fromKitId`) → 400 with the
+    custodian's name. Release custody first.
+
+  On the dest side, the kit-driven `BookingAsset.quantity` slices on
+  any active bookings holding the destination kit get incremented in
+  the same tx (mirrors the existing cascade pattern at
+  `kit/service.server.ts:4127-4133`). Notes use new `createKitMoveNote`
+  helper at `note/service.server.ts:385` rendering
+  "moved {N units} from kit {KitX} to kit {KitY}".
+
+- **Place N unplaced units at a location.** `placeUnplacedUnits` at
+  `asset/service.server.ts:<near end>`. One-sided variant of
+  `moveAssetLocationUnits` — no source row; just upserts the dest.
+  Computes unplaced from
+  `Asset.quantity - sum(AssetLocation.quantity WHERE assetKitId IS NULL)`
+  (manual rows only — kit-driven rows live on the orthogonal AssetKit
+  axis per the 2026-06-02 trigger realignment). Single
+  `ASSET_LOCATION_CHANGED` event with `meta.placeUnplaced: true`.
+  `Asset.quantity` null-coerced to 0 so a misconfigured asset returns a
+  clear 400 instead of writing a `NaN`-comparison row.
+
+**Generic dialog component.** `MoveUnitsDialog` at
+`components/assets/move-units-dialog.tsx:202` — axis-parameterized
+(`'location' | 'kit' | 'place-unplaced'`). Used the static-list `Select`
+primitive (Radix) over `DynamicSelect` since destinations are
+pre-computed in the loader, not query-driven. Re-validates client-side
+via react-zorm + server-side via `getValidationErrors` fallback per the
+CLAUDE.md form-validation rule. Smoke-test at `move-units-dialog.test.tsx`
+covers axis-specific header copy + the disable conditions; assertion
+style adapted to happy-dom's constraint-validation API
+(`validity.rangeOverflow` + `value` / `min` inspection instead of
+unreliable `requestSubmit` blocking).
+
+**Entry points (single route file).**
+`routes/_layout+/assets.$assetId.overview.tsx` — three insertion points
+all guarded by `isQty && canEditAsset`:
+
+- Sidebar "Placed at locations" card per manual `AssetLocation` row
+  → `<MoveUnitsDialog axis="location" ... />`. Kit-driven rows
+  excluded (`!viaKit`) per orthogonal-axes invariant — they have to be
+  moved via the kit instead.
+- Sidebar "Included in kit(s)" card per `AssetKit` row
+  → `<MoveUnitsDialog axis="kit" ... />`.
+- New "X units unplaced" CTA card after `QuantityOverviewCard` when
+  `unplacedQuantity > 0` → `<MoveUnitsDialog axis="place-unplaced" ... />`.
+- Loader computes `moveDestinations.locations` + `moveDestinations.kits`
+  (org-scoped, tight `select: { id, name }`) and `unplacedQuantity`.
+- Action gains a single early dispatch on `MOVE_UNITS_INTENT_FIELD`
+  routed to `handleMoveUnitsIntent`, which zod-validates per-axis and
+  calls the matching service.
+
+**Tests added (Wave 2 Agent-G).** 36 new tests across:
+
+- `modules/asset/service.server.test.ts` — 12 for
+  `moveAssetLocationUnits` (happy paths, source-exhausted, dest-exists,
+  all negative paths, orthogonal-axes invariant assertion) + 9 for
+  `placeUnplacedUnits`.
+- `modules/kit/service.server.test.ts` — 15 for `moveAssetKitUnits`
+  including both the **active-booking BLOCK** and the
+  **kit-inherited-custody BLOCK**, plus the dest-side BookingAsset
+  cascade verification.
+- Each new Prisma client mock carries the `// why:` justification per
+  the CLAUDE.md Mock Justification Rule.
+
+**Cross-axis invariant verified.** AWK-pattern grep over each new service
+confirms no unintended cross-pivot writes: `moveAssetLocationUnits` →
+zero `tx.assetKit` / `tx.custody` / `tx.bookingAsset` writes;
+`placeUnplacedUnits` → zero cross-axis writes; `moveAssetKitUnits` → zero
+`tx.assetLocation` writes (the only `tx.bookingAsset` calls are the
+expected `findMany` for the active-booking BLOCK check + the `updateMany`
+for the dest-side cascade).
+
+**Linting.** Four `local-rules/require-org-scope-on-id-queries` warnings
+on the post-findFirst `tx.assetLocation.delete/update where id: source.id`
+calls (and one analogous in the kit service) carry the required
+`// eslint-disable-next-line ... -- idor-safe: <id was just retrieved
+via the org+asset-scoped findFirst above, inside this same tx>`
+justification per the rule's escape hatch. These are NOT cross-org IDOR
+risks.
+
+**Validate result.** `pnpm webapp:validate` exit 0 — 191 test files /
+2588 tests pass, 1 pre-existing skip. Baseline was 2421 (Phase 4e);
+this PR brings Shelf to **2588 / 2589** (+36 Phase 4c tests plus
+unmeasured carry-overs since the last local validate).
+
+**Pending pre-PR-merge:** the manual walk-through of
+`TESTING-PHASE-4C.md` (9 sections, ~480 lines — seed data shopping list
+
+- §1-§8 flow verification + §9 validate-green) against a real dev DB.
+  Not gating the PR on the manual pass since service-level tests cover the
+  correctness matrix; the manual pass is for browser/UI verification.
+
+**Plan-file housekeeping.** Delete
+`superpowers/PHASE-4C-SPLIT-MERGE-UX.md` before PR merge (per
+`feedback_plans_location` memory).
+
 #### Phase 4e — Quantity-aware notes + activity events (2026-05-31) — COMMITTED (`f07abe29d`)
 
 **Done in five chunks (C0–C4) on `feat-quantities`:**

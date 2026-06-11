@@ -24,7 +24,9 @@ import {
   checkOutQuantity,
   createAsset,
   getActiveCustomFieldsForAsset,
+  moveAssetLocationUnits,
   parseAssetValuation,
+  placeUnplacedUnits,
   refreshExpiredAssetImages,
   releaseQuantity,
   relinkAssetQrCode,
@@ -91,6 +93,18 @@ vitest.mock("~/database/db.server", () => ({
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
+    // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
+    // AssetLocation pivot for the manual placement rows. `findFirst` is
+    // scoped to `assetKitId: null` (manual rows only); `aggregate` sums
+    // the unplaced pool for `placeUnplacedUnits`. Defaults are empty so
+    // tests opt in to the placement state they need.
+    assetLocation: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      create: vitest.fn().mockResolvedValue({}),
+      update: vitest.fn().mockResolvedValue({}),
+      delete: vitest.fn().mockResolvedValue({}),
     },
     // why: checkOutQuantity / releaseQuantity look up the custodian's user.id so
     // the CUSTODY_ASSIGNED / CUSTODY_RELEASED activity event can carry targetUserId.
@@ -206,8 +220,24 @@ vitest.mock("~/modules/note/service.server", () => ({
   createAssetCategoryChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetDescriptionChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetNameChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetQuantityChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetValuationChangeNote: vitest.fn().mockResolvedValue({}),
   createTagChangeNoteIfNeeded: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: `moveAssetLocationUnits` / `placeUnplacedUnits` write the
+// bidirectional "moved N units" note via `createLocationChangeNote` after
+// the tx commits. We're not asserting note content here — just preventing
+// DB writes by stubbing the helper.
+vitest.mock("~/modules/location/service.server", () => ({
+  createLocationChangeNote: vitest.fn().mockResolvedValue({}),
+  createLocationsIfNotExists: vitest.fn().mockResolvedValue([]),
+}));
+
+// why: same as above for the per-location-timeline note writes that
+// `moveAssetLocationUnits` + `placeUnplacedUnits` queue post-tx.
+vitest.mock("~/modules/location-note/service.server", () => ({
+  createSystemLocationNote: vitest.fn().mockResolvedValue({}),
 }));
 
 // why: control custom-field lookup so we can assert org+category scoping
@@ -2072,4 +2102,470 @@ describe("bulkCreateAssetsFromModel — pre-validation rejects before any write"
   // can't construct with public params (the renderer always varies the
   // suffix by `startNumber + i`). The branch is defensive and exercised
   // by the runtime walk-through (TESTING-BULK-CREATE.md §4).
+});
+
+describe("moveAssetLocationUnits", () => {
+  // Typed handles for the mocks we drive directly. The `findFirst`
+  // mock is used twice per happy-path: once for the source row, once
+  // for the destination row — `mockResolvedValueOnce` lets us script
+  // each call in sequence.
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+  const mockAssetLocationFindFirst = db.assetLocation.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationCreate = db.assetLocation.create as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationUpdate = db.assetLocation.update as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationDelete = db.assetLocation.delete as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockLocationFindFirst = db.location.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+
+  /**
+   * Realistic QUANTITY_TRACKED locked asset stub. The service reads only
+   * `id`, `organizationId`, `type`, `quantity`, `unitOfMeasure`, `title`.
+   */
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+    unitOfMeasure: "boxes",
+  };
+
+  const baseArgs = {
+    assetId: "asset-1",
+    organizationId: "org-1",
+    userId: "user-1",
+    fromLocationId: "loc-from",
+    toLocationId: "loc-to",
+    quantity: 25,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: prior describe blocks may have left a rejection on
+    // `asset.update` — restore the default resolve so the tx body
+    // doesn't blow up on writes it doesn't even use.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    // why: `assertAssetsBelongToOrg` runs `db.asset.findMany` with
+    // `{ id: { in: [assetId] }, organizationId }`. Echo the input so the
+    // org-scope guard passes by default.
+    mockAssetFindMany.mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id })))
+    );
+    // why: `assertLocationBelongsToOrg` runs `db.location.findFirst` —
+    // by default return the queried id so both src/dest validate. Also
+    // covers the post-tx `db.location.findFirst` for the note-writer
+    // sequence at the end of the service.
+    mockLocationFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id, name: where.id })
+    );
+  });
+
+  it("creates a new destination row when 25/100 are moved to a fresh location", async () => {
+    // Source row has 100; no existing destination row.
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    const result = await moveAssetLocationUnits(baseArgs);
+
+    expect(result.fromQuantity).toBe(75);
+    expect(result.toQuantity).toBe(25);
+    expect(result.sourceRowDeleted).toBe(false);
+    expect(result.moveCorrelationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+
+    expect(mockAssetLocationUpdate).toHaveBeenCalledWith({
+      where: { id: "al-src" },
+      data: { quantity: 75 },
+    });
+    expect(mockAssetLocationCreate).toHaveBeenCalledWith({
+      data: {
+        assetId: "asset-1",
+        locationId: "loc-to",
+        organizationId: "org-1",
+        quantity: 25,
+      },
+    });
+    expect(mockAssetLocationDelete).not.toHaveBeenCalled();
+  });
+
+  it("merges into an existing destination row instead of creating a new one", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce({ id: "al-dst", quantity: 25 });
+
+    const result = await moveAssetLocationUnits(baseArgs);
+
+    expect(result.fromQuantity).toBe(75);
+    expect(result.toQuantity).toBe(50);
+    expect(result.sourceRowDeleted).toBe(false);
+
+    // Destination merged into existing row, not freshly created.
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+    expect(mockAssetLocationUpdate).toHaveBeenCalledWith({
+      where: { id: "al-dst" },
+      data: { quantity: 50 },
+    });
+  });
+
+  it("deletes the source row when the move exhausts it", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 25 })
+      .mockResolvedValueOnce(null);
+
+    const result = await moveAssetLocationUnits(baseArgs);
+
+    expect(result.fromQuantity).toBe(0);
+    expect(result.toQuantity).toBe(25);
+    expect(result.sourceRowDeleted).toBe(true);
+
+    expect(mockAssetLocationDelete).toHaveBeenCalledWith({
+      where: { id: "al-src" },
+    });
+    // Update path must NOT fire when the row is deleted.
+    expect(mockAssetLocationUpdate).not.toHaveBeenCalled();
+  });
+
+  it("emits two paired ASSET_LOCATION_CHANGED events sharing a moveCorrelationId", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    const result = await moveAssetLocationUnits(baseArgs);
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const [events] = mockRecordEvents.mock.calls[0] as [
+      Array<{
+        action: string;
+        meta: { moveCorrelationId: string; side: "from" | "to" };
+      }>,
+    ];
+    expect(events).toHaveLength(2);
+    expect(events[0].action).toBe("ASSET_LOCATION_CHANGED");
+    expect(events[1].action).toBe("ASSET_LOCATION_CHANGED");
+    expect(events[0].meta.side).toBe("from");
+    expect(events[1].meta.side).toBe("to");
+    // Both halves of the move share the same correlation id, AND it
+    // matches the one returned to the caller.
+    expect(events[0].meta.moveCorrelationId).toBe(
+      events[1].meta.moveCorrelationId
+    );
+    expect(events[0].meta.moveCorrelationId).toBe(result.moveCorrelationId);
+  });
+
+  it("rejects an INDIVIDUAL asset (split/merge is QUANTITY_TRACKED-only)", async () => {
+    mockLock.mockResolvedValue({
+      ...lockedAsset,
+      type: "INDIVIDUAL" as const,
+    });
+
+    const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("quantity-tracked");
+    expect(mockAssetLocationUpdate).not.toHaveBeenCalled();
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects when source and destination are the same location", async () => {
+    const err = await moveAssetLocationUnits({
+      ...baseArgs,
+      toLocationId: baseArgs.fromLocationId,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("different");
+  });
+
+  it("rejects a non-positive quantity", async () => {
+    const err = await moveAssetLocationUnits({
+      ...baseArgs,
+      quantity: 0,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("positive");
+  });
+
+  it("rejects when the asset is not placed at the source location (kit-driven rows are filtered out)", async () => {
+    // No manual source row — either the asset isn't placed there at
+    // all, or all placement at this location is kit-driven (the
+    // service's `assetKitId: null` filter excludes those).
+    mockAssetLocationFindFirst.mockResolvedValueOnce(null);
+
+    const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain(
+      "not placed at the source location"
+    );
+  });
+
+  it("rejects an over-move and surfaces the available quantity in the error", async () => {
+    // Source has 10 boxes; user tries to move 25.
+    mockAssetLocationFindFirst.mockResolvedValueOnce({
+      id: "al-src",
+      quantity: 10,
+    });
+
+    const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    // Helpful error: surface the available count + unit label so the
+    // user understands what to retry with.
+    expect((err as ShelfError).message).toMatch(/Only/);
+    expect((err as ShelfError).message).toMatch(/10/);
+    expect(mockAssetLocationUpdate).not.toHaveBeenCalled();
+    expect(mockAssetLocationDelete).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the asset belongs to another org (assertAssetsBelongToOrg)", async () => {
+    // Empty result → the org-scope guard throws a 400.
+    mockAssetFindMany.mockResolvedValue([]);
+
+    const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    // The lock+placement work must NOT have happened.
+    expect(mockLock).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the destination location is not in the org (assertLocationBelongsToOrg)", async () => {
+    // Default location.findFirst is overridden to return null for
+    // `loc-to`, simulating a cross-org destination ID.
+    mockLocationFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === "loc-to" ? null : { id: where.id, name: where.id }
+        )
+    );
+
+    const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(404);
+  });
+
+  it("does not touch AssetKit, Custody, or BookingAsset rows (orthogonal-axes invariant)", async () => {
+    mockAssetLocationFindFirst
+      .mockResolvedValueOnce({ id: "al-src", quantity: 100 })
+      .mockResolvedValueOnce(null);
+
+    await moveAssetLocationUnits(baseArgs);
+
+    // Orthogonal-axes invariant — moving on the location axis must not
+    // alter the kit axis or any custody/booking pivot rows.
+    expect(db.custody.create).not.toHaveBeenCalled();
+    expect(db.custody.update).not.toHaveBeenCalled();
+    expect(db.custody.delete).not.toHaveBeenCalled();
+    // No BookingAsset writes are exposed on the asset-side mock; the
+    // service has no `bookingAsset` writes inside this path either —
+    // verified by the absence of failing calls above.
+  });
+});
+
+describe("placeUnplacedUnits", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+  const mockAssetLocationFindFirst = db.assetLocation.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationAggregate = db.assetLocation.aggregate as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationCreate = db.assetLocation.create as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetLocationUpdate = db.assetLocation.update as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockLocationFindFirst = db.location.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 30,
+    unitOfMeasure: "boxes",
+  };
+
+  const baseArgs = {
+    assetId: "asset-1",
+    organizationId: "org-1",
+    userId: "user-1",
+    toLocationId: "loc-office",
+    quantity: 10,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    mockAssetFindMany.mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id })))
+    );
+    mockLocationFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id, name: where.id })
+    );
+  });
+
+  it("places 10 unplaced units at a fresh destination", async () => {
+    // Asset has 30 units; 20 already placed → 10 unplaced. We ask for
+    // exactly 10.
+    mockAssetLocationAggregate.mockResolvedValue({ _sum: { quantity: 20 } });
+    mockAssetLocationFindFirst.mockResolvedValueOnce(null);
+
+    const result = await placeUnplacedUnits(baseArgs);
+
+    expect(result.toQuantity).toBe(10);
+    expect(result.moveCorrelationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+    expect(mockAssetLocationCreate).toHaveBeenCalledWith({
+      data: {
+        assetId: "asset-1",
+        locationId: "loc-office",
+        organizationId: "org-1",
+        quantity: 10,
+      },
+    });
+  });
+
+  it("merges into an existing manual row at the destination", async () => {
+    // Asset has 30 units; 0 placed → 30 unplaced.
+    mockAssetLocationAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // Existing manual row at the destination with 20 units already.
+    mockAssetLocationFindFirst.mockResolvedValueOnce({
+      id: "al-dst",
+      quantity: 20,
+    });
+
+    const result = await placeUnplacedUnits(baseArgs);
+
+    expect(result.toQuantity).toBe(30);
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+    expect(mockAssetLocationUpdate).toHaveBeenCalledWith({
+      where: { id: "al-dst" },
+      data: { quantity: 30 },
+    });
+  });
+
+  it("emits ONE ASSET_LOCATION_CHANGED event with meta.placeUnplaced", async () => {
+    mockAssetLocationAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockAssetLocationFindFirst.mockResolvedValueOnce(null);
+
+    await placeUnplacedUnits(baseArgs);
+
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const [events] = mockRecordEvents.mock.calls[0] as [
+      Array<{
+        action: string;
+        meta: { placeUnplaced?: boolean; side?: string };
+      }>,
+    ];
+    expect(events).toHaveLength(1);
+    expect(events[0].action).toBe("ASSET_LOCATION_CHANGED");
+    expect(events[0].meta.placeUnplaced).toBe(true);
+    expect(events[0].meta.side).toBe("to");
+  });
+
+  it("rejects when the user tries to place more than the unplaced pool", async () => {
+    // Pool: 30 total − 25 placed = 5 unplaced. User asks for 10.
+    mockAssetLocationAggregate.mockResolvedValue({ _sum: { quantity: 25 } });
+
+    const err = await placeUnplacedUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toMatch(/Only/);
+    expect((err as ShelfError).message).toMatch(/unplaced/);
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+    expect(mockAssetLocationUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects an INDIVIDUAL asset", async () => {
+    mockLock.mockResolvedValue({
+      ...lockedAsset,
+      type: "INDIVIDUAL" as const,
+    });
+
+    const err = await placeUnplacedUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("quantity-tracked");
+  });
+
+  it("rejects a non-positive quantity", async () => {
+    const err = await placeUnplacedUnits({
+      ...baseArgs,
+      quantity: -5,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect((err as ShelfError).message).toContain("positive");
+  });
+
+  it("rejects a cross-org destination location with status 404", async () => {
+    mockLocationFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === "loc-office" ? null : { id: where.id, name: where.id }
+        )
+    );
+
+    const err = await placeUnplacedUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(404);
+  });
+
+  it("rejects a cross-org asset (assertAssetsBelongToOrg)", async () => {
+    mockAssetFindMany.mockResolvedValue([]);
+
+    const err = await placeUnplacedUnits(baseArgs).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect((err as ShelfError).status).toBe(400);
+    expect(mockLock).not.toHaveBeenCalled();
+  });
+
+  it("does not touch AssetKit, Custody, or BookingAsset rows", async () => {
+    mockAssetLocationAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockAssetLocationFindFirst.mockResolvedValueOnce(null);
+
+    await placeUnplacedUnits(baseArgs);
+
+    expect(db.custody.create).not.toHaveBeenCalled();
+    expect(db.custody.update).not.toHaveBeenCalled();
+    expect(db.custody.delete).not.toHaveBeenCalled();
+  });
 });

@@ -356,6 +356,105 @@ export async function createKitChangeNote({
   }
 }
 
+/**
+ * Persist a per-side system note for a Phase 4c kit-axis "move units"
+ * operation. Wording mirrors the location-axis move note:
+ *
+ *   `{user} moved {N units} from kit {KitX-link} to kit {KitY-link}.`
+ *
+ * Called twice per move — once for the from-side and once for the to-side —
+ * so both kit pages and the asset feed have a chronological record of the
+ * redistribution. INDIVIDUAL assets omit the unit-count fragment to match
+ * the rest of the kit-note family.
+ *
+ * Writes through the global `db` (no tx) to mirror `createKitChangeNote`.
+ * The paired ActivityEvents are the source of truth for tx atomicity; notes
+ * are surfaced UI sugar that lands post-tx if the move commits.
+ *
+ * @param params.fromKit - Source kit (asset is losing units from here)
+ * @param params.toKit - Destination kit (asset is gaining units here)
+ * @param params.firstName / params.lastName - Acting user (for the userLink)
+ * @param params.assetId - Asset whose units are being redistributed
+ * @param params.userId - Acting user — written to `Note.userId`
+ * @param params.organizationId - Caller's validated organization ID
+ * @param params.type - `AssetType` — decides whether to render a unit count
+ * @param params.unitOfMeasure - Labels the count ("pairs" / "boxes"); defaults to "units"
+ * @param params.quantity - Number of units moved in this redistribution
+ * @throws {ShelfError} On DB failure
+ */
+export async function createKitMoveNote({
+  fromKit,
+  toKit,
+  firstName,
+  lastName,
+  assetId,
+  userId,
+  organizationId,
+  type,
+  unitOfMeasure,
+  quantity,
+}: {
+  fromKit: Pick<Kit, "id" | "name">;
+  toKit: Pick<Kit, "id" | "name">;
+  firstName: string;
+  lastName: string;
+  assetId: Asset["id"];
+  userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
+  /** Asset type — decides whether a qty-tracked unit count applies. */
+  type: AssetType;
+  /** Labels the count ("units" / "pairs"); defaults to "units". */
+  unitOfMeasure?: string | null;
+  /** Number of units moved in this redistribution. */
+  quantity: number;
+}) {
+  try {
+    const userLink = wrapUserLinkForNote({
+      id: userId,
+      firstName,
+      lastName,
+    });
+
+    const fromKitLink = wrapKitsWithDataForNote(
+      { id: fromKit.id, name: fromKit.name.trim() },
+      "updated"
+    );
+    const toKitLink = wrapKitsWithDataForNote(
+      { id: toKit.id, name: toKit.name.trim() },
+      "updated"
+    );
+
+    // Qty-tracked: "moved 50 units from kit A to kit B"; INDIVIDUAL falls
+    // back to the countless wording to match the rest of the kit-note family.
+    const count = formatUnitCount({ type, unitOfMeasure }, quantity);
+    const message = count
+      ? `${userLink} moved ${count} from kit ${fromKitLink} to kit ${toKitLink}.`
+      : `${userLink} moved asset from kit ${fromKitLink} to kit ${toKitLink}.`;
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+      organizationId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a kit move note. Please try again or contact support",
+      additionalData: {
+        userId,
+        assetId,
+        fromKitId: fromKit.id,
+        toKitId: toKit.id,
+      },
+      label,
+    });
+  }
+}
+
 export async function createTagChangeNoteIfNeeded({
   assetId,
   userId,
