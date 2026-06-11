@@ -1,11 +1,15 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { getKitsWhereInput } from "~/modules/kit/utils.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
 import { getLocationsWhereInput } from "~/modules/location/utils.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { assertLocationsBelongToOrg } from "~/utils/org-validation.server";
+import {
+  assertKitsBelongToOrg,
+  assertLocationsBelongToOrg,
+} from "~/utils/org-validation.server";
 
 /** Context type for audit creation */
 export type AuditContextType = "location" | "kit" | "user";
@@ -272,6 +276,79 @@ export async function resolveAssetIdsForLocationSelection({
       cause: null,
       message:
         "None of the selected locations contain assets. Add assets before starting an audit.",
+      status: 400,
+      label: "Audit",
+      shouldBeCaptured: false,
+    });
+  }
+
+  return assets.map((asset) => asset.id);
+}
+
+/**
+ * Resolves the asset IDs to audit from a multi-select of kits on the Kits index
+ * (the bulk "Create audit" action).
+ *
+ * - "Select all" (when `kitIds` contains {@link ALL_SELECTED_KEY}) matches assets
+ *   whose kit satisfies the current list filter, mirroring what the user sees —
+ *   see {@link getKitsWhereInput} (which honors the Kits list `s` / `status` /
+ *   `teamMember` filters). This uses a `kit` relation filter so it stays a
+ *   SINGLE query: no need to materialize the kit IDs into a giant `IN (...)`
+ *   list.
+ * - An explicit selection is proven to belong to the caller's org first (IDOR
+ *   guard), then scoped by the (deduped) kit IDs.
+ *
+ * Asset→kit is 1:1, so the result needs no dedup. The asset query is always
+ * org-scoped, so a tampered/foreign kit ID can never leak another org's assets.
+ *
+ * @param organizationId - The caller's (validated) organization ID
+ * @param kitIds - Selected kit IDs (may contain ALL_SELECTED_KEY)
+ * @param currentSearchParams - Serialized Kits-list search params (for select-all)
+ * @returns Asset IDs across the selected kits
+ * @throws {ShelfError} 400 if none of the selected kits contain assets
+ */
+export async function resolveAssetIdsForKitSelection({
+  organizationId,
+  kitIds,
+  currentSearchParams,
+}: {
+  organizationId: string;
+  kitIds: string[];
+  currentSearchParams?: string | null;
+}): Promise<string[]> {
+  // Build the org-scoped asset where-clause for the selected kits.
+  let assetWhere: Prisma.AssetWhereInput;
+
+  if (kitIds.includes(ALL_SELECTED_KEY)) {
+    // "Select all" — match assets whose kit satisfies the SAME filter the user
+    // sees on the Kits list. A relation filter keeps this one query (no separate
+    // kit lookup, no giant IN list). Assets with no kit are naturally excluded,
+    // which matches the explicit-selection semantics.
+    assetWhere = {
+      organizationId,
+      kit: getKitsWhereInput({ organizationId, currentSearchParams }),
+    };
+  } else {
+    // Explicit selection from request input — prove org ownership before use,
+    // then scope by the deduped IDs (schema guarantees at least one).
+    await assertKitsBelongToOrg({ kitIds, organizationId });
+    assetWhere = {
+      organizationId,
+      kitId: { in: [...new Set(kitIds)] },
+    };
+  }
+
+  // Asset→kit is 1:1, so findMany already returns each asset once.
+  const assets = await db.asset.findMany({
+    where: assetWhere,
+    select: { id: true },
+  });
+
+  if (assets.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "None of the selected kits contain assets. Add assets before starting an audit.",
       status: 400,
       label: "Audit",
       shouldBeCaptured: false,

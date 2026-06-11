@@ -23,6 +23,7 @@
 import type {
   Asset,
   Category,
+  Kit,
   Location,
   Tag,
   TeamMember,
@@ -69,6 +70,12 @@ export type OrgValidationTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
+  };
+  kit: {
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
@@ -166,6 +173,46 @@ export async function assertLocationsBelongToOrg(
       title: "Invalid locations",
       message:
         "Some of the selected locations do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every kit ID belongs to `organizationId`.
+ *
+ * For bulk paths that accept a list of kit IDs from request/form input (e.g.
+ * creating an audit from a multi-select on the Kits index). Dedupes the input
+ * so duplicate IDs don't inflate the expected count. A no-op for an empty list.
+ *
+ * @param params.kitIds - Kit IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertKitsBelongToOrg(
+  { kitIds, organizationId }: { kitIds: Kit["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (kitIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(kitIds)];
+
+  const found = await client.kit.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid kits",
+      message:
+        "Some of the selected kits do not exist in your workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,
