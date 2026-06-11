@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { db } from "~/database/db.server";
 import { getKitsWhereInput } from "~/modules/kit/utils.server";
 import { getLocationDescendantIds } from "~/modules/location/descendants.server";
@@ -214,21 +216,23 @@ export async function getAssetsForUserContext({
  * Resolves the asset IDs to audit from a multi-select of locations on the
  * Locations index (the bulk "Create audit" action).
  *
- * - "Select all" (when `locationIds` contains {@link ALL_SELECTED_KEY}) resolves
- *   the full set of locations matching the current list filter, mirroring what
- *   the user sees — see {@link getLocationsWhereInput}.
+ * - "Select all" (when `locationIds` contains {@link ALL_SELECTED_KEY}) matches
+ *   assets whose location satisfies the current list filter, mirroring what the
+ *   user sees — see {@link getLocationsWhereInput}. This uses a `location`
+ *   relation filter so it stays a SINGLE query: no need to materialize the
+ *   location IDs into a giant `IN (...)` list.
  * - An explicit selection is proven to belong to the caller's org first (IDOR
- *   guard) before use.
+ *   guard), then scoped by the (deduped) location IDs.
  *
- * Asset→location is 1:1, so the union across locations needs no dedup. The
- * asset query is org-scoped, so a tampered/foreign location ID can never leak
- * another org's assets.
+ * Asset→location is 1:1, so the result needs no dedup. The asset query is always
+ * org-scoped, so a tampered/foreign location ID can never leak another org's
+ * assets.
  *
  * @param organizationId - The caller's (validated) organization ID
  * @param locationIds - Selected location IDs (may contain ALL_SELECTED_KEY)
  * @param currentSearchParams - Serialized Locations-list search params (for select-all)
  * @returns Asset IDs across the selected locations
- * @throws {ShelfError} 400 if no locations resolve, or none of them contain assets
+ * @throws {ShelfError} 400 if none of the selected locations contain assets
  */
 export async function resolveAssetIdsForLocationSelection({
   organizationId,
@@ -239,36 +243,31 @@ export async function resolveAssetIdsForLocationSelection({
   locationIds: string[];
   currentSearchParams?: string | null;
 }): Promise<string[]> {
-  // Resolve which locations to include in the audit
-  let resolvedLocationIds: string[];
+  // Build the org-scoped asset where-clause for the selected locations.
+  let assetWhere: Prisma.AssetWhereInput;
 
   if (locationIds.includes(ALL_SELECTED_KEY)) {
-    // "Select all" — resolve the full filtered set (org-scoped by construction)
-    const locations = await db.location.findMany({
-      where: getLocationsWhereInput({ organizationId, currentSearchParams }),
-      select: { id: true },
-    });
-    resolvedLocationIds = locations.map((location) => location.id);
+    // "Select all" — match assets whose location satisfies the SAME filter the
+    // user sees on the Locations list. A relation filter keeps this one query
+    // (no separate location lookup, no giant IN list). Assets with no location
+    // are naturally excluded, which matches the explicit-selection semantics.
+    assetWhere = {
+      organizationId,
+      location: getLocationsWhereInput({ organizationId, currentSearchParams }),
+    };
   } else {
-    // Explicit selection from request input — prove org ownership before use
+    // Explicit selection from request input — prove org ownership before use,
+    // then scope by the deduped IDs (schema guarantees at least one).
     await assertLocationsBelongToOrg({ locationIds, organizationId });
-    resolvedLocationIds = locationIds;
+    assetWhere = {
+      organizationId,
+      locationId: { in: [...new Set(locationIds)] },
+    };
   }
 
-  if (resolvedLocationIds.length === 0) {
-    throw new ShelfError({
-      cause: null,
-      message: "No locations selected for the audit.",
-      status: 400,
-      label: "Audit",
-      shouldBeCaptured: false,
-    });
-  }
-
-  // Union of assets across the selected locations (asset→location is 1:1, so
-  // findMany already returns each asset once — no dedup needed).
+  // Asset→location is 1:1, so findMany already returns each asset once.
   const assets = await db.asset.findMany({
-    where: { organizationId, locationId: { in: resolvedLocationIds } },
+    where: assetWhere,
     select: { id: true },
   });
 

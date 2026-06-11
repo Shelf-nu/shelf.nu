@@ -8,9 +8,15 @@
  * and kits multi-selects). These tests lock that contract so the new location
  * and kit branches and the legacy forms can't silently regress.
  *
- * @see {@link file://./audits.start.ts}
+ * Lives under `test/routes-tests/` rather than next to the route itself
+ * because React Router's flat-routes scanner auto-registers any `*.ts` /
+ * `*.tsx` file inside `app/routes/` as a route module and would try to
+ * serve this test file — crashing the dev server on its server-only imports.
+ *
+ * @see {@link file://../../../app/routes/api+/audits.start.ts}
  */
-import { StartAuditSchema } from "./audits.start";
+import { StartAuditSchema } from "~/routes/api+/audits.start";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // why: importing the route module transitively pulls in ~/database/db.server
 // (Prisma client init) and the audit service; the schema under test never
@@ -37,7 +43,7 @@ describe("StartAuditSchema", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
       contextType: "location",
-      locationIds: ["all-selected"],
+      locationIds: [ALL_SELECTED_KEY],
     });
     expect(result.success).toBe(true);
   });

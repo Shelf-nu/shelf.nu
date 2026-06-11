@@ -111,6 +111,9 @@ model User {
 
   assetFilterPresets AssetFilterPreset[]
 
+  // Native-app SSO web-delegated login — single-use session-handoff codes
+  mobileAuthCodes MobileAuthCode[]
+
   // Role change audit log
   roleChangesReceived  RoleChangeLog[] @relation("roleChangeTarget")
   roleChangesPerformed RoleChangeLog[] @relation("roleChangeActor")
@@ -1173,6 +1176,41 @@ model Invite {
   @@index([teamMemberId])
 }
 
+// Single-use authorization codes for native-app SSO login (web-delegated auth).
+// After a user authenticates via SSO in the system browser, the web mints a row
+// here and hands the app the plaintext `code` via the `shelf://` deeplink. The
+// app redeems it at `POST /api/mobile/exchange`, which validates the code and
+// mints a FRESH, independent Supabase session for the device — the web session's
+// tokens are never transferred, so web and mobile keep independent token
+// families (no refresh-rotation cascade). Single-use, short-lived (~60s).
+//
+// @see apps/webapp/app/modules/auth/mobile-sso.server.ts
+// @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
+model MobileAuthCode {
+  id String @id @default(cuid())
+
+  // The user this code authorizes a session for.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  // SHA-256 hash of the single-use plaintext code. The plaintext only ever
+  // lives in the deeplink + the exchange request body — never stored.
+  codeHash String @unique
+
+  // Single-use guard: set when redeemed. A non-null value rejects reuse.
+  consumedAt DateTime?
+
+  // Short TTL (~60s). Rejected once `now > expiresAt`.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  // Indexes for foreign keys
+  @@index([userId])
+  // For periodic cleanup of expired, unredeemed rows
+  @@index([expiresAt])
+}
+
 model Announcement {
   id String @id @default(cuid())
 
@@ -1269,6 +1307,9 @@ model BookingSettings {
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
+
+  // Progressive check-in/out settings
+  countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it
 
   // Notification settings
   notifyBookingCreator     Boolean @default(true) // Whether the booking creator receives email notifications

@@ -88,7 +88,8 @@ export const StartAuditSchema = BaseAuditSchema.extend({
     return hasAssetIds || hasContext || hasLocationSelection || hasKitSelection;
   },
   {
-    message: "Either assetIds or context parameters must be provided",
+    message:
+      "Provide assetIds, context parameters (contextType + contextId), or a location selection (contextType=location + locationIds).",
   }
 );
 

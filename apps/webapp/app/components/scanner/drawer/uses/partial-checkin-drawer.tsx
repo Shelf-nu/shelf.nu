@@ -17,6 +17,7 @@ import CheckinDialog from "~/components/booking/checkin-dialog";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Progress } from "~/components/shared/progress";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkin-assets";
@@ -389,10 +390,14 @@ export default function PartialCheckinDrawer({
       }
       title={
         <div className="text-right">
-          <span className="block text-gray-600">
+          <span className="flex items-center justify-end gap-1 text-gray-600">
             {assetIdsForCheckin.length}/
             {partialCheckinProgress?.uncheckedCount || booking.assets.length}{" "}
             Assets scanned
+            <InfoTooltip
+              iconClassName="size-4"
+              content={<p>All assets inside kits are counted individually</p>}
+            />
           </span>
           <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
             <Progress

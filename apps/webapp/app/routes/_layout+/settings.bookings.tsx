@@ -16,6 +16,10 @@ import {
 } from "~/components/booking/explicit-checkin-settings";
 import { NotificationSettings } from "~/components/booking/notification-settings";
 import {
+  ProgressiveCheckinSettings,
+  CountKitsAsUnitSettingsSchema,
+} from "~/components/booking/progressive-checkin-settings";
+import {
   TagsRequiredSettings,
   TagsRequiredSettingsSchema,
 } from "~/components/booking/tags-required/tags-required-settings";
@@ -139,6 +143,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateAutoArchiveToggle",
         "updateAutoArchiveDays",
         "updateExplicitCheckin",
+        "updateCountKitsAsSingleUnit",
         "updateNotifyBookingCreator",
         "updateNotifyAdminsOnNewBooking",
         "updateAlwaysNotifyTeamMembers",
@@ -485,6 +490,35 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return data(payload({ success: true }), { status: 200 });
       }
 
+      case "updateCountKitsAsSingleUnit": {
+        const { countKitsAsSingleUnit } = parseData(
+          formData,
+          CountKitsAsUnitSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          countKitsAsSingleUnit,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message:
+            "Progressive check-in counting setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
       default: {
         throw new ShelfError({
           cause: null,
@@ -521,6 +555,18 @@ export default function GeneralPage() {
             bookingSettings.requireExplicitCheckinForSelfService,
         }}
       />
+
+      {/* Progressive check-in/out display options group */}
+      <div>
+        <ProgressiveCheckinSettings
+          header={{
+            title: "Counting options",
+            subHeading:
+              "Choose how kits are counted when visualising booking check-in/out progress.",
+          }}
+          defaultValue={bookingSettings.countKitsAsSingleUnit}
+        />
+      </div>
 
       {/* Tags required settings form */}
       <TagsRequiredSettings
