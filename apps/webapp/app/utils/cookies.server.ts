@@ -64,6 +64,28 @@ export function setCookie(cookieValue: string): [string, string] {
   return ["Set-Cookie", cookieValue];
 }
 
+/**
+ * MOBILE SSO PKCE CHALLENGE COOKIE
+ *
+ * Carries the PKCE `code_challenge` (S256) across the native-app SSO round-trip.
+ * A PKCE-capable companion build appends `?code_challenge=…` when it opens
+ * `/sso-login`; the loader stashes it here so it survives the browser-session
+ * redirect chain (Supabase → IdP → `/oauth/callback/mobile`), where it is bound
+ * to the minted auth code and then cleared. HttpOnly + short-lived: it only
+ * needs to outlive one SSO login. The value is a non-secret hash, so it is not
+ * signed — tampering only breaks the attacker's own exchange.
+ *
+ * @see apps/webapp/app/routes/_auth+/sso-login.tsx — sets it
+ * @see apps/webapp/app/routes/_auth+/oauth.callback_.mobile.tsx — reads + clears it
+ */
+export const mobilePkceChallengeCookie = createCookie("mobile_pkce_challenge", {
+  path: "/",
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 10, // 10 min — must outlive the IdP login + the redirect chain
+});
+
 /** USER PREFS COOKIE */
 
 export const userPrefs = createCookie("user-prefs", {

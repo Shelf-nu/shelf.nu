@@ -21,12 +21,16 @@ import { getActionMethod } from "~/utils/http.server";
 
 const ExchangeSchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
+  // PKCE verifier (RFC 7636: 43–128 chars). Optional — only codes minted by a
+  // PKCE-capable app build carry a challenge that requires it.
+  codeVerifier: z.string().min(43).max(128).optional(),
 });
 
 /**
  * POST /api/mobile/exchange
  *
- * Body: `{ code: string }` — the single-use code from the SSO deeplink.
+ * Body: `{ code: string, codeVerifier?: string }` — the single-use code from
+ * the SSO deeplink, plus the PKCE verifier when the app build supports it.
  *
  * @param args - React Router action args (carrying the incoming request)
  * @returns `{ accessToken, refreshToken }` on success (the app passes them to
@@ -52,7 +56,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const authSession = await redeemMobileAuthCode(parsed.data.code);
+    const authSession = await redeemMobileAuthCode(
+      parsed.data.code,
+      parsed.data.codeVerifier
+    );
 
     // Opportunistic cleanup of expired codes (no app-level cron in this repo).
     // Fire-and-forget: a cleanup failure must never affect the exchange.
