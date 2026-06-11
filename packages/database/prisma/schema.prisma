@@ -816,6 +816,12 @@ model UserOrganization {
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
 
+  /// Secret, unguessable token for this member's iCal calendar-feed subscription
+  /// in this workspace. Null until the user generates a feed; regenerating it
+  /// rotates the value (invalidating any previously-shared subscription URL).
+  /// `@unique` doubles as the lookup index for the public feed route.
+  calendarTokenId String? @unique
+
   @@unique([userId, organizationId])
   // Index for foreign key
   @@index([organizationId])
