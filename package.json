@@ -26,6 +26,8 @@
     "webapp:seed:reporting-demo:staging": "pnpm --filter @shelf/webapp seed:reporting-demo:staging",
     "webapp:clean:reporting-demo": "pnpm --filter @shelf/webapp clean:reporting-demo",
     "webapp:clean:reporting-demo:staging": "pnpm --filter @shelf/webapp clean:reporting-demo:staging",
+    "webapp:report:state-of-em-2026": "pnpm --filter @shelf/webapp report:state-of-em-2026",
+    "webapp:report:state-of-em-2026:staging": "pnpm --filter @shelf/webapp report:state-of-em-2026:staging",
     "companion:dev": "pnpm --filter @shelf/companion dev",
     "companion:dev:clear": "pnpm --filter @shelf/companion dev:clear",
     "companion:dev:tunnel": "pnpm --filter @shelf/companion dev:tunnel",
