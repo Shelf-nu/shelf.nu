@@ -7,13 +7,16 @@ import { getParams } from "~/utils/http.server";
  * This is mostly made for handling users cmd+click on asset or booking in user page
  */
 export const loader = ({ request, params }: LoaderFunctionArgs) => {
-  const { userId: selectedUserId } = getParams(
+  const { "*": splat } = getParams(
     params,
-    z.object({ userId: z.string() })
+    z.object({ userId: z.string(), "*": z.string() })
   );
+  const url = new URL(request.url);
+  const redirectTo = `/${splat}${url.search}${url.hash}`;
 
-  /** Split the url based on the user id */
-  const extraParts = request.url.split(selectedUserId);
+  if (!redirectTo.startsWith("/") || redirectTo.startsWith("//")) {
+    throw new Response("Invalid redirect", { status: 400 });
+  }
 
-  return redirect(extraParts[extraParts.length - 1]);
+  return redirect(redirectTo);
 };
