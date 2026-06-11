@@ -20,6 +20,7 @@ import {
   assertTeamMemberBelongsToOrg,
   assertCategoryBelongsToOrg,
   assertLocationBelongsToOrg,
+  assertLocationsBelongToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
 
@@ -36,7 +37,10 @@ function txWith(overrides: Record<string, any>) {
     tag: { findMany: vitest.fn().mockResolvedValue([]) },
     teamMember: { findFirst: vitest.fn().mockResolvedValue(null) },
     category: { findFirst: vitest.fn().mockResolvedValue(null) },
-    location: { findFirst: vitest.fn().mockResolvedValue(null) },
+    location: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     customField: { findMany: vitest.fn().mockResolvedValue([]) },
     userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     ...overrides,
@@ -106,6 +110,70 @@ describe("assertAssetsBelongToOrg", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.title).toBe("Invalid assets");
+  });
+});
+
+describe("assertLocationsBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({});
+    await expect(
+      assertLocationsBelongToOrg({ locationIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.location.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every location belongs to the org and scopes the query by organizationId", async () => {
+    const tx = txWith({
+      location: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "l1" }, { id: "l2" }]),
+      },
+    });
+
+    await expect(
+      assertLocationsBelongToOrg(
+        { locationIds: ["l1", "l2"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.location.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["l1", "l2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("dedupes input so duplicate IDs don't inflate the expected count", async () => {
+    const tx = txWith({
+      location: { findMany: vitest.fn().mockResolvedValue([{ id: "l1" }]) },
+    });
+
+    await expect(
+      assertLocationsBelongToOrg(
+        { locationIds: ["l1", "l1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.location.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["l1"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any ID is foreign/missing", async () => {
+    // l2 belongs to another org → the org-scoped findMany returns only l1
+    const tx = txWith({
+      location: { findMany: vitest.fn().mockResolvedValue([{ id: "l1" }]) },
+    });
+
+    const err = await assertLocationsBelongToOrg(
+      { locationIds: ["l1", "l2"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid locations");
   });
 });
 
@@ -211,8 +279,11 @@ describe("assertCustomFieldsBelongToOrg", () => {
   });
 });
 
-describe("single-entity guards reject foreign/missing with 404", () => {
-  it("assertTeamMemberBelongsToOrg throws 404 when not found in org", async () => {
+// A foreign/missing single ID is an invalid request input (not a gone
+// resource), so these guards return 400 — consistent with the bulk guards
+// above and the file-level contract.
+describe("single-entity guards reject foreign/missing with 400", () => {
+  it("assertTeamMemberBelongsToOrg throws 400 when not found in org", async () => {
     const tx = txWith({
       teamMember: { findFirst: vitest.fn().mockResolvedValue(null) },
     });
@@ -222,7 +293,7 @@ describe("single-entity guards reject foreign/missing with 404", () => {
     ).catch((e) => e);
 
     expect(err).toBeInstanceOf(ShelfError);
-    expect(err.status).toBe(404);
+    expect(err.status).toBe(400);
     expect(tx.teamMember.findFirst).toHaveBeenCalledWith({
       where: { id: "tm-foreign", organizationId: ORG },
       select: { id: true },
@@ -241,7 +312,7 @@ describe("single-entity guards reject foreign/missing with 404", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("assertCategoryBelongsToOrg throws 404 when foreign/missing", async () => {
+  it("assertCategoryBelongsToOrg throws 400 when foreign/missing", async () => {
     const tx = txWith({
       category: { findFirst: vitest.fn().mockResolvedValue(null) },
     });
@@ -250,10 +321,10 @@ describe("single-entity guards reject foreign/missing with 404", () => {
       tx
     ).catch((e) => e);
     expect(err).toBeInstanceOf(ShelfError);
-    expect(err.status).toBe(404);
+    expect(err.status).toBe(400);
   });
 
-  it("assertLocationBelongsToOrg throws 404 when foreign/missing", async () => {
+  it("assertLocationBelongsToOrg throws 400 when foreign/missing", async () => {
     const tx = txWith({
       location: { findFirst: vitest.fn().mockResolvedValue(null) },
     });
@@ -262,7 +333,8 @@ describe("single-entity guards reject foreign/missing with 404", () => {
       tx
     ).catch((e) => e);
     expect(err).toBeInstanceOf(ShelfError);
-    expect(err.status).toBe(404);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid location");
   });
 
   it("assertLocationBelongsToOrg resolves when the location is in the org", async () => {
@@ -276,7 +348,7 @@ describe("single-entity guards reject foreign/missing with 404", () => {
 });
 
 describe("assertUserBelongsToOrg", () => {
-  it("throws 404 when the user is not a member of the org (foreign custodian user)", async () => {
+  it("throws 400 when the user is not a member of the org (foreign custodian user)", async () => {
     const tx = txWith({
       userOrganization: { findFirst: vitest.fn().mockResolvedValue(null) },
     });
@@ -286,7 +358,7 @@ describe("assertUserBelongsToOrg", () => {
     ).catch((e) => e);
 
     expect(err).toBeInstanceOf(ShelfError);
-    expect(err.status).toBe(404);
+    expect(err.status).toBe(400);
     expect(tx.userOrganization.findFirst).toHaveBeenCalledWith({
       where: { userId: "u-foreign", organizationId: ORG },
       select: { id: true },
