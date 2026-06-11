@@ -103,7 +103,8 @@ export type FailureReason = {
     | "Asset Scheduler" // Error related to the image import
     | "Audit"
     | "Activity"
-    | "Update";
+    | "Update"
+    | "Analytics";
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html
