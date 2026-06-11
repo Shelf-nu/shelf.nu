@@ -1,5 +1,8 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
-import type { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import type {
+  calculatePartialCheckinProgress,
+  calculateUnitCheckinProgress,
+} from "~/modules/booking/utils.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
@@ -31,7 +34,9 @@ export function BookingStatistics({
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
-  partialCheckinProgress?: ReturnType<typeof calculatePartialCheckinProgress>;
+  partialCheckinProgress?:
+    | ReturnType<typeof calculatePartialCheckinProgress>
+    | ReturnType<typeof calculateUnitCheckinProgress>;
   autoArchivedAt?: Date | null;
   status: BookingStatus;
 }) {
@@ -57,9 +62,30 @@ export function BookingStatistics({
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500">Check-in progress</span>
                 <span className="flex min-w-[150px] items-center gap-2 text-right text-sm font-medium">
-                  <span className="whitespace-nowrap">
+                  <span className="flex items-center gap-1 whitespace-nowrap">
                     {partialCheckinProgress.checkedInCount} /{" "}
                     {partialCheckinProgress.totalAssets}
+                    {partialCheckinProgress.countMode === "units" ? (
+                      <>
+                        <span className="text-gray-500">items</span>
+                        <InfoTooltip
+                          iconClassName="size-4"
+                          content={<p>Kits count as one item</p>}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-gray-500">assets</span>
+                        <InfoTooltip
+                          iconClassName="size-4"
+                          content={
+                            <p>
+                              All assets inside kits are counted individually
+                            </p>
+                          }
+                        />
+                      </>
+                    )}
                   </span>
                   <Progress value={partialCheckinProgress.progressPercentage} />
                 </span>

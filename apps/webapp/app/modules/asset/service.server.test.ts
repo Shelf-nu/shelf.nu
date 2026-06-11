@@ -17,6 +17,7 @@ import {
   bulkUpdateAssetCategory,
   createAsset,
   getActiveCustomFieldsForAsset,
+  getAssets,
   parseAssetValuation,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
@@ -34,6 +35,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findUnique: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
+      count: vitest.fn().mockResolvedValue(0),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -1099,5 +1101,109 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
     ).rejects.toThrow(
       "Self service user can only release custody of assets assigned to their user"
     );
+  });
+});
+
+describe("getAssets search fallback", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+  const countMock = vi.mocked(db.asset.count);
+
+  /** Minimal required params for a simple-index search call. */
+  const baseParams = {
+    organizationId: "org-1",
+    page: 1,
+    perPage: 8,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+
+  /** The title branch only exists in the full search clause, never the narrow one. */
+  const titleClause = {
+    title: { contains: "103468", mode: "insensitive" },
+  };
+
+  beforeEach(() => {
+    findManyMock.mockReset();
+    countMock.mockReset();
+  });
+
+  it("runs only the narrow indexed clause when an ID-shaped query matches", async () => {
+    // why: first (and only) fetch returns a row, so no fallback is needed.
+    findManyMock.mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock.mockResolvedValueOnce(1 as never);
+
+    const result = await getAssets({ ...baseParams, search: "103468" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    // Narrow clause: sequentialId / barcode / qr only — no title branch.
+    expect(JSON.stringify(where.OR)).not.toContain("title");
+    expect(where.OR).toContainEqual({
+      sequentialId: { contains: "103468", mode: "insensitive" },
+    });
+    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("falls back to the full search when the narrow clause matches nothing", async () => {
+    // why: narrow query finds 0 rows; the number is embedded in a title, so the
+    // fallback re-query with the full clause must surface it.
+    findManyMock
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock
+      .mockResolvedValueOnce(0 as never)
+      .mockResolvedValueOnce(1 as never);
+
+    const result = await getAssets({ ...baseParams, search: "103468" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(2);
+    // The narrow-first behaviour is asserted by the single-query test above;
+    // getAssets mutates and reuses one `where` object across both fetches, so
+    // we can only reliably inspect its final (post-fallback) state here.
+    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
+    expect(secondWhere.OR[0]).toEqual({
+      OR: expect.arrayContaining([titleClause]),
+    });
+    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("does not run the fast path for free-text searches", async () => {
+    // why: "armchair" is not ID-shaped, so the full clause is used directly and
+    // there is never a second query even when zero rows match.
+    findManyMock.mockResolvedValueOnce([] as never);
+    countMock.mockResolvedValueOnce(0 as never);
+
+    await getAssets({ ...baseParams, search: "armchair" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(JSON.stringify(where.OR)).toContain("title");
+  });
+
+  it("preserves appended filter clauses when falling back", async () => {
+    // why: the fallback must keep filter OR clauses (here: team-member custody)
+    // appended after the search, or it would return assets outside the filter.
+    findManyMock
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock
+      .mockResolvedValueOnce(0 as never)
+      .mockResolvedValueOnce(1 as never);
+
+    await getAssets({
+      ...baseParams,
+      search: "103468",
+      teamMemberIds: ["tm-1"],
+    });
+
+    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
+    // Full search clause swapped in...
+    expect(secondWhere.OR[0]).toEqual({
+      OR: expect.arrayContaining([titleClause]),
+    });
+    // ...and the team-member filter clause survived the fallback.
+    expect(secondWhere.OR).toContainEqual({
+      custody: { teamMemberId: { in: ["tm-1"] } },
+    });
   });
 });

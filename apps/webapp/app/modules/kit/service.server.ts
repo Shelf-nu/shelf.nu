@@ -26,6 +26,7 @@ import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
+import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -170,7 +171,10 @@ export async function createKit({
         barcodes: {
           create: barcodesToAdd.map(({ type, value }) => ({
             type,
-            value: value.toUpperCase(),
+            // Normalize per type (ExternalQR keeps its case, others uppercase)
+            // so stored kit barcodes match what filters/lookups expect — same
+            // rule the asset create path uses via `normalizeBarcodeValue`.
+            value: normalizeBarcodeValue(type, value),
             organizationId,
           })),
         },
