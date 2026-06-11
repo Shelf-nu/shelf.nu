@@ -246,9 +246,11 @@ export async function resolveAssetIdsForLocationSelection({
     });
     resolvedLocationIds = locations.map((location) => location.id);
   } else {
-    // Explicit selection from request input — prove org ownership before use
+    // Explicit selection from request input — prove org ownership before use.
+    // Dedupe so duplicate IDs from the client don't bloat the `in` query (and
+    // can't push large selections toward Prisma's bind-parameter ceiling).
     await assertLocationsBelongToOrg({ locationIds, organizationId });
-    resolvedLocationIds = locationIds;
+    resolvedLocationIds = [...new Set(locationIds)];
   }
 
   if (resolvedLocationIds.length === 0) {

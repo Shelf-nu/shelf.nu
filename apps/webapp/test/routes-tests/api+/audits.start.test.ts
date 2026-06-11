@@ -16,6 +16,7 @@
  * @see {@link file://../../../app/routes/api+/audits.start.ts}
  */
 import { StartAuditSchema } from "~/routes/api+/audits.start";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // why: importing the route module transitively pulls in ~/database/db.server
 // (Prisma client init) and the audit service; the schema under test never
@@ -42,7 +43,7 @@ describe("StartAuditSchema", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
       contextType: "location",
-      locationIds: ["all-selected"],
+      locationIds: [ALL_SELECTED_KEY],
     });
     expect(result.success).toBe(true);
   });

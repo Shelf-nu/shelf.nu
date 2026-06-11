@@ -62,6 +62,23 @@ describe("resolveAssetIdsForLocationSelection", () => {
     });
   });
 
+  it("explicit selection: dedupes duplicate location IDs before the asset query", async () => {
+    // guard sees the unique set; resolver must not re-introduce the duplicate
+    locationFindMany.mockResolvedValueOnce([{ id: "l1" }, { id: "l2" }]);
+    assetFindMany.mockResolvedValueOnce([{ id: "a1" }]);
+
+    await resolveAssetIdsForLocationSelection({
+      organizationId: ORG,
+      locationIds: ["l1", "l1", "l2"],
+    });
+
+    // the `in` clause carries each location once, not the raw duplicated input
+    expect(assetFindMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG, locationId: { in: ["l1", "l2"] } },
+      select: { id: true },
+    });
+  });
+
   it("rejects a foreign/tampered location ID before reading any assets (IDOR guard)", async () => {
     // org-scoped guard returns only one of the two requested → count mismatch
     locationFindMany.mockResolvedValueOnce([{ id: "l1" }]);
