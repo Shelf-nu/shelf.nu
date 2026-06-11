@@ -19,6 +19,7 @@ import {
 } from "./middleware";
 import { mobileIpRateLimit } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
+import { securityHeaders } from "./security-headers";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 import { serverTiming } from "./timing.server";
@@ -73,6 +74,18 @@ export default createHonoServer<ServerEnv>({
   /** Disable default logger as we have our own */
   defaultLogger: false,
   getLoadContext,
+  /**
+   * Apply baseline security headers to EVERY response.
+   *
+   * Registered via `beforeAll` (not `configure`) on purpose: `beforeAll` runs
+   * before react-router-hono-server's `serveStatic` handlers, so the
+   * `await next()` inside `securityHeaders()` wraps — and therefore decorates —
+   * static-asset responses too. Those short-circuit at `serveStatic` and never
+   * reach `configure`, so a middleware registered there would miss them.
+   */
+  beforeAll: (app) => {
+    app.use("*", securityHeaders());
+  },
   configure: (server) => {
     // Measure total request duration (dev/staging only, skipped in production).
     // Registered first so it captures time spent in all downstream middleware.
@@ -164,6 +177,7 @@ export default createHonoServer<ServerEnv>({
           "/login",
           "/sso-login",
           "/oauth/callback",
+          "/oauth/callback/mobile", // Native-app SSO callback (web-delegated)
           "/logout",
           "/otp",
           "/resend-otp",
