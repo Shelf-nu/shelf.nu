@@ -289,21 +289,23 @@ export async function resolveAssetIdsForLocationSelection({
  * Resolves the asset IDs to audit from a multi-select of kits on the Kits index
  * (the bulk "Create audit" action).
  *
- * - "Select all" (when `kitIds` contains {@link ALL_SELECTED_KEY}) resolves the
- *   full set of kits matching the current list filter, mirroring what the user
- *   sees — see {@link getKitsWhereInput} (which honors the Kits list `s` /
- *   `status` / `teamMember` filters).
+ * - "Select all" (when `kitIds` contains {@link ALL_SELECTED_KEY}) matches assets
+ *   whose kit satisfies the current list filter, mirroring what the user sees —
+ *   see {@link getKitsWhereInput} (which honors the Kits list `s` / `status` /
+ *   `teamMember` filters). This uses a `kit` relation filter so it stays a
+ *   SINGLE query: no need to materialize the kit IDs into a giant `IN (...)`
+ *   list.
  * - An explicit selection is proven to belong to the caller's org first (IDOR
- *   guard) before use.
+ *   guard), then scoped by the (deduped) kit IDs.
  *
- * Asset→kit is 1:1, so the union across kits needs no dedup. The asset query is
+ * Asset→kit is 1:1, so the result needs no dedup. The asset query is always
  * org-scoped, so a tampered/foreign kit ID can never leak another org's assets.
  *
  * @param organizationId - The caller's (validated) organization ID
  * @param kitIds - Selected kit IDs (may contain ALL_SELECTED_KEY)
  * @param currentSearchParams - Serialized Kits-list search params (for select-all)
  * @returns Asset IDs across the selected kits
- * @throws {ShelfError} 400 if no kits resolve, or none of them contain assets
+ * @throws {ShelfError} 400 if none of the selected kits contain assets
  */
 export async function resolveAssetIdsForKitSelection({
   organizationId,
@@ -314,36 +316,31 @@ export async function resolveAssetIdsForKitSelection({
   kitIds: string[];
   currentSearchParams?: string | null;
 }): Promise<string[]> {
-  // Resolve which kits to include in the audit
-  let resolvedKitIds: string[];
+  // Build the org-scoped asset where-clause for the selected kits.
+  let assetWhere: Prisma.AssetWhereInput;
 
   if (kitIds.includes(ALL_SELECTED_KEY)) {
-    // "Select all" — resolve the full filtered set (org-scoped by construction)
-    const kits = await db.kit.findMany({
-      where: getKitsWhereInput({ organizationId, currentSearchParams }),
-      select: { id: true },
-    });
-    resolvedKitIds = kits.map((kit) => kit.id);
+    // "Select all" — match assets whose kit satisfies the SAME filter the user
+    // sees on the Kits list. A relation filter keeps this one query (no separate
+    // kit lookup, no giant IN list). Assets with no kit are naturally excluded,
+    // which matches the explicit-selection semantics.
+    assetWhere = {
+      organizationId,
+      kit: getKitsWhereInput({ organizationId, currentSearchParams }),
+    };
   } else {
-    // Explicit selection from request input — prove org ownership before use
+    // Explicit selection from request input — prove org ownership before use,
+    // then scope by the deduped IDs (schema guarantees at least one).
     await assertKitsBelongToOrg({ kitIds, organizationId });
-    resolvedKitIds = kitIds;
+    assetWhere = {
+      organizationId,
+      kitId: { in: [...new Set(kitIds)] },
+    };
   }
 
-  if (resolvedKitIds.length === 0) {
-    throw new ShelfError({
-      cause: null,
-      message: "No kits selected for the audit.",
-      status: 400,
-      label: "Audit",
-      shouldBeCaptured: false,
-    });
-  }
-
-  // Union of assets across the selected kits (asset→kit is 1:1, so findMany
-  // already returns each asset once — no dedup needed).
+  // Asset→kit is 1:1, so findMany already returns each asset once.
   const assets = await db.asset.findMany({
-    where: { organizationId, kitId: { in: resolvedKitIds } },
+    where: assetWhere,
     select: { id: true },
   });
 

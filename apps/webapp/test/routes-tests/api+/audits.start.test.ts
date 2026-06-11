@@ -61,7 +61,7 @@ describe("StartAuditSchema", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
       contextType: "kit",
-      kitIds: ["all-selected"],
+      kitIds: [ALL_SELECTED_KEY],
     });
     expect(result.success).toBe(true);
   });

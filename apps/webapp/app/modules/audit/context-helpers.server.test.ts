@@ -183,9 +183,24 @@ describe("resolveAssetIdsForKitSelection", () => {
     expect(assetFindMany).not.toHaveBeenCalled();
   });
 
-  it("select all: resolves the filtered kit set honoring the status filter, with no per-ID guard", async () => {
-    // resolver resolves all matching kits, then their assets
+  it("explicit selection: dedupes duplicate kit IDs before the asset query", async () => {
+    // guard sees the unique set; resolver must not re-introduce the duplicate
     kitFindMany.mockResolvedValueOnce([{ id: "k1" }, { id: "k2" }]);
+    assetFindMany.mockResolvedValueOnce([{ id: "a1" }]);
+
+    await resolveAssetIdsForKitSelection({
+      organizationId: ORG,
+      kitIds: ["k1", "k1", "k2"],
+    });
+
+    // the `in` clause carries each kit once, not the raw duplicated input
+    expect(assetFindMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG, kitId: { in: ["k1", "k2"] } },
+      select: { id: true },
+    });
+  });
+
+  it("select all: matches assets via a kit relation filter honoring the status filter (single query, no per-ID guard)", async () => {
     assetFindMany.mockResolvedValueOnce([{ id: "a1" }]);
 
     const result = await resolveAssetIdsForKitSelection({
@@ -195,11 +210,17 @@ describe("resolveAssetIdsForKitSelection", () => {
     });
 
     expect(result).toEqual(["a1"]);
-    // kit set honors the active status filter (mirrors the list filter)
-    expect(kitFindMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, status: "AVAILABLE" },
+    // one asset query; its `kit` relation mirrors the active list filter
+    expect(assetFindMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: ORG,
+        kit: { organizationId: ORG, status: "AVAILABLE" },
+      },
       select: { id: true },
     });
+    // select-all is org-scoped by construction — no separate kit lookup and no
+    // per-ID guard
+    expect(kitFindMany).not.toHaveBeenCalled();
   });
 
   it("throws a clear 400 when none of the selected kits contain assets", async () => {
