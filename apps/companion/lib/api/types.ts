@@ -113,6 +113,8 @@ export type QrResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -132,6 +134,8 @@ export type BarcodeResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -193,12 +197,15 @@ export type UpdateImageResponse = {
   };
 };
 
+/**
+ * Response of the three mobile bulk endpoints (bulk-assign-custody,
+ * bulk-release-custody, bulk-update-location). The underlying services are
+ * all-or-nothing — the routes return only `{ success: true }`, never partial
+ * counts. Client-side blockers (lib/batch-blockers.ts) guarantee only clean
+ * batches are submitted.
+ */
 export type BulkActionResponse = {
   success: boolean;
-  assigned?: number;
-  released?: number;
-  updated?: number;
-  skipped?: number;
 };
 
 export type BookingStatus =

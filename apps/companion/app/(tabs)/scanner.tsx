@@ -29,6 +29,12 @@ import { extractQrId } from "@/lib/qr-utils";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
+import {
+  computeBlockers,
+  blockedQrIds,
+  type BatchScanAction,
+  type BlockerGroup,
+} from "@/lib/batch-blockers";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -38,6 +44,7 @@ import { useScanProcessing } from "@/hooks/use-scan-processing";
 import { ScanFrame } from "@/components/scanner/scan-frame";
 import { ScanResultCard } from "@/components/scanner/scan-result-card";
 import { ActionPills, ModeDots } from "@/components/scanner/action-pills";
+import { ActionPillsCoachmark } from "@/components/scanner/action-pills-coachmark";
 import { BatchDrawer } from "@/components/scanner/batch-drawer";
 
 // ── Action Types ────────────────────────────────────────
@@ -96,6 +103,8 @@ type ScannedItem = {
   status: string;
   mainImage: string | null;
   category: string | null;
+  /** Set when the asset belongs to a kit — drives the part-of-kit blocker. */
+  kitId: string | null;
 };
 
 // ── Scanner Content ─────────────────────────────────────
@@ -128,12 +137,38 @@ function ScannerContent() {
     [currentOrg?.roles]
   );
 
+  // Self-service users may only assign custody to themselves (mirrors the
+  // web scanner, which pre-selects self and disables the custodian picker).
+  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+
   // Action state
   const [action, setAction] = useState<ScannerAction>("view");
 
   // Batch state (for assign/release/location modes)
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Blockers: items in the list that make the batch ineligible for the
+  // current action. The bulk services are all-or-nothing, so submit stays
+  // disabled until these are resolved (web-scanner parity).
+  const blockers = useMemo<BlockerGroup[]>(
+    () =>
+      isBatchAction(action)
+        ? computeBlockers(action as BatchScanAction, scannedItems)
+        : [],
+    [action, scannedItems]
+  );
+
+  const resolveBlocker = useCallback((group: BlockerGroup) => {
+    setScannedItems((prev) =>
+      prev.filter((i) => !group.qrIds.includes(i.qrId))
+    );
+  }, []);
+
+  const resolveAllBlockers = useCallback(() => {
+    const blocked = blockedQrIds(blockers);
+    setScannedItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
+  }, [blockers]);
 
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -277,6 +312,9 @@ function ScannerContent() {
           title: string;
           status: string;
           mainImage: string | null;
+          // The kit the ASSET belongs to (distinct from the `kitId` local
+          // below, which is the kit a kit-linked QR points at directly).
+          kitId: string | null;
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
@@ -516,6 +554,7 @@ function ScannerContent() {
             status: asset.status,
             mainImage: asset.mainImage,
             category: asset.category?.name || null,
+            kitId: asset.kitId ?? null,
           };
 
           if (asset.status !== "CHECKED_OUT") {
@@ -598,6 +637,7 @@ function ScannerContent() {
           status: asset.status,
           mainImage: asset.mainImage,
           category: asset.category?.name || null,
+          kitId: asset.kitId ?? null,
         };
 
         setScannedItems((prev) => [newItem, ...prev]);
@@ -655,23 +695,23 @@ function ScannerContent() {
   };
 
   const handleBatchSubmit = () => {
-    if (scannedItems.length === 0) return;
+    // The drawer disables submit while blockers exist; this guard is
+    // belt-and-braces so a clean list is an invariant of every perform* call.
+    if (scannedItems.length === 0 || blockers.length > 0) return;
 
     if (action === "assign_custody") {
-      setShowCustodyPicker(true);
-    } else if (action === "release_custody") {
-      const releasable = scannedItems.filter((i) => i.status === "IN_CUSTODY");
-      if (releasable.length === 0) {
-        Alert.alert(
-          "No Assets to Release",
-          "None of the scanned assets are currently in custody."
-        );
-        return;
+      if (isSelfService) {
+        // Self-service: no picker — resolve own team-member record and assign.
+        void assignCustodyToSelf();
+      } else {
+        setShowCustodyPicker(true);
       }
+    } else if (action === "release_custody") {
+      // Blockers guarantee every item in the list is IN_CUSTODY here.
       const releaseLabel =
-        releasable.length === 1
-          ? `"${releasable[0].title}"`
-          : `${releasable.length} assets`;
+        scannedItems.length === 1
+          ? `"${scannedItems[0].title}"`
+          : `${scannedItems.length} assets`;
       Alert.alert("Release Custody", `Release custody of ${releaseLabel}?`, [
         { text: "Cancel", style: "cancel" },
         {
@@ -683,6 +723,28 @@ function ScannerContent() {
     } else if (action === "update_location") {
       setShowLocationPicker(true);
     }
+  };
+
+  /**
+   * Self-service custody assignment: the mobile team-members endpoint returns
+   * only the caller's own record for SELF_SERVICE roles, so resolve it and go
+   * straight to the confirm dialog — no picker.
+   */
+  const assignCustodyToSelf = async () => {
+    if (!currentOrg) return;
+    setIsSubmitting(true);
+    const { data, error } = await api.teamMembers(currentOrg.id);
+    setIsSubmitting(false);
+
+    const selfMember = data?.teamMembers?.[0];
+    if (error || !selfMember) {
+      Alert.alert(
+        "Error",
+        error || "Could not find your team member record for this workspace."
+      );
+      return;
+    }
+    performBulkAssign(selfMember);
   };
 
   const performBulkAssign = async (member: TeamMember) => {
@@ -706,7 +768,7 @@ function ScannerContent() {
         onPress: async () => {
           setIsSubmitting(true);
           const assetIds = scannedItems.map((i) => i.assetId);
-          const { data: result, error } = await api.bulkAssignCustody(
+          const { error } = await api.bulkAssignCustody(
             currentOrg.id,
             assetIds,
             member.id
@@ -718,15 +780,11 @@ function ScannerContent() {
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            const assignedCount = result?.assigned ?? scannedItems.length;
             const assetLabel =
               scannedItems.length === 1
                 ? `"${scannedItems[0].title}"`
-                : `${assignedCount} asset${assignedCount > 1 ? "s" : ""}`;
-            const msg = result?.skipped
-              ? `Assigned ${assetLabel} to ${displayName}. ${result.skipped} skipped (already in custody).`
-              : `Assigned ${assetLabel} to ${displayName}.`;
-            Alert.alert("Done", msg);
+                : `${scannedItems.length} assets`;
+            Alert.alert("Done", `Assigned ${assetLabel} to ${displayName}.`);
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -739,10 +797,7 @@ function ScannerContent() {
     if (!currentOrg) return;
     setIsSubmitting(true);
     const assetIds = scannedItems.map((i) => i.assetId);
-    const { data: result, error } = await api.bulkReleaseCustody(
-      currentOrg.id,
-      assetIds
-    );
+    const { error } = await api.bulkReleaseCustody(currentOrg.id, assetIds);
     setIsSubmitting(false);
 
     if (error) {
@@ -750,15 +805,11 @@ function ScannerContent() {
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      const releasedCount = result?.released ?? scannedItems.length;
       const assetLabel =
         scannedItems.length === 1
           ? `"${scannedItems[0].title}"`
-          : `${releasedCount} asset${releasedCount > 1 ? "s" : ""}`;
-      const msg = result?.skipped
-        ? `Released ${assetLabel}. ${result.skipped} skipped (not in custody).`
-        : `Released custody of ${assetLabel}.`;
-      Alert.alert("Done", msg);
+          : `${scannedItems.length} assets`;
+      Alert.alert("Done", `Released custody of ${assetLabel}.`);
       setScannedItems([]);
       lastScanRef.current = "";
     }
@@ -779,7 +830,7 @@ function ScannerContent() {
         onPress: async () => {
           setIsSubmitting(true);
           const assetIds = scannedItems.map((i) => i.assetId);
-          const { data: result, error } = await api.bulkUpdateLocation(
+          const { error } = await api.bulkUpdateLocation(
             currentOrg.id,
             assetIds,
             location.id
@@ -791,15 +842,11 @@ function ScannerContent() {
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            const updatedCount = result?.updated ?? scannedItems.length;
             const assetLabel =
               scannedItems.length === 1
                 ? `"${scannedItems[0].title}"`
-                : `${updatedCount} asset${updatedCount > 1 ? "s" : ""}`;
-            const msg = result?.skipped
-              ? `Moved ${assetLabel} to ${location.name}. ${result.skipped} already at this location.`
-              : `Moved ${assetLabel} to ${location.name}.`;
-            Alert.alert("Done", msg);
+                : `${scannedItems.length} assets`;
+            Alert.alert("Done", `Moved ${assetLabel} to ${location.name}.`);
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -946,7 +993,8 @@ function ScannerContent() {
   // Submit button label
   const submitLabelMap: Record<ScannerAction, string> = {
     view: "",
-    assign_custody: "Choose Custodian",
+    // Self-service users can only take custody themselves — no picker step.
+    assign_custody: isSelfService ? "Take Custody" : "Choose Custodian",
     release_custody: "Release All",
     update_location: "Choose Location",
   };
@@ -1018,6 +1066,10 @@ function ScannerContent() {
                 actions={availableActions}
                 currentAction={action}
                 onActionChange={handleActionChange}
+              />
+              <ActionPillsCoachmark
+                enabled={availableActions.length > 1}
+                currentAction={action}
               />
             </View>
           )}
@@ -1191,6 +1243,9 @@ function ScannerContent() {
             onClear={clearAll}
             onSubmit={handleBatchSubmit}
             showStatus
+            blockers={blockers}
+            onResolveBlocker={resolveBlocker}
+            onResolveAllBlockers={resolveAllBlockers}
           />
         )}
 

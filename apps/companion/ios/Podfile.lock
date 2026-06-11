@@ -1,5 +1,5 @@
 PODS:
-  - AsyncStorage (3.0.1):
+  - AsyncStorage (3.1.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -26,9 +26,6 @@ PODS:
     - ReactCommon/turbomodule/core
   - EXConstants (18.0.13):
     - ExpoModulesCore
-  - EXImageLoader (6.0.0):
-    - ExpoModulesCore
-    - React-Core
   - EXJSONUtils (0.15.0)
   - EXManifests (1.0.10):
     - ExpoModulesCore
@@ -2010,6 +2007,28 @@ PODS:
     - React-utils (= 0.81.5)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.81.5)
+  - RNDateTimePicker (8.4.4):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RNScreens (4.16.0):
     - hermes-engine
     - RCTRequired
@@ -2056,6 +2075,30 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
+    - Yoga
+  - RNSentry (7.2.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Sentry/HybridSDK (= 8.56.1)
     - Yoga
   - RNSVG (15.15.3):
     - hermes-engine
@@ -2113,6 +2156,7 @@ PODS:
   - SDWebImageWebPCoder (0.14.6):
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
+  - Sentry/HybridSDK (8.56.1)
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
@@ -2121,13 +2165,12 @@ PODS:
     - ZXingObjC/Core
 
 DEPENDENCIES:
-  - "AsyncStorage (from `../../../node_modules/.pnpm/@react-native-async-storage+async-storage@3.0.1_react-native@0.81.5_@babel+core@7.29.0_@types_um4yrseenerul5vrvb6dkhyn6e/node_modules/@react-native-async-storage/async-storage`)"
+  - "AsyncStorage (from `../../../node_modules/.pnpm/@react-native-async-storage+async-storage@3.1.0_react-native@0.81.5_@babel+core@7.29.0_@types_jjbuzfvgpul7pom62zgtpiyufu/node_modules/@react-native-async-storage/async-storage`)"
   - "EXAV (from `../../../node_modules/.pnpm/expo-av@16.0.8_expo@54.0.33_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19.1_ualvikd24ijyikr73urxr3kubq/node_modules/expo-av/ios`)"
   - "EXConstants (from `../../../node_modules/.pnpm/expo-constants@18.0.13_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0_/node_modules/expo-constants/ios`)"
-  - "EXImageLoader (from `../../../node_modules/.pnpm/expo-image-loader@6.0.0_expo@54.0.33/node_modules/expo-image-loader/ios`)"
   - "EXJSONUtils (from `../../../node_modules/.pnpm/expo-json-utils@0.15.0/node_modules/expo-json-utils/ios`)"
   - "EXManifests (from `../../../node_modules/.pnpm/expo-manifests@1.0.10_expo@54.0.33/node_modules/expo-manifests/ios`)"
-  - "Expo (from `../../../node_modules/.pnpm/expo@54.0.33_@babel+core@7.29.0_@expo+metro-runtime@6.1.2_expo-router@6.0.23_graphql@16.12.0__xrzn3w2ej4oidgu75byva57nqu/node_modules/expo`)"
+  - "Expo (from `../../../node_modules/.pnpm/expo@54.0.33_@babel+core@7.29.0_@expo+metro-runtime@6.1.2_expo-router@6.0.23_graphql@16.13.2__elplfpst5afhzftds66n2sewva/node_modules/expo`)"
   - "expo-dev-client (from `../../../node_modules/.pnpm/expo-dev-client@6.0.20_expo@54.0.33/node_modules/expo-dev-client/ios`)"
   - "expo-dev-launcher (from `../../../node_modules/.pnpm/expo-dev-launcher@6.0.20_expo@54.0.33/node_modules/expo-dev-launcher`)"
   - "expo-dev-menu (from `../../../node_modules/.pnpm/expo-dev-menu@7.0.18_expo@54.0.33/node_modules/expo-dev-menu`)"
@@ -2217,7 +2260,9 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - "ReactCommon/turbomodule/core (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/ReactCommon`)"
   - "ReactNativeDependencies (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)"
+  - "RNDateTimePicker (from `../../../node_modules/.pnpm/@react-native-community+datetimepicker@8.4.4_expo@54.0.33_react-native@0.81.5_@babel+core@7.2_vxgyj5mnkompx5nek3jtccnghm/node_modules/@react-native-community/datetimepicker`)"
   - "RNScreens (from `../../../node_modules/.pnpm/react-native-screens@4.16.0_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/react-native-screens`)"
+  - "RNSentry (from `../../../node_modules/.pnpm/@sentry+react-native@7.2.0_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@1_o4zpmth4kuxfe5tkc3zx6yncpi/node_modules/@sentry/react-native`)"
   - "RNSVG (from `../../../node_modules/.pnpm/react-native-svg@15.15.3_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/react-native-svg`)"
   - "Yoga (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/ReactCommon/yoga`)"
 
@@ -2230,23 +2275,22 @@ SPEC REPOS:
     - SDWebImageAVIFCoder
     - SDWebImageSVGCoder
     - SDWebImageWebPCoder
+    - Sentry
     - ZXingObjC
 
 EXTERNAL SOURCES:
   AsyncStorage:
-    :path: "../../../node_modules/.pnpm/@react-native-async-storage+async-storage@3.0.1_react-native@0.81.5_@babel+core@7.29.0_@types_um4yrseenerul5vrvb6dkhyn6e/node_modules/@react-native-async-storage/async-storage"
+    :path: "../../../node_modules/.pnpm/@react-native-async-storage+async-storage@3.1.0_react-native@0.81.5_@babel+core@7.29.0_@types_jjbuzfvgpul7pom62zgtpiyufu/node_modules/@react-native-async-storage/async-storage"
   EXAV:
     :path: "../../../node_modules/.pnpm/expo-av@16.0.8_expo@54.0.33_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19.1_ualvikd24ijyikr73urxr3kubq/node_modules/expo-av/ios"
   EXConstants:
     :path: "../../../node_modules/.pnpm/expo-constants@18.0.13_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0_/node_modules/expo-constants/ios"
-  EXImageLoader:
-    :path: "../../../node_modules/.pnpm/expo-image-loader@6.0.0_expo@54.0.33/node_modules/expo-image-loader/ios"
   EXJSONUtils:
     :path: "../../../node_modules/.pnpm/expo-json-utils@0.15.0/node_modules/expo-json-utils/ios"
   EXManifests:
     :path: "../../../node_modules/.pnpm/expo-manifests@1.0.10_expo@54.0.33/node_modules/expo-manifests/ios"
   Expo:
-    :path: "../../../node_modules/.pnpm/expo@54.0.33_@babel+core@7.29.0_@expo+metro-runtime@6.1.2_expo-router@6.0.23_graphql@16.12.0__xrzn3w2ej4oidgu75byva57nqu/node_modules/expo"
+    :path: "../../../node_modules/.pnpm/expo@54.0.33_@babel+core@7.29.0_@expo+metro-runtime@6.1.2_expo-router@6.0.23_graphql@16.13.2__elplfpst5afhzftds66n2sewva/node_modules/expo"
   expo-dev-client:
     :path: "../../../node_modules/.pnpm/expo-dev-client@6.0.20_expo@54.0.33/node_modules/expo-dev-client/ios"
   expo-dev-launcher:
@@ -2424,18 +2468,21 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/ReactCommon"
   ReactNativeDependencies:
     :podspec: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
+  RNDateTimePicker:
+    :path: "../../../node_modules/.pnpm/@react-native-community+datetimepicker@8.4.4_expo@54.0.33_react-native@0.81.5_@babel+core@7.2_vxgyj5mnkompx5nek3jtccnghm/node_modules/@react-native-community/datetimepicker"
   RNScreens:
     :path: "../../../node_modules/.pnpm/react-native-screens@4.16.0_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/react-native-screens"
+  RNSentry:
+    :path: "../../../node_modules/.pnpm/@sentry+react-native@7.2.0_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@1_o4zpmth4kuxfe5tkc3zx6yncpi/node_modules/@sentry/react-native"
   RNSVG:
     :path: "../../../node_modules/.pnpm/react-native-svg@15.15.3_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0__react@19.1.0/node_modules/react-native-svg"
   Yoga:
     :path: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@types+react@19.2.14_react@19.1.0/node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
-  AsyncStorage: b7e9d8feded2a33e90a600565c35fcf9fcc37543
+  AsyncStorage: 9c8cab0c034421e0e2905d21dbfaea44701eacab
   EXAV: b60fcf142fae6684d295bc28cd7cfcb3335570ea
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
-  EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05
   EXJSONUtils: 1d3e4590438c3ee593684186007028a14b3686cd
   EXManifests: a8d97683e5c7a3b026ffbd58559c64dc655b747b
   Expo: aadbcc8c6c14ff3105a9154f1683cb1424ff0d2a
@@ -2530,12 +2577,15 @@ SPEC CHECKSUMS:
   ReactCodegen: 5c1ca8a927b55065253d3da28fc69edb48a08948
   ReactCommon: 08810150b1206cc44aecf5f6ae19af32f29151a8
   ReactNativeDependencies: 71ce9c28beb282aa720ea7b46980fff9669f428a
+  RNDateTimePicker: be0e44bcb9ed0607c7c5f47dbedd88cf091f6791
   RNScreens: d8d6f1792f6e7ac12b0190d33d8d390efc0c1845
+  RNSentry: 41979b419908128847ef662cc130a400b7576fa9
   RNSVG: 7612f5bc575eab5da3364d44abe9f0d5db2cde03
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   SDWebImageAVIFCoder: afe194a084e851f70228e4be35ef651df0fc5c57
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
+  Sentry: b3ec44d01708fce73f99b544beb57e890eca4406
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 

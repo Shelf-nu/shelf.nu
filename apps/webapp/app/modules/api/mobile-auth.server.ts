@@ -238,6 +238,9 @@ export const MOBILE_ASSET_SELECT = {
   title: true,
   status: true,
   mainImage: true,
+  // why: kitId powers the scanner's "part of a kit" batch blocker — assets
+  // inside a kit must be (un)assigned via the kit, mirroring the web drawers.
+  kitId: true,
   category: { select: { name: true } },
   location: { select: { name: true } },
 } as const;

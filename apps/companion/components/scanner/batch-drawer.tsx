@@ -8,9 +8,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import type { BlockerGroup } from "@/lib/batch-blockers";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
+import { BatchBlockers } from "./batch-blockers";
 
 type ScannedItem = {
   qrId: string;
@@ -19,6 +21,8 @@ type ScannedItem = {
   status: string;
   mainImage: string | null;
   category: string | null;
+  /** Set when the asset belongs to a kit — drives the part-of-kit blocker. */
+  kitId: string | null;
 };
 
 type BatchDrawerProps = {
@@ -34,6 +38,16 @@ type BatchDrawerProps = {
   onSubmit: () => void;
   /** Whether to show status in the item meta line */
   showStatus?: boolean;
+  /**
+   * Blocker groups for the current action (see lib/batch-blockers.ts).
+   * While non-empty the submit button is disabled and the groups render
+   * above it with one-tap "Remove" fixes.
+   */
+  blockers?: BlockerGroup[];
+  /** Removes one blocker group's items from the scan list. */
+  onResolveBlocker?: (group: BlockerGroup) => void;
+  /** Removes every blocked item from the scan list. */
+  onResolveAllBlockers?: () => void;
 };
 
 function formatStatus(status: string) {
@@ -57,12 +71,18 @@ export function BatchDrawer({
   onClear,
   onSubmit,
   showStatus = true,
+  blockers = [],
+  onResolveBlocker,
+  onResolveAllBlockers,
 }: BatchDrawerProps) {
   const styles = useStyles();
   const { colors } = useTheme();
+  const hasBlockers = blockers.length > 0;
 
   return (
-    <View style={styles.batchDrawer}>
+    // why: blocker rows add up to ~3 extra rows; without the taller cap the
+    // fixed maxHeight clips the submit button out of view
+    <View style={[styles.batchDrawer, hasBlockers && { maxHeight: 400 }]}>
       {/* Drawer header */}
       <View style={styles.drawerHeader}>
         <Text style={styles.drawerTitle}>{title}</Text>
@@ -122,12 +142,25 @@ export function BatchDrawer({
         )}
       />
 
+      {/* Blockers — submit stays disabled until the list is clean */}
+      {hasBlockers && onResolveBlocker && onResolveAllBlockers && (
+        <BatchBlockers
+          blockers={blockers}
+          onResolve={onResolveBlocker}
+          onResolveAll={onResolveAllBlockers}
+        />
+      )}
+
       {/* Submit button */}
       <TouchableOpacity
-        style={[styles.drawerSubmitBtn, isSubmitting && { opacity: 0.6 }]}
+        style={[
+          styles.drawerSubmitBtn,
+          (isSubmitting || hasBlockers) && { opacity: 0.6 },
+        ]}
         onPress={onSubmit}
-        disabled={isSubmitting}
+        disabled={isSubmitting || hasBlockers}
         activeOpacity={0.7}
+        accessibilityState={{ disabled: isSubmitting || hasBlockers }}
       >
         {isSubmitting ? (
           <ActivityIndicator size="small" color="#fff" />
