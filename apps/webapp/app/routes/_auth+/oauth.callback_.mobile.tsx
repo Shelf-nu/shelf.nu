@@ -11,6 +11,7 @@ import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
+import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod, parseData, payload } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
@@ -70,6 +71,12 @@ const MobileCallbackSchema = z.object({
 
 export async function action({ request }: ActionFunctionArgs) {
   const { disableSSO } = config;
+  // Clears the one-shot PKCE challenge cookie. Applied on every exit path —
+  // success (once the challenge is bound to the code) and failure (so an
+  // abandoned flow doesn't leave the challenge readable for its full TTL).
+  const clearChallengeCookie = await mobilePkceChallengeCookie.serialize("", {
+    maxAge: 0,
+  });
   try {
     if (disableSSO) {
       throw new ShelfError({
@@ -124,13 +131,28 @@ export async function action({ request }: ActionFunctionArgs) {
           contactInfo,
         });
 
+        // PKCE: if a PKCE-capable app started this login, the S256 challenge is
+        // waiting in the cookie `/sso-login` set at the start of the flow. Bind
+        // it to the auth code so the exchange must present a matching verifier.
+        // Absent → legacy (pre-PKCE) flow, redeemed without a verifier.
+        const codeChallenge = await mobilePkceChallengeCookie.parse(
+          request.headers.get("Cookie")
+        );
+
         // Hand the device a single-use code via the deeplink — never tokens.
-        const code = await createMobileAuthCode(authSession.userId);
+        const code = await createMobileAuthCode(
+          authSession.userId,
+          typeof codeChallenge === "string" ? codeChallenge : undefined
+        );
 
         return data(
           payload({
             deeplink: `${MOBILE_CALLBACK_URL}?code=${encodeURIComponent(code)}`,
-          })
+          }),
+          {
+            // Clear the one-shot challenge cookie now that it's bound to the code.
+            headers: { "Set-Cookie": clearChallengeCookie },
+          }
         );
       }
     }
@@ -140,7 +162,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const reason = makeShelfError(cause);
     return data(
       { error: { message: reason.message } },
-      { status: reason.status }
+      {
+        status: reason.status,
+        headers: { "Set-Cookie": clearChallengeCookie },
+      }
     );
   }
 }
