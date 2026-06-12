@@ -235,30 +235,39 @@ export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,
   defaultRedirect = "/"
 ) {
-  /** Absolute domains we explicitly allow to redirect to (e.g. URL shortener). */
-  const safeList = [SERVER_URL, `https://${URL_SHORTENER}`];
-
   if (!to || typeof to !== "string") {
     return defaultRedirect;
   }
 
-  // Allowed absolute domains pass through unchanged.
-  if (safeList.some((safeUrl) => to.startsWith(safeUrl))) {
-    return to;
-  }
-
-  // Otherwise the target must be a local absolute path. Reject non-paths and
-  // internal Remix routes (manifest, etc.) created by lazy route discovery.
-  if (!to.startsWith("/") || to.startsWith("/__")) {
+  // Block internal Remix routes (manifest, etc.) created by lazy route discovery.
+  if (to.startsWith("/__")) {
     return defaultRedirect;
   }
 
-  // Final defense: resolve against our own origin and confirm it stays
-  // same-origin. A prefix check (e.g. `startsWith("//")`) misses "//host",
+  // Absolute URL? Validate the allow-list by ORIGIN, never by prefix.
+  // `SERVER_URL` has its trailing slash stripped, so a prefix check matches any
+  // host that merely begins with it — e.g. "https://app.shelf.nu.evil.com" or
+  // the "https://app.shelf.nu@evil.com" userinfo trick — which resolve
+  // off-origin. `new URL(to)` throws for relative inputs, which fall through.
+  try {
+    const absolute = new URL(to);
+    const allowed = new Set([new URL(SERVER_URL).origin]);
+    if (URL_SHORTENER) {
+      allowed.add(new URL(`https://${URL_SHORTENER}`).origin);
+    }
+    return allowed.has(absolute.origin) ? to : defaultRedirect;
+  } catch {
+    // Not an absolute URL — fall through to local-path handling.
+  }
+
+  if (!to.startsWith("/")) {
+    return defaultRedirect;
+  }
+
+  // Final defense: resolve the local path against our own origin and confirm it
+  // stays same-origin. A prefix check (e.g. `startsWith("//")`) misses "//host",
   // "/\host" and "/\\host": browsers treat "\" like "/" in http(s) URLs, and a
-  // "\" reaches here decoded from "%5C" via route params. All of these resolve
-  // off-origin, so origin comparison closes the open redirect that prefix
-  // matching leaves open.
+  // "\" reaches here decoded from "%5C" via route params — all resolve off-origin.
   try {
     if (new URL(to, SERVER_URL).origin !== new URL(SERVER_URL).origin) {
       return defaultRedirect;

@@ -172,6 +172,10 @@ describe(safeRedirect.name, () => {
     expect(safeRedirect(`/${decodeURIComponent("%5C")}evil.com`)).toBe("/");
     // Internal Remix routes remain blocked.
     expect(safeRedirect("/__manifest")).toBe("/");
+    // Absolute allow-list is matched by origin, not prefix: a host that merely
+    // begins with SERVER_URL, or hides it in userinfo, must not pass.
+    expect(safeRedirect("https://app.shelf.nu.evil.com/phish")).toBe("/");
+    expect(safeRedirect("https://app.shelf.nu@evil.com/phish")).toBe("/");
   });
 });
 
