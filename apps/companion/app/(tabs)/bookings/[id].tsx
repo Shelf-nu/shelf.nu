@@ -13,6 +13,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
+import { consumeBookingDirty } from "@/lib/booking-refresh";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingDetail, type BookingAsset } from "@/lib/api";
@@ -42,6 +43,10 @@ export default function BookingDetailScreen() {
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
+
+  // Mirrors the web's canUserManageBookingAssets: closed statuses reject;
+  // self-service users may only build their own DRAFT bookings.
+  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -74,14 +79,17 @@ export default function BookingDetailScreen() {
     lastFetchedAt.current = Date.now();
   }, [id, currentOrg]);
 
-  // Stale-while-revalidate: refetch on focus if data is > 60s old
+  // Stale-while-revalidate: refetch on focus if data is > 60s old — UNLESS
+  // a flow that mutated this booking (e.g. scan-to-add) marked it dirty,
+  // which must bypass the freshness gate.
   useFocusEffect(
     useCallback(() => {
+      const mustRefresh = consumeBookingDirty(id);
       const age = Date.now() - lastFetchedAt.current;
-      if (age < 60_000 && booking) return; // fresh enough
+      if (!mustRefresh && age < 60_000 && booking) return; // fresh enough
       setIsLoading(!booking); // show skeleton only on first load
       fetchBooking().finally(() => setIsLoading(false));
-    }, [fetchBooking, booking])
+    }, [fetchBooking, booking, id])
   );
 
   const onRefresh = async () => {
@@ -455,6 +463,34 @@ export default function BookingDetailScreen() {
             </View>
 
             {/* Action buttons */}
+            {booking &&
+              !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+              (!isSelfService || booking.status === "DRAFT") && (
+                <TouchableOpacity
+                  style={styles.actionButtonOutline}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/scanner?bookingId=${
+                        booking.id
+                      }&bookingName=${encodeURIComponent(
+                        booking.name
+                      )}&bookingAction=add`
+                    )
+                  }
+                  accessibilityLabel="Scan assets or kits to add to this booking"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="scan"
+                    size={18}
+                    color={colors.buttonSecondaryText}
+                  />
+                  <Text style={styles.actionButtonOutlineText}>
+                    Scan to Add Assets
+                  </Text>
+                </TouchableOpacity>
+              )}
+
             {canCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}

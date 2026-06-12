@@ -113,7 +113,7 @@ export type ScannedKit = {
   status: string;
   image: string | null;
   _count: { assets: number };
-  assets: { id: string; status: string }[];
+  assets: { id: string; status: string; availableToBook: boolean }[];
 };
 
 export type QrResponse = {
@@ -129,6 +129,8 @@ export type QrResponse = {
       mainImage: string | null;
       /** Set when the asset belongs to a kit (drives scanner batch blockers) */
       kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -152,6 +154,8 @@ export type BarcodeResponse = {
       mainImage: string | null;
       /** Set when the asset belongs to a kit (drives scanner batch blockers) */
       kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;

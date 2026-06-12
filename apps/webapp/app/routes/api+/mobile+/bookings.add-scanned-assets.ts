@@ -1,0 +1,127 @@
+import { OrganizationRoles } from "@prisma/client";
+import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
+import { db } from "~/database/db.server";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+  getMobileUserContext,
+} from "~/modules/api/mobile-auth.server";
+import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
+import { canUserManageBookingAssets } from "~/utils/bookings";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+
+/**
+ * POST /api/mobile/bookings/add-scanned-assets
+ *
+ * Adds scanned assets and/or kits to a booking — the mobile twin of the web
+ * scanner's add-to-booking flow. Wraps the same `addScannedAssetsToBooking`
+ * service (kit expansion, status sync, notes, events stay identical).
+ *
+ * Status/role gating mirrors the web (`canUserManageBookingAssets`):
+ * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
+ * only modify their own DRAFT bookings.
+ *
+ * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ *
+ * @see {@link file://../../_layout+/bookings.$bookingId.overview.scan-assets.tsx} web twin
+ */
+
+const BodySchema = z
+  .object({
+    bookingId: z.string().min(1),
+    assetIds: z.array(z.string().min(1)).optional().default([]),
+    kitIds: z.array(z.string().min(1)).optional().default([]),
+  })
+  .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
+    message: "Scan at least one asset or kit to add.",
+  });
+
+export async function action({ request }: ActionFunctionArgs) {
+  let userId: string | undefined;
+
+  try {
+    const { user } = await requireMobileAuth(request);
+    userId = user.id;
+    await enforceUserRateLimit(user.id, "bulk");
+
+    const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    const { bookingId, assetIds, kitIds } = BodySchema.parse(
+      await request.json()
+    );
+
+    // Org-scoped booking lookup — a foreign-org booking id 404s here.
+    const booking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { id: true, status: true, from: true, to: true },
+    });
+
+    if (!booking) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    if (!canUserManageBookingAssets(booking, isSelfService)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Assets cannot be added to this booking in its current status.",
+        additionalData: { userId, bookingId, status: booking.status },
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Expand kits to their contained assets — the service only connects
+    // `assetIds` to the booking (`kitIds` drives status flags and notes).
+    // The web drawer does this expansion client-side; doing it here keeps
+    // the mobile client thin and the expansion org-scoped.
+    let expandedAssetIds = assetIds;
+    if (kitIds.length > 0) {
+      const kitAssets = await db.asset.findMany({
+        where: { kitId: { in: kitIds }, organizationId },
+        select: { id: true },
+      });
+      expandedAssetIds = [
+        ...new Set([...assetIds, ...kitAssets.map((a) => a.id)]),
+      ];
+    }
+
+    await addScannedAssetsToBooking({
+      assetIds: expandedAssetIds,
+      kitIds,
+      bookingId,
+      organizationId,
+      userId: user.id,
+    });
+
+    return data({ success: true });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return data(
+      { error: { message: reason.message } },
+      { status: reason.status }
+    );
+  }
+}

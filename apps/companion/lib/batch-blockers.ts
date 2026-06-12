@@ -16,6 +16,10 @@
  * - release custody — assets: not in custody / part of a kit; kits: not in
  *   custody
  * - update location — no eligibility blockers
+ * - add to booking — assets: already in this booking / part of a kit / not
+ *   available to book / checked out (only when the booking is
+ *   ONGOING/OVERDUE); kits: contains unavailable assets / checked out
+ *   (only when the booking is ONGOING/OVERDUE)
  *
  * @see {@link file://./../components/scanner/batch-blockers.tsx} UI renderer
  * @see {@link file://./../app/(tabs)/scanner.tsx} integration
@@ -25,18 +29,33 @@
 export type BatchScanAction =
   | "assign_custody"
   | "release_custody"
-  | "update_location";
+  | "update_location"
+  | "booking_add";
 
 /** The minimal item shape blocker rules need (assets and kits). */
 export type BlockableItem = {
   qrId: string;
   type: "asset" | "kit";
+  /** Asset id for type=asset, kit id for type=kit. */
+  targetId: string;
   title: string;
   status: string;
   /** Assets only: id of the kit the asset belongs to (null otherwise). */
   kitId: string | null;
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
+  /** Assets only: false when the asset is marked unavailable to book. */
+  availableToBook?: boolean;
+  /** Kits only: true when any contained asset is unavailable to book. */
+  hasUnavailableAssets?: boolean;
+};
+
+/** Booking context for the `booking_add` action's rules. */
+export type BookingBlockerContext = {
+  /** Asset ids already in the target booking. */
+  bookedAssetIds: ReadonlySet<string>;
+  /** The target booking's status (gates the checked-out blockers). */
+  bookingStatus: string;
 };
 
 /** A group of items blocked for the same reason, with copy ready to render. */
@@ -49,7 +68,12 @@ export type BlockerGroup = {
     | "kit-in-custody"
     | "kit-checked-out"
     | "kit-has-assets-in-custody"
-    | "kit-not-in-custody";
+    | "kit-not-in-custody"
+    | "asset-already-in-booking"
+    | "asset-not-bookable"
+    | "asset-checked-out-for-booking"
+    | "kit-has-unavailable-assets"
+    | "kit-checked-out-for-booking";
   /** qrIds of the affected items — used to remove them from the scan list. */
   qrIds: string[];
   message: string;
@@ -68,7 +92,9 @@ function countNoun(n: number, noun: "asset" | "kit") {
  */
 export function computeBlockers(
   action: BatchScanAction,
-  items: BlockableItem[]
+  items: BlockableItem[],
+  /** Required for the `booking_add` action; ignored otherwise. */
+  bookingCtx?: BookingBlockerContext
 ): BlockerGroup[] {
   const groups: BlockerGroup[] = [];
   const assets = items.filter((i) => i.type === "asset");
@@ -159,6 +185,59 @@ export function computeBlockers(
       (n) =>
         `${countNoun(n, "kit")} not in custody, so there is nothing to release.`
     );
+  } else if (action === "booking_add" && bookingCtx) {
+    // Mirrors the web add-assets-to-booking drawer exactly — including that
+    // checked-out items only block when the booking itself is checked out
+    // (ONGOING/OVERDUE), and that there is no kit-already-in-booking rule.
+    const bookingIsCheckedOut = ["ONGOING", "OVERDUE"].includes(
+      bookingCtx.bookingStatus
+    );
+
+    push(
+      "asset-already-in-booking",
+      assets.filter((i) => bookingCtx.bookedAssetIds.has(i.targetId)),
+      (n) => `${countNoun(n, "asset")} already in this booking.`
+    );
+    push(
+      "asset-part-of-kit",
+      assets.filter((i) => i.kitId !== null),
+      (n) =>
+        `${countNoun(
+          n,
+          "asset"
+        )} part of a kit. Scan the kit to add it as a whole.`
+    );
+    push(
+      "asset-not-bookable",
+      assets.filter((i) => i.availableToBook === false),
+      (n) => `${countNoun(n, "asset")} marked as unavailable to book.`
+    );
+    push(
+      "kit-has-unavailable-assets",
+      kits.filter((i) => i.hasUnavailableAssets === true),
+      (n) =>
+        `${countNoun(n, "kit")} holding assets that are unavailable to book.`
+    );
+    if (bookingIsCheckedOut) {
+      push(
+        "asset-checked-out-for-booking",
+        assets.filter((i) => i.status === "CHECKED_OUT"),
+        (n) =>
+          `${countNoun(
+            n,
+            "asset"
+          )} checked out and cannot join a checked-out booking.`
+      );
+      push(
+        "kit-checked-out-for-booking",
+        kits.filter((i) => i.status === "CHECKED_OUT"),
+        (n) =>
+          `${countNoun(
+            n,
+            "kit"
+          )} checked out and cannot join a checked-out booking.`
+      );
+    }
   }
   // update_location: no eligibility blockers — any scanned item can move.
 

@@ -25,6 +25,25 @@ export const bookingsApi = {
       `/api/mobile/bookings/${bookingId}?orgId=${orgId}`
     ),
 
+  /**
+   * Add scanned assets and/or kits to a booking (scan-to-build flow).
+   * Kits expand to their contained assets server-side, mirroring the web
+   * scanner's add-to-booking drawer.
+   */
+  addScannedToBooking: (
+    orgId: string,
+    bookingId: string,
+    assetIds: string[],
+    kitIds: string[]
+  ) =>
+    apiFetch<{ success: boolean }>(
+      `/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, assetIds, kitIds }),
+      }
+    ),
+
   /** Check out a booking (RESERVED -> ONGOING) */
   checkoutBooking: (orgId: string, bookingId: string, timeZone?: string) =>
     apiFetch<BookingActionResponse>(

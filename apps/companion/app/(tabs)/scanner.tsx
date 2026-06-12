@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
+  InteractionManager,
   Linking,
   Platform,
   Alert,
@@ -36,6 +37,7 @@ import {
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
+import { markBookingDirty } from "@/lib/booking-refresh";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -109,6 +111,10 @@ type ScannedItem = {
   category: string | null;
   /** Assets only: set when the asset belongs to a kit (part-of-kit blocker). */
   kitId: string | null;
+  /** Assets only: false when the asset is marked unavailable to book. */
+  availableToBook?: boolean;
+  /** Kits only: true when any contained asset is unavailable to book. */
+  hasUnavailableAssets?: boolean;
   /** Kits only: number of contained assets (shown in the drawer row). */
   assetCount?: number;
   /** Kits only: true when any contained asset is individually in custody. */
@@ -119,9 +125,11 @@ type ScannedItem = {
 
 function ScannerContent() {
   const router = useRouter();
-  const { bookingId, bookingName } = useLocalSearchParams<{
+  const { bookingId, bookingName, bookingAction } = useLocalSearchParams<{
     bookingId?: string;
     bookingName?: string;
+    /** "checkin" (default) or "add" — which booking flow the scanner serves. */
+    bookingAction?: string;
   }>();
   const isFocused = useIsFocused();
   const { currentOrg } = useOrg();
@@ -131,6 +139,9 @@ function ScannerContent() {
 
   // Booking check-in mode
   const isBookingMode = !!bookingId;
+  // Scan-to-build flow: same booking header, but scans ADD items (assets and
+  // kits) to the booking instead of checking them in.
+  const isBookingAddMode = isBookingMode && bookingAction === "add";
 
   // Filter scanner actions based on the user's role in the current org
   const availableActions = useMemo(
@@ -187,6 +198,49 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  // Booking context for add-mode blockers: which assets are already in the
+  // booking, and its status (gates the checked-out blockers — web parity).
+  const [bookingCtx, setBookingCtx] = useState<{
+    bookedAssetIds: Set<string>;
+    bookingStatus: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isBookingAddMode || !bookingId || !currentOrg) return;
+    let cancelled = false;
+    api.booking(bookingId, currentOrg.id).then(({ data }) => {
+      if (cancelled || !data) return;
+      setBookingCtx({
+        bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
+        bookingStatus: data.booking.status,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isBookingAddMode, bookingId, currentOrg]);
+
+  // Blockers for the add-to-booking list (the check-in flow has its own
+  // eligibility rule at scan time and no blockers).
+  const bookingBlockers = useMemo<BlockerGroup[]>(
+    () =>
+      isBookingAddMode && bookingCtx
+        ? computeBlockers("booking_add", bookingCheckinItems, bookingCtx)
+        : [],
+    [isBookingAddMode, bookingCtx, bookingCheckinItems]
+  );
+
+  const resolveBookingBlocker = useCallback((group: BlockerGroup) => {
+    setBookingCheckinItems((prev) =>
+      prev.filter((i) => !group.qrIds.includes(i.qrId))
+    );
+  }, []);
+
+  const resolveAllBookingBlockers = useCallback(() => {
+    const blocked = blockedQrIds(bookingBlockers);
+    setBookingCheckinItems((prev) => prev.filter((i) => !blocked.has(i.qrId)));
+  }, [bookingBlockers]);
 
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
@@ -323,6 +377,7 @@ function ScannerContent() {
           // The kit the ASSET belongs to (distinct from the `kitId` local
           // below, which is the kit a kit-linked QR points at directly).
           kitId: string | null;
+          availableToBook: boolean;
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
@@ -469,7 +524,8 @@ function ScannerContent() {
         if (!asset && kit) {
           // Booking check-in stays asset-only for now (kit check-in needs
           // partial-kit semantics — planned with the booking scanner work).
-          if (isBookingMode) {
+          // The scan-to-ADD flow accepts kits: the service expands them.
+          if (isBookingMode && !isBookingAddMode) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             setScanResult({
@@ -478,6 +534,59 @@ function ScannerContent() {
               message:
                 "Booking check-in works per asset. Scan the kit's assets individually.",
             });
+            finalizeScan();
+            return;
+          }
+
+          // BOOKING-ADD mode: dedupe by kit id, add to the booking list
+          if (isBookingAddMode) {
+            if (
+              bookingCheckinItems.some(
+                (item) => item.type === "kit" && item.targetId === kit!.id
+              )
+            ) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: "Already Scanned",
+                message: "This kit is already in your list.",
+              });
+              finalizeScan();
+              return;
+            }
+
+            const kitItem: ScannedItem = {
+              type: "kit",
+              qrId: codeId,
+              targetId: kit.id,
+              title: kit.name,
+              status: kit.status,
+              mainImage: kit.image,
+              category: null,
+              kitId: null,
+              assetCount: kit._count.assets,
+              hasAssetsInCustody: kit.assets.some(
+                (a) => a.status === "IN_CUSTODY"
+              ),
+              hasUnavailableAssets: kit.assets.some((a) => !a.availableToBook),
+            };
+
+            setBookingCheckinItems((prev) => [kitItem, ...prev]);
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            setScanResult({
+              type: "success",
+              title: kit.name,
+              message: `Added to list (${
+                bookingCheckinItems.length + 1
+              } items)`,
+            });
+
+            setTimeout(() => setScanResult(null), 1200);
             finalizeScan();
             return;
           }
@@ -637,7 +746,7 @@ function ScannerContent() {
           return;
         }
 
-        // ── BOOKING CHECK-IN mode ──
+        // ── BOOKING modes (check-in / scan-to-add) ──
         if (isBookingMode) {
           // Check duplicate
           if (bookingCheckinItems.some((item) => item.targetId === asset.id)) {
@@ -646,7 +755,9 @@ function ScannerContent() {
             setScanResult({
               type: "error",
               title: "Already Scanned",
-              message: "This asset is already in your check-in list.",
+              message: isBookingAddMode
+                ? "This asset is already in your list."
+                : "This asset is already in your check-in list.",
             });
             finalizeScan();
             return;
@@ -661,7 +772,28 @@ function ScannerContent() {
             mainImage: asset.mainImage,
             category: asset.category?.name || null,
             kitId: asset.kitId ?? null,
+            availableToBook: asset.availableToBook,
           };
+
+          // ADD mode: no scan-time eligibility gate — the blockers handle
+          // ineligible items with one-tap fixes (web parity).
+          if (isBookingAddMode) {
+            setBookingCheckinItems((prev) => [newItem, ...prev]);
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            setScanResult({
+              type: "success",
+              title: asset.title,
+              message: `Added to list (${
+                bookingCheckinItems.length + 1
+              } items)`,
+            });
+
+            setTimeout(() => setScanResult(null), 1200);
+            finalizeScan();
+            return;
+          }
 
           if (asset.status !== "CHECKED_OUT") {
             flashFrame("error");
@@ -996,6 +1128,89 @@ function ScannerContent() {
     lastScanRef.current = "";
   };
 
+  /** Submit the scan-to-add list: assets + kits join the booking. */
+  const handleBookingAdd = () => {
+    if (
+      !bookingId ||
+      !currentOrg ||
+      bookingCheckinItems.length === 0 ||
+      bookingBlockers.length > 0
+    ) {
+      return;
+    }
+
+    const assetIds = bookingCheckinItems
+      .filter((i) => i.type === "asset")
+      .map((i) => i.targetId);
+    const kitIds = bookingCheckinItems
+      .filter((i) => i.type === "kit")
+      .map((i) => i.targetId);
+    const count = bookingCheckinItems.length;
+
+    Alert.alert(
+      "Add to Booking",
+      `Add ${count} item${count === 1 ? "" : "s"} to "${
+        bookingName || "this booking"
+      }"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Add",
+          onPress: async () => {
+            setIsBookingSubmitting(true);
+            const { error } = await api.addScannedToBooking(
+              currentOrg.id,
+              bookingId,
+              assetIds,
+              kitIds
+            );
+            setIsBookingSubmitting(false);
+
+            if (error) {
+              Alert.alert("Error", error);
+              return;
+            }
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            Alert.alert(
+              "Done",
+              `Added ${count} item${count === 1 ? "" : "s"} to "${
+                bookingName || "the booking"
+              }".`,
+              [
+                {
+                  text: "OK",
+                  onPress: () => {
+                    setBookingCheckinItems([]);
+                    lastScanRef.current = "";
+                    // Navigate explicitly (anchored) — router.back() from a
+                    // tab screen falls through history and can land on Home.
+                    // The dirty flag forces the detail to refetch past its
+                    // 60s freshness gate (router params don't reach an
+                    // already-mounted screen, so a ?refresh token can't).
+                    markBookingDirty(bookingId);
+                    // Defer past the alert dismissal: navigating
+                    // synchronously from an Alert onPress wedges the
+                    // navigation transition into an endless render-commit
+                    // loop (JS thread pegged at ~125% CPU, network
+                    // callbacks starve) — verified by process sampling.
+                    InteractionManager.runAfterInteractions(() => {
+                      pushIntoTab(
+                        "/(tabs)/bookings",
+                        `/(tabs)/bookings/${bookingId}`
+                      );
+                    });
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
@@ -1050,8 +1265,15 @@ function ScannerContent() {
                 onPress: () => {
                   setBookingCheckinItems([]);
                   lastScanRef.current = "";
+                  // The check-in mutated the booking — flag the detail to
+                  // refetch past its freshness gate on next focus.
+                  markBookingDirty(bookingId);
                   if (result?.isComplete) {
-                    router.back();
+                    // Defer past the alert dismissal (same render-loop
+                    // wedge as the add path — see handleBookingAdd).
+                    InteractionManager.runAfterInteractions(() => {
+                      router.back();
+                    });
                   }
                 },
               },
@@ -1183,7 +1405,9 @@ function ScannerContent() {
                   <Ionicons name="arrow-back" size={22} color="#fff" />
                 </TouchableOpacity>
                 <View style={styles.bookingModeInfo}>
-                  <Text style={styles.bookingModeLabel}>Booking Check-In</Text>
+                  <Text style={styles.bookingModeLabel}>
+                    {isBookingAddMode ? "Add to Booking" : "Booking Check-In"}
+                  </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
                     {bookingName || "Scan assets to check in"}
                   </Text>
@@ -1252,7 +1476,9 @@ function ScannerContent() {
             ) : (
               <Text style={styles.instructionText}>
                 {isBookingMode
-                  ? "Scan assets to check in"
+                  ? isBookingAddMode
+                    ? "Scan assets or kits to add"
+                    : "Scan assets to check in"
                   : instructionMap[action]}
               </Text>
             )}
@@ -1355,50 +1581,77 @@ function ScannerContent() {
             )}
           </View>
         )}
-
-        {/* ── Batch Drawer ────────────────────────────── */}
-        {showBatchDrawer && (
-          <BatchDrawer
-            items={scannedItems}
-            keyField="qrId"
-            title={`${scannedItems.length} item${
-              scannedItems.length > 1 ? "s" : ""
-            } scanned`}
-            submitLabel={submitLabelMap[action]}
-            submitIcon={
-              SCANNER_ACTIONS.find((a) => a.key === action)?.icon || "checkmark"
-            }
-            isSubmitting={isSubmitting}
-            onRemove={removeItem}
-            onClear={clearAll}
-            onSubmit={handleBatchSubmit}
-            showStatus
-            blockers={blockers}
-            onResolveBlocker={resolveBlocker}
-            onResolveAllBlockers={resolveAllBlockers}
-          />
-        )}
-
-        {/* ── Booking Check-in Drawer ──────────────────── */}
-        {showBookingDrawer && (
-          <BatchDrawer
-            items={bookingCheckinItems}
-            keyField="targetId"
-            title={`${bookingCheckinItems.length} asset${
-              bookingCheckinItems.length > 1 ? "s" : ""
-            } to check in`}
-            submitLabel={`Check In ${bookingCheckinItems.length} ${
-              bookingCheckinItems.length === 1 ? "Asset" : "Assets"
-            }`}
-            submitIcon="log-in-outline"
-            isSubmitting={isBookingSubmitting}
-            onRemove={removeBookingItem}
-            onClear={clearBookingItems}
-            onSubmit={handleBookingCheckin}
-            showStatus={false}
-          />
-        )}
       </View>
+
+      {/* ── Drawers ─────────────────────────────────────
+          Hosted OUTSIDE the overlay view as a sibling ABOVE the paused
+          overlay: RN zIndex only competes between siblings, so nesting the
+          drawer inside the overlay left its buttons dead whenever the
+          camera auto-paused (the paused layer won the hit test). */}
+      {(showBatchDrawer || showBookingDrawer) && (
+        <View style={styles.drawerHost} pointerEvents="box-none">
+          {/* ── Batch Drawer ──────────────────────────── */}
+          {showBatchDrawer && (
+            <BatchDrawer
+              items={scannedItems}
+              keyField="qrId"
+              title={`${scannedItems.length} item${
+                scannedItems.length > 1 ? "s" : ""
+              } scanned`}
+              submitLabel={submitLabelMap[action]}
+              submitIcon={
+                SCANNER_ACTIONS.find((a) => a.key === action)?.icon ||
+                "checkmark"
+              }
+              isSubmitting={isSubmitting}
+              onRemove={removeItem}
+              onClear={clearAll}
+              onSubmit={handleBatchSubmit}
+              showStatus
+              blockers={blockers}
+              onResolveBlocker={resolveBlocker}
+              onResolveAllBlockers={resolveAllBlockers}
+            />
+          )}
+
+          {/* ── Booking Drawer (check-in / scan-to-add) ── */}
+          {showBookingDrawer && (
+            <BatchDrawer
+              items={bookingCheckinItems}
+              keyField="targetId"
+              title={
+                isBookingAddMode
+                  ? `${bookingCheckinItems.length} item${
+                      bookingCheckinItems.length > 1 ? "s" : ""
+                    } scanned`
+                  : `${bookingCheckinItems.length} asset${
+                      bookingCheckinItems.length > 1 ? "s" : ""
+                    } to check in`
+              }
+              submitLabel={
+                isBookingAddMode
+                  ? "Add to Booking"
+                  : `Check In ${bookingCheckinItems.length} ${
+                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
+                    }`
+              }
+              submitIcon={
+                isBookingAddMode ? "add-circle-outline" : "log-in-outline"
+              }
+              isSubmitting={isBookingSubmitting}
+              onRemove={removeBookingItem}
+              onClear={clearBookingItems}
+              onSubmit={
+                isBookingAddMode ? handleBookingAdd : handleBookingCheckin
+              }
+              showStatus={isBookingAddMode}
+              blockers={isBookingAddMode ? bookingBlockers : []}
+              onResolveBlocker={resolveBookingBlocker}
+              onResolveAllBlockers={resolveAllBookingBlockers}
+            />
+          )}
+        </View>
+      )}
 
       {/* ── Pickers (modals) ──────────────────────────── */}
       {currentOrg && (
@@ -1474,6 +1727,15 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.xl,
   },
 
+  // Hosts the drawers as a sibling ABOVE the paused overlay (zIndex 5) so
+  // their buttons stay tappable while the camera is auto-paused.
+  drawerHost: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+  },
   // Paused overlay
   pausedOverlay: {
     ...StyleSheet.absoluteFillObject,

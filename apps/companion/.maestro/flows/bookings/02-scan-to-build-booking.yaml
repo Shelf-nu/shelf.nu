@@ -1,0 +1,132 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Scan to build a booking"
+tags:
+  - bookings
+  - scanner
+  - high-impact
+
+---
+# Test: build a booking with the camera — assets AND kits scan into the
+# add-list, blockers catch ineligible items, and submitting adds everything
+# (kits expand to their assets server-side).
+#
+# Requires (in the test org):
+#   - a DRAFT booking named "QA Scan Booking" with NO assets (reset by the
+#     fixture script before runs)
+#   - ${SHELF_TEST_ASSET_QR_ID}      = QR of an AVAILABLE, bookable asset
+#   - ${SHELF_TEST_KIT_MEMBER_QR_ID} = QR of an asset that belongs to a kit
+#     (trips the part-of-kit blocker)
+#   - ${SHELF_TEST_KIT_QR_ID}        = QR linked to the kit itself
+
+- runFlow: ../../shared/login.yaml
+
+# Switch to the QA workspace
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "WORKSPACE"
+    timeout: 8000
+- tapOn:
+    point: "50%,32%"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Open the draft booking ──
+- tapOn: "Bookings"
+# The list defaults to the "Active" filter; DRAFT bookings live under "All"
+# (the pills expose a11y labels "Filter: <name>", masking their inner text)
+- extendedWaitUntil:
+    visible: "Filter: All"
+    timeout: 15000
+- tapOn: "Filter: All"
+# The fixture booking's dates are far-future; it sorts below the fold.
+# Rows expose "Booking: <name>, <status>" a11y labels — match with regex.
+- scrollUntilVisible:
+    element:
+      text: ".*QA Scan Booking.*"
+    direction: DOWN
+    timeout: 60000
+- tapOn: ".*QA Scan Booking.*"
+# The button exposes the a11y label "Scan assets or kits to add to this
+# booking" — match that, not the visible text it masks
+- extendedWaitUntil:
+    visible: ".*Scan assets or kits to add.*"
+    timeout: 15000
+- takeScreenshot: booking-scan-to-add-entry
+
+# ── Scan-to-add mode ──
+- tapOn: ".*Scan assets or kits to add.*"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Scan assets or kits to add"
+    timeout: 15000
+
+# Inject a clean asset
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ASSET_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+
+# Inject a kit-member asset — must trip the part-of-kit blocker
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_MEMBER_QR_ID}
+- pressKey: enter
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*part of a kit.*"
+    timeout: 15000
+- takeScreenshot: booking-add-part-of-kit-blocker
+# The resolve button's a11y label is "Remove N blocked items from the list"
+- tapOn: "Remove .*blocked item.*"
+
+# Inject the kit itself (allowed — expands server-side)
+- tapOn:
+    id: "dev-scan-toggle"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- assertVisible: "QA Blocker Test Kit"
+- takeScreenshot: booking-add-asset-and-kit
+
+# ── Submit ──
+# why id: the mode header ALSO reads "Add to Booking" — text matching hits
+# the header label instead of the drawer's submit button
+- tapOn:
+    id: "batch-drawer-submit"
+- tapOn: "Add"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 20000
+- takeScreenshot: booking-add-success
+- tapOn: "OK"
+
+# Back on booking detail — the kit expanded to its asset, so both the
+# scanned asset and the kit's member asset are now in the booking
+- extendedWaitUntil:
+    visible: ".*Arterial Puncture.*"
+    timeout: 20000
+- assertVisible: ".*Nasco Life/form IV Training Arm.*"
+- takeScreenshot: booking-built-by-scanning

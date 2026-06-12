@@ -169,6 +169,7 @@ export function BatchDrawer({
 
       {/* Submit button */}
       <TouchableOpacity
+        testID="batch-drawer-submit"
         style={[
           styles.drawerSubmitBtn,
           (isSubmitting || hasBlockers) && { opacity: 0.6 },
@@ -199,6 +200,10 @@ const useStyles = createStyles((colors, shadows) => ({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: 280,
+    // why: must out-rank the scanner's paused overlay (zIndex 5) in hit
+    // testing — otherwise the drawer's buttons go dead while the camera is
+    // auto-paused, even though the drawer draws on top of the dim layer.
+    zIndex: 10,
     ...shadows.md,
   },
   drawerHeader: {
