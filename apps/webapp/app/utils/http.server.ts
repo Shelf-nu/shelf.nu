@@ -235,23 +235,35 @@ export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,
   defaultRedirect = "/"
 ) {
-  /** List of domains we allow to redirect to
-   */
+  /** Absolute domains we explicitly allow to redirect to (e.g. URL shortener). */
   const safeList = [SERVER_URL, `https://${URL_SHORTENER}`];
 
-  if (!to || typeof to !== "string" || to.startsWith("//")) {
+  if (!to || typeof to !== "string") {
     return defaultRedirect;
   }
 
-  // Block internal Remix routes (manifest, etc.) from being used as redirects
-  // These are framework-internal URLs created by lazy route discovery
-  if (to.startsWith("/__")) {
+  // Allowed absolute domains pass through unchanged.
+  if (safeList.some((safeUrl) => to.startsWith(safeUrl))) {
+    return to;
+  }
+
+  // Otherwise the target must be a local absolute path. Reject non-paths and
+  // internal Remix routes (manifest, etc.) created by lazy route discovery.
+  if (!to.startsWith("/") || to.startsWith("/__")) {
     return defaultRedirect;
   }
 
-  // Check if the URL starts with any of the safe domains
-  const isSafeDomain = safeList.some((safeUrl) => to.startsWith(safeUrl));
-  if (!to.startsWith("/") && !isSafeDomain) {
+  // Final defense: resolve against our own origin and confirm it stays
+  // same-origin. A prefix check (e.g. `startsWith("//")`) misses "//host",
+  // "/\host" and "/\\host": browsers treat "\" like "/" in http(s) URLs, and a
+  // "\" reaches here decoded from "%5C" via route params. All of these resolve
+  // off-origin, so origin comparison closes the open redirect that prefix
+  // matching leaves open.
+  try {
+    if (new URL(to, SERVER_URL).origin !== new URL(SERVER_URL).origin) {
+      return defaultRedirect;
+    }
+  } catch {
     return defaultRedirect;
   }
 
