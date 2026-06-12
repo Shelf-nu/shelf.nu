@@ -23,7 +23,7 @@ import { pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
-import type { ScannedKit } from "@/lib/api/types";
+import type { BookingAsset, ScannedKit } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -199,27 +199,35 @@ function ScannerContent() {
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
 
-  // Booking context for add-mode blockers: which assets are already in the
-  // booking, and its status (gates the checked-out blockers — web parity).
+  // Booking context for both booking modes. Add mode uses bookedAssetIds +
+  // bookingStatus for its blockers (web parity); check-in mode uses the
+  // full asset rows for membership gates and kit→member expansion, plus
+  // checkedInAssetIds to reject already-returned assets at scan time.
   const [bookingCtx, setBookingCtx] = useState<{
     bookedAssetIds: Set<string>;
     bookingStatus: string;
+    bookedAssets: BookingAsset[];
+    checkedInAssetIds: Set<string>;
   } | null>(null);
 
-  useEffect(() => {
-    if (!isBookingAddMode || !bookingId || !currentOrg) return;
-    let cancelled = false;
+  // Also called from the scan paths when a code arrives before the first
+  // fetch lands (or after it failed) — a scan-while-loading retries it.
+  const fetchBookingCtx = useCallback(() => {
+    if (!isBookingMode || !bookingId || !currentOrg) return;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
-      if (cancelled || !data) return;
+      if (!data) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
+        bookedAssets: data.booking.assets,
+        checkedInAssetIds: new Set(data.checkedInAssetIds),
       });
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [isBookingAddMode, bookingId, currentOrg]);
+  }, [isBookingMode, bookingId, currentOrg]);
+
+  useEffect(() => {
+    fetchBookingCtx();
+  }, [fetchBookingCtx]);
 
   // Blockers for the add-to-booking list (the check-in flow has its own
   // eligibility rule at scan time and no blockers).
@@ -522,18 +530,86 @@ function ScannerContent() {
 
         // ── KIT-LINKED code (full kit object resolved) ──
         if (!asset && kit) {
-          // Booking check-in stays asset-only for now (kit check-in needs
-          // partial-kit semantics — planned with the booking scanner work).
-          // The scan-to-ADD flow accepts kits: the service expands them.
+          // BOOKING CHECK-IN: a kit QR expands to the kit's member assets
+          // that are in THIS booking and not yet checked in — mirroring the
+          // web partial-check-in drawer (kits are never checked in as a
+          // unit; partially-in-booking kits are allowed).
           if (isBookingMode && !isBookingAddMode) {
-            flashFrame("error");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            if (!bookingCtx) {
+              // Context fetch still in flight (sub-second) — ask for a rescan
+              // rather than guessing membership.
+              fetchBookingCtx(); // self-heal if the initial fetch failed
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: "Booking Still Loading",
+                message: "One moment — scan the kit again.",
+              });
+              finalizeScan();
+              return;
+            }
+
+            const members = bookingCtx.bookedAssets.filter(
+              (a) => a.kitId === kit!.id
+            );
+            if (members.length === 0) {
+              flashFrame("error");
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              setScanResult({
+                type: "error",
+                title: "Not in This Booking",
+                message: `None of "${kit.name}"'s assets are part of this booking.`,
+              });
+              finalizeScan();
+              return;
+            }
+
+            const eligible = members.filter(
+              (a) =>
+                !bookingCtx.checkedInAssetIds.has(a.id) &&
+                !bookingCheckinItems.some((item) => item.targetId === a.id)
+            );
+            if (eligible.length === 0) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: "Already Covered",
+                message: `All of "${kit.name}"'s assets in this booking are already checked in or scanned.`,
+              });
+              finalizeScan();
+              return;
+            }
+
+            const kitMemberItems: ScannedItem[] = eligible.map((a) => ({
+              type: "asset",
+              qrId: `${codeId}:${a.id}`,
+              targetId: a.id,
+              title: a.title,
+              status: a.status,
+              mainImage: a.mainImage,
+              category: a.category?.name ?? null,
+              kitId: a.kitId,
+            }));
+
+            setBookingCheckinItems((prev) => [...kitMemberItems, ...prev]);
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
             setScanResult({
-              type: "error",
-              title: "Kits Not Supported Here",
-              message:
-                "Booking check-in works per asset. Scan the kit's assets individually.",
+              type: "success",
+              title: kit.name,
+              message: `Added ${eligible.length} kit asset${
+                eligible.length === 1 ? "" : "s"
+              } (${bookingCheckinItems.length + eligible.length} items)`,
             });
+
+            setTimeout(() => setScanResult(null), 1200);
             finalizeScan();
             return;
           }
@@ -795,6 +871,50 @@ function ScannerContent() {
             return;
           }
 
+          // CHECK-IN mode scan-time gates (web parity — the web drawer
+          // surfaces these as blockers; mobile rejects at scan time for
+          // instant feedback). Membership can't be judged before the
+          // booking context arrives, so scans during that window are
+          // rejected with a retry prompt — falling through to the status
+          // gate would accept assets from OTHER bookings (they are
+          // CHECKED_OUT too). The e2e caught exactly that race.
+          if (!bookingCtx) {
+            fetchBookingCtx(); // self-heal if the initial fetch failed
+            flashFrame("error");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setScanResult({
+              type: "error",
+              title: "Booking Still Loading",
+              message: "One moment — scan again.",
+            });
+            finalizeScan();
+            return;
+          }
+
+          if (!bookingCtx.bookedAssetIds.has(asset.id)) {
+            flashFrame("error");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setScanResult({
+              type: "error",
+              title: "Not in This Booking",
+              message: `"${asset.title}" is not part of this booking.`,
+            });
+            finalizeScan();
+            return;
+          }
+
+          if (bookingCtx.checkedInAssetIds.has(asset.id)) {
+            flashFrame("error");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setScanResult({
+              type: "error",
+              title: "Already Checked In",
+              message: `"${asset.title}" has already been checked in for this booking.`,
+            });
+            finalizeScan();
+            return;
+          }
+
           if (asset.status !== "CHECKED_OUT") {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -921,6 +1041,8 @@ function ScannerContent() {
       scannedItems,
       isBookingMode,
       bookingCheckinItems,
+      bookingCtx,
+      fetchBookingCtx,
       flashFrame,
       resetInactivityTimer,
     ]
@@ -1252,6 +1374,20 @@ function ScannerContent() {
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
+            // Keep the scan-time gates honest for follow-up scans: the
+            // assets just submitted are now checked in, but the fetched
+            // context predates the submit.
+            setBookingCtx((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    checkedInAssetIds: new Set([
+                      ...prev.checkedInAssetIds,
+                      ...assetIds,
+                    ]),
+                  }
+                : prev
+            );
             const msg = result?.isComplete
               ? `All assets checked in! "${
                   bookingName || "Booking"
@@ -1269,10 +1405,15 @@ function ScannerContent() {
                   // refetch past its freshness gate on next focus.
                   markBookingDirty(bookingId);
                   if (result?.isComplete) {
-                    // Defer past the alert dismissal (same render-loop
-                    // wedge as the add path — see handleBookingAdd).
+                    // Anchored navigation — router.back() from a tab screen
+                    // falls through history and can land on Home. Deferred
+                    // past the alert dismissal (same render-loop wedge as
+                    // the add path — see handleBookingAdd).
                     InteractionManager.runAfterInteractions(() => {
-                      router.back();
+                      pushIntoTab(
+                        "/(tabs)/bookings",
+                        `/(tabs)/bookings/${bookingId}`
+                      );
                     });
                   }
                 },
