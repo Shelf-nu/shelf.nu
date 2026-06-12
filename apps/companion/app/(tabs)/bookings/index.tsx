@@ -34,7 +34,9 @@ const bookingKeyExtractor = (item: BookingListItem) => item.id;
 
 /** Which status filters to show as pills */
 const STATUS_FILTERS: { label: string; value: string }[] = [
-  { label: "Active", value: "RESERVED,ONGOING,OVERDUE" },
+  // DRAFT counts as active: a booking being built (e.g. scan-to-add) must
+  // not vanish from the default view the moment the user leaves it.
+  { label: "Active", value: "DRAFT,RESERVED,ONGOING,OVERDUE" },
   { label: "Completed", value: "COMPLETE" },
   {
     label: "All",
