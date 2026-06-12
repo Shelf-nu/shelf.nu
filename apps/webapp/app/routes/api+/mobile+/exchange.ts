@@ -21,9 +21,15 @@ import { getActionMethod } from "~/utils/http.server";
 
 const ExchangeSchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
-  // PKCE verifier (RFC 7636: 43–128 chars). Optional — only codes minted by a
-  // PKCE-capable app build carry a challenge that requires it.
-  codeVerifier: z.string().min(43).max(128).optional(),
+  // PKCE verifier (RFC 7636: 43–128 chars, base64url unreserved charset).
+  // Optional — only codes minted by a PKCE-capable app build carry a challenge
+  // that requires it. The charset is constrained to mirror the strict S256
+  // `code_challenge` validation at `/sso-login`; a non-conforming verifier could
+  // never hash to a stored challenge anyway, so we reject it up front.
+  codeVerifier: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43,128}$/)
+    .optional(),
 });
 
 /**

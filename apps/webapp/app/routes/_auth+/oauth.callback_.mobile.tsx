@@ -71,6 +71,12 @@ const MobileCallbackSchema = z.object({
 
 export async function action({ request }: ActionFunctionArgs) {
   const { disableSSO } = config;
+  // Clears the one-shot PKCE challenge cookie. Applied on every exit path —
+  // success (once the challenge is bound to the code) and failure (so an
+  // abandoned flow doesn't leave the challenge readable for its full TTL).
+  const clearChallengeCookie = await mobilePkceChallengeCookie.serialize("", {
+    maxAge: 0,
+  });
   try {
     if (disableSSO) {
       throw new ShelfError({
@@ -145,11 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
           }),
           {
             // Clear the one-shot challenge cookie now that it's bound to the code.
-            headers: {
-              "Set-Cookie": await mobilePkceChallengeCookie.serialize("", {
-                maxAge: 0,
-              }),
-            },
+            headers: { "Set-Cookie": clearChallengeCookie },
           }
         );
       }
@@ -160,7 +162,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const reason = makeShelfError(cause);
     return data(
       { error: { message: reason.message } },
-      { status: reason.status }
+      {
+        status: reason.status,
+        headers: { "Set-Cookie": clearChallengeCookie },
+      }
     );
   }
 }
