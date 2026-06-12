@@ -15,20 +15,25 @@ import { useTheme } from "@/lib/theme-context";
 import { BatchBlockers } from "./batch-blockers";
 
 type ScannedItem = {
+  /** Entity kind — kits batch alongside assets, mirroring the web scanner. */
+  type: "asset" | "kit";
   qrId: string;
-  assetId: string;
+  /** Asset id for type=asset, kit id for type=kit. */
+  targetId: string;
   title: string;
   status: string;
   mainImage: string | null;
   category: string | null;
-  /** Set when the asset belongs to a kit — drives the part-of-kit blocker. */
+  /** Assets only: set when the asset belongs to a kit (part-of-kit blocker). */
   kitId: string | null;
+  /** Kits only: number of contained assets (shown in the row meta line). */
+  assetCount?: number;
 };
 
 type BatchDrawerProps = {
   items: ScannedItem[];
-  /** Key extractor field: "qrId" for batch scan, "assetId" for booking */
-  keyField: "qrId" | "assetId";
+  /** Key extractor field: "qrId" for batch scan, "targetId" for booking */
+  keyField: "qrId" | "targetId";
   title: string;
   submitLabel: string;
   submitIcon: string;
@@ -115,7 +120,11 @@ export function BatchDrawer({
                   styles.drawerItemImagePlaceholder,
                 ]}
               >
-                <Ionicons name="cube-outline" size={16} color={colors.muted} />
+                <Ionicons
+                  name={item.type === "kit" ? "albums-outline" : "cube-outline"}
+                  size={16}
+                  color={colors.muted}
+                />
               </View>
             )}
             <View style={styles.drawerItemInfo}>
@@ -123,11 +132,18 @@ export function BatchDrawer({
                 {item.title}
               </Text>
               <Text style={styles.drawerItemMeta}>
-                {showStatus
-                  ? `${item.category || "Asset"} \u2022 ${formatStatus(
-                      item.status
-                    )}`
-                  : item.category || "Asset"}
+                {/* Kits show their size; assets show their category. */}
+                {(() => {
+                  const label =
+                    item.type === "kit"
+                      ? `Kit \u2022 ${item.assetCount ?? 0} asset${
+                          item.assetCount === 1 ? "" : "s"
+                        }`
+                      : item.category || "Asset";
+                  return showStatus
+                    ? `${label} \u2022 ${formatStatus(item.status)}`
+                    : label;
+                })()}
               </Text>
             </View>
             <TouchableOpacity
@@ -160,6 +176,8 @@ export function BatchDrawer({
         onPress={onSubmit}
         disabled={isSubmitting || hasBlockers}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={submitLabel}
         accessibilityState={{ disabled: isSubmitting || hasBlockers }}
       >
         {isSubmitting ? (

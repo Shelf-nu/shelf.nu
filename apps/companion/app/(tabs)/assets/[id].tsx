@@ -345,6 +345,12 @@ export default function AssetDetailScreen() {
                 icon="layers-outline"
                 label="Kit"
                 value={asset.kit.name}
+                // Kit detail lives in this same stack, so a plain push keeps
+                // "back" returning to this asset.
+                onPress={() =>
+                  router.push(`/(tabs)/assets/kits/${asset.kit!.id}`)
+                }
+                accessibilityLabel={`View kit ${asset.kit.name}`}
               />
             )}
             {asset.custody && (
@@ -552,24 +558,51 @@ const InfoRow = memo(function InfoRow({
   icon,
   label,
   value,
+  onPress,
+  accessibilityLabel,
 }: {
   icon: string;
   label: string;
   value: string;
+  /** When set, the row becomes tappable and shows a chevron affordance. */
+  onPress?: () => void;
+  /** A11y label for the tappable row (defaults to the value text). */
+  accessibilityLabel?: string;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  return (
-    <View style={styles.infoRow}>
+
+  const content = (
+    <>
       <View style={styles.infoLabel}>
         <Ionicons name={icon as any} size={16} color={colors.muted} />
         <Text style={styles.infoLabelText}>{label}</Text>
       </View>
-      <Text style={styles.infoValue} numberOfLines={2} selectable>
+      {/* why: selectable text claims touches — only enable it on static rows */}
+      <Text style={styles.infoValue} numberOfLines={2} selectable={!onPress}>
         {value}
       </Text>
-    </View>
+      {onPress && (
+        <Ionicons name="chevron-forward" size={16} color={colors.mutedLight} />
+      )}
+    </>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        style={styles.infoRow}
+        onPress={onPress}
+        activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? value}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.infoRow}>{content}</View>;
 });
 
 // ── Styles ─────────────────────────────────────────────

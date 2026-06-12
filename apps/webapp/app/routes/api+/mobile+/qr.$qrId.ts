@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   MOBILE_ASSET_SELECT,
+  MOBILE_KIT_SELECT,
 } from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -69,12 +70,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Now fetch the full data (only after authorization passes).
     // Scope by qr.organizationId — proven above (line 38 ensures it exists,
     // lines 47-66 verify the caller is a member of that org) — so the linked
-    // asset can be safely constrained to the same organization.
+    // asset/kit can be safely constrained to the same organization.
     let asset = null;
     if (qr.assetId) {
       asset = await db.asset.findFirst({
         where: { id: qr.assetId, organizationId: qr.organizationId },
         select: MOBILE_ASSET_SELECT,
+      });
+    }
+
+    // Kit-linked QR: return the kit so the scanner can batch-operate on it
+    // (web parity — all web scanner drawers accept kits).
+    let kit = null;
+    if (!qr.assetId && qr.kitId) {
+      kit = await db.kit.findFirst({
+        where: { id: qr.kitId, organizationId: qr.organizationId },
+        select: MOBILE_KIT_SELECT,
       });
     }
 
@@ -85,6 +96,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kitId: qr.kitId,
         organizationId: qr.organizationId,
         asset,
+        kit,
       },
     });
   } catch (cause) {

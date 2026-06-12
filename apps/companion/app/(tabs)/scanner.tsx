@@ -22,6 +22,7 @@ import { pushIntoTab } from "@/lib/navigation";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
+import type { ScannedKit } from "@/lib/api/types";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -97,14 +98,21 @@ const isBatchAction = (a: ScannerAction) => a !== "view";
 // ── Scanned Item Type ───────────────────────────────────
 
 type ScannedItem = {
+  /** Entity kind — kits batch alongside assets, mirroring the web scanner. */
+  type: "asset" | "kit";
   qrId: string;
-  assetId: string;
+  /** Asset id for type=asset, kit id for type=kit. */
+  targetId: string;
   title: string;
   status: string;
   mainImage: string | null;
   category: string | null;
-  /** Set when the asset belongs to a kit — drives the part-of-kit blocker. */
+  /** Assets only: set when the asset belongs to a kit (part-of-kit blocker). */
   kitId: string | null;
+  /** Kits only: number of contained assets (shown in the drawer row). */
+  assetCount?: number;
+  /** Kits only: true when any contained asset is individually in custody. */
+  hasAssetsInCustody?: boolean;
 };
 
 // ── Scanner Content ─────────────────────────────────────
@@ -318,6 +326,8 @@ function ScannerContent() {
           category: { name: string } | null;
           location: { name: string } | null;
         } | null;
+        // The kit a kit-linked code resolves to (full object for batch ops).
+        let kit: ScannedKit | null = null;
         // A QR can be asset-less but still linked to a kit. We track kitId
         // separately because the create-asset flow must not be offered for
         // kit-linked QRs (see the !asset branch below for the full rationale).
@@ -336,7 +346,7 @@ function ScannerContent() {
             setScanResult({
               type: "error",
               title: "Already Scanned",
-              message: "This asset is already in your scan list.",
+              message: "This item is already in your scan list.",
             });
             finalizeScan();
             return;
@@ -381,6 +391,7 @@ function ScannerContent() {
           codeId = qrId;
           codeOrgId = qrData.qr?.organizationId ?? null;
           asset = qrData.qr?.asset ?? null;
+          kit = qrData.qr?.kit ?? null;
           kitId = qrData.qr?.kitId ?? null;
         } else {
           // ── Barcode fallback path ──
@@ -434,6 +445,8 @@ function ScannerContent() {
           codeId = barcodeData.barcode.id;
           codeOrgId = barcodeData.barcode.organizationId;
           asset = barcodeData.barcode.asset;
+          kit = barcodeData.barcode.kit ?? null;
+          kitId = barcodeData.barcode.kitId ?? null;
         }
 
         // ── Shared processing (QR and barcode paths converge here) ──
@@ -448,6 +461,98 @@ function ScannerContent() {
             message:
               "This asset belongs to a different workspace. Switch workspaces to view it.",
           });
+          finalizeScan();
+          return;
+        }
+
+        // ── KIT-LINKED code (full kit object resolved) ──
+        if (!asset && kit) {
+          // Booking check-in stays asset-only for now (kit check-in needs
+          // partial-kit semantics — planned with the booking scanner work).
+          if (isBookingMode) {
+            flashFrame("error");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setScanResult({
+              type: "error",
+              title: "Kits Not Supported Here",
+              message:
+                "Booking check-in works per asset. Scan the kit's assets individually.",
+            });
+            finalizeScan();
+            return;
+          }
+
+          if (action === "view") {
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            announce("Kit scanned successfully");
+            setScanResult({
+              type: "success",
+              title: kit.name,
+              message: `Kit • ${kit._count.assets} asset${
+                kit._count.assets === 1 ? "" : "s"
+              }`,
+            });
+
+            const kitDetailId = kit.id;
+            setTimeout(() => {
+              // Cross-surface nav must go through pushIntoTab so the Assets
+              // stack (which hosts the kits screens) is rooted and "back"
+              // works.
+              pushIntoTab(
+                "/(tabs)/assets",
+                `/(tabs)/assets/kits/${kitDetailId}`
+              );
+              setScanResult(null);
+              finalizeScan();
+            }, 950);
+            return;
+          }
+
+          // BATCH mode: dedupe by kit id, then add to the list
+          if (
+            scannedItems.some(
+              (item) => item.type === "kit" && item.targetId === kit!.id
+            )
+          ) {
+            flashFrame("error");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setScanResult({
+              type: "error",
+              title: "Already Scanned",
+              message: "This kit is already in your scan list.",
+            });
+            finalizeScan();
+            return;
+          }
+
+          const newKitItem: ScannedItem = {
+            type: "kit",
+            qrId: codeId,
+            targetId: kit.id,
+            title: kit.name,
+            status: kit.status,
+            mainImage: kit.image,
+            category: null,
+            kitId: null,
+            assetCount: kit._count.assets,
+            hasAssetsInCustody: kit.assets.some(
+              (a) => a.status === "IN_CUSTODY"
+            ),
+          };
+
+          setScannedItems((prev) => [newKitItem, ...prev]);
+          flashFrame("success");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          playScanSound();
+          setScanResult({
+            type: "success",
+            title: kit.name,
+            message: `Added to list (${scannedItems.length + 1} items)`,
+          });
+
+          setTimeout(() => setScanResult(null), 1200);
           finalizeScan();
           return;
         }
@@ -535,7 +640,7 @@ function ScannerContent() {
         // ── BOOKING CHECK-IN mode ──
         if (isBookingMode) {
           // Check duplicate
-          if (bookingCheckinItems.some((item) => item.assetId === asset.id)) {
+          if (bookingCheckinItems.some((item) => item.targetId === asset.id)) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
@@ -548,8 +653,9 @@ function ScannerContent() {
           }
 
           const newItem: ScannedItem = {
+            type: "asset",
             qrId: codeId,
-            assetId: asset.id,
+            targetId: asset.id,
             title: asset.title,
             status: asset.status,
             mainImage: asset.mainImage,
@@ -618,7 +724,11 @@ function ScannerContent() {
         }
 
         // ── BATCH mode: add to list ──
-        if (scannedItems.some((item) => item.assetId === asset.id)) {
+        if (
+          scannedItems.some(
+            (item) => item.type === "asset" && item.targetId === asset!.id
+          )
+        ) {
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           setScanResult({
@@ -631,8 +741,9 @@ function ScannerContent() {
         }
 
         const newItem: ScannedItem = {
+          type: "asset",
           qrId: codeId,
-          assetId: asset.id,
+          targetId: asset.id,
           title: asset.title,
           status: asset.status,
           mainImage: asset.mainImage,
@@ -694,6 +805,26 @@ function ScannerContent() {
     lastScanRef.current = "";
   };
 
+  /** Split the scan list into asset and kit id arrays for the fan-out calls. */
+  const splitScannedIds = () => ({
+    assetIds: scannedItems
+      .filter((i) => i.type === "asset")
+      .map((i) => i.targetId),
+    kitIds: scannedItems.filter((i) => i.type === "kit").map((i) => i.targetId),
+  });
+
+  /** Human label for the current batch: `"Tripod"` / `3 assets and 2 kits`. */
+  const batchLabel = () => {
+    if (scannedItems.length === 1) return `"${scannedItems[0].title}"`;
+    const assetCount = scannedItems.filter((i) => i.type === "asset").length;
+    const kitCount = scannedItems.length - assetCount;
+    const parts: string[] = [];
+    if (assetCount > 0)
+      parts.push(`${assetCount} asset${assetCount > 1 ? "s" : ""}`);
+    if (kitCount > 0) parts.push(`${kitCount} kit${kitCount > 1 ? "s" : ""}`);
+    return parts.join(" and ");
+  };
+
   const handleBatchSubmit = () => {
     // The drawer disables submit while blockers exist; this guard is
     // belt-and-braces so a clean list is an invariant of every perform* call.
@@ -708,11 +839,7 @@ function ScannerContent() {
       }
     } else if (action === "release_custody") {
       // Blockers guarantee every item in the list is IN_CUSTODY here.
-      const releaseLabel =
-        scannedItems.length === 1
-          ? `"${scannedItems[0].title}"`
-          : `${scannedItems.length} assets`;
-      Alert.alert("Release Custody", `Release custody of ${releaseLabel}?`, [
+      Alert.alert("Release Custody", `Release custody of ${batchLabel()}?`, [
         { text: "Cancel", style: "cancel" },
         {
           text: "Release",
@@ -757,34 +884,33 @@ function ScannerContent() {
           .join(" ") || member.name
       : member.name;
 
-    const confirmLabel =
-      scannedItems.length === 1
-        ? `"${scannedItems[0].title}"`
-        : `${scannedItems.length} assets`;
+    const confirmLabel = batchLabel();
     Alert.alert("Assign Custody", `Assign ${confirmLabel} to ${displayName}?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Assign",
         onPress: async () => {
           setIsSubmitting(true);
-          const assetIds = scannedItems.map((i) => i.assetId);
-          const { error } = await api.bulkAssignCustody(
-            currentOrg.id,
-            assetIds,
-            member.id
-          );
+          // Fan out per entity type — assets and kits have separate bulk
+          // endpoints wrapping their respective services (web parity).
+          const { assetIds, kitIds } = splitScannedIds();
+          const [assetResult, kitResult] = await Promise.all([
+            assetIds.length > 0
+              ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
+              : Promise.resolve({ error: null }),
+            kitIds.length > 0
+              ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
+              : Promise.resolve({ error: null }),
+          ]);
           setIsSubmitting(false);
 
+          const error = assetResult.error || kitResult.error;
           if (error) {
             Alert.alert("Error", error);
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            const assetLabel =
-              scannedItems.length === 1
-                ? `"${scannedItems[0].title}"`
-                : `${scannedItems.length} assets`;
-            Alert.alert("Done", `Assigned ${assetLabel} to ${displayName}.`);
+            Alert.alert("Done", `Assigned ${confirmLabel} to ${displayName}.`);
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -795,21 +921,26 @@ function ScannerContent() {
 
   const performBulkRelease = async () => {
     if (!currentOrg) return;
+    const releasedLabel = batchLabel();
     setIsSubmitting(true);
-    const assetIds = scannedItems.map((i) => i.assetId);
-    const { error } = await api.bulkReleaseCustody(currentOrg.id, assetIds);
+    const { assetIds, kitIds } = splitScannedIds();
+    const [assetResult, kitResult] = await Promise.all([
+      assetIds.length > 0
+        ? api.bulkReleaseCustody(currentOrg.id, assetIds)
+        : Promise.resolve({ error: null }),
+      kitIds.length > 0
+        ? api.bulkReleaseKitCustody(currentOrg.id, kitIds)
+        : Promise.resolve({ error: null }),
+    ]);
     setIsSubmitting(false);
 
+    const error = assetResult.error || kitResult.error;
     if (error) {
       Alert.alert("Error", error);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      const assetLabel =
-        scannedItems.length === 1
-          ? `"${scannedItems[0].title}"`
-          : `${scannedItems.length} assets`;
-      Alert.alert("Done", `Released custody of ${assetLabel}.`);
+      Alert.alert("Done", `Released custody of ${releasedLabel}.`);
       setScannedItems([]);
       lastScanRef.current = "";
     }
@@ -819,34 +950,31 @@ function ScannerContent() {
     setShowLocationPicker(false);
     if (!currentOrg) return;
 
-    const moveLabel =
-      scannedItems.length === 1
-        ? `"${scannedItems[0].title}"`
-        : `${scannedItems.length} assets`;
+    const moveLabel = batchLabel();
     Alert.alert("Update Location", `Move ${moveLabel} to ${location.name}?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Move",
         onPress: async () => {
           setIsSubmitting(true);
-          const assetIds = scannedItems.map((i) => i.assetId);
-          const { error } = await api.bulkUpdateLocation(
-            currentOrg.id,
-            assetIds,
-            location.id
-          );
+          const { assetIds, kitIds } = splitScannedIds();
+          const [assetResult, kitResult] = await Promise.all([
+            assetIds.length > 0
+              ? api.bulkUpdateLocation(currentOrg.id, assetIds, location.id)
+              : Promise.resolve({ error: null }),
+            kitIds.length > 0
+              ? api.bulkUpdateKitLocation(currentOrg.id, kitIds, location.id)
+              : Promise.resolve({ error: null }),
+          ]);
           setIsSubmitting(false);
 
+          const error = assetResult.error || kitResult.error;
           if (error) {
             Alert.alert("Error", error);
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            const assetLabel =
-              scannedItems.length === 1
-                ? `"${scannedItems[0].title}"`
-                : `${scannedItems.length} assets`;
-            Alert.alert("Done", `Moved ${assetLabel} to ${location.name}.`);
+            Alert.alert("Done", `Moved ${moveLabel} to ${location.name}.`);
             setScannedItems([]);
             lastScanRef.current = "";
           }
@@ -857,8 +985,10 @@ function ScannerContent() {
 
   // ── Booking Check-in Actions ────────────────────────
 
-  const removeBookingItem = (assetId: string) => {
-    setBookingCheckinItems((prev) => prev.filter((i) => i.assetId !== assetId));
+  const removeBookingItem = (targetId: string) => {
+    setBookingCheckinItems((prev) =>
+      prev.filter((i) => i.targetId !== targetId)
+    );
   };
 
   const clearBookingItems = () => {
@@ -881,7 +1011,7 @@ function ScannerContent() {
           text: "Check In",
           onPress: async () => {
             setIsBookingSubmitting(true);
-            const assetIds = bookingCheckinItems.map((i) => i.assetId);
+            const assetIds = bookingCheckinItems.map((i) => i.targetId);
             const timeZone = (() => {
               try {
                 return (
@@ -984,10 +1114,10 @@ function ScannerContent() {
 
   // Instruction text
   const instructionMap: Record<ScannerAction, string> = {
-    view: "Scan to view asset",
-    assign_custody: "Scan assets to assign custody",
-    release_custody: "Scan assets to release custody",
-    update_location: "Scan assets to update location",
+    view: "Scan to view an asset or kit",
+    assign_custody: "Scan assets or kits to assign custody",
+    release_custody: "Scan assets or kits to release custody",
+    update_location: "Scan assets or kits to update location",
   };
 
   // Submit button label
@@ -1231,7 +1361,7 @@ function ScannerContent() {
           <BatchDrawer
             items={scannedItems}
             keyField="qrId"
-            title={`${scannedItems.length} asset${
+            title={`${scannedItems.length} item${
               scannedItems.length > 1 ? "s" : ""
             } scanned`}
             submitLabel={submitLabelMap[action]}
@@ -1253,7 +1383,7 @@ function ScannerContent() {
         {showBookingDrawer && (
           <BatchDrawer
             items={bookingCheckinItems}
-            keyField="assetId"
+            keyField="targetId"
             title={`${bookingCheckinItems.length} asset${
               bookingCheckinItems.length > 1 ? "s" : ""
             } to check in`}
@@ -1351,7 +1481,9 @@ const useStyles = createStyles((colors) => ({
     justifyContent: "center",
     alignItems: "center",
     gap: spacing.md,
-    zIndex: 5,
+    // why: no zIndex — the action pills / batch drawer (later siblings) must
+    // win hit-testing, otherwise this full-screen touchable swallows the
+    // first tap aimed at them while paused. It still covers the camera area.
   },
   pausedTitle: {
     color: "#fff",

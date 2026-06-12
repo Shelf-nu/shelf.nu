@@ -1,7 +1,7 @@
 /**
  * Batch-scan blocker rules.
  *
- * The webapp's bulk services are all-or-nothing: one ineligible asset fails
+ * The webapp's bulk services are all-or-nothing: one ineligible item fails
  * the entire batch (e.g. `bulkAssignCustody` throws if any asset is not
  * AVAILABLE). The web scanner prevents this with client-side "blockers"
  * (see webapp `components/scanner/drawer/blockers-factory.tsx` and the
@@ -10,10 +10,12 @@
  * function from (action, scanned items) to a list of blocker groups the UI
  * renders above the submit button.
  *
- * Rules mirror the web drawers exactly:
- * - assign custody: already in custody / checked out / part of a kit
- * - release custody: not in custody / part of a kit
- * - update location: no eligibility blockers (web parity)
+ * Rules mirror the web drawers exactly, for both entity types:
+ * - assign custody — assets: already in custody / checked out / part of a
+ *   kit; kits: already in custody / checked out / has assets in custody
+ * - release custody — assets: not in custody / part of a kit; kits: not in
+ *   custody
+ * - update location — no eligibility blockers
  *
  * @see {@link file://./../components/scanner/batch-blockers.tsx} UI renderer
  * @see {@link file://./../app/(tabs)/scanner.tsx} integration
@@ -25,25 +27,37 @@ export type BatchScanAction =
   | "release_custody"
   | "update_location";
 
-/** The minimal item shape blocker rules need. */
+/** The minimal item shape blocker rules need (assets and kits). */
 export type BlockableItem = {
   qrId: string;
+  type: "asset" | "kit";
   title: string;
   status: string;
+  /** Assets only: id of the kit the asset belongs to (null otherwise). */
   kitId: string | null;
+  /** Kits only: true when any contained asset is individually in custody. */
+  hasAssetsInCustody?: boolean;
 };
 
 /** A group of items blocked for the same reason, with copy ready to render. */
 export type BlockerGroup = {
-  key: "in-custody" | "checked-out" | "part-of-kit" | "not-in-custody";
+  key:
+    | "asset-in-custody"
+    | "asset-checked-out"
+    | "asset-part-of-kit"
+    | "asset-not-in-custody"
+    | "kit-in-custody"
+    | "kit-checked-out"
+    | "kit-has-assets-in-custody"
+    | "kit-not-in-custody";
   /** qrIds of the affected items — used to remove them from the scan list. */
   qrIds: string[];
   message: string;
 };
 
-/** "3 assets are" / "1 asset is" — shared by all blocker messages. */
-function assetCount(n: number) {
-  return n === 1 ? "1 asset is" : `${n} assets are`;
+/** "3 assets are" / "1 kit is" — shared by all blocker messages. */
+function countNoun(n: number, noun: "asset" | "kit") {
+  return n === 1 ? `1 ${noun} is` : `${n} ${noun}s are`;
 }
 
 /**
@@ -57,6 +71,8 @@ export function computeBlockers(
   items: BlockableItem[]
 ): BlockerGroup[] {
   const groups: BlockerGroup[] = [];
+  const assets = items.filter((i) => i.type === "asset");
+  const kits = items.filter((i) => i.type === "kit");
 
   const push = (
     key: BlockerGroup["key"],
@@ -74,38 +90,77 @@ export function computeBlockers(
 
   if (action === "assign_custody") {
     push(
-      "in-custody",
-      items.filter((i) => i.status === "IN_CUSTODY"),
-      (n) => `${assetCount(n)} already in custody.`
+      "asset-in-custody",
+      assets.filter((i) => i.status === "IN_CUSTODY"),
+      (n) => `${countNoun(n, "asset")} already in custody.`
     );
     push(
-      "checked-out",
-      items.filter((i) => i.status === "CHECKED_OUT"),
+      "asset-checked-out",
+      assets.filter((i) => i.status === "CHECKED_OUT"),
       (n) =>
-        `${assetCount(
-          n
+        `${countNoun(
+          n,
+          "asset"
         )} checked out. Checked-out assets cannot be assigned custody.`
     );
     push(
-      "part-of-kit",
-      items.filter((i) => i.kitId !== null),
+      "asset-part-of-kit",
+      assets.filter((i) => i.kitId !== null),
       (n) =>
-        `${assetCount(n)} part of a kit. Kit custody is managed as a whole.`
+        `${countNoun(
+          n,
+          "asset"
+        )} part of a kit. Scan the kit to assign it as a whole.`
+    );
+    push(
+      "kit-in-custody",
+      kits.filter((i) => i.status === "IN_CUSTODY"),
+      (n) => `${countNoun(n, "kit")} already in custody.`
+    );
+    push(
+      "kit-checked-out",
+      kits.filter((i) => i.status === "CHECKED_OUT"),
+      (n) =>
+        `${countNoun(
+          n,
+          "kit"
+        )} checked out. Checked-out kits cannot be assigned custody.`
+    );
+    push(
+      "kit-has-assets-in-custody",
+      kits.filter(
+        (i) => i.status !== "IN_CUSTODY" && i.hasAssetsInCustody === true
+      ),
+      (n) =>
+        `${countNoun(n, "kit")} holding assets that are already in custody.`
     );
   } else if (action === "release_custody") {
     push(
-      "not-in-custody",
-      items.filter((i) => i.status !== "IN_CUSTODY"),
-      (n) => `${assetCount(n)} not in custody, so there is nothing to release.`
+      "asset-not-in-custody",
+      assets.filter((i) => i.status !== "IN_CUSTODY"),
+      (n) =>
+        `${countNoun(
+          n,
+          "asset"
+        )} not in custody, so there is nothing to release.`
     );
     push(
-      "part-of-kit",
-      items.filter((i) => i.kitId !== null && i.status === "IN_CUSTODY"),
+      "asset-part-of-kit",
+      assets.filter((i) => i.kitId !== null && i.status === "IN_CUSTODY"),
       (n) =>
-        `${assetCount(n)} part of a kit. Kit custody is managed as a whole.`
+        `${countNoun(
+          n,
+          "asset"
+        )} part of a kit. Scan the kit to release it as a whole.`
+    );
+    push(
+      "kit-not-in-custody",
+      kits.filter((i) => i.status !== "IN_CUSTODY"),
+      (n) =>
+        `${countNoun(n, "kit")} not in custody, so there is nothing to release.`
     );
   }
-  // update_location: no eligibility blockers — any scanned asset can move.
+  // update_location: no eligibility blockers — any scanned item can move.
 
   return groups;
 }

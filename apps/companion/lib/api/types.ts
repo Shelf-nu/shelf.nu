@@ -102,6 +102,20 @@ export type AssetDetail = {
   }[];
 };
 
+/**
+ * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
+ * statuses power the kit batch blockers ("kit has assets in custody"),
+ * mirroring the web scanner drawers.
+ */
+export type ScannedKit = {
+  id: string;
+  name: string;
+  status: string;
+  image: string | null;
+  _count: { assets: number };
+  assets: { id: string; status: string }[];
+};
+
 export type QrResponse = {
   qr: {
     id: string;
@@ -118,6 +132,8 @@ export type QrResponse = {
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the QR is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
 
@@ -139,8 +155,73 @@ export type BarcodeResponse = {
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the barcode is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
+
+// ── Kits ────────────────────────────────────────────────
+
+export type KitStatus = "AVAILABLE" | "IN_CUSTODY" | "CHECKED_OUT";
+
+export type KitListItem = {
+  id: string;
+  name: string;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  _count: { assets: number };
+  custody: { custodian: { id: string; name: string } } | null;
+};
+
+export type KitsResponse = {
+  kits: KitListItem[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type KitDetailAsset = {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+};
+
+export type KitDetail = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  createdAt: string;
+  custody: {
+    createdAt: string;
+    custodian: {
+      id: string;
+      name: string;
+      user: {
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+      } | null;
+    };
+  } | null;
+  assets: KitDetailAsset[];
+};
+
+export type KitDetailResponse = { kit: KitDetail };
+
+/** Intents accepted by POST /api/mobile/kits/bulk-actions */
+export type KitBulkIntent =
+  | "assign-custody"
+  | "release-custody"
+  | "update-location";
 
 export type TeamMember = {
   id: string;

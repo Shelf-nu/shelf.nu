@@ -13,7 +13,9 @@ appId: com.shelf.companion.carlos
     timeout: 8000
 - tapOn:
     point: "50%,32%"
-- tapOn: "Team WS"
+# Workspace name is env-driven so flows run against any test account
+# (defaults preserved via env/test.env; was hardcoded "Team WS")
+- tapOn: ${SHELF_TEST_WORKSPACE}
 - waitForAnimationToEnd
 - tapOn: "Home"
 - tapOn:

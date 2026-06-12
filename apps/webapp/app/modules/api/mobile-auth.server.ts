@@ -244,3 +244,18 @@ export const MOBILE_ASSET_SELECT = {
   category: { select: { name: true } },
   location: { select: { name: true } },
 } as const;
+
+/**
+ * Shared Prisma select shape for kit data returned by mobile scanner
+ * endpoints (QR/barcode resolution). The per-asset statuses power the
+ * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
+ * web scanner drawers.
+ */
+export const MOBILE_KIT_SELECT = {
+  id: true,
+  name: true,
+  status: true,
+  image: true,
+  _count: { select: { assets: true } },
+  assets: { select: { id: true, status: true } },
+} as const;
