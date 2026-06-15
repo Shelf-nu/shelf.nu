@@ -48,10 +48,9 @@ vi.mock("~/utils/rate-limit.server", () => ({
   enforceUserRateLimit: vi.fn(),
 }));
 
-// why: isolate eligibility — the route gates on canUserManageBookingAssets
-vi.mock("~/utils/bookings", () => ({
-  canUserManageBookingAssets: vi.fn(),
-}));
+// Note: canUserManageBookingAssets (~/utils/bookings) is intentionally NOT
+// mocked — it is the real authorization gate, exercised via the booking
+// status / role / custodian fixtures below.
 
 // why: we need to control error formatting in the catch block
 vi.mock("~/utils/error", () => ({
@@ -73,7 +72,6 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckinBooking } from "~/modules/booking/service.server";
 import { db } from "~/database/db.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 
 const mockUser = {
@@ -114,6 +112,9 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
 
     // Org-scoped booking lookup + eligibility added by the check-in hardening.
     (getMobileUserContext as any).mockResolvedValue({ role: "OWNER" });
+    // ONGOING + non-self-service role => the real canUserManageBookingAssets
+    // returns true (it only blocks COMPLETE/ARCHIVED/CANCELLED, and
+    // self-service on non-DRAFT bookings).
     (db.booking.findFirst as any).mockResolvedValue({
       id: "booking-1",
       status: "ONGOING",
@@ -121,7 +122,6 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
       to: new Date(),
       custodianUserId: "user-1",
     });
-    (canUserManageBookingAssets as any).mockReturnValue(true);
   });
 
   it("should partially checkin assets and return counts", async () => {
