@@ -154,6 +154,33 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
 }
 
 /**
+ * Keys whose values are credentials/secrets and must NEVER reach Sentry, even
+ * if one slips into a ShelfError's `additionalData`. Defense-in-depth: callers
+ * shouldn't put secrets in `additionalData` in the first place, but this
+ * guarantees a stray one can't be spread into the captured event's `extra`.
+ */
+const SENSITIVE_KEY_PATTERN =
+  /token|password|secret|verifier|cookie|authorization|api[-_]?key/i;
+
+/**
+ * Shallow-redact values under sensitive keys before they are spread into a
+ * Sentry event's `extra`. Non-object input yields an empty object.
+ *
+ * @param data - A ShelfError's `additionalData`
+ * @returns A copy with secret-ish values replaced by `"[redacted]"`
+ */
+function redactSecrets(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object") {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    out[key] = SENSITIVE_KEY_PATTERN.test(key) ? "[redacted]" : value;
+  }
+  return out;
+}
+
+/**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
@@ -176,7 +203,7 @@ function makeSentryContext(exception: unknown) {
       shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...(exception.additionalData || {}),
+      ...redactSecrets(exception.additionalData),
       traceId: exception.traceId,
       message: exception.message,
       cause: {

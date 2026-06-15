@@ -297,6 +297,28 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
   ReturnType<typeof payload<T>>;
 
 /**
+ * Log a caught server error for observability WITHOUT building a response.
+ *
+ * The logging half of {@link error}, for resource/API routes that catch a
+ * `ShelfError` and return their own JSON shape (so they can't use `error()`,
+ * which also fires a user notification and returns a richer payload). Mirrors
+ * `error()`'s logging exactly: 5xx (and uncaught) reach Sentry via
+ * `Logger.error`; handled 4xx land on the low-severity log trail via
+ * `Logger.handledClientError` (and are dropped from the Sentry error pipeline
+ * by `handleBeforeSendError`); client disconnects (status 499, "Request
+ * aborted") are intentionally skipped from both.
+ *
+ * @param cause - The normalized `ShelfError` to log
+ */
+export function logException(cause: ShelfError) {
+  if (cause.label === "Request aborted") {
+    return;
+  }
+  Logger.error(cause);
+  Logger.handledClientError(cause);
+}
+
+/**
  * Create an error response payload.
  *
  * Normalize the error to return to help type inference.

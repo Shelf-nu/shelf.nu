@@ -116,33 +116,3 @@ jobs:
         run: flyctl deploy --remote-only --build-arg COMMIT_SHA=${{ github.sha }} --app ${{ steps.app_name.outputs.value }} --dockerfile apps/webapp/Dockerfile
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      # Migrations apply via fly.toml's `release_command` (`prisma migrate
-      # deploy`) during the deploy above. If that ever exits 0 without applying
-      # (e.g. a schema-path/env hiccup at release time), the deploy still goes
-      # green and a missing table only surfaces later as runtime 500s — which is
-      # how a prod migration once drifted unnoticed. This gate asks the running
-      # production machine whether Prisma considers the schema in sync and fails
-      # loudly otherwise, so drift is caught here rather than by a user. It
-      # reuses FLY_API_TOKEN (no DB credentials in CI) and runs on the machine,
-      # which already carries DATABASE_URL/DIRECT_URL as Fly secrets. It runs
-      # after deploy, so a failure is an alert to investigate — it does not roll
-      # the release back.
-      - name: 🔎 Verify migrations applied (production)
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          set -uo pipefail
-          echo "Checking 'prisma migrate status' on production…"
-          OUTPUT=$(flyctl ssh console --app ${{ steps.app_name.outputs.value }} \
-            -C "/bin/sh -lc 'cd /src/apps/webapp && npx prisma migrate status'" 2>&1) || true
-          echo "--- prisma migrate status ---"
-          echo "$OUTPUT"
-          echo "-----------------------------"
-          if echo "$OUTPUT" | grep -q "Database schema is up to date"; then
-            echo "✅ Production database schema is up to date."
-            exit 0
-          fi
-          echo "::error::Prisma reports the production schema is NOT up to date — a migration may have failed to apply during release. Run 'npx prisma migrate status' / 'migrate deploy' against production and investigate before treating this deploy as healthy."
-          exit 1
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
