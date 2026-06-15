@@ -36,7 +36,7 @@ import {
   computeBookingAvailableQuantity,
   createConsumptionLog,
 } from "~/modules/consumption-log/service.server";
-import { assetQtyMeta } from "~/utils/asset-quantity";
+import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -3096,6 +3096,14 @@ export async function checkinBooking({
     type CheckinQtySummary = {
       assetId: string;
       title: string;
+      /**
+       * Asset shape needed to render unit-aware disposition phrasing
+       * via `formatUnitCount` (Phase 4e canonical helper). Populated
+       * from the row-locked asset inside the tx so notes can read
+       * "returned 10 boxes" rather than "returned 10".
+       */
+      type: AssetType;
+      unitOfMeasure: string | null;
       returned: number;
       consumed: number;
       lost: number;
@@ -3319,6 +3327,8 @@ export async function checkinBooking({
           const existing = summaryByAssetId.get(slice.assetId) ?? {
             assetId: slice.assetId,
             title: locked.title,
+            type: locked.type,
+            unitOfMeasure: locked.unitOfMeasure,
             returned: 0,
             consumed: 0,
             lost: 0,
@@ -3608,13 +3618,27 @@ export async function checkinBooking({
         );
 
         for (const summary of qtySummariesRef.value) {
+          /**
+           * Render disposition counts with the asset's `unitOfMeasure`
+           * via `formatUnitCount` ("returned 10 boxes" instead of
+           * "returned 10"). Phase 4e wording parity. The helper returns
+           * `null` for INDIVIDUAL — defence-in-depth fallback to bare
+           * integer (in practice this loop only sees qty-tracked rows).
+           */
+          const fmt = (qty: number) =>
+            formatUnitCount(
+              { type: summary.type, unitOfMeasure: summary.unitOfMeasure },
+              qty
+            ) ?? String(qty);
+
           const parts: string[] = [];
           if (summary.returned > 0)
-            parts.push(`returned **${summary.returned}**`);
+            parts.push(`returned **${fmt(summary.returned)}**`);
           if (summary.consumed > 0)
-            parts.push(`consumed **${summary.consumed}**`);
-          if (summary.lost > 0) parts.push(`**${summary.lost}** lost`);
-          if (summary.damaged > 0) parts.push(`**${summary.damaged}** damaged`);
+            parts.push(`consumed **${fmt(summary.consumed)}**`);
+          if (summary.lost > 0) parts.push(`**${fmt(summary.lost)}** lost`);
+          if (summary.damaged > 0)
+            parts.push(`**${fmt(summary.damaged)}** damaged`);
 
           if (parts.length > 0) {
             await createNotes({
@@ -3793,6 +3817,13 @@ function buildQtyPerAssetFragment(
   summaries: Array<{
     assetId: string;
     title: string;
+    /**
+     * Asset shape — feeds `formatUnitCount` so qty-tracked rows render
+     * the asset's `unitOfMeasure` ("10 boxes" instead of "10"). Phase 4e
+     * wording parity with the per-axis note sweep.
+     */
+    type: AssetType;
+    unitOfMeasure: string | null;
     returned: number;
     consumed: number;
     lost: number;
@@ -3802,13 +3833,24 @@ function buildQtyPerAssetFragment(
 ): string {
   const fragments: string[] = [];
   for (const s of summaries) {
+    /**
+     * `formatUnitCount` returns `null` for INDIVIDUAL (the helper's contract).
+     * Defence-in-depth: this loop only sees qty-tracked rows in practice (the
+     * `qtySummaries`/`CheckinQtySummary` arrays are populated inside the
+     * QUANTITY_TRACKED disposition branches), but the bare-integer fallback
+     * keeps phrasing sensible if an INDIVIDUAL ever sneaks in.
+     */
+    const fmt = (qty: number) =>
+      formatUnitCount({ type: s.type, unitOfMeasure: s.unitOfMeasure }, qty) ??
+      String(qty);
+
     const parts: string[] = [];
-    if (s.returned > 0) parts.push(`${s.returned} returned`);
-    if (s.consumed > 0) parts.push(`${s.consumed} consumed`);
-    if (s.lost > 0) parts.push(`${s.lost} lost`);
-    if (s.damaged > 0) parts.push(`${s.damaged} damaged`);
+    if (s.returned > 0) parts.push(`${fmt(s.returned)} returned`);
+    if (s.consumed > 0) parts.push(`${fmt(s.consumed)} consumed`);
+    if (s.lost > 0) parts.push(`${fmt(s.lost)} lost`);
+    if (s.damaged > 0) parts.push(`${fmt(s.damaged)} damaged`);
     if (s.pendingAfter && s.pendingAfter > 0) {
-      parts.push(`${s.pendingAfter} pending`);
+      parts.push(`${fmt(s.pendingAfter)} pending`);
     }
     if (parts.length === 0) continue;
     const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
@@ -4092,6 +4134,14 @@ export async function partialCheckinBooking({
     type QtyDispositionSummary = {
       assetId: string;
       title: string;
+      /**
+       * Asset shape needed to render unit-aware disposition phrasing
+       * via `formatUnitCount` (Phase 4e canonical helper). Populated
+       * from the row-locked asset inside the tx so notes can read
+       * "returned 10 boxes" rather than "returned 10".
+       */
+      type: AssetType;
+      unitOfMeasure: string | null;
       returned: number;
       consumed: number;
       lost: number;
@@ -4252,6 +4302,8 @@ export async function partialCheckinBooking({
         qtySummaries.push({
           assetId: disp.assetId,
           title: lockedAsset.title,
+          type: lockedAsset.type,
+          unitOfMeasure: lockedAsset.unitOfMeasure,
           returned: disp.returned ?? 0,
           consumed: disp.consumed ?? 0,
           lost: disp.lost ?? 0,
@@ -4475,15 +4527,30 @@ export async function partialCheckinBooking({
        * to preserve current behavior.
        */
       for (const summary of aggregatedQtySummaries) {
+        /**
+         * Render disposition counts with the asset's `unitOfMeasure` via
+         * `formatUnitCount` ("returned 10 boxes" instead of "returned 10")
+         * — Phase 4e wording parity. The helper returns `null` for
+         * INDIVIDUAL; defence-in-depth fallback to bare integer (in
+         * practice this loop only sees qty-tracked rows — the partial-
+         * checkin tx skips INDIVIDUAL dispositions at line ~4114).
+         */
+        const fmt = (qty: number) =>
+          formatUnitCount(
+            { type: summary.type, unitOfMeasure: summary.unitOfMeasure },
+            qty
+          ) ?? String(qty);
+
         const parts: string[] = [];
         if (summary.returned > 0)
-          parts.push(`returned **${summary.returned}**`);
+          parts.push(`returned **${fmt(summary.returned)}**`);
         if (summary.consumed > 0)
-          parts.push(`consumed **${summary.consumed}**`);
-        if (summary.lost > 0) parts.push(`**${summary.lost}** lost`);
-        if (summary.damaged > 0) parts.push(`**${summary.damaged}** damaged`);
+          parts.push(`consumed **${fmt(summary.consumed)}**`);
+        if (summary.lost > 0) parts.push(`**${fmt(summary.lost)}** lost`);
+        if (summary.damaged > 0)
+          parts.push(`**${fmt(summary.damaged)}** damaged`);
         if (summary.pendingAfter > 0) {
-          parts.push(`**${summary.pendingAfter}** still pending`);
+          parts.push(`**${fmt(summary.pendingAfter)}** still pending`);
         }
 
         await createNotes({

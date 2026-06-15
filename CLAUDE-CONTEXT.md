@@ -1594,16 +1594,16 @@ main).
 
 **🔵 Post-release backlog — deferred, NOT in this PR:**
 
-| Item                                                                             | Where (CLAUDE-CONTEXT.md) | Status                                                                                                                                                                                                   |
-| -------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10, COMMITTED `c6ef9c802`, polish 2026-06-15** — brought forward from post-release; see "Phase 4c — Split / merge UX (COMMITTED)" section below for the full report.                 |
-| **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Mostly not started. Sub-items: kit checkout/check-in qty polish, model grouping tool, import/export with qty columns, bulk-ops asset-type awareness.                                                     |
-| **Phase 4d — Rebalance kit allocation**                                          | line 1529-1533            | **Explicitly deferred 2026-06-10** (release pressure). Asset's `Assign` button stays disabled for fully-kit-allocated qty-tracked assets. `QuantityCustodyDialog` copy stays as-is.                      |
-| **Phase 4e — Booking-notes sweep (original scope tail)**                         | line 1698-1700            | Possibly residual. 4e landed the Custody / Kit / Location / Activity-feed axes; the "booking checkout / partial / final check-in" note-writer audit was not explicitly ticked. Worth a grep before ship. |
-| **Sub-phase 3e — Calendar + Polish**                                             | line 710-720              | Deferred until after Phase 4c (entangled with split/merge mechanic).                                                                                                                                     |
-| **Sub-phase 3d follow-ups**                                                      | line 645-708              | Deferred until after Phase 4.                                                                                                                                                                            |
-| **Reports end-to-end verification**                                              | line 2068-2083            | `TESTING-REPORTS.md` scaffold ready; deferred to post-Phase-4 to avoid double-walkthrough.                                                                                                               |
-| **Backfill verification on prod snapshot** (KitCustody, 628 prod rows)           | line 2088-2091            | `TESTING-KIT-CUSTODY-CORRECTNESS.md` Path B. Pre-prod-merge task — has to happen before the migration ships to prod, doesn't block PR merge.                                                             |
+| Item                                                                             | Where (CLAUDE-CONTEXT.md) | Status                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10, COMMITTED `c6ef9c802`, polish 2026-06-15** — brought forward from post-release; see "Phase 4c — Split / merge UX (COMMITTED)" section below for the full report.                                                                                                                                                                                                                   |
+| **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Mostly not started. Sub-items: kit checkout/check-in qty polish, model grouping tool, import/export with qty columns, bulk-ops asset-type awareness.                                                                                                                                                                                                                                                       |
+| **Phase 4d — Rebalance kit allocation**                                          | line 1529-1533            | **Explicitly deferred 2026-06-10** (release pressure). Asset's `Assign` button stays disabled for fully-kit-allocated qty-tracked assets. `QuantityCustodyDialog` copy stays as-is.                                                                                                                                                                                                                        |
+| **Phase 4e — Booking-notes sweep (original scope tail)**                         | line 1698-1700            | **CLOSED 2026-06-15.** Pre-release grep surfaced the two residual writers (`booking/service.server.ts` per-asset final + partial check-in notes + the `buildQtyPerAssetFragment` helper) that still emitted bare integers — now route counts through `formatUnitCount`, so phrasing reads "returned 10 boxes" instead of "returned 10" for qty-tracked assets. See "Phase 4e tail closeout" section below. |
+| **Sub-phase 3e — Calendar + Polish**                                             | line 710-720              | Deferred until after Phase 4c (entangled with split/merge mechanic).                                                                                                                                                                                                                                                                                                                                       |
+| **Sub-phase 3d follow-ups**                                                      | line 645-708              | Deferred until after Phase 4.                                                                                                                                                                                                                                                                                                                                                                              |
+| **Reports end-to-end verification**                                              | line 2068-2083            | `TESTING-REPORTS.md` scaffold ready; deferred to post-Phase-4 to avoid double-walkthrough.                                                                                                                                                                                                                                                                                                                 |
+| **Backfill verification on prod snapshot** (KitCustody, 628 prod rows)           | line 2088-2091            | `TESTING-KIT-CUSTODY-CORRECTNESS.md` Path B. Pre-prod-merge task — has to happen before the migration ships to prod, doesn't block PR merge.                                                                                                                                                                                                                                                               |
 
 #### Phase 4c — Split / merge UX (2026-06-10) — COMMITTED `c6ef9c802`
 
@@ -1907,6 +1907,40 @@ asset — credible audit-log spoof / phishing. Patched in two layers:
 +6 tests (2 in `asset-quantity.test.ts` covering strip + new helper
 describe block, 4 in `form.test.ts` covering refinement accept/reject
 cases). Validate green at **2388 / 2388**.
+
+#### Phase 4e tail closeout — Booking-notes sweep (2026-06-15)
+
+Pre-release residual surfaced by a grep over `booking/service.server.ts`
+for `createNote*` paths that still emitted bare integers. Three writers
+still rendered "returned **10**" instead of the canonical Phase 4e
+"returned **10 boxes**" for qty-tracked dispositions:
+
+- Per-asset final check-in note (`checkinBooking`, line ~3610) — the
+  `${actor} via check-in on {booking}: returned **N**, consumed **N**…`
+  loop fed by `qtySummariesRef.value`.
+- Per-asset partial check-in note (`partialCheckinBooking`, line ~4477) —
+  same shape, fed by `aggregatedQtySummaries`.
+- `buildQtyPerAssetFragment` helper (line ~3792) used by both the
+  booking-side `Pens (10 returned, 2 consumed)` summary line and the
+  partial-checkin `qtyTail`.
+
+Closeout: widened the local `CheckinQtySummary` + `QtyDispositionSummary`
+type defs to carry the asset's `type` + `unitOfMeasure`, plumbed those
+fields through from the row-locked asset at the two summary-build sites
+(line 3319 + 4252), then routed all four rendering paths through
+`formatUnitCount` with a bare-integer fallback (defence-in-depth — the
+loops only see QUANTITY_TRACKED in practice). Activity events were
+already qty-aware via `assetQtyMeta` since the original 4e sweep and
+were not touched. Checkout flow has no per-asset note, only a
+booking-level `createStatusTransitionNote` — also not touched.
+
+`pnpm webapp:validate` green at **2588 / 2589** (1 pre-existing skip).
+No new tests; existing `booking/service.server.test.ts` cases assert
+note content at higher level so the wording change rides through.
+
+This closes the row in the post-release backlog table; **Phase 4e is
+fully done** — every qty-tracked note + ActivityEvent.meta path now
+surfaces the affected unit count.
 
 #### Phase 4e — Quantity-aware notes + activity-feed audit (original scope)
 
