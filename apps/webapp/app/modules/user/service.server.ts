@@ -21,6 +21,7 @@ import { db } from "~/database/db.server";
 
 import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   deleteAuthAccount,
@@ -676,7 +677,7 @@ export async function createUser(
   const shouldCreatePersonalOrg = !config.disableSignup;
 
   try {
-    return await db.$transaction(
+    const createdUser = await db.$transaction(
       async (tx) => {
         const user = await tx.user.create({
           data: {
@@ -774,6 +775,23 @@ export async function createUser(
       },
       { maxWait: 6000, timeout: 10000 }
     );
+
+    /**
+     * Best-effort funnel analytics: a brand-new account was created. Fire-and-
+     * forget — never throws and is a no-op when PostHog is unconfigured, so it
+     * cannot affect signup. `created_with_invite` / `is_sso` let the funnel
+     * isolate genuine self-serve signups downstream.
+     */
+    captureServerEvent({
+      distinctId: userId,
+      event: "signup_completed",
+      properties: {
+        created_with_invite: Boolean(createdWithInvite),
+        is_sso: Boolean(isSSO),
+      },
+    });
+
+    return createdUser;
   } catch (cause) {
     const isUniqueViolation =
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";

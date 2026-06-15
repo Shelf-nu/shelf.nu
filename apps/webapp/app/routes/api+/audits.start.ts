@@ -8,7 +8,11 @@ import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
-import { resolveAssetIdsForAudit } from "~/modules/audit/context-helpers.server";
+import {
+  resolveAssetIdsForAudit,
+  resolveAssetIdsForKitSelection,
+  resolveAssetIdsForLocationSelection,
+} from "~/modules/audit/context-helpers.server";
 import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import {
   createAuditSession,
@@ -62,16 +66,30 @@ export const StartAuditSchema = BaseAuditSchema.extend({
   contextType: z.enum(["location", "kit", "user"]).optional(),
   contextId: z.string().optional(),
   contextName: z.string().optional(),
+  // Location IDs - for the bulk "Create audit" action on the Locations index
+  // (multi-select). May contain ALL_SELECTED_KEY when "select all" is active.
+  locationIds: z.array(z.string()).optional(),
+  // Kit IDs - for the bulk "Create audit" action on the Kits index
+  // (multi-select). May contain ALL_SELECTED_KEY when "select all" is active.
+  kitIds: z.array(z.string()).optional(),
   includeChildLocations: z.coerce.boolean().default(false),
 }).refine(
   (data) => {
-    // Must have either assetIds OR context params
+    // Must have assetIds, single-context params, a location multi-selection,
+    // OR a kit multi-selection
     const hasAssetIds = data.assetIds && data.assetIds.length > 0;
     const hasContext = data.contextType && data.contextId;
-    return hasAssetIds || hasContext;
+    const hasLocationSelection =
+      data.contextType === "location" &&
+      !!data.locationIds &&
+      data.locationIds.length > 0;
+    const hasKitSelection =
+      data.contextType === "kit" && !!data.kitIds && data.kitIds.length > 0;
+    return hasAssetIds || hasContext || hasLocationSelection || hasKitSelection;
   },
   {
-    message: "Either assetIds or context parameters must be provided",
+    message:
+      "Provide assetIds, context parameters (contextType + contextId), a location selection (contextType=location + locationIds), or a kit selection (contextType=kit + kitIds).",
   }
 );
 
@@ -99,19 +117,39 @@ export async function action({ request, context }: ActionFunctionArgs) {
       contextType,
       contextId,
       contextName,
+      locationIds,
+      kitIds,
       includeChildLocations,
       currentSearchParams,
     } = parseData(formData, StartAuditSchema.and(CurrentSearchParamsSchema), {
       additionalData: { organizationId, userId },
     });
 
-    // Determine if we're selecting all items across multiple pages
-    const isSelectingAll =
+    // Determine if we're selecting all asset rows across multiple pages
+    const isSelectingAllAssets =
       directAssetIds && directAssetIds.includes(ALL_SELECTED_KEY);
 
     let assetIds: string[];
 
-    if (isSelectingAll) {
+    if (contextType === "location" && locationIds && locationIds.length > 0) {
+      // Bulk "Create audit" from the Locations index (multi-select). Resolve
+      // the union of assets across the selected locations server-side — handles
+      // "select all" (honoring the list filter) and asserts explicit IDs.
+      assetIds = await resolveAssetIdsForLocationSelection({
+        organizationId,
+        locationIds,
+        currentSearchParams,
+      });
+    } else if (contextType === "kit" && kitIds && kitIds.length > 0) {
+      // Bulk "Create audit" from the Kits index (multi-select). Resolve the
+      // union of assets across the selected kits server-side — handles "select
+      // all" (honoring the list filter) and asserts explicit IDs.
+      assetIds = await resolveAssetIdsForKitSelection({
+        organizationId,
+        kitIds,
+        currentSearchParams,
+      });
+    } else if (isSelectingAllAssets) {
       // When "Select All" is used, resolve IDs using bulk operation helper
       // which handles both simple and advanced filter modes
       const settings = await getAssetIndexSettings({

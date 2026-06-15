@@ -161,6 +161,22 @@ describe(safeRedirect.name, () => {
   it("should return destination path", () => {
     expect(safeRedirect("/items")).toBe("/items");
   });
+
+  it("should block open-redirect bypasses that prefix checks miss", () => {
+    // Protocol-relative and backslash variants all resolve off-origin;
+    // browsers treat "\" like "/" in http(s) URLs.
+    expect(safeRedirect("//evil.com")).toBe("/");
+    expect(safeRedirect("/\\evil.com")).toBe("/"); // "/\evil.com"
+    expect(safeRedirect("/\\\\evil.com")).toBe("/"); // "/\\evil.com"
+    // "%5C" reaches a route loader already decoded to "\" via route params.
+    expect(safeRedirect(`/${decodeURIComponent("%5C")}evil.com`)).toBe("/");
+    // Internal Remix routes remain blocked.
+    expect(safeRedirect("/__manifest")).toBe("/");
+    // Absolute allow-list is matched by origin, not prefix: a host that merely
+    // begins with SERVER_URL, or hides it in userinfo, must not pass.
+    expect(safeRedirect("https://app.shelf.nu.evil.com/phish")).toBe("/");
+    expect(safeRedirect("https://app.shelf.nu@evil.com/phish")).toBe("/");
+  });
 });
 
 describe(payload.name, () => {

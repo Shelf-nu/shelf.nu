@@ -20,7 +20,7 @@
  * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   isAuthApiError,
   isAuthRetryableFetchError,
@@ -54,6 +54,28 @@ const MOBILE_AUTH_CODE_TTL_MS = 180_000;
  */
 function hashCode(plaintext: string): string {
   return createHash("sha256").update(plaintext).digest("hex");
+}
+
+/**
+ * Verifies a PKCE code verifier against a stored S256 challenge in constant
+ * time. The challenge is `base64url(SHA-256(verifier))` (RFC 7636); we recompute
+ * it from the presented verifier and compare. Length is checked first because
+ * `timingSafeEqual` throws on unequal-length buffers.
+ *
+ * @param codeVerifier - The verifier presented at exchange (from the app)
+ * @param codeChallenge - The S256 challenge bound to the code at mint time
+ * @returns true if the verifier hashes to the stored challenge
+ */
+function verifyPkceChallenge(
+  codeVerifier: string,
+  codeChallenge: string
+): boolean {
+  const computed = createHash("sha256")
+    .update(codeVerifier)
+    .digest("base64url");
+  const a = Buffer.from(computed);
+  const b = Buffer.from(codeChallenge);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /**
@@ -215,10 +237,16 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
  * and the subsequent exchange request — only its hash is persisted.
  *
  * @param userId - The authenticated user the code authorizes a session for
+ * @param codeChallenge - Optional PKCE (S256) challenge. When present, the code
+ *   can only be redeemed with a matching verifier (see
+ *   {@link redeemMobileAuthCode}). Omitted by legacy (pre-PKCE) app builds.
  * @returns The plaintext authorization code to embed in the deeplink
  * @throws {ShelfError} If the row cannot be created
  */
-export async function createMobileAuthCode(userId: string): Promise<string> {
+export async function createMobileAuthCode(
+  userId: string,
+  codeChallenge?: string
+): Promise<string> {
   try {
     const code = randomBytes(32).toString("base64url"); // 256-bit entropy
 
@@ -226,6 +254,7 @@ export async function createMobileAuthCode(userId: string): Promise<string> {
       data: {
         userId,
         codeHash: hashCode(code),
+        codeChallenge: codeChallenge ?? null,
         expiresAt: new Date(Date.now() + MOBILE_AUTH_CODE_TTL_MS),
       },
     });
@@ -251,11 +280,25 @@ export async function createMobileAuthCode(userId: string): Promise<string> {
  * already-consumed code yields a uniform 400 (no oracle about which check
  * failed).
  *
+ * PKCE: if the code was minted with an S256 `codeChallenge` (a PKCE-capable
+ * app), the caller MUST present a `codeVerifier` that hashes to it — otherwise
+ * the (now-consumed) code is rejected with the SAME uniform 400, so an
+ * intercepted code is useless without the verifier. Codes minted WITHOUT a
+ * challenge (legacy, pre-PKCE builds) redeem with no verifier — backward
+ * compatible. Verification runs AFTER the atomic consume, so a wrong verifier
+ * burns the single-use code; acceptable, since the legitimate app always
+ * presents the matching verifier.
+ *
  * @param code - The plaintext authorization code from the deeplink
+ * @param codeVerifier - PKCE verifier; required iff the code carries a challenge
  * @returns A freshly minted, mapped auth session for the device
- * @throws {ShelfError} 400 if the code is missing/invalid/expired/already used
+ * @throws {ShelfError} 400 if the code is missing/invalid/expired/used, or if a
+ *   PKCE-bound code is presented without a matching verifier
  */
-export async function redeemMobileAuthCode(code: string): Promise<AuthSession> {
+export async function redeemMobileAuthCode(
+  code: string,
+  codeVerifier?: string
+): Promise<AuthSession> {
   try {
     if (!code) {
       throw new ShelfError({
@@ -285,10 +328,26 @@ export async function redeemMobileAuthCode(code: string): Promise<AuthSession> {
       });
     }
 
-    const { user } = await db.mobileAuthCode.findUniqueOrThrow({
+    const { user, codeChallenge } = await db.mobileAuthCode.findUniqueOrThrow({
       where: { codeHash },
-      select: { user: { select: { email: true } } },
+      select: { codeChallenge: true, user: { select: { email: true } } },
     });
+
+    // PKCE check — only for codes minted with a challenge. Same uniform 400 as
+    // an invalid code (no oracle about why redemption failed). The code is
+    // already consumed above, so a wrong/absent verifier burns it.
+    if (
+      codeChallenge &&
+      (!codeVerifier || !verifyPkceChallenge(codeVerifier, codeChallenge))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid or expired authorization code",
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     return await mintMobileSessionForUser(user.email);
   } catch (cause) {

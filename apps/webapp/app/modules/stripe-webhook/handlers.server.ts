@@ -8,6 +8,7 @@ import { subscriptionGrantedText } from "~/emails/stripe/subscription-granted";
 import { sendTrialEndsSoonEmail } from "~/emails/stripe/trial-ends-soon";
 import { unpaidInvoiceUserText } from "~/emails/stripe/unpaid-invoice";
 import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { scheduleTrialEndsTomorrowEmail } from "~/modules/addon-trial/scheduler.server";
 import { handleAuditAddonWebhook } from "~/modules/audit/addon.server";
 import { handleBarcodeAddonWebhook } from "~/modules/barcode/addon.server";
@@ -35,6 +36,57 @@ import {
 } from "./helpers.server";
 
 const OK = () => new Response(null, { status: 200 });
+
+/**
+ * Builds the `upgrade_completed` PostHog properties from a Stripe subscription.
+ * Normalises the recurring price to a monthly figure (`mrr`) so monthly,
+ * yearly, weekly and daily plans are comparable; `mrr` is `null` when the plan
+ * price or interval is unavailable/unrecognised rather than guessing.
+ *
+ * @param subscription - The Stripe subscription from the webhook event
+ * @param tierId - The resolved Shelf tier for the subscription
+ * @param via - How the paid conversion happened: `direct` (subscribed without a
+ *   trial), `upgrade` (moved to a higher paid tier), or `trial_conversion`
+ *   (a trial transitioned to an active paid subscription)
+ * @returns Flat, PII-free property bag for the funnel event
+ */
+function buildUpgradeCompletedProps(
+  subscription: Stripe.Subscription,
+  tierId: string | undefined,
+  via: "direct" | "upgrade" | "trial_conversion"
+) {
+  const plan = subscription.items.data[0]?.plan;
+
+  // Normalise the recurring amount to a monthly figure. Unknown intervals fall
+  // through to null so we never report a wrong MRR for an unexpected cadence.
+  let mrr: number | null = null;
+  if (typeof plan?.amount === "number") {
+    const perPeriod = plan.amount / 100;
+    switch (plan.interval) {
+      case "month":
+        mrr = perPeriod;
+        break;
+      case "year":
+        mrr = Number((perPeriod / 12).toFixed(2));
+        break;
+      case "week":
+        mrr = Number(((perPeriod * 52) / 12).toFixed(2));
+        break;
+      case "day":
+        mrr = Number(((perPeriod * 365) / 12).toFixed(2));
+        break;
+      default:
+        mrr = null;
+    }
+  }
+
+  return {
+    tierId: tierId ?? "unknown",
+    billing_cycle: plan?.interval ?? null,
+    mrr,
+    via,
+  };
+}
 
 // ─── Checkout ──────────────────────────────────────────────
 
@@ -206,6 +258,14 @@ export async function handleSubscriptionCreated(
         });
       });
 
+    // Direct paid conversion (non-trial, non-transfer): a free user just
+    // became paying. Best-effort funnel event — never blocks the webhook.
+    captureServerEvent({
+      distinctId: user.id,
+      event: "upgrade_completed",
+      properties: buildUpgradeCompletedProps(subscription, tierId, "direct"),
+    });
+
     const { emailsToNotify, customerName } = await getCustomerNotificationData({
       customerId,
       user,
@@ -333,6 +393,18 @@ export async function handleSubscriptionUpdated(
     user.tierId
   );
 
+  // A trial converting to paid arrives as a status transition trialing →
+  // active. The trial-creation path already set the user's paid tier, so the
+  // "higher tier" guard below is false for these — detect the transition
+  // explicitly, otherwise every trial-originated paid conversion is missed.
+  const previousStatus = (
+    event.data.previous_attributes as
+      | { status?: Stripe.Subscription.Status }
+      | undefined
+  )?.status;
+  const isTrialConversion =
+    previousStatus === "trialing" && subscription.status === "active";
+
   if (subscription.status === "active" && newSubscriptionIsHigherTier) {
     await db.user
       .update({
@@ -349,6 +421,24 @@ export async function handleSubscriptionUpdated(
           status: 500,
         });
       });
+  }
+
+  // Fire upgrade_completed for either a genuine tier upgrade or a trial→paid
+  // conversion. The DB tier (set on the first such event) prevents repeats, so
+  // renewals/no-op updates don't re-emit. Best-effort; never blocks the webhook.
+  if (
+    isTrialConversion ||
+    (subscription.status === "active" && newSubscriptionIsHigherTier)
+  ) {
+    captureServerEvent({
+      distinctId: user.id,
+      event: "upgrade_completed",
+      properties: buildUpgradeCompletedProps(
+        subscription,
+        tierId,
+        isTrialConversion ? "trial_conversion" : "upgrade"
+      ),
+    });
   }
 
   return OK();
@@ -413,6 +503,21 @@ export async function handleSubscriptionDeleted(
           status: 500,
         });
       });
+
+    // Count churn only for users who actually paid. Trial users are placed on
+    // the paid tier at trial start, so the tier guard above also passes for a
+    // mid-trial cancellation — exclude those (still inside the trial window) so
+    // trial abandonment doesn't inflate churn. Best-effort; never blocks.
+    const stillWithinTrial = subscription.trial_end
+      ? subscription.trial_end * 1000 > Date.now()
+      : false;
+    if (!stillWithinTrial) {
+      captureServerEvent({
+        distinctId: user.id,
+        event: "subscription_cancelled",
+        properties: { tierId: tierId ?? "unknown" },
+      });
+    }
 
     // Only reset branding when downgrading from Plus (tier_1) to Free
     if (user.tierId === TierId.tier_1) {

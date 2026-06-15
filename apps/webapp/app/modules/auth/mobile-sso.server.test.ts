@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 import {
@@ -47,9 +48,15 @@ beforeEach(() => {
 });
 
 /** Wires the happy-path mocks for a successful redeem + fresh-session mint. */
-function mockSuccessfulMint(email = "sso@acme.com") {
+function mockSuccessfulMint(
+  email = "sso@acme.com",
+  codeChallenge: string | null = null
+) {
   dbMocks.updateMany.mockResolvedValue({ count: 1 });
-  dbMocks.findUniqueOrThrow.mockResolvedValue({ user: { email } });
+  dbMocks.findUniqueOrThrow.mockResolvedValue({
+    user: { email },
+    codeChallenge,
+  });
   supabaseMocks.generateLink.mockResolvedValue({
     data: { properties: { hashed_token: "hash_123" } },
     error: null,
@@ -84,6 +91,16 @@ describe("createMobileAuthCode", () => {
     expect(data.codeHash).toEqual(expect.any(String));
     expect(data.codeHash).not.toEqual(code); // stored value is the hash
     expect(data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(data.codeChallenge).toBeNull(); // no PKCE challenge when omitted
+  });
+
+  it("stores the PKCE challenge when provided", async () => {
+    dbMocks.create.mockResolvedValue({});
+
+    await createMobileAuthCode("user_1", "challenge_abc");
+
+    const { data } = dbMocks.create.mock.calls[0][0];
+    expect(data.codeChallenge).toBe("challenge_abc");
   });
 });
 
@@ -218,6 +235,50 @@ describe("redeemMobileAuthCode", () => {
       status: 500,
     });
     expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
+  });
+
+  it("redeems a legacy (no-challenge) code without a verifier", async () => {
+    mockSuccessfulMint("sso@acme.com", null); // pre-PKCE app: codeChallenge null
+
+    const session = await redeemMobileAuthCode("good-code"); // no verifier
+
+    expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // minted
+  });
+
+  it("redeems a PKCE code when the verifier matches the challenge", async () => {
+    const verifier = "v".repeat(64);
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    mockSuccessfulMint("sso@acme.com", challenge);
+
+    const session = await redeemMobileAuthCode("good-code", verifier);
+
+    expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
+  });
+
+  it("rejects a PKCE code with a wrong verifier (400, no mint) but consumes it", async () => {
+    const challenge = createHash("sha256")
+      .update("the-real-verifier")
+      .digest("base64url");
+    mockSuccessfulMint("sso@acme.com", challenge);
+
+    await expect(
+      redeemMobileAuthCode("good-code", "a-different-verifier")
+    ).rejects.toMatchObject({ status: 400 });
+    expect(dbMocks.updateMany).toHaveBeenCalledTimes(1); // single-use consume ran
+    expect(supabaseMocks.generateLink).not.toHaveBeenCalled(); // never minted
+  });
+
+  it("rejects a PKCE code when no verifier is supplied", async () => {
+    const challenge = createHash("sha256")
+      .update("verifier")
+      .digest("base64url");
+    mockSuccessfulMint("sso@acme.com", challenge);
+
+    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(supabaseMocks.generateLink).not.toHaveBeenCalled();
   });
 });
 

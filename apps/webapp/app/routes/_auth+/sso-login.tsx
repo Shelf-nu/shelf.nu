@@ -19,6 +19,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -42,17 +43,17 @@ const SSOLoginFormSchema = z.object({
   platform: z.enum(["web", "mobile"]).optional(),
 });
 
-export function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
   const subHeading = "Enter your company's domain to login with SSO.";
   const { disableSSO } = config;
 
+  const url = new URL(request.url);
   // The native-app flow opens this page with `?platform=mobile`. The in-app
   // browser may carry a stale web cookie, but the app still needs to complete
   // the SSO handoff to obtain its OWN session — so don't short-circuit it to
   // /assets. The web flow still redirects an already-authenticated session.
-  const isMobile =
-    new URL(request.url).searchParams.get("platform") === "mobile";
+  const isMobile = url.searchParams.get("platform") === "mobile";
 
   try {
     if (context.isAuthenticated && !isMobile) {
@@ -68,6 +69,26 @@ export function loader({ context, request }: LoaderFunctionArgs) {
         label: "User onboarding",
         status: 403,
         shouldBeCaptured: false,
+      });
+    }
+
+    // PKCE (native SSO): a PKCE-capable companion build appends an S256
+    // `code_challenge`. Stash it in a short-lived cookie so it survives the SSO
+    // redirect chain back to `/oauth/callback/mobile`, where it is bound to the
+    // minted auth code. Only accept a well-formed S256 challenge (43-char
+    // base64url); anything else is ignored (treated as a legacy, non-PKCE flow).
+    const codeChallenge = url.searchParams.get("code_challenge");
+    const validChallenge =
+      isMobile && codeChallenge && /^[A-Za-z0-9_-]{43}$/.test(codeChallenge)
+        ? codeChallenge
+        : null;
+
+    if (validChallenge) {
+      return data(payload({ title, subHeading }), {
+        headers: {
+          "Set-Cookie":
+            await mobilePkceChallengeCookie.serialize(validChallenge),
+        },
       });
     }
 
