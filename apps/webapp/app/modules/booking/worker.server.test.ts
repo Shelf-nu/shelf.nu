@@ -3,7 +3,10 @@ import { db } from "~/database/db.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
-import { createStatusTransitionNote } from "./service.server";
+import {
+  createStatusTransitionNote,
+  scheduleExpiryArchiveJob,
+} from "./service.server";
 import type { SchedulerData } from "./types";
 import { registerBookingWorkers } from "./worker.server";
 
@@ -38,6 +41,7 @@ vitest.mock("~/utils/scheduler.server", () => ({
 vitest.mock("./service.server", () => ({
   createStatusTransitionNote: vitest.fn().mockResolvedValue(undefined),
   scheduleNextBookingJob: vitest.fn().mockResolvedValue(undefined),
+  scheduleExpiryArchiveJob: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoiding actual booking note creation during worker tests
@@ -343,7 +347,7 @@ describe("autoArchiveExpiredHandler", () => {
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
-  it("skips when the end date + grace period has not yet elapsed", async () => {
+  it("reschedules (does not archive) when the end date + grace has not elapsed", async () => {
     //@ts-expect-error missing vitest type
     db.booking.findUnique.mockResolvedValue({
       ...pastReservedBooking,
@@ -358,5 +362,8 @@ describe("autoArchiveExpiredHandler", () => {
     await workerHandler(mockJob);
 
     expect(db.booking.update).not.toHaveBeenCalled();
+    expect(scheduleExpiryArchiveJob).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "booking-1" })
+    );
   });
 });

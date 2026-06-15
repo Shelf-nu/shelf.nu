@@ -2273,7 +2273,7 @@ describe("archiveBooking", () => {
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
+      where: { id: "booking-1", status: BookingStatus.COMPLETE },
       data: { status: BookingStatus.ARCHIVED },
     });
     expect(result).toEqual(archivedBooking);
@@ -2349,7 +2349,7 @@ describe("archiveBooking", () => {
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
+      where: { id: "booking-1", status: BookingStatus.RESERVED },
       data: {
         status: BookingStatus.ARCHIVED,
         archivedWithoutCheckin: true,
@@ -3550,7 +3550,11 @@ describe("bulkArchiveBookings", () => {
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["b1", "b2"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["b1", "b2"] },
+        organizationId: "org-1",
+        status: BookingStatus.COMPLETE,
+      },
       data: { status: BookingStatus.ARCHIVED },
     });
     // The fix removed the interactive transaction entirely for this path.
@@ -3610,7 +3614,11 @@ describe("bulkArchiveBookings", () => {
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["r1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["r1"] },
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+      },
       data: {
         status: BookingStatus.ARCHIVED,
         archivedWithoutCheckin: true,
@@ -3691,12 +3699,20 @@ describe("bulkArchiveBookings", () => {
 
     // COMPLETE rows archive without the flag…
     expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["c1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["c1"] },
+        organizationId: "org-1",
+        status: BookingStatus.COMPLETE,
+      },
       data: { status: BookingStatus.ARCHIVED },
     });
     // …RESERVED rows archive WITH the never-returned flag.
     expect(db.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["r1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["r1"] },
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+      },
       data: {
         status: BookingStatus.ARCHIVED,
         archivedWithoutCheckin: true,

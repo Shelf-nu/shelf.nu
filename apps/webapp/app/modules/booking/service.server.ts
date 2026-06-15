@@ -3419,14 +3419,31 @@ export async function archiveBooking({
      */
     const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.ARCHIVED,
-        ...(archivedWithoutCheckin ? { archivedWithoutCheckin: true } : {}),
-      },
-    });
+    /**
+     * Guard the write on the status we just read. If a concurrent checkout
+     * flipped a RESERVED booking to ONGOING/OVERDUE between the read above and
+     * this write, the update matches no row and we abort — otherwise we'd
+     * archive a booking whose assets are now physically checked out (TOCTOU).
+     */
+    const updatedBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id, status: booking.status },
+        data: {
+          status: BookingStatus.ARCHIVED,
+          ...(archivedWithoutCheckin ? { archivedWithoutCheckin: true } : {}),
+        },
+      })
+      .catch(() => null);
+
+    if (!updatedBooking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "This booking's status changed before it could be archived. Please refresh and try again.",
+      });
+    }
 
     // Cancel any pending auto-archive job
     await cancelScheduler(booking);
@@ -5336,14 +5353,27 @@ export async function bulkArchiveBookings({
 
     if (completeIds.length > 0) {
       await db.booking.updateMany({
-        where: { id: { in: completeIds }, organizationId },
+        // status guard: only rows still COMPLETE are archived, in case one was
+        // transitioned between the findMany above and this write.
+        where: {
+          id: { in: completeIds },
+          organizationId,
+          status: BookingStatus.COMPLETE,
+        },
         data: { status: BookingStatus.ARCHIVED },
       });
     }
 
     if (reservedIds.length > 0) {
       await db.booking.updateMany({
-        where: { id: { in: reservedIds }, organizationId },
+        // status guard: a reservation checked out between the findMany above and
+        // this write is no longer RESERVED, so it is skipped — its now
+        // checked-out assets keep their active booking (no orphaned custody).
+        where: {
+          id: { in: reservedIds },
+          organizationId,
+          status: BookingStatus.RESERVED,
+        },
         data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
       });
     }

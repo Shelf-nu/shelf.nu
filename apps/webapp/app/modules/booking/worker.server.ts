@@ -22,6 +22,7 @@ import {
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createStatusTransitionNote,
+  scheduleExpiryArchiveJob,
   scheduleNextBookingJob,
 } from "./service.server";
 import type { SchedulerData } from "./types";
@@ -383,9 +384,20 @@ const autoArchiveExpiredHandler = async ({
     );
     const now = new Date();
     if (archiveAfter > now) {
+      // Not due yet: the booking was extended, or the org raised the grace
+      // days, after this job was queued. Re-queue for the correct time instead
+      // of dropping it — otherwise the booking would never be auto-archived.
       Logger.info(
-        `Auto-archive-expired: Booking ${data.id} end-date+grace not yet reached, skipping`
+        `Auto-archive-expired: Booking ${
+          data.id
+        } not due yet, rescheduling for ${archiveAfter.toISOString()}`
       );
+      await scheduleExpiryArchiveJob({
+        bookingId: booking.id,
+        to: booking.to,
+        autoArchiveDays: bookingSettings.autoArchiveDays,
+        hints: data.hints,
+      });
       return;
     }
 
