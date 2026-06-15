@@ -59,6 +59,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -270,14 +271,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // When turning the setting ON, schedule the archive job for every
         // currently-reserved booking so the existing backlog of past-due
         // reservations is cleaned up too — not just bookings reserved later.
+        // Best-effort: the toggle is already saved, so a scheduler hiccup must
+        // not fail the settings update. New reservations still schedule via the
+        // reserve path, and the backlog re-schedules if the org re-toggles.
         if (autoArchiveExpiredReservations) {
-          const settings =
-            await getBookingSettingsForOrganization(organizationId);
-          await scheduleExpiryArchiveForExistingReservations({
-            organizationId,
-            autoArchiveDays: settings.autoArchiveDays,
-            hints: getClientHint(request),
-          });
+          try {
+            const settings =
+              await getBookingSettingsForOrganization(organizationId);
+            await scheduleExpiryArchiveForExistingReservations({
+              organizationId,
+              autoArchiveDays: settings.autoArchiveDays,
+              hints: getClientHint(request),
+            });
+          } catch (cause) {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message:
+                  "Failed to schedule auto-archive for existing reservations",
+                additionalData: { organizationId },
+                label: "Booking Settings",
+                shouldBeCaptured: false,
+              })
+            );
+          }
         }
 
         sendNotification({

@@ -1319,12 +1319,28 @@ export async function reserveBooking({
       select: { autoArchiveExpiredReservations: true, autoArchiveDays: true },
     });
     if (expiryArchiveSettings?.autoArchiveExpiredReservations) {
-      await scheduleExpiryArchiveJob({
-        bookingId: bookingFound.id,
-        to,
-        autoArchiveDays: expiryArchiveSettings.autoArchiveDays,
-        hints,
-      });
+      // Best-effort: the booking is already persisted as RESERVED, so a
+      // scheduler/queue hiccup must not fail the reservation. Log and continue —
+      // the job is re-established if the org re-toggles the setting.
+      try {
+        await scheduleExpiryArchiveJob({
+          bookingId: bookingFound.id,
+          to,
+          autoArchiveDays: expiryArchiveSettings.autoArchiveDays,
+          hints,
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Failed to schedule auto-archive-expired job after reserving booking",
+            additionalData: { bookingId: bookingFound.id, organizationId },
+            label,
+            shouldBeCaptured: false,
+          })
+        );
+      }
     }
 
     // Resolve notification recipients and send emails.
