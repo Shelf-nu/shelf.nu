@@ -432,6 +432,14 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
 
+    // Mock asset statuses - the scanned assets are CHECKED_OUT so they pass the
+    // progressive-checkout guard (only checked-out assets can be checked in).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.CHECKED_OUT },
+    ]);
+
     const result = await partialCheckinBooking(mockPartialCheckinParams);
 
     // Verify assets status updated (no longer disconnecting from booking)
@@ -470,6 +478,32 @@ describe("partialCheckinBooking", () => {
       remainingAssetCount: 1, // 3 total - 2 checked in = 1 remaining
       isComplete: false,
     });
+  });
+
+  it("should reject checking in assets that were never checked out (progressive checkout guard)", async () => {
+    expect.assertions(1);
+
+    // Booking holds both assets; asset-2 is still Booked (AVAILABLE) — it was
+    // never scanned out under progressive checkout, so it cannot be checked in.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // asset-1 is CHECKED_OUT, asset-2 is still AVAILABLE (never checked out).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.AVAILABLE },
+    ]);
+
+    await expect(
+      partialCheckinBooking(mockPartialCheckinParams)
+    ).rejects.toThrow(/never checked out/i);
   });
 
   it("should redirect to complete check-in when all assets are being checked in", async () => {

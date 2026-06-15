@@ -82,8 +82,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    teamMembers,
+    teamMembersForForm,
+    userId,
+    currentOrganization,
+    lifecycleProgress,
+  } = useLoaderData<BookingPageLoaderData>();
+
+  // Progressive checkout is only offered while there are still items that
+  // haven't been checked out yet (the Booked bucket). Once everything has been
+  // checked out, hide the "Scan to check out" entry point.
+  const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -283,6 +293,33 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 {isBase ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
+
+            {/*
+              Progressive checkout: scan booking items to check them out
+              one-by-one. Available while the booking is RESERVED (start the
+              checkout) and while ONGOING/OVERDUE (continue checking out
+              still-Booked items). Link button → no explicit `type` needed.
+            */}
+            <When
+              truthy={
+                (bookingStatus?.isReserved ||
+                  bookingStatus?.isOngoing ||
+                  bookingStatus?.isOverdue) &&
+                canCheckOutBooking &&
+                hasItemsToCheckOut
+              }
+            >
+              <Button
+                variant="secondary"
+                icon="scan"
+                size="sm"
+                className="grow whitespace-nowrap"
+                to={`/bookings/${id}/overview/checkout-assets`}
+                disabled={disabled || isLoadingWorkingHours}
+              >
+                Scan to check out
+              </Button>
+            </When>
 
             {/* When booking is reserved, we show the check-out button */}
             <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>

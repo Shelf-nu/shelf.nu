@@ -10,6 +10,7 @@ import {
   completeAuditSession,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
+import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -80,9 +81,13 @@ export async function action({ request }: ActionFunctionArgs) {
       isSelfServiceOrBase,
     });
 
-    const hints = {
-      timeZone: timeZone || "UTC",
-      locale: "en-US",
+    // Derive hints the standard way: locale from the request's Accept-Language
+    // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
+    // clients can't set that cookie, so they pass their device timeZone in the
+    // body — prefer it when present.
+    const hints: ClientHint = {
+      ...getClientHint(request),
+      ...(timeZone ? { timeZone } : {}),
     };
 
     await completeAuditSession({

@@ -20,6 +20,7 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { partialCheckinAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkin-drawer";
+import { partialCheckoutAssetsSchema } from "~/components/scanner/drawer/uses/partial-checkout-drawer";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
@@ -1294,6 +1295,91 @@ export async function reserveBooking({
   }
 }
 
+/**
+ * Schedules the post-checkout check-in reminder (and overdue handler) for a
+ * booking that has just transitioned into an active (ONGOING) state.
+ *
+ * Extracted from {@link checkoutBooking}'s scheduler tail so the progressive
+ * (partial) checkout path can reuse the exact same scheduling behaviour when
+ * its first scan flips the booking to ONGOING. Callers must only invoke this
+ * for NON-expired bookings (expired bookings go straight to OVERDUE and need no
+ * reminder). The booking is re-hydrated internally with the email-include shape
+ * so callers don't need to supply a full `BookingForEmail`.
+ *
+ * Behaviour:
+ * - If less than 1 hour remains until `to`, the check-in reminder is sent
+ *   immediately and an overdue handler is scheduled for `to`.
+ * - Otherwise the check-in reminder is scheduled for 1 hour before `to`.
+ *
+ * @param booking - The effective (post-checkout) booking; must include `id` and
+ *   a non-null `to`
+ * @param hints - Client hints forwarded to the scheduled jobs and email
+ * @param organizationId - Booking's organization (for recipient resolution)
+ */
+async function scheduleCheckinReminderForBooking(
+  booking: { id: string; to: Date | null },
+  hints: ClientHint,
+  organizationId: string
+) {
+  const effectiveTo = booking.to;
+  if (!effectiveTo) {
+    return;
+  }
+
+  /** Calculate the time difference between the booking.to and the current time */
+  const { hours } = calcTimeDifference(effectiveTo, new Date());
+  const lessThanOneHourToCheckin = hours < 1;
+
+  // For any checkout (early or not), what matters is time until check-in.
+  /**
+   * If less than 1 hour until check-in time, then
+   * send checkin reminder immediately.
+   * We also schedule the overdue handler for the booking
+   */
+  if (lessThanOneHourToCheckin) {
+    // Re-hydrate the email-shaped booking only when we actually need to email.
+    // BOOKING_INCLUDE_FOR_EMAIL carries `_count.assets` used for the email body.
+    const bookingForEmail = await db.booking.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: caller already org-checked this booking id before invoking the helper
+      where: { id: booking.id },
+      include: { ...BOOKING_INCLUDE_FOR_EMAIL, assets: true },
+    });
+
+    await sendCheckinReminder(
+      bookingForEmail,
+      bookingForEmail._count.assets,
+      hints,
+      organizationId
+    );
+
+    const when = new Date(effectiveTo);
+    await scheduleNextBookingJob({
+      data: {
+        id: booking.id,
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
+      },
+      when,
+    });
+  } else {
+    /**
+     * If the checkout is performed more than 1 hour before booking.to
+     * the checkout reminder has not been sent yet
+     * So we need to cancel it and manually schedule check-in reminder
+     */
+    const when = new Date(effectiveTo);
+    when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
+    await scheduleNextBookingJob({
+      data: {
+        id: booking.id,
+        hints,
+        eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
+      },
+      when,
+    });
+  }
+}
+
 export async function checkoutBooking({
   id,
   organizationId,
@@ -1500,22 +1586,14 @@ export async function checkoutBooking({
       { timeout: 15000 }
     );
 
-    /** Build an effective snapshot by merging bookingFound with any fields
-     * modified by dataToUpdate (adjusted dates, status). This avoids
-     * re-reading from the DB and ensures downstream logic (notes, emails,
-     * scheduling) uses the correct post-checkout values. */
-    const effectiveFrom =
-      (dataToUpdate.from as Date | undefined) ?? bookingFound.from;
+    /** Build effective post-checkout values by merging bookingFound with any
+     * fields modified by dataToUpdate (adjusted dates, status). This avoids
+     * re-reading from the DB and ensures downstream logic (notes, scheduling)
+     * uses the correct post-checkout values. */
     const effectiveTo =
       (dataToUpdate.to as Date | undefined) ?? bookingFound.to;
     const effectiveStatus =
       (dataToUpdate.status as BookingStatus) ?? bookingFound.status;
-    const effectiveBooking = {
-      ...bookingFound,
-      from: effectiveFrom,
-      to: effectiveTo,
-      status: effectiveStatus,
-    };
 
     // Create status transition note
     if (userId) {
@@ -1528,10 +1606,6 @@ export async function checkoutBooking({
         custodianUserId: bookingFound.custodianUserId || undefined,
       });
     }
-
-    /** Calculate the time difference between the booking.to and the current time */
-    const { hours } = calcTimeDifference(effectiveTo!, new Date());
-    const lessThanOneHourToCheckin = hours < 1;
 
     /** We cancel just in case there is something pending */
     await cancelScheduler(bookingFound);
@@ -1548,48 +1622,13 @@ export async function checkoutBooking({
       });
     }
 
-    // For any checkout (early or not), what matters is time until check-in
-    /**
-     * If less than 1 hour until check-in time, then
-     * send checkin reminder immediately.
-     * We also schedule the overdue handler for the booking
-     */
-    if (lessThanOneHourToCheckin) {
-      await sendCheckinReminder(
-        effectiveBooking,
-        bookingFound._count.assets,
-        hints,
-        organizationId
-      );
-
-      if (effectiveTo) {
-        const when = new Date(effectiveTo);
-        await scheduleNextBookingJob({
-          data: {
-            id: bookingFound.id,
-            hints,
-            eventType: BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler,
-          },
-          when,
-        });
-      }
-    } else {
-      /**
-       * If the checkout is performed more than 1 hour before booking.to
-       * the checkout reminder has not been sent yet
-       * So we need to cancel it and manually schedule check-in reminder
-       */
-      const when = new Date(effectiveTo!);
-      when.setHours(when.getHours() - 1); // send the reminder 1 hour before the booking ends
-      await scheduleNextBookingJob({
-        data: {
-          id: bookingFound.id,
-          hints,
-          eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder,
-        },
-        when,
-      });
-    }
+    // Schedule the check-in reminder / overdue handler (shared with the
+    // progressive-checkout path). Uses the post-checkout effective `to`.
+    await scheduleCheckinReminderForBooking(
+      { id: bookingFound.id, to: effectiveTo ?? null },
+      hints,
+      organizationId
+    );
 
     /** Hydrate the full booking with relations for the return payload only. */
     return await db.booking.findUniqueOrThrow({
@@ -1806,18 +1845,19 @@ export async function checkinBooking({
           }
         }
 
-        // Activity events — one BOOKING_CHECKED_IN per asset, inside the tx.
-        // Must be atomic with booking status update for audit trail consistency.
-        if (bookingFound.assets.length > 0) {
+        // Activity events — one BOOKING_CHECKED_IN per ACTUALLY-checked-in asset.
+        // Never-checked-out assets (progressive checkout can leave some) must
+        // NOT get a check-in event. Atomic with the booking status update.
+        if (assetsToCheckin.length > 0) {
           await recordEvents(
-            bookingFound.assets.map((asset) => ({
+            assetsToCheckin.map((assetId) => ({
               organizationId,
               actorUserId: userId ?? null,
               action: "BOOKING_CHECKED_IN",
               entityType: "BOOKING",
               entityId: bookingFound.id,
               bookingId: bookingFound.id,
-              assetId: asset.id,
+              assetId,
             })),
             tx
           );
@@ -2117,6 +2157,36 @@ export async function partialCheckinBooking({
       });
     }
 
+    // Progressive checkout guard: an asset can only be checked IN if it was
+    // first checked OUT. With progressive checkout a booking can hold
+    // still-Booked (AVAILABLE) assets that were never scanned out — attempting
+    // to check those in is invalid and must be rejected before the
+    // "covers all remaining" early-exit (which would otherwise complete the
+    // booking and flip never-checked-out assets to AVAILABLE no-ops).
+    const scannedStatuses = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, title: true, status: true },
+    });
+    const notCheckedOut = scannedStatuses.filter(
+      (a) => a.status !== AssetStatus.CHECKED_OUT
+    );
+    if (notCheckedOut.length > 0) {
+      // why: with progressive checkout a booking can hold still-Booked
+      // (AVAILABLE) assets that were never checked out — they cannot be checked in.
+      const names = notCheckedOut
+        .slice(0, 3)
+        .map((a) => a.title)
+        .join(", ");
+      const more =
+        notCheckedOut.length > 3 ? ` and ${notCheckedOut.length - 3} more` : "";
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Cannot check in assets that were never checked out: ${names}${more}.`,
+      });
+    }
+
     // Early exit: if this batch returns every asset still outstanding for THIS
     // booking, run a complete check-in instead of recording another partial one.
     //
@@ -2400,6 +2470,417 @@ export async function partialCheckinBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while partially checking in booking.",
+    });
+  }
+}
+
+/**
+ * Progressive (partial) check-OUT of a booking.
+ *
+ * Mirrors {@link partialCheckinBooking} but for the checkout direction: scan
+ * booking items to check them out one batch at a time. Each batch records a
+ * `PartialBookingCheckout` row (the per-booking source of truth) and flips the
+ * scanned assets/kits to CHECKED_OUT.
+ *
+ * Semantic differences from partial check-in:
+ * - The FIRST scan transitions the booking RESERVED → ONGOING (or OVERDUE if
+ *   the booking's `to` is already in the past). Subsequent scans leave the
+ *   status untouched. Partial checkout NEVER auto-completes the booking.
+ * - Every scanned batch is run through conflict + custody validation (scoped to
+ *   the scanned assets), which partial check-in does not perform.
+ * - If a batch covers every still-Booked asset, the full {@link checkoutBooking}
+ *   is delegated to (clean status transition + schedulers + notes), mirroring
+ *   how partial check-in delegates to checkinBooking for the final batch.
+ *
+ * @param id - Booking id (org-checked via findUniqueOrThrow)
+ * @param organizationId - Caller's active organization
+ * @param assetIds - Asset ids scanned in this batch (must belong to the booking)
+ * @param userId - Acting user
+ * @param hints - Client hints (timezone/locale) for scheduling + date math
+ * @param intentChoice - Optional early-checkout intent forwarded to the full op
+ * @returns booking + checkedOutAssetCount + remainingAssetCount + isComplete
+ * @throws {ShelfError} 404 if booking not found; 400 for membership/idempotency
+ *   violations; conflict/custody business-rule rejections
+ */
+export async function partialCheckoutBooking({
+  id,
+  organizationId,
+  assetIds,
+  userId,
+  hints,
+  intentChoice,
+}: Pick<Booking, "id" | "organizationId"> & {
+  assetIds: Asset["id"][];
+  userId: User["id"];
+  hints: ClientHint;
+  intentChoice?: CheckoutIntentEnum;
+}) {
+  try {
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    // First, validate the booking exists and get its current assets.
+    // status is selected on assets because the custody guard below needs it.
+    const bookingFound = await db.booking
+      .findUniqueOrThrow({
+        where: { id, organizationId },
+        include: {
+          assets: { select: { id: true, kitId: true, status: true } },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          status: 404,
+          label,
+          message:
+            "Booking not found, are you sure it exists in current workspace?",
+          shouldBeCaptured: !isNotFoundError(cause),
+        });
+      });
+
+    // Validate that all provided assetIds are actually in the booking BEFORE any
+    // completion shortcut. The early-exit below delegates to the full checkout
+    // when this batch covers all outstanding assets; without this guard a batch
+    // like [lastOutstandingAsset, unrelatedSameOrgAsset] would satisfy that
+    // check and check out the booking (writing notes about a non-booking asset)
+    // instead of returning a 400. This matters especially for the mobile
+    // endpoint, which forwards raw assetIds with none of the web drawer's
+    // client-side filtering.
+    const bookingAssetIds = new Set(bookingFound.assets.map((a) => a.id));
+    const invalidAssetIds = assetIds.filter(
+      (assetId) => !bookingAssetIds.has(assetId)
+    );
+
+    if (invalidAssetIds.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Some assets are not part of this booking: ${invalidAssetIds.join(
+          ", "
+        )}`,
+      });
+    }
+
+    // Assets already checked out for THIS booking (per-booking source of truth).
+    const alreadyCheckedOutAssetIds = await getPartiallyCheckedOutAssetIds(id);
+    const recordedAssetIdSet = new Set(alreadyCheckedOutAssetIds);
+    const providedAssetIds = new Set(assetIds);
+
+    // Booking assets not yet covered by any partial check-OUT record = still Booked.
+    const outstandingAssetIds = bookingFound.assets
+      .map((asset) => asset.id)
+      .filter((assetId) => !recordedAssetIdSet.has(assetId));
+
+    // If this batch covers every still-Booked asset, run the full checkout
+    // (clean status transition + schedulers + notes), mirroring how partial
+    // check-in delegates to checkinBooking for the final batch.
+    if (
+      bookingFound.assets.length > 0 &&
+      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
+    ) {
+      const fullyCheckedOut = await checkoutBooking({
+        id,
+        organizationId,
+        hints,
+        intentChoice,
+        from: bookingFound.from,
+        to: bookingFound.to,
+        userId,
+      });
+      return {
+        booking: fullyCheckedOut,
+        checkedOutAssetCount: outstandingAssetIds.length,
+        remainingAssetCount: 0,
+        isComplete: true,
+      };
+    }
+
+    // Validate the SCANNED assets only: reject if any is in custody or is
+    // booked/checked-out by another overlapping booking. Mirrors
+    // checkoutBooking's guards, scoped to this scan batch.
+    const scannedAssetsWithConflicts = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      include: {
+        bookings: createBookingConflictConditions({
+          currentBookingId: id,
+          fromDate: bookingFound.from,
+          toDate: bookingFound.to,
+        }),
+      },
+    });
+
+    const inCustody = scannedAssetsWithConflicts.filter(
+      (a) => a.status === AssetStatus.IN_CUSTODY
+    );
+    if (inCustody.length > 0) {
+      const names = inCustody
+        .slice(0, 3)
+        .map((a) => a.title)
+        .join(", ");
+      const more =
+        inCustody.length > 3 ? ` and ${inCustody.length - 3} more` : "";
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Assets in custody",
+        message: `Cannot check out. Some assets are currently in custody: ${names}${more}. Release custody first or remove them from the booking.`,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (bookingFound.from && bookingFound.to) {
+      const conflicted = scannedAssetsWithConflicts.filter((a) =>
+        hasAssetBookingConflicts(a, id)
+      );
+      if (conflicted.length > 0) {
+        const names = conflicted
+          .slice(0, 3)
+          .map((a) => a.title)
+          .join(", ");
+        const more =
+          conflicted.length > 3 ? ` and ${conflicted.length - 3} more` : "";
+        throw new ShelfError({
+          cause: null,
+          label,
+          title: "Booking conflict",
+          message: `Cannot check out. Some assets are already booked or checked out elsewhere: ${names}${more}. Remove the conflicted assets and try again.`,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    // Defensive: skip assets already checked out for this booking (idempotent re-scan).
+    const assetIdsToCheckOut = assetIds.filter(
+      (assetId) => !recordedAssetIdSet.has(assetId)
+    );
+    if (assetIdsToCheckOut.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: "All scanned assets are already checked out for this booking.",
+      });
+    }
+
+    // For kits: only update kit status if ALL assets of a kit are being checked out
+    const assetsBeingCheckedOut = bookingFound.assets.filter((a) =>
+      assetIdsToCheckOut.includes(a.id)
+    );
+    const kitIdsBeingCheckedOut = getKitIdsByAssets(assetsBeingCheckedOut);
+
+    // Only process kits where ALL their assets in this booking are being checked out
+    const completeKitIds: string[] = [];
+    for (const kitId of kitIdsBeingCheckedOut) {
+      const kitAssetsInBooking = bookingFound.assets.filter(
+        (a) => a.kitId === kitId
+      );
+      const kitAssetsBeingCheckedOut = assetsBeingCheckedOut.filter(
+        (a) => a.kitId === kitId
+      );
+
+      if (kitAssetsInBooking.length === kitAssetsBeingCheckedOut.length) {
+        completeKitIds.push(kitId);
+      }
+    }
+
+    const result = await db.$transaction(async (tx) => {
+      // Update the status of checked-out assets to CHECKED_OUT
+      await tx.asset.updateMany({
+        where: { id: { in: assetIdsToCheckOut }, organizationId },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+
+      // Only update kit status for kits that are completely checked out
+      if (completeKitIds.length > 0) {
+        await tx.kit.updateMany({
+          where: { id: { in: completeKitIds }, organizationId },
+          data: { status: KitStatus.CHECKED_OUT },
+        });
+      }
+
+      // Create partial check-out record for tracking
+      await tx.partialBookingCheckout.create({
+        data: {
+          bookingId: id,
+          checkedOutById: userId,
+          assetIds: assetIdsToCheckOut,
+          checkoutCount: assetIdsToCheckOut.length,
+        },
+      });
+
+      // Create audit notes for each checked-out asset using createNotes
+      const actor = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const noteContent = `${actor} checked out via partial check-out.`;
+      await createNotes({
+        content: noteContent,
+        type: "UPDATE",
+        userId,
+        assetIds: assetIdsToCheckOut,
+        organizationId,
+      });
+
+      // Activity events — one BOOKING_PARTIAL_CHECKOUT per asset, inside the tx.
+      await recordEvents(
+        assetIdsToCheckOut.map((assetId) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "BOOKING_PARTIAL_CHECKOUT",
+          entityType: "BOOKING",
+          entityId: id,
+          bookingId: id,
+          assetId,
+        })),
+        tx
+      );
+
+      // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
+      let bookingStatusChanged = false;
+      if (bookingFound.status === BookingStatus.RESERVED) {
+        const expired = bookingFound.to
+          ? isBookingExpired({ to: bookingFound.to })
+          : false;
+        await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
+          where: { id },
+          data: {
+            status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+          },
+          select: { id: true },
+        });
+        bookingStatusChanged = true;
+      }
+
+      // BOOKING ACTIVITY LOG: Log partial check-out activity.
+      // Get the kit and standalone asset data for consistent formatting.
+      const assetsWithKitInfo = await tx.asset.findMany({
+        where: { id: { in: assetIdsToCheckOut }, organizationId },
+        select: {
+          id: true,
+          title: true,
+          kit: { select: { id: true, name: true } },
+        },
+      });
+
+      // Separate complete kits from individual assets
+      const completeKits: Array<{ id: string; name: string }> = [];
+      const standaloneAssets: Array<{ id: string; title: string }> = [];
+      const processedKitIds = new Set<string>();
+
+      for (const asset of assetsWithKitInfo) {
+        if (
+          asset.kit &&
+          completeKitIds.includes(asset.kit.id) &&
+          !processedKitIds.has(asset.kit.id)
+        ) {
+          completeKits.push({ id: asset.kit.id, name: asset.kit.name });
+          processedKitIds.add(asset.kit.id);
+        } else if (!asset.kit) {
+          standaloneAssets.push({ id: asset.id, title: asset.title });
+        }
+      }
+
+      const hasKits = completeKits.length > 0;
+      const hasAssets = standaloneAssets.length > 0;
+
+      let itemsDescription = "";
+      if (hasKits && hasAssets) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked out");
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked out"
+        );
+        itemsDescription = `${assetContent} and ${kitContent}`;
+      } else if (hasKits) {
+        const kitContent = wrapKitsWithDataForNote(completeKits, "checked out");
+        itemsDescription = kitContent;
+      } else if (hasAssets) {
+        const assetContent = wrapAssetsWithDataForNote(
+          standaloneAssets,
+          "checked out"
+        );
+        itemsDescription = assetContent;
+      }
+
+      // Get the updated booking with all original assets to calculate remaining count
+      const updatedBookingForNote = await tx.booking.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this re-fetches the same proven id
+        where: { id },
+        include: {
+          assets: true,
+          custodianUser: true,
+          custodianTeamMember: true,
+          _count: { select: { assets: true } },
+        },
+      });
+
+      const statusNote = bookingStatusChanged
+        ? ` and checked out the booking (status changed to ${
+            bookingFound.to && isBookingExpired({ to: bookingFound.to })
+              ? "Overdue"
+              : "Ongoing"
+          })`
+        : "";
+      await createSystemBookingNote({
+        bookingId: id,
+        organizationId,
+        content: `${wrapUserLinkForNote(
+          user!
+        )} performed a partial check-out: ${itemsDescription}${statusNote}.`,
+      });
+
+      // Remaining = booking assets not covered by any partial check-out record
+      // (previous sessions + this batch).
+      const checkedOutAfterThisBatch = new Set([
+        ...recordedAssetIdSet,
+        ...assetIdsToCheckOut,
+      ]);
+      const remainingAssetCount = updatedBookingForNote.assets.filter(
+        (asset) => !checkedOutAfterThisBatch.has(asset.id)
+      ).length;
+
+      return {
+        booking: updatedBookingForNote,
+        checkedOutAssetCount: assetIdsToCheckOut.length,
+        remainingAssetCount,
+        isComplete: false,
+        bookingStatusChanged,
+      };
+    });
+
+    // When the first scan transitioned the booking to ONGOING (not expired),
+    // schedule the check-in reminder exactly like the full checkout does.
+    if (result.bookingStatusChanged && bookingFound.to) {
+      const expired = isBookingExpired({ to: bookingFound.to });
+      if (!expired) {
+        await scheduleCheckinReminderForBooking(
+          { id: bookingFound.id, to: bookingFound.to },
+          hints,
+          organizationId
+        );
+      }
+    }
+
+    // Strip the internal flag from the returned payload.
+    const { bookingStatusChanged: _ignored, ...publicResult } = result;
+    return publicResult;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while partially checking out booking.",
     });
   }
 }
@@ -5533,6 +6014,179 @@ export async function checkinAssets({
     return payload({
       success: true,
       message: `Successfully checked in ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      }`,
+    });
+  }
+
+  return redirect(`/bookings/${bookingId}`);
+}
+
+/**
+ * Get all unique asset IDs that have been checked out via partial check-outs
+ * for a booking. Mirrors {@link getPartiallyCheckedInAssetIds} for the checkout
+ * direction; this is the per-booking source of truth for what has been scanned
+ * out so far (progress bar + completion detection).
+ *
+ * @param bookingId - Booking id to read partial check-out records for
+ * @returns Deduplicated list of asset ids checked out for this booking
+ */
+export async function getPartiallyCheckedOutAssetIds(
+  bookingId: string
+): Promise<string[]> {
+  const partialCheckouts = await db.partialBookingCheckout.findMany({
+    where: { bookingId },
+    select: { assetIds: true },
+  });
+
+  // Flatten all asset ID arrays and get unique values
+  const allAssetIds = partialCheckouts.flatMap((pc) => pc.assetIds);
+  return [...new Set(allAssetIds)];
+}
+
+/**
+ * Get detailed partial check-out data with user and date information for each
+ * asset. Mirrors {@link getDetailedPartialCheckinData}. Returns both the asset
+ * IDs and the detailed check-out data in one query.
+ *
+ * @param bookingId - Booking id to read partial check-out records for
+ * @returns checkedOutAssetIds + a record of assetId → { checkoutDate, checkedOutBy }
+ */
+export async function getDetailedPartialCheckoutData(bookingId: string) {
+  const partialCheckouts = await db.partialBookingCheckout.findMany({
+    where: { bookingId },
+    include: {
+      checkedOutBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          profilePicture: true,
+        },
+      },
+    },
+    orderBy: { checkoutTimestamp: "asc" },
+  });
+
+  // Create a record of asset ID to its check-out details
+  const assetCheckoutRecord: Record<
+    string,
+    {
+      checkoutDate: Date;
+      checkedOutBy: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        profilePicture: string | null;
+      };
+    }
+  > = {};
+
+  // Collect all unique asset IDs
+  const checkedOutAssetIds: string[] = [];
+
+  partialCheckouts.forEach((checkout) => {
+    checkout.assetIds.forEach((assetId) => {
+      // Only store the first (earliest) check-out for each asset
+      if (!assetCheckoutRecord[assetId]) {
+        assetCheckoutRecord[assetId] = {
+          checkoutDate: checkout.checkoutTimestamp,
+          checkedOutBy: checkout.checkedOutBy,
+        };
+        checkedOutAssetIds.push(assetId);
+      }
+    });
+  });
+
+  return {
+    checkedOutAssetIds,
+    partialCheckoutDetails: assetCheckoutRecord,
+  };
+}
+
+export type PartialCheckoutDetailsType = Record<
+  string,
+  {
+    checkoutDate: Date | string;
+    checkedOutBy: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePicture: string | null;
+    };
+  }
+>;
+
+/**
+ * Action wrapper for progressive (partial) check-OUT, mirroring
+ * {@link checkinAssets}. Parses the scanned asset ids from form data, runs
+ * {@link partialCheckoutBooking}, sends a notification, and either returns JSON
+ * (bulk dialog) or redirects back to the booking.
+ *
+ * @param formData - Submitted form data (assetIds + optional intent/returnJson)
+ * @param request - Incoming request (for client hints)
+ * @param bookingId - Booking being checked out
+ * @param organizationId - Caller's active organization
+ * @param userId - Acting user
+ * @param authSession - Auth session (notification sender)
+ * @returns JSON payload (when returnJson) or a redirect to the booking page
+ */
+export async function checkoutAssets({
+  formData,
+  request,
+  bookingId,
+  organizationId,
+  userId,
+  authSession,
+}: {
+  formData: FormData;
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  authSession: AuthSession;
+}) {
+  const { assetIds, checkoutIntentChoice, returnJson } = parseData(
+    formData,
+    partialCheckoutAssetsSchema.extend({
+      checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+      returnJson: z
+        .string()
+        .optional()
+        .transform((val) => val === "true"),
+    })
+  );
+  const hints = getClientHint(request);
+
+  const result = await partialCheckoutBooking({
+    id: bookingId,
+    organizationId,
+    assetIds,
+    userId,
+    hints,
+    intentChoice: checkoutIntentChoice,
+  });
+
+  const notificationMessage = result.isComplete
+    ? `Successfully checked out ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } and checked out the booking.`
+    : `Successfully checked out ${assetIds.length} asset${
+        assetIds.length > 1 ? "s" : ""
+      } from booking.`;
+
+  sendNotification({
+    title: result.isComplete ? "Booking checked out" : "Assets checked out",
+    message: notificationMessage,
+    icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
+  });
+
+  // Return JSON if requested by bulk dialog, otherwise redirect
+  if (returnJson) {
+    return payload({
+      success: true,
+      message: `Successfully checked out ${assetIds.length} asset${
         assetIds.length > 1 ? "s" : ""
       }`,
     });

@@ -40,7 +40,7 @@ export default function CheckoutDialog({
     return (
       <Button
         disabled={disabled}
-        className="grow"
+        className="grow whitespace-nowrap"
         size="sm"
         type="submit"
         name="intent"
@@ -54,7 +54,12 @@ export default function CheckoutDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button disabled={disabled} className="grow" size="sm" type="button">
+        <Button
+          disabled={disabled}
+          className="grow whitespace-nowrap"
+          size="sm"
+          type="button"
+        >
           Check Out
         </Button>
       </AlertDialogTrigger>
