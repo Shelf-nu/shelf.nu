@@ -18,6 +18,7 @@ import {
   logException,
   parseData,
   payload,
+  readFormData,
 } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 
@@ -99,6 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
+        // why: readFormData (not request.formData()) so a malformed body / wrong
+        // Content-Type is downgraded to a non-captured 400, rather than a
+        // TypeError that logException would otherwise surface as a captured 5xx.
         const {
           refreshToken,
           firstName,
@@ -110,7 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
           stateProvince,
           postalCode,
           country,
-        } = parseData(await request.formData(), MobileCallbackSchema);
+        } = parseData(await readFormData(request), MobileCallbackSchema);
 
         // Don't trust client tokens — re-derive the session from the refresh
         // token server-side (same trust boundary as the web callback).
