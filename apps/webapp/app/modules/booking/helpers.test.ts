@@ -80,6 +80,23 @@ describe("isBookingArchivable", () => {
       isBookingArchivable({ status: BookingStatus.CANCELLED, to: past })
     ).toBe(false);
   });
+
+  it("handles ISO date strings the same as Date objects", () => {
+    // `to` arrives as a serialized string from client/loader payloads, so the
+    // helper must treat an ISO string identically to a Date.
+    expect(
+      isBookingArchivable({
+        status: BookingStatus.RESERVED,
+        to: "2020-01-01T00:00:00Z",
+      })
+    ).toBe(true);
+    expect(
+      isBookingArchivable({
+        status: BookingStatus.RESERVED,
+        to: "2999-01-01T00:00:00Z",
+      })
+    ).toBe(false);
+  });
 });
 
 describe("groupAndSortAssetsByKit", () => {

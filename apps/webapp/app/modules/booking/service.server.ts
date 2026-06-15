@@ -409,7 +409,11 @@ export async function scheduleExpiryArchiveJob({
       hints,
       eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler,
     },
-    {},
+    // Per-booking singleton: the handler re-queues on not-yet-due, and both the
+    // reserve hook and the on-enable backlog sweep can target the same booking.
+    // Without this they'd pile up duplicate pending jobs (queue bloat + repeated
+    // no-op fires); singletonKey keeps at most one pending job per booking.
+    { singletonKey: `booking-auto-archive-expired:${bookingId}` },
     when
   );
 }
