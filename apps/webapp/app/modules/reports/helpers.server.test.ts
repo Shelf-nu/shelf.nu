@@ -115,6 +115,30 @@ describe("bookingComplianceReport — complianceData hero", () => {
     expect(result.complianceData!.rate).toBe(50);
   });
 
+  it("excludes never-returned archives (archivedWithoutCheckin) from every booking query", async () => {
+    // why: A booking archived straight from RESERVED was never checked in, so
+    // it must not be measured for on-time-return compliance. The exclusion is
+    // enforced at the query layer — every booking read in the compliance flow
+    // filters on `archivedWithoutCheckin: false`, so archived-from-reserved
+    // rows never reach the count, rows, rate, trend, or custodian breakdown.
+    await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    const findManyCalls = vi.mocked(db.booking.findMany).mock.calls;
+    expect(findManyCalls.length).toBeGreaterThan(0);
+    for (const [args] of findManyCalls) {
+      expect((args as any).where.archivedWithoutCheckin).toBe(false);
+    }
+
+    const countCalls = vi.mocked(db.booking.count).mock.calls;
+    expect(countCalls.length).toBeGreaterThan(0);
+    for (const [args] of countCalls) {
+      expect((args as any).where.archivedWithoutCheckin).toBe(false);
+    }
+  });
+
   it("falls back to updatedAt for COMPLETE bookings missing a check-in event", async () => {
     // why: The partial-check-in completion path historically wrote a custom
     // system note instead of calling `createStatusTransitionNote`, so no

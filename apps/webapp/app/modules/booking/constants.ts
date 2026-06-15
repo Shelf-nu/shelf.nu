@@ -163,6 +163,7 @@ export enum BOOKING_SCHEDULER_EVENTS_ENUM {
   checkinReminder = `booking-checkin-reminder`,
   overdueHandler = `booking-overdue-handler`,
   autoArchiveHandler = `booking-auto-archive-handler`,
+  autoArchiveExpiredHandler = `booking-auto-archive-expired-handler`,
 }
 
 /**

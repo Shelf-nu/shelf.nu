@@ -8,6 +8,7 @@ import { data, useLoaderData } from "react-router";
 import {
   AutoArchiveSettings,
   AutoArchiveDaysSchema,
+  AutoArchiveExpiredToggleSchema,
   AutoArchiveToggleSchema,
 } from "~/components/booking/auto-archive-settings";
 import {
@@ -32,6 +33,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
+import { scheduleExpiryArchiveForExistingReservations } from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
   updateAlwaysNotifyTeamMembers,
@@ -53,6 +55,7 @@ import {
   WorkingHoursToggleSchema,
 } from "~/modules/working-hours/zod-utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -141,6 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateTimeSettings",
         "updateTagsRequired",
         "updateAutoArchiveToggle",
+        "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
         "updateExplicitCheckin",
         "updateCountKitsAsSingleUnit",
@@ -239,6 +243,47 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Auto-archive setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateAutoArchiveExpiredToggle": {
+        const { autoArchiveExpiredReservations } = parseData(
+          formData,
+          AutoArchiveExpiredToggleSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          autoArchiveExpiredReservations,
+        });
+
+        // When turning the setting ON, schedule the archive job for every
+        // currently-reserved booking so the existing backlog of past-due
+        // reservations is cleaned up too — not just bookings reserved later.
+        if (autoArchiveExpiredReservations) {
+          const settings =
+            await getBookingSettingsForOrganization(organizationId);
+          await scheduleExpiryArchiveForExistingReservations({
+            organizationId,
+            autoArchiveDays: settings.autoArchiveDays,
+            hints: getClientHint(request),
+          });
+        }
+
+        sendNotification({
+          title: "Settings updated",
+          message:
+            "Auto-archive expired-reservations setting has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -586,6 +631,9 @@ export default function GeneralPage() {
             "Configure automatic actions for completed bookings to keep your workspace clean.",
         }}
         defaultAutoArchiveBookings={bookingSettings.autoArchiveBookings}
+        defaultAutoArchiveExpiredReservations={
+          bookingSettings.autoArchiveExpiredReservations
+        }
         defaultAutoArchiveDays={bookingSettings.autoArchiveDays}
       />
 

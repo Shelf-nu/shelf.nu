@@ -311,6 +311,45 @@ export function formatBookingDuration(from: Date, to: Date): string {
 }
 
 /**
+ * Whether a booking is eligible to be archived.
+ *
+ * Two cases qualify:
+ * - `COMPLETE` bookings — the classic path, where the gear was checked back in.
+ * - `RESERVED` bookings whose end date (`to`) has already passed. These are
+ *   reservations that were never checked out, so archiving just files them
+ *   away; their assets are already `AVAILABLE` and nothing gets orphaned.
+ *
+ * `ONGOING` / `OVERDUE` are deliberately excluded: their assets are physically
+ * `CHECKED_OUT`, so archiving would hide the booking while leaving the gear
+ * checked out with no active booking. `DRAFT`, `CANCELLED`, and future-dated
+ * `RESERVED` bookings are not archivable either.
+ *
+ * Pure and dependency-light so the same rule gates both the server mutation and
+ * the client-side UI affordance — no drift between them.
+ *
+ * @param status - The booking's current status.
+ * @param to - The booking's scheduled end date.
+ * @returns `true` if the booking may be archived.
+ */
+export function isBookingArchivable({
+  status,
+  to,
+}: {
+  status: BookingStatus;
+  to: Date | string | null;
+}): boolean {
+  if (status === BookingStatus.COMPLETE) {
+    return true;
+  }
+
+  if (status === BookingStatus.RESERVED && to != null) {
+    return isBefore(new Date(to), new Date());
+  }
+
+  return false;
+}
+
+/**
  * Core logic for determining if an asset has booking conflicts
  * Used by both isAssetAlreadyBooked and kit-related functions
  */

@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { recordEvents } from "~/modules/activity-event/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
@@ -2278,7 +2279,7 @@ describe("archiveBooking", () => {
     expect(result).toEqual(archivedBooking);
   });
 
-  it("should throw error when booking is not COMPLETE", async () => {
+  it("rejects ONGOING bookings (their assets are still checked out)", async () => {
     expect.assertions(1);
 
     const mockBooking = { ...mockBookingData, status: BookingStatus.ONGOING };
@@ -2324,6 +2325,53 @@ describe("archiveBooking", () => {
     await archiveBooking({ id: "booking-1", organizationId: "org-1" });
 
     expect(scheduler.cancel).not.toHaveBeenCalled();
+  });
+
+  it("archives a past-due RESERVED booking and flags it archivedWithoutCheckin", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      to: new Date("2020-01-01T00:00:00Z"),
+    };
+    const archivedBooking = { ...mockBooking, status: BookingStatus.ARCHIVED };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(archivedBooking);
+
+    await archiveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("rejects a RESERVED booking whose end date has not passed", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      to: new Date("2999-01-01T00:00:00Z"),
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await expect(
+      archiveBooking({ id: "booking-1", organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
   });
 });
 
@@ -3498,6 +3546,7 @@ describe("bulkArchiveBookings", () => {
     await bulkArchiveBookings({
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
+      userId: "user-1",
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -3519,20 +3568,179 @@ describe("bulkArchiveBookings", () => {
     );
   });
 
-  it("throws if any selected booking is not COMPLETE", async () => {
+  it("throws if any selected booking is not archivable (e.g. ONGOING)", async () => {
     expect.assertions(1);
     //@ts-expect-error mock setup
     db.booking.findMany.mockResolvedValue([
       {
         id: "b1",
         status: BookingStatus.ONGOING,
+        to: new Date("2020-01-01T00:00:00Z"),
         custodianUserId: null,
         activeSchedulerReference: null,
       },
     ]);
 
     await expect(
-      bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
+      bulkArchiveBookings({
+        bookingIds: ["b1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
     ).rejects.toThrow(ShelfError);
+  });
+
+  it("archives a past-due RESERVED booking and flags it archivedWithoutCheckin", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["r1"] }, organizationId: "org-1" },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("rejects a RESERVED booking whose end date has not passed", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2999-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["r1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects OVERDUE bookings even when past their end date (assets still checked out)", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "o1",
+        status: BookingStatus.OVERDUE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["o1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(ShelfError);
+  });
+
+  it("flags only the never-returned RESERVED rows when archiving a mixed selection", async () => {
+    expect.assertions(2);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "c1",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2999-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "r1",
+        status: BookingStatus.RESERVED,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["c1", "r1"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    // COMPLETE rows archive without the flag…
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["c1"] }, organizationId: "org-1" },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    // …RESERVED rows archive WITH the never-returned flag.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["r1"] }, organizationId: "org-1" },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        archivedWithoutCheckin: true,
+      },
+    });
+  });
+
+  it("emits a BOOKING_ARCHIVED event per booking (parity with single archive)", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b2",
+        status: BookingStatus.COMPLETE,
+        to: new Date("2020-01-01T00:00:00Z"),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "b2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(recordEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "b1",
+        }),
+        expect.objectContaining({
+          action: "BOOKING_ARCHIVED",
+          bookingId: "b2",
+        }),
+      ])
+    );
   });
 });

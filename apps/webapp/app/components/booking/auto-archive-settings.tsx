@@ -20,6 +20,13 @@ export const AutoArchiveToggleSchema = z.object({
     .default("false"),
 });
 
+export const AutoArchiveExpiredToggleSchema = z.object({
+  autoArchiveExpiredReservations: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
+});
+
 export const AutoArchiveDaysSchema = z.object({
   autoArchiveDays: z.coerce
     .number()
@@ -31,22 +38,33 @@ export const AutoArchiveDaysSchema = z.object({
 export function AutoArchiveSettings({
   header,
   defaultAutoArchiveBookings = false,
+  defaultAutoArchiveExpiredReservations = false,
   defaultAutoArchiveDays = 2,
 }: {
   header: { title: string; subHeading?: string };
   defaultAutoArchiveBookings: boolean;
+  defaultAutoArchiveExpiredReservations: boolean;
   defaultAutoArchiveDays: number;
 }) {
   const fetcher = useFetcher();
   const toggleDisabled = useDisabled(fetcher);
+  const expiredFetcher = useFetcher();
+  const expiredToggleDisabled = useDisabled(expiredFetcher);
   const daysDisabled = useDisabled();
   // Lazy initializer avoids a false-positive derived-state lint: this drives optimistic
   // UI for the toggle. After mount it's user-controlled; it must NOT re-sync with the
   // server-provided default (that would overwrite the optimistic value before the
   // fetcher revalidates).
   const [isEnabled, setIsEnabled] = useState(() => defaultAutoArchiveBookings);
+  const [isExpiredEnabled, setIsExpiredEnabled] = useState(
+    () => defaultAutoArchiveExpiredReservations
+  );
 
   const toggleZo = useZorm("AutoArchiveToggleForm", AutoArchiveToggleSchema);
+  const expiredToggleZo = useZorm(
+    "AutoArchiveExpiredToggleForm",
+    AutoArchiveExpiredToggleSchema
+  );
   const daysZo = useZorm("AutoArchiveDaysForm", AutoArchiveDaysSchema);
 
   const actionData = useActionData<BookingSettingsActionData>();
@@ -99,29 +117,73 @@ export function AutoArchiveSettings({
           <input type="hidden" value="updateAutoArchiveToggle" name="intent" />
         </fetcher.Form>
 
-        {/* Days form - standard form with Save button, only shown when enabled */}
-        {isEnabled && (
+        {/* Expired-reservation toggle - auto-submits on change */}
+        <expiredFetcher.Form
+          ref={expiredToggleZo.ref}
+          method="post"
+          onChange={(e) => {
+            const form = e.currentTarget;
+            const checkbox = form.elements.namedItem(
+              expiredToggleZo.fields.autoArchiveExpiredReservations()
+            ) as HTMLInputElement;
+            if (checkbox) {
+              setIsExpiredEnabled(checkbox.checked);
+            }
+            void expiredFetcher.submit(form);
+          }}
+        >
+          <FormRow
+            rowLabel="Auto-archive expired reservations"
+            subHeading={
+              <div>
+                Automatically move reserved bookings to Archived once their end
+                date has passed without ever being checked out — for teams that
+                use bookings as a reservation calendar.
+              </div>
+            }
+            className="border-b-0 pb-[10px] pt-0"
+          >
+            <div className="flex flex-col items-center gap-2">
+              <Switch
+                name={expiredToggleZo.fields.autoArchiveExpiredReservations()}
+                disabled={expiredToggleDisabled}
+                defaultChecked={defaultAutoArchiveExpiredReservations}
+                aria-label="Auto-archive expired reservations"
+                title="Auto-archive expired reservations"
+              />
+            </div>
+          </FormRow>
+          <input
+            type="hidden"
+            value="updateAutoArchiveExpiredToggle"
+            name="intent"
+          />
+        </expiredFetcher.Form>
+
+        {/* Days form - shared by both toggles, shown when either is enabled */}
+        {(isEnabled || isExpiredEnabled) && (
           <Form ref={daysZo.ref} method="post">
             <FormRow
-              rowLabel="Days after completion"
+              rowLabel="Days before auto-archiving"
               subHeading={
                 <div>
-                  Number of days to wait after a booking is completed before
-                  automatically archiving it.
+                  Number of days to wait after a booking is completed (or its
+                  reservation's end date has passed) before automatically
+                  archiving it.
                 </div>
               }
               className="border-b-0 pb-[10px]"
               required
             >
               <Input
-                label="Days after completion"
+                label="Days before auto-archiving"
                 hideLabel
                 type="number"
                 name={daysZo.fields.autoArchiveDays()}
                 disabled={daysDisabled}
                 defaultValue={defaultAutoArchiveDays}
                 required
-                title="Days after completion"
+                title="Days before auto-archiving"
                 min={1}
                 max={365}
                 step={1}

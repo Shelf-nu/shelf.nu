@@ -89,6 +89,7 @@ import {
 } from "./email-helpers";
 import {
   hasAssetBookingConflicts,
+  isBookingArchivable,
   isBookingEarlyCheckin,
   isBookingEarlyCheckout,
 } from "./helpers";
@@ -315,6 +316,7 @@ export function getActionTextFromTransition(
     case "OVERDUE->COMPLETE":
       return "checked-in the booking";
     case "COMPLETE->ARCHIVED":
+    case "RESERVED->ARCHIVED":
       return "archived the booking";
     default:
       return "changed the booking status";
@@ -335,6 +337,8 @@ export function getSystemActionText(
       return "Booking became overdue";
     case "COMPLETE->ARCHIVED":
       return "Booking was automatically archived";
+    case "RESERVED->ARCHIVED":
+      return "Booking was archived";
     default:
       return "Booking status changed";
   }
@@ -367,6 +371,78 @@ export async function scheduleNextBookingJob({
       label,
     });
   }
+}
+
+/**
+ * Schedules the one-shot "auto-archive expired reservation" job for a single
+ * booking, to fire `autoArchiveDays` after its end date.
+ *
+ * Unlike {@link scheduleNextBookingJob} this deliberately does NOT touch
+ * `activeSchedulerReference` — it runs independently of the checkout / overdue /
+ * auto-archive chain, so it can coexist with a booking's checkout reminder. The
+ * handler self-validates at fire time, so this job is never cancelled; a stale
+ * one simply no-ops.
+ *
+ * @see {@link file://./worker.server.ts} `autoArchiveExpiredHandler`
+ */
+export async function scheduleExpiryArchiveJob({
+  bookingId,
+  to,
+  autoArchiveDays,
+  hints,
+}: {
+  bookingId: Booking["id"];
+  to: NonNullable<Booking["to"]>;
+  autoArchiveDays: number;
+  hints: ClientHint;
+}) {
+  // Fire `autoArchiveDays` after the end date. A `when` in the past makes
+  // pg-boss run the job on the next tick — exactly what we want when enabling
+  // the setting for already-expired reservations.
+  const when = new Date(to);
+  when.setDate(when.getDate() + autoArchiveDays);
+
+  await scheduler.sendAfter(
+    QueueNames.bookingQueue,
+    {
+      id: bookingId,
+      hints,
+      eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler,
+    },
+    {},
+    when
+  );
+}
+
+/**
+ * When an org enables "auto-archive expired reservations", schedule the expiry
+ * job for every currently-RESERVED booking — so the existing backlog of
+ * past-due reservations is cleaned up too, not just future ones.
+ */
+export async function scheduleExpiryArchiveForExistingReservations({
+  organizationId,
+  autoArchiveDays,
+  hints,
+}: {
+  organizationId: Organization["id"];
+  autoArchiveDays: number;
+  hints: ClientHint;
+}) {
+  const reserved = await db.booking.findMany({
+    where: { organizationId, status: BookingStatus.RESERVED },
+    select: { id: true, to: true },
+  });
+
+  await Promise.all(
+    reserved.map((b) =>
+      scheduleExpiryArchiveJob({
+        bookingId: b.id,
+        to: b.to,
+        autoArchiveDays,
+        hints,
+      })
+    )
+  );
 }
 
 async function updateBookingAssetStates(
@@ -1230,6 +1306,24 @@ export async function reserveBooking({
           eventType: BOOKING_SCHEDULER_EVENTS_ENUM.checkoutReminder,
         },
         when,
+      });
+    }
+
+    /**
+     * If the org auto-archives expired reservations, schedule the one-shot
+     * archive job for this booking (end date + grace). Independent of the
+     * checkout-reminder slot; the handler self-validates, so we never cancel it.
+     */
+    const expiryArchiveSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { autoArchiveExpiredReservations: true, autoArchiveDays: true },
+    });
+    if (expiryArchiveSettings?.autoArchiveExpiredReservations && to) {
+      await scheduleExpiryArchiveJob({
+        bookingId: bookingFound.id,
+        to,
+        autoArchiveDays: expiryArchiveSettings.autoArchiveDays,
+        hints,
       });
     }
 
@@ -3286,7 +3380,12 @@ export async function archiveBooking({
     const booking = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
-        select: { id: true, status: true, activeSchedulerReference: true },
+        select: {
+          id: true,
+          status: true,
+          to: true,
+          activeSchedulerReference: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -3299,19 +3398,34 @@ export async function archiveBooking({
         });
       });
 
-    /** Booking can be archived only if it is COMPLETE */
-    if (booking.status !== BookingStatus.COMPLETE) {
+    /**
+     * Archivable when COMPLETE (gear was checked back in) or a past-due
+     * RESERVED booking (a reservation whose window elapsed without checkout).
+     * ONGOING/OVERDUE are rejected — their assets are still CHECKED_OUT.
+     * @see {@link isBookingArchivable}
+     */
+    if (!isBookingArchivable({ status: booking.status, to: booking.to })) {
       throw new ShelfError({
         cause: null,
         label,
-        message: "Archiving is only allowed for Completed bookings.",
+        message:
+          "This booking can't be archived. Only completed bookings, or reserved bookings whose end date has passed, can be archived.",
       });
     }
 
+    /**
+     * A booking archived straight from RESERVED was never checked in, so flag
+     * it: return-behaviour reports (Booking Compliance) exclude these.
+     */
+    const archivedWithoutCheckin = booking.status === BookingStatus.RESERVED;
+
     const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2546; this is the write on that same proven id
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
       where: { id: booking.id },
-      data: { status: BookingStatus.ARCHIVED },
+      data: {
+        status: BookingStatus.ARCHIVED,
+        ...(archivedWithoutCheckin ? { archivedWithoutCheckin: true } : {}),
+      },
     });
 
     // Cancel any pending auto-archive job
@@ -5155,10 +5269,12 @@ export async function bulkDeleteBookings({
 export async function bulkArchiveBookings({
   bookingIds,
   organizationId,
+  userId,
   currentSearchParams,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
+  userId: User["id"];
   currentSearchParams?: string | null;
 }) {
   try {
@@ -5174,36 +5290,63 @@ export async function bulkArchiveBookings({
       select: {
         id: true,
         status: true,
+        to: true,
         custodianUserId: true,
         activeSchedulerReference: true,
       },
     });
 
-    const someBookingNotComplete = bookings.some(
-      (b) => b.status !== "COMPLETE"
+    /**
+     * Archivable = COMPLETE (returned) or a past-due RESERVED booking (a
+     * reservation whose window elapsed without checkout). All-or-nothing: if
+     * any selected booking is ineligible we reject the whole batch, mirroring
+     * the UI which only enables Archive when every selected row qualifies.
+     * @see {@link isBookingArchivable}
+     */
+    const ineligibleBookings = bookings.filter(
+      (b) => !isBookingArchivable({ status: b.status, to: b.to })
     );
 
-    /** Bookings must be complete to add them in archive */
-    if (someBookingNotComplete) {
+    if (ineligibleBookings.length > 0) {
       throw new ShelfError({
         cause: null,
         message:
-          "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+          "Some selected bookings can't be archived. You can only archive completed bookings, or reserved bookings whose end date has passed.",
         label,
         additionalData: {
-          bookings,
+          bookings: ineligibleBookings,
           organizationId,
           bookingIds,
         },
       });
     }
 
-    /** Update all selected bookings to ARCHIVED. This is a single statement —
-     * atomic on its own — so it needs no interactive transaction. */
-    await db.booking.updateMany({
-      where: { id: { in: bookings.map((b) => b.id) }, organizationId },
-      data: { status: BookingStatus.ARCHIVED },
-    });
+    /**
+     * Bookings archived straight from RESERVED were never checked in — flag them
+     * so return-behaviour reports (Booking Compliance) exclude them; COMPLETE
+     * bookings keep the default `false`. Two scoped updateMany statements (each
+     * atomic on its own, no interactive transaction) so the flag lands only on
+     * the never-returned rows. */
+    const reservedIds = bookings
+      .filter((b) => b.status === BookingStatus.RESERVED)
+      .map((b) => b.id);
+    const completeIds = bookings
+      .filter((b) => b.status === BookingStatus.COMPLETE)
+      .map((b) => b.id);
+
+    if (completeIds.length > 0) {
+      await db.booking.updateMany({
+        where: { id: { in: completeIds }, organizationId },
+        data: { status: BookingStatus.ARCHIVED },
+      });
+    }
+
+    if (reservedIds.length > 0) {
+      await db.booking.updateMany({
+        where: { id: { in: reservedIds }, organizationId },
+        data: { status: BookingStatus.ARCHIVED, archivedWithoutCheckin: true },
+      });
+    }
 
     /** Create booking status transition notes for each booking.
      *
@@ -5219,9 +5362,25 @@ export async function bulkArchiveBookings({
         organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.ARCHIVED,
+        userId,
         custodianUserId: booking.custodianUserId || undefined,
       });
     }
+
+    /**
+     * Semantic BOOKING_ARCHIVED events — one per booking — for parity with the
+     * single-booking archive path (see {@link archiveBooking}). Without these,
+     * reports that count BOOKING_ARCHIVED would silently miss bulk archives. */
+    await recordEvents(
+      bookings.map((b) => ({
+        organizationId,
+        actorUserId: userId ?? null,
+        action: "BOOKING_ARCHIVED" as const,
+        entityType: "BOOKING" as const,
+        entityId: b.id,
+        bookingId: b.id,
+      }))
+    );
 
     /** Cancel any active schedulers */
     await Promise.all(bookings.map((b) => cancelScheduler(b)));

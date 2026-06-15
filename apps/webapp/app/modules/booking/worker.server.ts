@@ -315,6 +315,122 @@ const autoArchiveHandler = async ({ data }: PgBoss.Job<SchedulerData>) => {
   }
 };
 
+/**
+ * Auto-archives a RESERVED booking whose end date has passed without it ever
+ * being checked out — for teams that use bookings as a reservation calendar and
+ * don't check out/in.
+ *
+ * Scheduled at `to + autoArchiveDays` when a booking is reserved (and for
+ * existing reservations when the org enables the setting). The job is
+ * deliberately fire-and-forget: it is NOT cancelled on checkout/cancel/extend/
+ * delete. Instead it RE-VALIDATES at fire time — still RESERVED, setting still
+ * on, and the end-date-plus-grace has actually elapsed against the booking's
+ * CURRENT `to` — and no-ops otherwise. So it can never archive a booking that
+ * was acted on, and an extended booking simply gets a fresh job.
+ *
+ * @see {@link autoArchiveHandler} — the completed-booking counterpart.
+ */
+const autoArchiveExpiredHandler = async ({
+  data,
+}: PgBoss.Job<SchedulerData>) => {
+  try {
+    const booking = await db.booking.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job keyed by bookingId from the queue payload (SchedulerData has no user org context); org is derived from the fetched booking and used to gate the subsequent archive
+      where: { id: data.id },
+      select: {
+        id: true,
+        status: true,
+        to: true,
+        custodianUserId: true,
+        organizationId: true,
+      },
+    });
+
+    if (!booking) {
+      Logger.warn(
+        `Auto-archive-expired: Booking ${data.id} not found, skipping`
+      );
+      return;
+    }
+
+    // Only ever archive bookings that are STILL reserved — i.e. never checked
+    // out. If it was checked out, cancelled, completed, etc., leave it alone.
+    if (booking.status !== BookingStatus.RESERVED) {
+      Logger.info(
+        `Auto-archive-expired: Booking ${data.id} is no longer RESERVED (status: ${booking.status}), skipping`
+      );
+      return;
+    }
+
+    const bookingSettings = await db.bookingSettings.findUnique({
+      where: { organizationId: booking.organizationId },
+      select: { autoArchiveExpiredReservations: true, autoArchiveDays: true },
+    });
+
+    if (!bookingSettings?.autoArchiveExpiredReservations) {
+      Logger.info(
+        `Auto-archive-expired: setting disabled for organization ${booking.organizationId}, skipping booking ${data.id}`
+      );
+      return;
+    }
+
+    // Re-validate the delay against the booking's CURRENT end date. If it was
+    // extended after this job was scheduled, the grace window hasn't elapsed
+    // and we no-op (a fresh job is scheduled when the dates change).
+    const archiveAfter = new Date(booking.to);
+    archiveAfter.setDate(
+      archiveAfter.getDate() + bookingSettings.autoArchiveDays
+    );
+    const now = new Date();
+    if (archiveAfter > now) {
+      Logger.info(
+        `Auto-archive-expired: Booking ${data.id} end-date+grace not yet reached, skipping`
+      );
+      return;
+    }
+
+    // Archive atomically, guarded on RESERVED to avoid a TOCTOU race with a
+    // concurrent checkout / manual archive.
+    const updatedBooking = await db.booking
+      .update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss scheduler job; booking.id was just fetched above and the org's setting was checked before this guarded status transition (no user org context exists in SchedulerData)
+        where: { id: booking.id, status: BookingStatus.RESERVED },
+        data: {
+          status: BookingStatus.ARCHIVED,
+          archivedWithoutCheckin: true,
+          autoArchivedAt: now,
+        },
+      })
+      .catch(() => null);
+
+    if (!updatedBooking) {
+      Logger.info(
+        `Auto-archive-expired: Booking ${data.id} was modified concurrently, skipping`
+      );
+      return;
+    }
+
+    await createStatusTransitionNote({
+      bookingId: booking.id,
+      organizationId: booking.organizationId,
+      fromStatus: BookingStatus.RESERVED,
+      toStatus: BookingStatus.ARCHIVED,
+      custodianUserId: booking.custodianUserId || undefined,
+    });
+
+    Logger.info(`Auto-archived expired reservation ${booking.id}`);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to auto-archive expired reservation",
+        additionalData: { bookingId: data.id },
+        label: "Booking",
+      })
+    );
+  }
+};
+
 const event2HandlerMap: Record<
   BOOKING_SCHEDULER_EVENTS_ENUM,
   (job: PgBoss.Job<SchedulerData>) => Promise<void>
@@ -323,6 +439,8 @@ const event2HandlerMap: Record<
   [BOOKING_SCHEDULER_EVENTS_ENUM.checkinReminder]: checkinReminder,
   [BOOKING_SCHEDULER_EVENTS_ENUM.overdueHandler]: overdueHandler,
   [BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveHandler]: autoArchiveHandler,
+  [BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler]:
+    autoArchiveExpiredHandler,
 };
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
