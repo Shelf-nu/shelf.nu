@@ -1318,7 +1318,7 @@ export async function reserveBooking({
       where: { organizationId },
       select: { autoArchiveExpiredReservations: true, autoArchiveDays: true },
     });
-    if (expiryArchiveSettings?.autoArchiveExpiredReservations && to) {
+    if (expiryArchiveSettings?.autoArchiveExpiredReservations) {
       await scheduleExpiryArchiveJob({
         bookingId: bookingFound.id,
         to,
