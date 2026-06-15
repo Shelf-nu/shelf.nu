@@ -11,6 +11,7 @@ import {
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -92,6 +93,12 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // Org-scope the caller-supplied asset ids before they are connected to the
+    // booking. The downstream service connects them by id with no org check, so
+    // without this a caller could attach another workspace's assets (cross-org
+    // IDOR). Kit-derived asset ids are already org-scoped by the query below.
+    await assertAssetsBelongToOrg({ assetIds, organizationId });
 
     // Expand kits to their contained assets — the service only connects
     // `assetIds` to the booking (`kitIds` drives status flags and notes).

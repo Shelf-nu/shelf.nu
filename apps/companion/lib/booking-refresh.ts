@@ -14,11 +14,13 @@
  * @see {@link file://./../app/(tabs)/scanner.tsx} producer (scan-to-add)
  */
 
-let dirtyBookingId: string | null = null;
+// A set (not a single slot) so two bookings marked dirty before either is
+// consumed don't clobber each other.
+const dirtyBookingIds = new Set<string>();
 
 /** Mark a booking as mutated by another screen. */
 export function markBookingDirty(id: string) {
-  dirtyBookingId = id;
+  dirtyBookingIds.add(id);
 }
 
 /**
@@ -26,9 +28,6 @@ export function markBookingDirty(id: string) {
  * flag so subsequent focuses fall back to the normal freshness gate.
  */
 export function consumeBookingDirty(id: string): boolean {
-  if (dirtyBookingId === id) {
-    dirtyBookingId = null;
-    return true;
-  }
-  return false;
+  // Set.delete returns true iff the id was present (and removes it).
+  return dirtyBookingIds.delete(id);
 }

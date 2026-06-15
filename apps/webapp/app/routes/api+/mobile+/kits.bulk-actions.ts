@@ -85,19 +85,14 @@ export async function action({ request }: ActionFunctionArgs) {
       case "assign-custody": {
         // Org-scoped custodian lookup — a foreign-org team member 404s here,
         // so custody can never be granted across workspaces.
+        // getTeamMember is org-scoped and already throws a 404 "Team member
+        // not found" for a true miss while letting infra/DB failures surface
+        // (and be captured) as their real error — so don't wrap it in a catch
+        // that would flatten every failure into a 404.
         const teamMember = await getTeamMember({
           id: body.custodianId,
           organizationId,
           select: { id: true, name: true, userId: true },
-        }).catch((cause) => {
-          throw new ShelfError({
-            cause,
-            title: "Team member not found",
-            message: "The selected team member could not be found.",
-            additionalData: { userId, kitIds: body.kitIds },
-            label: "Kit",
-            status: 404,
-          });
         });
 
         // Self-service users may only take custody themselves (web parity —

@@ -24,7 +24,7 @@ import { Image } from "expo-image";
 import { api } from "@/lib/api";
 import type { KitListItem } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InventorySegment } from "@/components/kits/inventory-segment";
@@ -39,14 +39,15 @@ const FILTERS = [
   { key: "CHECKED_OUT", label: "Checked Out" },
 ] as const;
 
-function formatStatus(status: string) {
-  if (status === "IN_CUSTODY") return "In Custody";
-  if (status === "AVAILABLE") return "Available";
-  return status.replace(/_/g, " ");
-}
-
 const kitKeyExtractor = (item: KitListItem) => item.id;
 
+/**
+ * Kits list screen. Renders the workspace's kits with debounced search, status
+ * filter pills, pull-to-refresh, and infinite scroll, and routes to a kit's
+ * detail on row press. Rendered inside the Assets stack under the Kits segment.
+ *
+ * @returns The kits list screen element.
+ */
 export default function KitsListScreen() {
   const router = useRouter();
   const { currentOrg } = useOrg();
@@ -63,6 +64,10 @@ export default function KitsListScreen() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const nextPageRef = useRef(2);
   const hasMoreRef = useRef(true);
+  // Re-entrancy guard for pagination. A ref (not the isLoadingMore state) so
+  // the check is always current inside fetchKits without putting the value in
+  // the callback's deps (which would re-create it mid-pagination).
+  const isLoadingMoreRef = useRef(false);
 
   // Debounce search input
   useEffect(() => {
@@ -76,7 +81,8 @@ export default function KitsListScreen() {
       if (mode === "initial") setIsLoading(true);
       if (mode === "refresh") setIsRefreshing(true);
       if (mode === "more") {
-        if (!hasMoreRef.current || isLoadingMore) return;
+        if (!hasMoreRef.current || isLoadingMoreRef.current) return;
+        isLoadingMoreRef.current = true;
         setIsLoadingMore(true);
       }
       setError(null);
@@ -102,10 +108,8 @@ export default function KitsListScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
       setIsLoadingMore(false);
+      isLoadingMoreRef.current = false;
     },
-    // why: isLoadingMore is read as a re-entrancy guard only; listing it
-    // would re-create the callback mid-pagination and double-fetch
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [currentOrg, debouncedSearch, statusFilter]
   );
 

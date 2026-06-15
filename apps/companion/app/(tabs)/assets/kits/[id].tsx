@@ -24,16 +24,17 @@ import { api } from "@/lib/api";
 import type { KitDetail } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 
-function formatStatus(status: string) {
-  if (status === "IN_CUSTODY") return "In Custody";
-  if (status === "AVAILABLE") return "Available";
-  return status.replace(/_/g, " ");
-}
-
+/**
+ * Kit detail screen. Shows a kit's header (name, image, status, code), its
+ * asset list, and per-asset status, resolved from the `id` route param scoped
+ * to the current workspace. Reached from the kits list or a scanned kit code.
+ *
+ * @returns The kit detail screen element.
+ */
 export default function KitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();

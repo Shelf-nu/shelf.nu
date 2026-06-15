@@ -1,7 +1,8 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -57,9 +58,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ];
     }
 
+    // Scope to the caller's own bookings for self-service / base users, who
+    // can only see the bookings they are the custodian of (web parity — see
+    // getBookings' `isSelfServiceOrBase` branch). Owners/admins see all. This
+    // matters especially now that DRAFT bookings appear in the default view.
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
+
     const where = {
       organizationId,
       status: { in: statusFilter },
+      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
     };
 
     const [bookings, totalCount] = await Promise.all([

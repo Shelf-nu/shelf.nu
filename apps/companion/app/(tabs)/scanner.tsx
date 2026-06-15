@@ -1271,6 +1271,10 @@ function ScannerContent() {
       !bookingId ||
       !currentOrg ||
       bookingCheckinItems.length === 0 ||
+      // Block submit until the booking context has loaded — until then
+      // bookingBlockers is empty (not "no blockers"), so a submit here would
+      // bypass the not-bookable / part-of-kit / already-in-booking checks.
+      !bookingCtx ||
       bookingBlockers.length > 0
     ) {
       return;
