@@ -299,8 +299,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Settings updated",
-          message:
-            "Auto-archive expired-reservations setting has been updated successfully",
+          message: "Auto-archive setting has been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

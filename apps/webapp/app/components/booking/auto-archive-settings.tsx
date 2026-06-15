@@ -133,7 +133,7 @@ export function AutoArchiveSettings({
           }}
         >
           <FormRow
-            rowLabel="Auto-archive expired reservations"
+            rowLabel="Auto-archive reserved bookings after their end date"
             subHeading={
               <div>
                 Automatically move reserved bookings to Archived once their end
@@ -148,8 +148,8 @@ export function AutoArchiveSettings({
                 name={expiredToggleZo.fields.autoArchiveExpiredReservations()}
                 disabled={expiredToggleDisabled}
                 defaultChecked={defaultAutoArchiveExpiredReservations}
-                aria-label="Auto-archive expired reservations"
-                title="Auto-archive expired reservations"
+                aria-label="Auto-archive reserved bookings after their end date"
+                title="Auto-archive reserved bookings after their end date"
               />
             </div>
           </FormRow>
