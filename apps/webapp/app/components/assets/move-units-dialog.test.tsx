@@ -12,10 +12,9 @@
  *   can drive fetcher state per test without spinning up a data router.
  * - `~/hooks/use-disabled` — stable `false` so submit gating is driven by
  *   our own disable conditions, not by `useNavigation` plumbing.
- * - The `Select` Radix popper component — happy-dom's portal/pointer-events
- *   plumbing can't drive Radix's `Select.Trigger → Content` open flow
- *   reliably, so we stub it with a native `<select>` that emits the same
- *   `onValueChange` payload.
+ * - `@radix-ui/react-popover` — happy-dom can't drive Radix's portal +
+ *   pointer-events open flow reliably, so we inline-render the destination
+ *   picker's trigger + portal + content. Mirrors `sort-by.test.tsx`.
  *
  * @see {@link file://./move-units-dialog.tsx}
  */
@@ -91,53 +90,22 @@ vi.mock("~/hooks/use-disabled", () => ({
   useDisabled: () => false,
 }));
 
-// why: Radix `Select` mounts a portal whose open state is driven by
-// pointer-events that happy-dom doesn't reliably simulate. Swap it for a
-// native `<select>` that emits the same `onValueChange(value: string)` payload
-// the production component consumes. This lets us drive destination
-// selection via `fireEvent.change` without fighting Radix's pointer plumbing.
-vi.mock("~/components/forms/select", () => {
-  const Select = ({
-    children,
-    onValueChange,
-    value,
-    disabled,
-  }: {
-    children: ReactNode;
-    onValueChange?: (value: string) => void;
-    value?: string;
-    disabled?: boolean;
-  }) => (
-    <select
-      data-testid="destination-select"
-      value={value ?? ""}
-      disabled={disabled}
-      onChange={(e) => onValueChange?.(e.target.value)}
-    >
-      <option value="" disabled>
-        Select…
-      </option>
-      {children}
-    </select>
-  );
-  const SelectTrigger = ({ children }: { children: ReactNode }) => (
-    <>{children}</>
-  );
-  const SelectValue = ({ placeholder }: { placeholder?: string }) => (
-    <span>{placeholder}</span>
-  );
-  const SelectContent = ({ children }: { children: ReactNode }) => (
-    <>{children}</>
-  );
-  const SelectItem = ({
-    children,
-    value,
-  }: {
-    children: ReactNode;
-    value: string;
-  }) => <option value={value}>{children}</option>;
-  return { Select, SelectTrigger, SelectValue, SelectContent, SelectItem };
-});
+// why: Radix Popover doesn't reliably open in happy-dom (portal + pointer-
+// events plumbing). Inline-render the trigger + portal + content so the
+// destination list rows are mounted directly and clickable via fireEvent.
+// Matches the canonical mock in `sort-by.test.tsx`.
+vi.mock("@radix-ui/react-popover", () => ({
+  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PopoverPortal: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PopoverContent: ({ children, ...props }: any) => (
+    <div {...props}>{children}</div>
+  ),
+}));
 
 // why: AlertDialog from `~/components/shared/modal` uses Radix's
 // AlertDialog primitive, which portals content out of the test root and
@@ -317,10 +285,9 @@ describe("MoveUnitsDialog", () => {
         />
       );
 
-      const select = screen.getByTestId(
-        "destination-select"
-      ) as HTMLSelectElement;
-      fireEvent.change(select, { target: { value: "loc-to" } });
+      // The popover content renders inline under the test mock, so the
+      // destination option is directly clickable.
+      fireEvent.click(screen.getByRole("option", { name: "Warehouse B" }));
 
       const quantityInput = screen.getByLabelText(
         /Quantity/i
@@ -357,10 +324,7 @@ describe("MoveUnitsDialog", () => {
         />
       );
 
-      const select = screen.getByTestId(
-        "destination-select"
-      ) as HTMLSelectElement;
-      fireEvent.change(select, { target: { value: "loc-to" } });
+      fireEvent.click(screen.getByRole("option", { name: "Warehouse B" }));
 
       const quantityInput = screen.getByLabelText(
         /Quantity/i

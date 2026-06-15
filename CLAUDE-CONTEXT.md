@@ -1596,7 +1596,7 @@ main).
 
 | Item                                                                             | Where (CLAUDE-CONTEXT.md) | Status                                                                                                                                                                                                   |
 | -------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10** — brought forward from post-release; see "Phase 4c — Split / merge UX (STAGED)" section below for the full report.                                                              |
+| **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10, COMMITTED `c6ef9c802`, polish 2026-06-15** — brought forward from post-release; see "Phase 4c — Split / merge UX (COMMITTED)" section below for the full report.                 |
 | **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Mostly not started. Sub-items: kit checkout/check-in qty polish, model grouping tool, import/export with qty columns, bulk-ops asset-type awareness.                                                     |
 | **Phase 4d — Rebalance kit allocation**                                          | line 1529-1533            | **Explicitly deferred 2026-06-10** (release pressure). Asset's `Assign` button stays disabled for fully-kit-allocated qty-tracked assets. `QuantityCustodyDialog` copy stays as-is.                      |
 | **Phase 4e — Booking-notes sweep (original scope tail)**                         | line 1698-1700            | Possibly residual. 4e landed the Custody / Kit / Location / Activity-feed axes; the "booking checkout / partial / final check-in" note-writer audit was not explicitly ticked. Worth a grep before ship. |
@@ -1605,12 +1605,63 @@ main).
 | **Reports end-to-end verification**                                              | line 2068-2083            | `TESTING-REPORTS.md` scaffold ready; deferred to post-Phase-4 to avoid double-walkthrough.                                                                                                               |
 | **Backfill verification on prod snapshot** (KitCustody, 628 prod rows)           | line 2088-2091            | `TESTING-KIT-CUSTODY-CORRECTNESS.md` Path B. Pre-prod-merge task — has to happen before the migration ships to prod, doesn't block PR merge.                                                             |
 
-#### Phase 4c — Split / merge UX (2026-06-10) — STAGED (uncommitted, awaiting approval)
+#### Phase 4c — Split / merge UX (2026-06-10) — COMMITTED `c6ef9c802`
 
 **Brought forward from post-release backlog** under release pressure. Pure
 UX layer on top of the 4a + 4b pivot schema — no migrations, no new
 constraints. Three services + one axis-parameterized dialog + one route's
 worth of wiring.
+
+**Post-merge polish (2026-06-15) — committed alongside the
+`assets.$assetId.activity` browser-bundle fix** (logger.ts `process.env`
+guard, separate `fix(webapp)` commit `7287a338d`). User browser-tested
+the dialog and flagged the picker styling drift from the rest of the
+app:
+
+- **Destination picker.** Replaced the Radix `Select` with the canonical
+  Popover + button-wrapped styled-`<div>` + `ChevronDownIcon` pattern
+  used by `components/dynamic-select/dynamic-select.tsx`. Same border
+  (`border-gray-300 px-[14px] py-2 text-sm`), same chevron icon from
+  `@radix-ui/react-icons`, same focused-error treatment. Keyboard
+  navigation (↑/↓/Enter) preserved.
+- **Server-error block** above the form (the "Cannot move — kit is in
+  custody …" message) bumped from `text-xs p-3 bg-error-25` to
+  `text-sm p-4` — same token ladder as `components/shared/warning-box.tsx`
+  so error-tone inline alerts read with the same weight as warning-tone
+  ones elsewhere in the app.
+- **Smoke test mock swap.** The dialog's component test was mocking
+  `~/components/forms/select`; now mocks `@radix-ui/react-popover`
+  inline-renderer (same shape as `sort-by.test.tsx`), and the two tests
+  that drive destination selection switched from a synthetic
+  `<select>` change-event to a direct `fireEvent.click` on the
+  rendered `role="option"` row.
+
+Live verification on `feat-quantities` against the `Quantities till the end`
+workspace (Gloves asset, 250 boxes across 4 manual locations + Kittington
+kit + 12 unplaced):
+
+- §1 location move (Chambers of Xeric → Christmas Event, 10 boxes) — UI
+  updated 25 → 15 / 22 → 32, paired `ASSET_LOCATION_CHANGED` events at
+  `2026-06-11 13:37:00.705+00` share `meta.moveCorrelationId =
+e060c76c-8ead-4f98-9b86-62697f4a6707`, `side: "from"` / `side: "to"`.
+- §3 kit BLOCK (kit-inherited-custody path) — attempted move
+  Kittington → Kittington 2 refused with "Cannot move — Kittington is
+  currently in Woox's custody. Release custody first." Both inline form
+  block AND error toast surfaced the message verbatim. This is the
+  exact behaviour from the 2026-06-10 option-(a) decision.
+- §5 place unplaced (12 boxes at God Wars Dungeon) — UI updated 66 → 78,
+  unplaced CTA disappeared after submit, single
+  `ASSET_LOCATION_CHANGED` event with `meta.placeUnplaced: true` +
+  `meta.moveCorrelationId = 9633efe3-d310-48ff-b199-65c15e934af4`.
+- §6 over-move guard (try 20 with 15 available) — client-side zorm
+  rendered "Maximum 15 boxes available" before the action ran.
+- §6 INDIVIDUAL hidden — Eternal Boots (asset_type INDIVIDUAL) renders
+  no "Move" affordance on its placement row, no kit row, no
+  place-unplaced CTA.
+
+Service-only verification (covered by Agent-G's 36 unit tests, not
+walked in browser): §2 source exhaustion, §3 kit happy-path,
+§3 active-booking BLOCK, §4 concurrent guard, §7 cross-org IDOR.
 
 **Implementation plan + dependency graph:**
 `superpowers/PHASE-4C-SPLIT-MERGE-UX.md` (delete before PR merge).

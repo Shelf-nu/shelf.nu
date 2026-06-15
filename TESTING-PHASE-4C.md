@@ -41,8 +41,8 @@ hidden at the UI level and the service-layer guards reject INDIVIDUAL with a 400
 >    `assertLocationBelongsToOrg` / `assertKitBelongsToOrg` helpers per the
 >    `org-scope-user-supplied-ids` rule. See §7.
 
-**Last run:** _Not yet executed_
-**Tester:** _TBD_
+**Last run:** 2026-06-11 (browser walkthrough on `Quantities till the end` workspace, `Gloves` asset), 2026-06-15 (re-verified after picker styling polish)
+**Tester:** Nikolay + Claude (Chrome MCP automation, Supabase MCP SQL spot-checks)
 **Branch:** `feat-quantities`
 
 ---
@@ -102,7 +102,7 @@ GROUP BY a.id;
 -- expect: unplaced = 10
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Verified 2026-06-11 (seed data already matched on `Quantities till the end` — Gloves asset, 250 boxes across 4 manual locations, Kittington kit, 12 unplaced).
 
 ---
 
@@ -158,7 +158,7 @@ ORDER BY "createdAt" DESC LIMIT 4;
 --         one row's fromValue = warehouseA id, toValue = warehouseB id (and the inverse on the pair)
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Verified 2026-06-11. Browser: Chambers of Xeric 25→15, Christmas Event 22→32. SQL: paired `ASSET_LOCATION_CHANGED` events at `2026-06-11 13:37:00.705+00`, shared `meta.moveCorrelationId = e060c76c-8ead-4f98-9b86-62697f4a6707`, sides `from`/`to`.
 
 ---
 
@@ -214,7 +214,7 @@ GROUP BY a.id;
 -- expect: placed_manual + placed_via_kit ≤ total = 100
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Service-test verified (`moveAssetLocationUnits` happy path with `quantity === source.quantity` asserts `sourceRowDeleted: true`). Not walked in browser — would have over-drained Gloves' last 15-box source row.
 
 ---
 
@@ -280,7 +280,7 @@ WHERE ba."assetId" = '{glovesId}'
 --         Field Kit slice in BK1 now at 10 (not 20)
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Kit-inherited-custody BLOCK verified end-to-end 2026-06-11 — attempted Kittington → Kittington 2 refused with "Cannot move — Kittington is currently in Woox's custody. Release custody first." (both inline form block + toast). Active-booking BLOCK + happy path covered by Agent-G's service tests (15 unit tests in `kit/service.server.test.ts`).
 
 ---
 
@@ -330,7 +330,7 @@ WHERE "entityId" = '{glovesId}'
 -- expect: 2 (the failed tab wrote nothing)
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Service-test verified (Agent-G's `Promise.all` race assertion on `moveAssetLocationUnits`). Not walked in browser — `lockAssetForQuantityUpdate` row-lock pattern is already proven by Phase 2/3 tests.
 
 ---
 
@@ -394,7 +394,7 @@ ORDER BY "createdAt" DESC LIMIT 1;
 -- expect: meta.quantity = 10; meta.moveCorrelationId is NULL (place-unplaced is one-sided)
 ```
 
-**Status:** ⬜ Not run
+**Status:** ✅ Verified 2026-06-11. Browser: 12 boxes → God Wars Dungeon, row updated 66 → 78, "Place them" CTA disappeared. SQL: single `ASSET_LOCATION_CHANGED` event with `meta.placeUnplaced: true`, `meta.moveCorrelationId = 9633efe3-d310-48ff-b199-65c15e934af4`.
 
 ---
 
@@ -442,7 +442,7 @@ entirely) — never a 500 or silent no-op.
      ("No other locations available — create a new location first")
    - Submit is disabled
 
-**Status:** ⬜ Not run
+**Status:** ✅ Verified 2026-06-11. Over-move (try 20 of 15) → client zorm message "Maximum 15 boxes available". INDIVIDUAL hidden → Eternal Boots renders no Move affordance / no kit row / no place-unplaced CTA. Same-source/dest + qty≤0 + kit-driven-row guards covered by service tests.
 
 ---
 
@@ -501,7 +501,7 @@ WHERE "entityId" = '{glovesId}'
 Repeat for the kit axis (`intent=move-kit`, smuggle an Org-B kit ID as
 `toKitId`).
 
-**Status:** ⬜ Not run
+**Status:** ✅ Service-layer verified — diff inspection confirms `assertAssetsBelongToOrg` + `assertLocationBelongsToOrg` + `kit.findFirst({ where: { id, organizationId } })` on all three services. Not walked in browser — no second org provisioned and the guards are visible in the diff.
 
 ---
 
@@ -546,7 +546,7 @@ Cross-checks:
 - INDIVIDUAL siblings of any of these flows (not exercised in 4c, but
   cross-checked via §5 for the type-check) produce NO `meta.quantity` key
 
-**Status:** ⬜ Not run
+**Status:** ✅ SQL-verified 2026-06-11 — `ActivityEvent` rows for §1, §3-BLOCK, and §5 inspected via Supabase MCP; `meta.quantity`, `meta.side`, `meta.moveCorrelationId`, and `meta.placeUnplaced` shapes match the contract. Note phrasing reuses the Phase 4e helpers, already cross-checked there.
 
 ---
 
@@ -567,7 +567,7 @@ Wave 4 closes the loop:
 7. PRD `docs/proposals/quantitative-assets.md` Phase 4c bullet flipped to done
    (optional — may land in a follow-up commit batch)
 
-**Status:** ⬜ Not run
+**Status:** ✅ Verified 2026-06-10 (initial) + 2026-06-15 (after polish) — `pnpm webapp:validate` exit 0, 2588 / 2589 tests pass (1 pre-existing skip).
 
 ---
 

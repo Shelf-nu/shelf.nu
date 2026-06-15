@@ -827,6 +827,18 @@ Available pool for new claims is the same Phase 2 formula: `Asset.quantity − s
 - Optionally a `Place N units at Location L` flow for unplaced stock (filling the "asset.quantity − sum(placements)" gap).
 - All UX gated on `Asset.type = QUANTITY_TRACKED`. INDIVIDUAL assets keep the existing single-placement UX.
 
+**Phase 4c — Split / merge UX — DONE (2026-06-10; polished + browser-verified 2026-06-15)**
+
+All three flows shipped on the asset detail page. Brought forward from the post-release backlog under release pressure since the existing manage-placements dialog buried the move concept in an abstract multi-row editor that users wouldn't discover. Per-axis services:
+
+- `moveAssetLocationUnits` (`modules/asset/service.server.ts`) — decrements source `AssetLocation`, deletes-on-zero, upserts destination, emits paired `ASSET_LOCATION_CHANGED` events sharing `meta.moveCorrelationId` + bidirectional "moved N units from L1 to L2" note via the Phase 4e `getLocationUpdateNoteContent` branch + per-location timeline notes.
+- `moveAssetKitUnits` (`modules/kit/service.server.ts`) — symmetric on `AssetKit`. Two **BLOCK conditions** decided 2026-06-10 (option (a) — block with helpful error — over silent cascade or confirm prompt): (1) active booking on source kit (DRAFT/RESERVED/ONGOING/OVERDUE) → 400 listing conflicting bookings, (2) source kit in kit-inherited operator custody → 400 listing custodian. Destination kit's active-booking `BookingAsset.quantity` slices cascade in the same tx. Notes use new `createKitMoveNote` helper rendering "moved N units from kit X to kit Y".
+- `placeUnplacedUnits` (`modules/asset/service.server.ts`) — one-sided variant filling the `Asset.quantity − sum(AssetLocation manual rows)` gap. Single `ASSET_LOCATION_CHANGED` event with `meta.placeUnplaced: true`. `Asset.quantity` null-coerced to 0 so a misconfigured asset returns a clear 400.
+
+Cross-axis invariant verified: location-axis moves never touch AssetKit/Custody/BookingAsset; kit-axis moves never touch AssetLocation. INDIVIDUAL assets keep single-placement UX (affordance hidden at UI level + service-layer 400). 36 service-level unit tests added across asset + kit modules covering happy paths, source-exhaustion, dest-merge, all negative paths, paired events, orthogonal-axes invariant, both kit BLOCK conditions, and dest-side BookingAsset cascade.
+
+Generic axis-parameterized `MoveUnitsDialog` component (`location | kit | place-unplaced`) lives at `components/assets/move-units-dialog.tsx`. Post-merge polish on 2026-06-15 swapped the Radix `Select`-based picker for the canonical `DynamicSelect` Popover + styled-`<div>` + `@radix-ui/react-icons` `ChevronDownIcon` pattern, and bumped the server-error block to `text-sm p-4` matching the `WarningBox` token ladder. Validate green at 2588 / 2589 tests. Implementation commit `c6ef9c802`, polish folded into a later commit on `feat-quantities`.
+
 **Auxiliary items (independent of pivot work)**
 
 - Kit integration polish for quantity-tracked items.

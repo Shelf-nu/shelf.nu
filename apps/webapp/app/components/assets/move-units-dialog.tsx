@@ -26,19 +26,19 @@
  * @see {@link file://../booking/adjust-booking-asset-quantity-dialog.tsx} - Pattern reference
  */
 
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
+import {
+  Popover,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from "@radix-ui/react-popover";
 import { useActionData, useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/forms/select";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -57,6 +57,8 @@ import { MOVE_UNITS_INTENT_FIELD } from "~/modules/asset/move-units.types";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { handleActivationKeyPress } from "~/utils/keyboard";
+import { tw } from "~/utils/tw";
 
 /** A pickable destination — a location or a kit (caller decides which). */
 export interface MoveUnitsDestination {
@@ -231,6 +233,15 @@ export function MoveUnitsDialog({
   const [selectedDestinationId, setSelectedDestinationId] = useState<
     string | null
   >(null);
+  /** Whether the destination picker popover is open. */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /**
+   * Index of the keyboard-highlighted destination row inside the open
+   * popover — drives the `↑ ↓ Enter` keyboard pattern shared with
+   * `field-selector.tsx`. Reset to 0 every time the popover (re-)opens.
+   */
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
   const fetcher = useFetcher<{ success?: boolean; error?: unknown }>({
     key: `move-units-${axis}-${assetId}`,
   });
@@ -341,9 +352,12 @@ export function MoveUnitsDialog({
         </AlertDialogHeader>
 
         {serverErrorMessage ? (
+          // Mirrors the shape of `WarningBox` (text-sm + p-4 + 25/300/700 token
+          // ladder) so server-side block errors render with the same weight as
+          // the inline warnings used elsewhere in the app — just in error tone.
           <div
             role="alert"
-            className="rounded border border-error-300 bg-error-25 p-3 text-xs text-error-700"
+            className="rounded border border-error-300 bg-error-25 p-4 text-sm text-error-700"
           >
             {serverErrorMessage}
           </div>
@@ -381,43 +395,163 @@ export function MoveUnitsDialog({
           />
 
           <div className="flex flex-col gap-4">
-            {/* Destination picker */}
+            {/* Destination picker — Popover + click-list pattern (per CLAUDE.md
+                "Deprecated Components" guidance and the canonical
+                field-selector.tsx implementation). The native `<Select>` was
+                replaced because its disconnected dropdown chrome didn't match
+                the rest of the app's secondary-button + Popover idiom. */}
             <div className="flex flex-col gap-1">
               <label
                 htmlFor={`move-units-destination-${axis}-${assetId}`}
-                className="text-text-sm font-medium text-gray-700"
+                className="text-sm font-medium text-gray-700"
               >
                 {copy.destinationLabel}
               </label>
-              <Select
-                value={selectedDestinationId ?? undefined}
-                onValueChange={(value) => setSelectedDestinationId(value)}
-                disabled={disabled || noDestinations}
-              >
-                <SelectTrigger
-                  id={`move-units-destination-${axis}-${assetId}`}
-                  aria-label={copy.destinationLabel}
-                >
-                  <SelectValue
-                    placeholder={
-                      noDestinations
-                        ? "No destinations available"
-                        : copy.destinationPlaceholder
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent
-                  position="popper"
-                  className="max-h-[280px] min-w-[var(--radix-select-trigger-width)] overflow-y-auto"
-                  align="start"
-                >
-                  {destinations.map((destination) => (
-                    <SelectItem key={destination.id} value={destination.id}>
-                      {destination.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {(() => {
+                const selectedDestination = selectedDestinationId
+                  ? destinations.find((d) => d.id === selectedDestinationId) ??
+                    null
+                  : null;
+                const triggerError = Boolean(
+                  validationErrors?.toId?.message || zo.errors.toId()?.message
+                );
+                const triggerDisabled = disabled || noDestinations;
+
+                const handleKeyDown = (
+                  event: KeyboardEvent<HTMLDivElement>
+                ) => {
+                  switch (event.key) {
+                    case "ArrowDown":
+                      event.preventDefault();
+                      setHighlightedIndex((prev) =>
+                        Math.min(prev + 1, destinations.length - 1)
+                      );
+                      break;
+                    case "ArrowUp":
+                      event.preventDefault();
+                      setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+                      break;
+                    case "Enter":
+                      event.preventDefault();
+                      {
+                        const candidate = destinations[highlightedIndex];
+                        if (candidate) {
+                          setSelectedDestinationId(candidate.id);
+                          setPickerOpen(false);
+                          pickerTriggerRef.current?.focus();
+                        }
+                      }
+                      break;
+                  }
+                };
+
+                return (
+                  <Popover
+                    open={pickerOpen}
+                    onOpenChange={(next) => {
+                      if (triggerDisabled && next) return;
+                      setPickerOpen(next);
+                      if (next) {
+                        // Highlight the current selection (or the first row)
+                        // on each open so the keyboard cursor starts somewhere
+                        // sensible.
+                        const idx = selectedDestinationId
+                          ? destinations.findIndex(
+                              (d) => d.id === selectedDestinationId
+                            )
+                          : 0;
+                        setHighlightedIndex(idx >= 0 ? idx : 0);
+                      }
+                    }}
+                  >
+                    {/* Trigger shape mirrors DynamicSelect's canonical pattern:
+                        a button-wrapper around an inner styled <div> carrying
+                        the border/padding/chevron. Using the inner-div idiom
+                        (not the shared Button component) is intentional — see
+                        components/dynamic-select/dynamic-select.tsx. */}
+                    <PopoverTrigger asChild disabled={triggerDisabled}>
+                      <button
+                        ref={pickerTriggerRef}
+                        type="button"
+                        id={`move-units-destination-${axis}-${assetId}`}
+                        aria-label={copy.destinationLabel}
+                        aria-haspopup="listbox"
+                        aria-expanded={pickerOpen}
+                        disabled={triggerDisabled}
+                        className={tw(
+                          "w-full",
+                          triggerDisabled && "cursor-not-allowed opacity-60"
+                        )}
+                      >
+                        <div
+                          className={tw(
+                            "flex w-full items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-sm hover:cursor-pointer",
+                            triggerError && "border-error-300"
+                          )}
+                        >
+                          <span
+                            className={tw(
+                              "truncate whitespace-nowrap pr-2",
+                              !selectedDestination && "text-gray-500"
+                            )}
+                          >
+                            {selectedDestination
+                              ? selectedDestination.name
+                              : noDestinations
+                              ? "No destinations available"
+                              : copy.destinationPlaceholder}
+                          </span>
+                          <ChevronDownIcon className="text-gray-500" />
+                        </div>
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverPortal>
+                      <PopoverContent
+                        align="start"
+                        sideOffset={4}
+                        className={tw(
+                          "z-[999999] max-h-[280px] w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-gray-200 bg-white shadow-md"
+                        )}
+                        onKeyDown={handleKeyDown}
+                      >
+                        <ul role="listbox" className="py-1">
+                          {destinations.map((destination, index) => {
+                            const isSelected =
+                              destination.id === selectedDestinationId;
+                            const isHighlighted = index === highlightedIndex;
+                            return (
+                              <li
+                                key={destination.id}
+                                role="option"
+                                aria-selected={isSelected}
+                                tabIndex={0}
+                                className={tw(
+                                  "cursor-pointer px-4 py-2 text-sm text-gray-700 hover:bg-gray-50",
+                                  isHighlighted && "bg-gray-50",
+                                  isSelected && "font-medium"
+                                )}
+                                onClick={() => {
+                                  setSelectedDestinationId(destination.id);
+                                  setPickerOpen(false);
+                                  pickerTriggerRef.current?.focus();
+                                }}
+                                onMouseEnter={() => setHighlightedIndex(index)}
+                                onKeyDown={handleActivationKeyPress(() => {
+                                  setSelectedDestinationId(destination.id);
+                                  setPickerOpen(false);
+                                  pickerTriggerRef.current?.focus();
+                                })}
+                              >
+                                {destination.name}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </PopoverContent>
+                    </PopoverPortal>
+                  </Popover>
+                );
+              })()}
               {validationErrors?.toId?.message || zo.errors.toId()?.message ? (
                 <p className="text-xs text-error-500">
                   {validationErrors?.toId?.message || zo.errors.toId()?.message}
