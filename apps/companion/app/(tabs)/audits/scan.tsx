@@ -30,6 +30,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
+import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { clearAuditScanState } from "@/lib/audit-scan-persistence";
@@ -405,15 +406,23 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // 1. Resolve code -> asset (QR or barcode)
+        // 1. Resolve code -> asset (QR, SAM id, or barcode)
         const qrId = extractQrId(data);
+        // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
+        // sequentialId branch, scoped to the workspace (web parity, ungated
+        // by the Barcodes add-on). currentOrg is non-null here (guard above).
+        const samId = !qrId ? parseSequentialId(data) : null;
+        const qrLookupId = qrId ?? samId;
         let codeId: string;
         let codeOrgId: string | null;
         let asset: { id: string; title: string } | null;
 
-        if (qrId) {
-          // ── Shelf QR path ──
-          const { data: qrData, error } = await api.qr(qrId);
+        if (qrLookupId) {
+          // ── Shelf QR / SAM path ──
+          const { data: qrData, error } = await api.qr(
+            qrLookupId,
+            currentOrg.id
+          );
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -426,7 +435,7 @@ function AuditScannerContent() {
             return;
           }
 
-          codeId = qrId;
+          codeId = qrLookupId;
           codeOrgId = qrData.qr.organizationId ?? null;
           asset = qrData.qr.asset;
         } else {

@@ -1,0 +1,57 @@
+# Audits — resolve a SAM / sequential ID while auditing (P4 parity)
+#
+# The audit scanner is a separate surface from the general scanner, with its
+# own code-resolution dispatch. This verifies it resolves SAM ids the same
+# way (web parity: sequentialId lookup, org-scoped, ungated by Barcodes).
+#
+# Fixture: SAM-0001 = "Laerdal SimMan 3G Wireless Patient Simulator" is an
+# EXPECTED asset in the PENDING audit "QA select-all Simulation Suites"
+# (GRANULAR WORKSPACE). The scan persists, so the run resets it afterward.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_SAM_ID
+#      SHELF_TEST_SAM_TITLE (regex fragment) / SHELF_TEST_AUDIT_NAME
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+# ── Switch to the QA workspace ──
+- tapOn: "Settings"
+- assertVisible: "WORKSPACE"
+- tapOn:
+    point: 50%, 32%
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Open the audit session and start scanning ──
+# Audits isn't a bottom tab (href: null) — it's a Home quick-action.
+- tapOn: "Home"
+- tapOn: "Audits"
+- scrollUntilVisible:
+    element: ".*${SHELF_TEST_AUDIT_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: ".*${SHELF_TEST_AUDIT_NAME}.*"
+- extendedWaitUntil:
+    visible: "Start scanning assets|Continue scanning assets"
+    timeout: 15000
+- tapOn: "Start scanning assets|Continue scanning assets"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 15000
+
+# ── Scan the SAM id (lowercase → proves normalization) ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_SAM_ID}
+- pressKey: Enter
+# Found expected asset → toast + persistent scanned-items row with the title
+- extendedWaitUntil:
+    visible: ".*${SHELF_TEST_SAM_TITLE}.*"
+    timeout: 20000
+- takeScreenshot: audit-sam-resolved
