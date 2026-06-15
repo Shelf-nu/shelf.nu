@@ -15,7 +15,16 @@ import { ShelfError } from "./error";
  * user-agent isn't available at this emit point.
  */
 const HANDLED_4XX_SAMPLE_RATE = (() => {
-  const raw = Number(process.env.SENTRY_HANDLED_4XX_SAMPLE_RATE);
+  // This module is reachable from the client bundle (e.g. the rich-text editor
+  // imports Logger), and this IIFE runs at module-load time. In the browser
+  // `process` is undefined in dev (Vite only statically replaces `process.env.X`
+  // in production builds), so guard the access — the sample rate is a
+  // server-only concern (handledClientError emits 4xx logs server-side) and
+  // defaults to 1 when unavailable.
+  const raw =
+    typeof process !== "undefined"
+      ? Number(process.env.SENTRY_HANDLED_4XX_SAMPLE_RATE)
+      : NaN;
   return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 1;
 })();
 
