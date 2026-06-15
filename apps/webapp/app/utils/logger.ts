@@ -10,12 +10,22 @@ import { ShelfError } from "./error";
  * `SENTRY_HANDLED_4XX_SAMPLE_RATE` (0–1) without a deploy if 4xx volume ever
  * threatens the quota.
  *
+ * The `typeof process` guard keeps this safe when `logger.ts` is reached from
+ * the browser bundle (e.g. the activity-feed Markdown editor pulls `Logger`
+ * via `use-editor-view.ts`). The sample-rate constant is only consumed by the
+ * Sentry log emit below, which only runs server-side, so the browser-side
+ * fallback value is never read in practice.
+ *
  * Note: the recurring curl-pentester sweep is filtered at the Sentry project
  * level (an inbound/log filter on `browser.name:curl`), not here — the
  * user-agent isn't available at this emit point.
  */
 const HANDLED_4XX_SAMPLE_RATE = (() => {
-  const raw = Number(process.env.SENTRY_HANDLED_4XX_SAMPLE_RATE);
+  const raw = Number(
+    typeof process !== "undefined"
+      ? process.env.SENTRY_HANDLED_4XX_SAMPLE_RATE
+      : undefined
+  );
   return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 1;
 })();
 
