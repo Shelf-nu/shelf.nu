@@ -28,6 +28,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
+import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
@@ -375,6 +376,15 @@ function ScannerContent() {
 
       try {
         const qrId = extractQrId(data);
+        // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
+        // via the QR route's sequentialId branch, scoped to the current
+        // workspace (web parity: the web scan resolver tries parseSequentialId
+        // before the QR lookup, ungated by the Barcodes add-on). SAM is unique
+        // per-org, so this needs currentOrg; without it we fall through to the
+        // barcode path, which already errors cleanly.
+        const samId = !qrId && currentOrg ? parseSequentialId(data) : null;
+        // The code to resolve via the QR route: a QR id or a normalized SAM id.
+        const qrLookupId = qrId ?? samId;
         let codeId: string;
         let codeOrgId: string | null;
         let asset: {
@@ -396,13 +406,13 @@ function ScannerContent() {
         // kit-linked QRs (see the !asset branch below for the full rationale).
         let kitId: string | null = null;
 
-        if (qrId) {
-          // ── Shelf QR path ──
+        if (qrLookupId) {
+          // ── Shelf QR / SAM path ──
 
-          // Early batch dedup by QR ID (saves a network call)
+          // Early batch dedup by code id (saves a network call)
           if (
             isBatchAction(action) &&
-            scannedItems.some((item) => item.qrId === qrId)
+            scannedItems.some((item) => item.qrId === qrLookupId)
           ) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -415,7 +425,12 @@ function ScannerContent() {
             return;
           }
 
-          const { data: qrData, error } = await api.qr(qrId);
+          // orgId is only consumed by the server's SAM branch; on the QR path
+          // the org is derived from the QR record and this is ignored.
+          const { data: qrData, error } = await api.qr(
+            qrLookupId,
+            currentOrg?.id
+          );
 
           if (error || !qrData) {
             flashFrame("error");
@@ -451,7 +466,7 @@ function ScannerContent() {
             return;
           }
 
-          codeId = qrId;
+          codeId = qrLookupId;
           codeOrgId = qrData.qr?.organizationId ?? null;
           asset = qrData.qr?.asset ?? null;
           kit = qrData.qr?.kit ?? null;
