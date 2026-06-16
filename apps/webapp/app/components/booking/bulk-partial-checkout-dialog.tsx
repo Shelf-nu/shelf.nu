@@ -148,14 +148,27 @@ export default function BulkPartialCheckoutDialog({
     (asset) => !isAssetAlreadyCheckedOut(asset)
   );
 
-  // Count only individual assets (exclude kit IDs) for final-checkout detection.
-  const selectedAssetIds = selectedItems
-    .filter((item: any) => item.title && !item._count) // Only assets, not kits
-    .map((asset: any) => asset.id);
+  // Count only individual assets (exclude kit IDs), deduped, for final-checkout
+  // detection and submission — the selection can contain the same asset twice
+  // (e.g. scanned both standalone and as a kit member).
+  const selectedAssetIds = Array.from(
+    new Set(
+      selectedItems
+        .filter((item: any) => item.title && !item._count) // Only assets, not kits
+        .map((asset: any) => asset.id)
+    )
+  );
 
+  // Final checkout = the selected set IS exactly the still-Booked set. Use set
+  // membership (not just count equality) so duplicates or an unrelated selection
+  // of the same size can't be misread as "final".
+  const remainingBookedAssetIds = new Set(
+    remainingBookedAssets.map((asset) => asset.id)
+  );
   const isFinalCheckout =
-    selectedAssetIds.length === remainingBookedAssets.length &&
-    remainingBookedAssets.length > 0;
+    selectedAssetIds.length > 0 &&
+    selectedAssetIds.length === remainingBookedAssetIds.size &&
+    selectedAssetIds.every((id) => remainingBookedAssetIds.has(id));
 
   // Early checkout is only relevant for final checkouts (checking out the whole
   // remaining booking before the start date).
@@ -215,17 +228,15 @@ export default function BulkPartialCheckoutDialog({
         >
           <input type="hidden" name="returnJson" value="true" />
 
-          {/* Filter out kit IDs - only send asset IDs to backend */}
-          {selectedItems
-            .filter((item: any) => item.title && !item._count) // Only assets, not kits
-            .map((asset: any, index: number) => (
-              <input
-                key={asset.id}
-                type="hidden"
-                name={`assetIds[${index}]`}
-                value={asset.id}
-              />
-            ))}
+          {/* Only deduped asset IDs are sent to the backend (kits excluded). */}
+          {selectedAssetIds.map((assetId: string, index: number) => (
+            <input
+              key={assetId}
+              type="hidden"
+              name={`assetIds[${index}]`}
+              value={assetId}
+            />
+          ))}
 
           {/* List of items being checked out */}
           <div className="mb-4 max-h-48 overflow-y-auto rounded border bg-gray-50 p-3">

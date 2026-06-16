@@ -108,6 +108,11 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       aggregate: vitest.fn().mockResolvedValue({ _sum: { checkinCount: 0 } }),
     },
+    partialBookingCheckout: {
+      create: vitest.fn().mockResolvedValue({}),
+      count: vitest.fn().mockResolvedValue(0),
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     user: {
       findUniqueOrThrow: vitest.fn().mockResolvedValue({
         id: "user-1",
@@ -396,6 +401,12 @@ describe("createBooking", () => {
 describe("partialCheckinBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // Default: no progressive-checkout records (an all-at-once checkout), so
+    // check-in eligibility falls back to all booking assets. Tests that need a
+    // genuine progressive-checkout history override this per-test.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
   });
 
   const mockPartialCheckinParams = {
@@ -498,11 +509,16 @@ describe("partialCheckinBooking", () => {
       ],
     });
 
-    // asset-1 is CHECKED_OUT, asset-2 is still AVAILABLE (never checked out).
+    // Progressive checkout history: only asset-1 was ever checked out for this
+    // booking, so asset-2 is ineligible for check-in (per-booking, not global).
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetIds: ["asset-1"] }]);
+
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
-      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
-      { id: "asset-2", title: "Asset 2", status: AssetStatus.AVAILABLE },
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
     ]);
 
     await expect(

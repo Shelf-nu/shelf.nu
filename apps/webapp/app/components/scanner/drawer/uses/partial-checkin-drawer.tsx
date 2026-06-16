@@ -208,19 +208,35 @@ export default function PartialCheckinDrawer({
   // booking was never scanned out, so it cannot be checked in. We only flag
   // assets that ARE in the booking (the not-in-booking blocker handles the rest)
   // and are NOT already checked in (that has its own blocker).
-  const neverCheckedOutAssetIds = assets
-    .filter(
-      (asset) =>
-        bookingAssetIds.has(asset.id) &&
-        asset.status !== AssetStatus.CHECKED_OUT &&
-        !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
-    )
-    .map((a) => a.id);
+  // Consider BOTH standalone scans and kit-member assets — scanning a kit QR
+  // queues its assets, so a kit whose in-booking assets were never checked out
+  // must surface a blocker too (otherwise submit is silently disabled).
+  const scannedBookingAssets = [
+    ...assets,
+    ...kits.flatMap((kit) => kit.assets),
+  ].filter(
+    (asset) =>
+      bookingAssetIds.has(asset.id) &&
+      asset.status !== AssetStatus.CHECKED_OUT &&
+      !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+  );
+  const neverCheckedOutAssetIds = [
+    ...new Set(scannedBookingAssets.map((a) => a.id)),
+  ];
+  const neverCheckedOutAssetIdSet = new Set(neverCheckedOutAssetIds);
 
   const qrIdsOfNeverCheckedOutAssets = Object.entries(items)
     .filter(([, item]) => {
-      if (!item || item.type !== "asset") return false;
-      return neverCheckedOutAssetIds.includes((item?.data as any)?.id);
+      if (!item) return false;
+      if (item.type === "asset") {
+        return neverCheckedOutAssetIdSet.has((item?.data as any)?.id);
+      }
+      if (item.type === "kit") {
+        return (item?.data as any)?.assets?.some((a: { id: string }) =>
+          neverCheckedOutAssetIdSet.has(a.id)
+        );
+      }
+      return false;
     })
     .map(([qrId]) => qrId);
 

@@ -2163,12 +2163,26 @@ export async function partialCheckinBooking({
     // to check those in is invalid and must be rejected before the
     // "covers all remaining" early-exit (which would otherwise complete the
     // booking and flip never-checked-out assets to AVAILABLE no-ops).
-    const scannedStatuses = await db.asset.findMany({
+    // Eligibility is per-booking, NOT global asset status. An asset can be
+    // CHECKED_OUT by a different active booking yet never checked out here, so
+    // keying on global status would wrongly accept it. The per-booking checkout
+    // history is the PartialBookingCheckout records (progressive checkouts,
+    // including the final batch). An all-at-once checkout leaves no records, so
+    // fall back to "every booking asset is eligible".
+    const checkedOutForThisBooking = new Set(
+      await getPartiallyCheckedOutAssetIds({ bookingId: id, organizationId })
+    );
+    const eligibleCheckinAssetIds =
+      checkedOutForThisBooking.size > 0
+        ? checkedOutForThisBooking
+        : new Set(bookingFound.assets.map((asset) => asset.id));
+
+    const scannedAssets = await db.asset.findMany({
       where: { id: { in: assetIds }, organizationId },
-      select: { id: true, title: true, status: true },
+      select: { id: true, title: true },
     });
-    const notCheckedOut = scannedStatuses.filter(
-      (a) => a.status !== AssetStatus.CHECKED_OUT
+    const notCheckedOut = scannedAssets.filter(
+      (a) => !eligibleCheckinAssetIds.has(a.id)
     );
     if (notCheckedOut.length > 0) {
       // why: with progressive checkout a booking can hold still-Booked
@@ -2201,10 +2215,14 @@ export async function partialCheckinBooking({
     const recordedAssetIdSet = new Set(alreadyCheckedInAssetIds);
     const providedAssetIds = new Set(assetIds);
 
-    // Booking assets not yet covered by any partial check-in record.
-    const outstandingAssetIds = bookingFound.assets
-      .map((asset) => asset.id)
-      .filter((assetId) => !recordedAssetIdSet.has(assetId));
+    // Outstanding = CHECKED-OUT-for-this-booking assets not yet checked back in.
+    // Crucially this is the eligible (checked-out) set, NOT every booking asset:
+    // a progressive booking can hold never-checked-out items, and counting those
+    // as outstanding would keep it stuck ONGOING forever after the actually
+    // checked-out items are all returned.
+    const outstandingAssetIds = [...eligibleCheckinAssetIds].filter(
+      (assetId) => !recordedAssetIdSet.has(assetId)
+    );
 
     // If this batch covers every still-outstanding asset, the booking is fully
     // returned → run the full check-in (which also cancels schedulers, sends the
@@ -2392,17 +2410,18 @@ export async function partialCheckinBooking({
         },
       });
 
-      // Remaining = booking assets not covered by any partial check-in record
-      // (previous sessions + this batch). The old `total - thisBatch` ignored
-      // earlier sessions, so multi-session check-ins reported the wrong count
-      // and could never reach zero. Completion is normally handled by the
-      // record-based early-exit above; this stays consistent as a safety net.
+      // Remaining = CHECKED-OUT-for-this-booking assets not covered by any
+      // partial check-in record (previous sessions + this batch). Counting only
+      // the eligible (checked-out) set — not every booking asset — means a
+      // progressive booking with never-checked-out items still completes once
+      // all actually checked-out items are returned. Completion is normally
+      // handled by the record-based early-exit above; this stays consistent.
       const checkedInAfterThisBatch = new Set([
         ...recordedAssetIdSet,
         ...assetIds,
       ]);
-      const remainingCount = updatedBookingForNote.assets.filter(
-        (asset) => !checkedInAfterThisBatch.has(asset.id)
+      const remainingCount = [...eligibleCheckinAssetIds].filter(
+        (assetId) => !checkedInAfterThisBatch.has(assetId)
       ).length;
       const isCompletingBooking = remainingCount === 0;
 
@@ -2612,13 +2631,19 @@ export async function partialCheckoutBooking({
       .map((asset) => asset.id)
       .filter((assetId) => !recordedAssetIdSet.has(assetId));
 
-    // If this batch covers every still-Booked asset, run the full checkout
-    // (clean status transition + schedulers + notes), mirroring how partial
-    // check-in delegates to checkinBooking for the final batch.
-    if (
+    // Delegate to the full checkout ONLY on the very first all-items scan of a
+    // RESERVED booking (no prior partial-checkout records). `checkoutBooking`
+    // re-processes EVERY booking asset, so running it after earlier partial
+    // checkouts would duplicate full-checkout events and re-flip already-returned
+    // assets to CHECKED_OUT. Once any records exist, later "final" batches stay
+    // in the partial path below and report completion via remainingAssetCount.
+    const shouldDelegateToFullCheckout =
+      bookingFound.status === BookingStatus.RESERVED &&
+      recordedAssetIdSet.size === 0 &&
       bookingFound.assets.length > 0 &&
-      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
-    ) {
+      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId));
+
+    if (shouldDelegateToFullCheckout) {
       const fullyCheckedOut = await checkoutBooking({
         id,
         organizationId,
@@ -2939,7 +2964,10 @@ export async function partialCheckoutBooking({
         booking: updatedBookingForNote,
         checkedOutAssetCount: assetIdsToCheckOut.length,
         remainingAssetCount,
-        isComplete: false,
+        // A later final batch (after earlier partial checkouts) completes the
+        // checkout here in the partial path rather than via the delegation
+        // above, so report completion from the remaining count.
+        isComplete: remainingAssetCount === 0,
         bookingStatusChanged,
       };
     });

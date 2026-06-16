@@ -331,6 +331,30 @@ describe("partialCheckoutBooking", () => {
     expect(result.isComplete).toBe(true);
   });
 
+  it("does NOT delegate to full checkout once partial-checkout records exist; the later final batch completes in the partial path", async () => {
+    expect.assertions(2);
+
+    // ONGOING booking with asset-1 & asset-2 already checked out (recorded).
+    // Scanning the last outstanding asset-3 must stay in the partial path — NOT
+    // re-run the whole-booking checkoutBooking (which would call db.booking.update).
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetIds: ["asset-1", "asset-2"] }]);
+
+    const result = await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-3"],
+    });
+
+    // No delegation and no first-scan transition → booking.update is untouched.
+    expect(db.booking.update).not.toHaveBeenCalled();
+    // All booking assets are now checked out → the partial path reports complete.
+    expect(result.isComplete).toBe(true);
+  });
+
   it("throws when a scanned asset is in custody", async () => {
     expect.assertions(2);
 

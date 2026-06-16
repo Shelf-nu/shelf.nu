@@ -315,7 +315,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 size="sm"
                 className="grow whitespace-nowrap"
                 to={`/bookings/${id}/overview/checkout-assets`}
-                disabled={disabled || isLoadingWorkingHours}
+                disabled={disabled}
               >
                 Scan to check out
               </Button>
