@@ -134,6 +134,7 @@ import type {
   PlaceUnplacedUnitsArgs,
   PlaceUnplacedUnitsResult,
 } from "./move-units.types";
+import { validateQtyTrackedFields } from "./qty-validation.server";
 import {
   CUSTOM_FIELD_SEARCH_PATHS,
   assetQueryFragment,
@@ -4107,31 +4108,17 @@ type ParsedQtyTrackedCsvRow = {
   consumptionType: ConsumptionType | undefined;
 };
 
-const CSV_ASSET_TYPES = new Set<string>([
-  AssetType.INDIVIDUAL,
-  AssetType.QUANTITY_TRACKED,
-]);
-const CSV_CONSUMPTION_TYPES = new Set<string>([
-  ConsumptionType.ONE_WAY,
-  ConsumptionType.TWO_WAY,
-]);
-
 /**
  * Parses + validates the quantity-tracked columns
  * (`type`, `quantity`, `minQuantity`, `unitOfMeasure`, `consumptionType`)
- * and the AssetModel reference from a single CSV import row.
+ * from a single CSV import row, on the create path.
  *
- * Throws a labelled `ShelfError` (HTTP 400) with row-identifying context
- * on any malformed value so the importer surfaces "row 14: quantity must
- * be a positive integer" rather than a generic 500 deeper in the chain.
- *
- * Validation rules:
- * - `type` (optional): must be `INDIVIDUAL` or `QUANTITY_TRACKED`; missing → INDIVIDUAL
- * - `quantity` (required for QUANTITY_TRACKED, ≥1): non-negative integer
- * - `quantity > 1` is rejected for INDIVIDUAL (matches the DB invariant)
- * - `minQuantity` (optional): non-negative integer
- * - `unitOfMeasure` (optional): plain string, sanitised against Markdoc tokens
- * - `consumptionType` (required for QUANTITY_TRACKED): `ONE_WAY` | `TWO_WAY`
+ * Thin adapter over the shared `validateQtyTrackedFields` validator so
+ * the update path (`parseQtyTrackedUpdateRow`) and the create path
+ * share a single source of truth for per-field error messages and
+ * validation rules. The function's public signature + return shape is
+ * preserved verbatim so the existing `createAssetsFromContentImport`
+ * call site keeps working without changes.
  *
  * @param asset - The parsed CSV row (raw string values + injected `key`)
  * @returns Typed object ready to spread into the createAsset payload
@@ -4140,146 +4127,20 @@ const CSV_CONSUMPTION_TYPES = new Set<string>([
 function parseQtyTrackedCsvRow(
   asset: CreateAssetFromContentImportPayload
 ): ParsedQtyTrackedCsvRow {
-  const rowLabel = `asset "${asset.title}"`;
-
-  // ── type ────────────────────────────────────────────────────────────
-  const rawType =
-    typeof asset.type === "string" ? asset.type.trim().toUpperCase() : "";
-  let parsedType: AssetType | undefined;
-  if (rawType === "") {
-    parsedType = undefined; // createAsset will default to INDIVIDUAL via DB
-  } else if (CSV_ASSET_TYPES.has(rawType)) {
-    parsedType = rawType as AssetType;
-  } else {
-    throw new ShelfError({
-      cause: null,
-      title: "Invalid asset type",
-      message: `Invalid type "${asset.type}" for ${rowLabel}. Must be "INDIVIDUAL" or "QUANTITY_TRACKED".`,
-      label: "Assets",
-      status: 400,
-      shouldBeCaptured: false,
-      additionalData: { assetKey: asset.key, type: asset.type },
-    });
-  }
-  const effectiveType = parsedType ?? AssetType.INDIVIDUAL;
-
-  // ── quantity ────────────────────────────────────────────────────────
-  const rawQty =
-    typeof asset.quantity === "string" ? asset.quantity.trim() : "";
-  let parsedQty: number | undefined;
-  if (rawQty !== "") {
-    const n = Number(rawQty);
-    if (!Number.isInteger(n) || n < 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Invalid quantity",
-        message: `Invalid quantity "${asset.quantity}" for ${rowLabel}. Must be a non-negative whole number.`,
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-        additionalData: { assetKey: asset.key, quantity: asset.quantity },
-      });
-    }
-    parsedQty = n;
-  }
-
-  if (effectiveType === AssetType.QUANTITY_TRACKED) {
-    if (parsedQty === undefined || parsedQty <= 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Quantity required",
-        message: `Quantity is required (and must be > 0) for QUANTITY_TRACKED ${rowLabel}.`,
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-        additionalData: { assetKey: asset.key },
-      });
-    }
-  } else if (effectiveType === AssetType.INDIVIDUAL) {
-    if (parsedQty !== undefined && parsedQty > 1) {
-      throw new ShelfError({
-        cause: null,
-        title: "Invalid quantity for INDIVIDUAL",
-        message: `INDIVIDUAL assets must have quantity 1 (or omit the column). Got "${asset.quantity}" for ${rowLabel}. To track stock, set type=QUANTITY_TRACKED.`,
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-        additionalData: { assetKey: asset.key, quantity: asset.quantity },
-      });
-    }
-  }
-
-  // ── minQuantity ─────────────────────────────────────────────────────
-  const rawMin =
-    typeof asset.minQuantity === "string" ? asset.minQuantity.trim() : "";
-  let parsedMin: number | undefined;
-  if (rawMin !== "") {
-    const n = Number(rawMin);
-    if (!Number.isInteger(n) || n < 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Invalid min quantity",
-        message: `Invalid minQuantity "${asset.minQuantity}" for ${rowLabel}. Must be a non-negative whole number.`,
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-        additionalData: { assetKey: asset.key, minQuantity: asset.minQuantity },
-      });
-    }
-    parsedMin = n;
-  }
-
-  // ── unitOfMeasure ───────────────────────────────────────────────────
-  // Sanitised to strip Markdoc tokens — see Phase 4e Hex follow-up.
-  const rawUnit =
-    typeof asset.unitOfMeasure === "string"
-      ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
-      : "";
-  const parsedUnit = rawUnit === "" ? undefined : rawUnit;
-
-  // ── consumptionType ─────────────────────────────────────────────────
-  const rawCt =
-    typeof asset.consumptionType === "string"
-      ? asset.consumptionType.trim().toUpperCase()
-      : "";
-  let parsedCt: ConsumptionType | undefined;
-  if (rawCt !== "") {
-    if (!CSV_CONSUMPTION_TYPES.has(rawCt)) {
-      throw new ShelfError({
-        cause: null,
-        title: "Invalid consumption type",
-        message: `Invalid consumptionType "${asset.consumptionType}" for ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-        additionalData: {
-          assetKey: asset.key,
-          consumptionType: asset.consumptionType,
-        },
-      });
-    }
-    parsedCt = rawCt as ConsumptionType;
-  }
-
-  if (effectiveType === AssetType.QUANTITY_TRACKED && !parsedCt) {
-    throw new ShelfError({
-      cause: null,
-      title: "Consumption type required",
-      message: `Consumption type is required for QUANTITY_TRACKED ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
-      label: "Assets",
-      status: 400,
-      shouldBeCaptured: false,
+  return validateQtyTrackedFields(
+    {
+      type: asset.type,
+      quantity: asset.quantity,
+      minQuantity: asset.minQuantity,
+      unitOfMeasure: asset.unitOfMeasure,
+      consumptionType: asset.consumptionType,
+    },
+    { kind: "create" },
+    {
+      rowLabel: `asset "${asset.title}"`,
       additionalData: { assetKey: asset.key },
-    });
-  }
-
-  return {
-    type: parsedType,
-    quantity: parsedQty,
-    minQuantity: parsedMin,
-    unitOfMeasure: parsedUnit,
-    consumptionType: parsedCt,
-  };
+    }
+  );
 }
 
 /**

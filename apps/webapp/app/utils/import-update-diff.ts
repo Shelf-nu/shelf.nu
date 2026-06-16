@@ -129,8 +129,11 @@ export function analyzeUpdateHeaders(
   const fallbackId = foundIdCols.length > 1 ? foundIdCols[1] : null;
 
   // Set of internal field names used as identifiers — skip them during
-  // column classification so they aren't treated as updatable or ignored
-  const identifierFields = new Set(
+  // column classification so they aren't treated as updatable or ignored.
+  // Typed as `Set<string>` so it accepts the now-widened
+  // `EXPORT_HEADER_TO_FIELD_MAP` lookup result (the map gained
+  // import-only aliases that aren't in `ColumnLabelKey`).
+  const identifierFields = new Set<string>(
     IDENTIFIER_COLUMNS.map((c) => c.internalField)
   );
 
@@ -351,6 +354,115 @@ export function compareCoreField(
           field: displayName,
           currentValue: asset.availableToBook ? "Yes" : "No",
           newValue: csvBool ? "Yes" : "No",
+        };
+      }
+      return null;
+    }
+
+    // ── Qty-tracked + AssetModel preview comparisons ──────────────────
+    // These fields are ONLY meaningful on the type that owns them:
+    // qty / minQuantity / unitOfMeasure / consumptionType apply to
+    // QUANTITY_TRACKED; assetModel applies to INDIVIDUAL. When the cell
+    // exists on the "wrong" type the row's other cells still apply —
+    // the actual drop happens in the apply path. The preview here
+    // surfaces the change for the matching type and silently no-ops
+    // for the other so the diff doesn't show ghost "changes" the
+    // import will silently ignore.
+    case "quantity": {
+      // Silently no-op on INDIVIDUAL rows — the apply path drops these.
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const currentQty = asset.quantity ?? 0;
+      const n = Number(csvValue);
+      if (!Number.isInteger(n) || n < 0) {
+        return {
+          field: displayName,
+          currentValue: String(currentQty),
+          newValue: csvValue,
+          warning: `"${csvValue}" is not a valid quantity (must be a non-negative whole number)`,
+        };
+      }
+      if (n !== currentQty) {
+        return {
+          field: displayName,
+          currentValue: String(currentQty),
+          newValue: String(n),
+        };
+      }
+      return null;
+    }
+
+    case "minQuantity": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const n = Number(csvValue);
+      if (!Number.isInteger(n) || n < 0) {
+        return {
+          field: displayName,
+          currentValue:
+            asset.minQuantity != null ? String(asset.minQuantity) : "(none)",
+          newValue: csvValue,
+          warning: `"${csvValue}" is not a valid min quantity (must be a non-negative whole number)`,
+        };
+      }
+      if (n !== (asset.minQuantity ?? null)) {
+        return {
+          field: displayName,
+          currentValue:
+            asset.minQuantity != null ? String(asset.minQuantity) : "(none)",
+          newValue: String(n),
+        };
+      }
+      return null;
+    }
+
+    case "unitOfMeasure": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const current = asset.unitOfMeasure ?? "";
+      if (csvValue !== current) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
+        };
+      }
+      return null;
+    }
+
+    case "consumptionType": {
+      if (asset.type !== "QUANTITY_TRACKED") return null;
+      const upper = csvValue.toUpperCase();
+      if (upper !== "ONE_WAY" && upper !== "TWO_WAY") {
+        return {
+          field: displayName,
+          currentValue: asset.consumptionType ?? "(none)",
+          newValue: csvValue,
+          warning: `Unrecognized consumption type "${csvValue}" — must be "ONE_WAY" or "TWO_WAY"`,
+        };
+      }
+      if (upper !== asset.consumptionType) {
+        return {
+          field: displayName,
+          currentValue: asset.consumptionType ?? "(none)",
+          newValue: upper,
+        };
+      }
+      return null;
+    }
+
+    case "assetModel": {
+      // Silently no-op on QUANTITY_TRACKED rows — the apply path warns
+      // and drops the cell. Suppressing the diff here keeps the
+      // preview honest (otherwise we'd advertise a change we won't
+      // actually apply).
+      if (asset.type !== "INDIVIDUAL") return null;
+      // Preview can't pre-resolve the model name → id; surface the cell
+      // value vs current model id so the user sees a change is queued.
+      // The apply path does the real resolution.
+      const current = asset.assetModelId ?? "";
+      if (csvValue !== current) {
+        return {
+          field: displayName,
+          currentValue: current || "(none)",
+          newValue: csvValue,
         };
       }
       return null;

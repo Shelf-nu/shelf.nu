@@ -1597,7 +1597,7 @@ main).
 | Item                                                                             | Where (CLAUDE-CONTEXT.md) | Status                                                                                                                                                                                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Phase 4c — Split / merge UX** ("Move N units from Location A → B" + Kit X → Y) | line 1507-1518            | **DELIVERED 2026-06-10, COMMITTED `c6ef9c802`, polish 2026-06-15** — brought forward from post-release; see "Phase 4c — Split / merge UX (COMMITTED)" section below for the full report.                                                                                                                                                                                                                   |
-| **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Mostly not started. Sub-items: kit checkout/check-in qty polish, model grouping tool, import/export with qty columns, bulk-ops asset-type awareness.                                                                                                                                                                                                                                                       |
+| **Phase 4d — Auxiliary items umbrella**                                          | line 1520-1533            | Partially shipped. **Import qty + AssetModel round-trip — DONE 2026-06-16** for content import (create + update); see the "Import qty-tracked + AssetModel — DONE" section below. Remaining sub-items still deferred: kit checkout/check-in qty polish, model grouping tool, backup-import AssetModel round-trip, bulk-ops asset-type awareness.                                                           |
 | **Phase 4d — Rebalance kit allocation**                                          | line 1529-1533            | **Explicitly deferred 2026-06-10** (release pressure). Asset's `Assign` button stays disabled for fully-kit-allocated qty-tracked assets. `QuantityCustodyDialog` copy stays as-is.                                                                                                                                                                                                                        |
 | **Phase 4e — Booking-notes sweep (original scope tail)**                         | line 1698-1700            | **CLOSED 2026-06-15.** Pre-release grep surfaced the two residual writers (`booking/service.server.ts` per-asset final + partial check-in notes + the `buildQtyPerAssetFragment` helper) that still emitted bare integers — now route counts through `formatUnitCount`, so phrasing reads "returned 10 boxes" instead of "returned 10" for qty-tracked assets. See "Phase 4e tail closeout" section below. |
 | **Sub-phase 3e — Calendar + Polish**                                             | line 710-720              | Deferred until after Phase 4c (entangled with split/merge mechanic).                                                                                                                                                                                                                                                                                                                                       |
@@ -1941,6 +1941,95 @@ note content at higher level so the wording change rides through.
 This closes the row in the post-release backlog table; **Phase 4e is
 fully done** — every qty-tracked note + ActivityEvent.meta path now
 surfaces the affected unit count.
+
+#### Import qty-tracked + AssetModel round-trip (2026-06-16) — DONE
+
+User-flagged pre-release blocker: asset import is heavily used and the
+existing CREATE path already supported the qty-tracked + AssetModel
+columns end-to-end, but the **UPDATE** path silently dropped them. PR
+extends `UPDATABLE_FIELDS` + adds the apply branches + plumbs an
+AssetModel batch resolver + surfaces a warnings channel in the results
+UI. Backup-import AssetModel round-trip explicitly dropped from this
+PR per user (stays as Phase 3d follow-up #3 in the backlog).
+
+**Plan + dependency graph:** `superpowers/IMPORT-QTY-TRACKED-SUPPORT.md`
+(delete before PR merge).
+
+**Decisions (2026-06-16):**
+
+- `type` is NOT in `UPDATABLE_FIELDS` — silently ignored on update
+  regardless of cell value (type cannot change via import).
+- Qty-tracked-only fields (`quantity`, `minQuantity`, `unitOfMeasure`,
+  `consumptionType`) on INDIVIDUAL existing rows — silently ignored.
+- `assetModel` cell on QUANTITY_TRACKED existing row — warn + skip the
+  cell, don't fail the row. Other cells on the same row still apply;
+  warning is surfaced in the results UI.
+- Shared `validateQtyTrackedFields()` extracted under
+  `modules/asset/qty-validation.server.ts` so the create-path
+  `parseQtyTrackedCsvRow()` and the new update-path
+  `parseQtyTrackedUpdateRow()` can't drift.
+
+**Build cadence (multi-agent):**
+
+- **Wave 1 (2 parallel agents):**
+  - Agent-A — service code: extracted shared validator, refactored
+    `parseQtyTrackedCsvRow()` to delegate, built `parseQtyTrackedUpdateRow()`,
+    extended `UPDATABLE_FIELDS` (no `type`), added
+    `batchResolveAssetModelNames()`, wired apply branches +
+    pre-pass with warnings collection.
+  - Agent-C — templates + docs: in-app help text section "Quantity-tracked
+    assets" rewritten in `components/assets/import-content.tsx:240-300`;
+    new external doc `apps/docs/asset-import.md` (110 lines) wired into
+    the VitePress sidebar; sample CSV templates were already
+    column-complete from earlier work (verified — no edits needed).
+- **Mid-wave UI follow-up:** `BulkUpdateResult.warnings` channel
+  surfaced in `components/assets/bulk-update/results-display.tsx` — new
+  yellow `SummaryPill` variant, `<details>` block between Skipped and
+  Failed, warnings included in the downloadable CSV report.
+- **Wave 2 (Agent-E):** **65 new tests** across 4 files —
+  `modules/asset/qty-validation.server.test.ts` (NEW, 27 tests),
+  `utils/import-update-entities.server.test.ts` (NEW, 6 tests),
+  `utils/import-update-diff.test.ts` (+20 tests, 64 → 84),
+  `utils/import-update.server.test.ts` (NEW, 8 tests).
+- **Wave 3:** `pnpm webapp:validate` clean at **2648 / 2649 tests** (1
+  pre-existing skip). The full validate flake-hit hook-timeouts on 3
+  route-test setup hooks under load; isolation re-run confirmed all
+  194 test files pass.
+
+**Implementation details:**
+
+- New file: `apps/webapp/app/modules/asset/qty-validation.server.ts` —
+  exports `validateQtyTrackedFields()` (shared core) +
+  `parseQtyTrackedUpdateRow()` (update wrapper) + supporting types.
+- New entity resolver:
+  `batchResolveAssetModelNames()` at
+  `utils/import-update-entities.server.ts:343-432`. Mirror of
+  `batchResolveCategoryNames()` but with per-row
+  `db.assetModel.create({ data: { createdBy: { connect: { id: userId } } } })`
+  (not `createMany` — nested-relation FK rejected by `createMany`).
+- Apply-branch wiring at `utils/import-update.server.ts` lines
+  351-476 (qty + AssetModel pre-pass), 543-582 (per-row patch
+  resolution), 643-651 (field switch cases), ~712-749 (counter +
+  payload extension).
+- `UPDATABLE_FIELDS` + `EXPORT_HEADER_TO_FIELD_MAP` extended in
+  `utils/import-update-types.ts`. Labels `"Min quantity"`, `"Unit of
+measure"`, `"Consumption type"` added as direct aliases (the
+  asset-index `columnsLabelsMap` system stays untouched — out of
+  scope).
+- Diff layer (`utils/import-update-diff.ts`) gains compare branches for
+  the 5 new updatable fields. Silent no-op on wrong-type rows mirrors
+  the apply layer's behavior.
+
+**Known sharp edge documented in Wave 2 findings:**
+
+- If a customer's update CSV row has ONLY an `assetModel` cell AND no
+  other updatable cells AND the existing asset is QUANTITY_TRACKED, the
+  row lands in `skipped` with "No changes detected" instead of
+  surfacing a warning. The warning only fires when at least one other
+  cell on the row produces a real diff so the row reaches the apply
+  loop. Common case (full export re-import with many cells) works
+  correctly; this edge case is rare. Worth documenting; not a release
+  blocker.
 
 #### Phase 4e — Quantity-aware notes + activity-feed audit (original scope)
 

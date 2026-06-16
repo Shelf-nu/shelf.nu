@@ -341,6 +341,93 @@ export async function batchResolveLocationNames(
 }
 
 /**
+ * Batch-resolves asset model names to IDs, creating missing ones.
+ *
+ * Mirrors `batchResolveCategoryNames` (same case-insensitive dedup,
+ * same findMany + createMany + re-fetch shape, same Map return). Used
+ * by the update-import flow to pre-resolve every distinct `assetModel`
+ * cell value across the import in one DB round-trip — avoids N+1
+ * lookups per row.
+ *
+ * Differences from the category resolver:
+ * - No `color` field in the create payload (models don't have one).
+ * - Create payload uses Prisma's nested `connect` for the FK fields
+ *   because the AssetModel schema relation is named `createdBy` /
+ *   `organization` (not `userId` / `organizationId` directly) — match
+ *   the `createAssetModelsIfNotExists` pattern in the content-import
+ *   path so behaviour stays identical.
+ *
+ * Caller responsibility — pre-filter the input to INDIVIDUAL rows. The
+ * `parseQtyTrackedUpdateRow` parser already drops the `assetModel`
+ * cell on QUANTITY_TRACKED rows, so the names array that reaches this
+ * function should only contain INDIVIDUAL-row model names. This
+ * function does NOT re-enforce that gate.
+ *
+ * @param names - AssetModel names from CSV changes
+ * @param userId - User performing the import (links new models via `createdBy`)
+ * @param organizationId - Organization scope for all reads + writes
+ * @returns Map of (original-spelling) model name → AssetModel.id
+ */
+export async function batchResolveAssetModelNames(
+  names: string[],
+  userId: string,
+  organizationId: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const trimmedNames = names.map((n) => n.trim()).filter(Boolean);
+  if (trimmedNames.length === 0) return result;
+
+  // Deduplicate case-insensitively — keep first spelling per lowercase key
+  const lcToOriginal = new Map<string, string>();
+  for (const name of trimmedNames) {
+    const lc = name.toLowerCase();
+    if (!lcToOriginal.has(lc)) lcToOriginal.set(lc, name);
+  }
+  const uniqueNames = [...lcToOriginal.values()];
+
+  // Batch fetch existing models
+  const existing = await db.assetModel.findMany({
+    where: {
+      organizationId,
+      name: { in: uniqueNames, mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  const lcToId = new Map<string, string>();
+  for (const m of existing) {
+    lcToId.set(m.name.toLowerCase(), m.id);
+  }
+
+  // Create missing (one per unique lowercase key). The AssetModel
+  // schema uses required FK relations (`createdBy`, `organization`),
+  // which `createMany` does not support — fall back to `create()` per
+  // missing model. Volume is bounded by distinct model names in the
+  // CSV (typically small).
+  const missingNames = uniqueNames.filter((n) => !lcToId.has(n.toLowerCase()));
+  if (missingNames.length > 0) {
+    for (const name of missingNames) {
+      const created = await db.assetModel.create({
+        data: {
+          name,
+          createdBy: { connect: { id: userId } },
+          organization: { connect: { id: organizationId } },
+        },
+        select: { id: true, name: true },
+      });
+      lcToId.set(created.name.toLowerCase(), created.id);
+    }
+  }
+
+  // Map all original name variants to their resolved ID
+  for (const name of trimmedNames) {
+    const id = lcToId.get(name.toLowerCase());
+    if (id) result.set(name, id);
+  }
+
+  return result;
+}
+
+/**
  * Resolves an array of tag names to their IDs, creating any that don't exist.
  * Uses batched queries to avoid N+1 round-trips.
  *

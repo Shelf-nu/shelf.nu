@@ -112,6 +112,11 @@ export const ImportContent = () => {
                 Each row creates a <b>new</b> asset — existing assets will not
                 be merged or overwritten
               </li>
+              <li>
+                To onboard stock-room consumables (boxes, batteries, fasteners),
+                or to link items to a reusable asset model, see{" "}
+                <b>"Quantity-tracked assets"</b> below
+              </li>
             </ul>
           </div>
         </div>
@@ -232,7 +237,7 @@ export const ImportContent = () => {
           </div>
         </When>
 
-        {/* Asset model + quantity-tracked columns (Phase A4) */}
+        {/* Quantity-tracked assets + asset model columns */}
         <div className="flex gap-3">
           <Icon
             icon="asset"
@@ -240,50 +245,56 @@ export const ImportContent = () => {
             className="mt-0.5 shrink-0 text-gray-500"
           />
           <div>
-            <h5 className="font-semibold">
-              Asset model + quantity-tracked columns
-            </h5>
+            <h5 className="font-semibold">Quantity-tracked assets</h5>
             <p className="text-[14px] text-gray-600">
-              Five optional columns let you onboard a fleet of qty-tracked stock
-              items or link new assets to an existing asset model:
+              Six optional columns let you onboard stock-room consumables
+              (boxes, batteries, fasteners) and link individually-tracked assets
+              to a reusable asset model:
             </p>
             <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
               <li>
-                <b>assetModel</b> — reference an asset model by name
-                (case-insensitive). Missing models are auto-created. The model's{" "}
-                <b>defaultCategory</b> and <b>defaultValuation</b> apply when
-                those columns are blank. <b>INDIVIDUAL rows only</b> — leave
-                blank for QUANTITY_TRACKED rows (models group multiple
-                distinguishable items; qty-tracked is itself one stock pool).
+                <b>type</b> — <code>INDIVIDUAL</code> (the default if the column
+                is missing or the cell is blank) or{" "}
+                <code>QUANTITY_TRACKED</code>. On <b>update</b> imports, the
+                cell is silently ignored — type cannot be changed once an asset
+                exists.
               </li>
               <li>
-                <b>type</b> — <code>INDIVIDUAL</code> (default) or{" "}
-                <code>QUANTITY_TRACKED</code>. Omit for "track each item
-                separately".
+                <b>quantity</b> — required, must be a positive integer when{" "}
+                <code>type = QUANTITY_TRACKED</code>. Ignored on{" "}
+                <code>INDIVIDUAL</code> rows.
               </li>
               <li>
-                <b>quantity</b> — required (and ≥ 1) for{" "}
-                <code>QUANTITY_TRACKED</code> rows; must be empty or{" "}
-                <code>1</code> for <code>INDIVIDUAL</code>.
+                <b>minQuantity</b> — optional non-negative integer; sets the
+                low-stock alert threshold. Ignored on <code>INDIVIDUAL</code>{" "}
+                rows.
               </li>
               <li>
-                <b>minQuantity</b> — optional low-stock threshold for
-                qty-tracked rows.
+                <b>unitOfMeasure</b> — optional free-text label (e.g.{" "}
+                <code>boxes</code>, <code>liters</code>, <code>kg</code>).
+                Markdoc injection characters (<code>{"{"}</code>, <code>%</code>
+                , <code>{"}"}</code>) are stripped.
               </li>
               <li>
-                <b>unitOfMeasure</b> — free-form label (<code>boxes</code>,{" "}
-                <code>kg</code>, …) for qty-tracked rows.
+                <b>consumptionType</b> — required when{" "}
+                <code>type = QUANTITY_TRACKED</code>. <code>ONE_WAY</code>{" "}
+                (consumed on checkout, no return) or <code>TWO_WAY</code>{" "}
+                (returned with a consumption report). Ignored on{" "}
+                <code>INDIVIDUAL</code> rows.
               </li>
               <li>
-                <b>consumptionType</b> — required for qty-tracked rows.{" "}
-                <code>TWO_WAY</code> (returned with a consumption report) or{" "}
-                <code>ONE_WAY</code> (consumed on checkout, no return).
+                <b>assetModel</b> — optional asset model name; created
+                automatically (case-insensitive lookup) if it doesn't exist yet.{" "}
+                <b>INDIVIDUAL rows only</b> — on a <code>QUANTITY_TRACKED</code>{" "}
+                row during update, the cell is skipped with a warning and the
+                rest of the row still applies.
               </li>
             </ul>
             <p className="mt-1 text-[14px] text-gray-600">
               <b>Tip:</b> the downloaded template above already contains one{" "}
-              <code>INDIVIDUAL</code> and one <code>QUANTITY_TRACKED</code>{" "}
-              example row.
+              <code>INDIVIDUAL</code> example with an <code>assetModel</code>{" "}
+              and one <code>QUANTITY_TRACKED</code> example with{" "}
+              <code>quantity</code> and <code>consumptionType</code> filled in.
             </p>
           </div>
         </div>
