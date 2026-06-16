@@ -26,6 +26,16 @@ type CheckoutDialogProps = {
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
+  /**
+   * The form `intent` submitted with the checkout. Defaults to the full-booking
+   * `"checkOut"` flow. The bulk partial-checkout dialog passes
+   * `"partial-checkout"` so that an early checkout of the SELECTED assets routes
+   * through `checkoutAssets` / `partialCheckoutBooking` (which records the batch
+   * and applies the adjusted-date choice) instead of the whole-booking
+   * `checkoutBooking`. The scanner checkout-assets route ignores intent (always
+   * partial), so it can leave the default.
+   */
+  intent?: string;
 };
 
 export default function CheckoutDialog({
@@ -33,6 +43,7 @@ export default function CheckoutDialog({
   booking,
   portalContainer,
   formId,
+  intent = "checkOut",
 }: CheckoutDialogProps) {
   const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
 
@@ -44,7 +55,7 @@ export default function CheckoutDialog({
         size="sm"
         type="submit"
         name="intent"
-        value="checkOut"
+        value={intent}
       >
         Check Out
       </Button>
@@ -87,7 +98,7 @@ export default function CheckoutDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value="checkOut" form={formId} />
+          <input type="hidden" name="intent" value={intent} form={formId} />
           <Button
             disabled={disabled}
             className="flex-1"

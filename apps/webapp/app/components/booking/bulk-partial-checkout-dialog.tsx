@@ -353,8 +353,11 @@ export default function BulkPartialCheckoutDialog({
 
             {/* Submit button - conditional based on early check-out. The
                 CheckoutDialog submits this same form (carrying the hidden
-                assetIds + returnJson) and injects intent=checkOut +
-                checkoutIntentChoice itself. */}
+                assetIds + returnJson). We pass intent="partial-checkout" so the
+                overview action routes to checkoutAssets/partialCheckoutBooking
+                (which records the batch + applies the date choice) rather than
+                the whole-booking checkoutBooking that the default intent would
+                trigger on this intent-routed page. */}
             {isEarlyCheckout ? (
               <CheckoutDialog
                 booking={{
@@ -362,6 +365,7 @@ export default function BulkPartialCheckoutDialog({
                   name: booking.name,
                   from: booking.from,
                 }}
+                intent="partial-checkout"
                 disabled={disabled || noAssetsToCheckOut}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkout-form"
