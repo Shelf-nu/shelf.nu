@@ -13,7 +13,13 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import { getActionMethod, parseData, payload } from "~/utils/http.server";
+import {
+  getActionMethod,
+  logException,
+  parseData,
+  payload,
+  readFormData,
+} from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 
 /**
@@ -94,6 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
+        // why: readFormData (not request.formData()) so a malformed body / wrong
+        // Content-Type is downgraded to a non-captured 400, rather than a
+        // TypeError that logException would otherwise surface as a captured 5xx.
         const {
           refreshToken,
           firstName,
@@ -105,7 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
           stateProvince,
           postalCode,
           country,
-        } = parseData(await request.formData(), MobileCallbackSchema);
+        } = parseData(await readFormData(request), MobileCallbackSchema);
 
         // Don't trust client tokens — re-derive the session from the refresh
         // token server-side (same trust boundary as the web callback).
@@ -160,6 +169,11 @@ export async function action({ request }: ActionFunctionArgs) {
     throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause);
+    // why: the client renders `result.error` and never re-throws, so without an
+    // explicit log a genuine 5xx (refresh-token exchange, user/org provisioning,
+    // or code mint failing) would never reach Sentry. `logException` mirrors
+    // `error()`'s logging (5xx → Sentry, handled 4xx → trail, aborts skipped).
+    logException(reason);
     return data(
       { error: { message: reason.message } },
       {

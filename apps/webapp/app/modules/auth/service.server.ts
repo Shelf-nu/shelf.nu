@@ -536,14 +536,15 @@ export async function refreshAccessToken(
 
     return mapAuthSession(session);
   } catch (cause) {
+    // SECURITY: never put `refreshToken` (a long-lived bearer credential) in
+    // additionalData — if this error is ever captured it would be spread into
+    // the Sentry event's `extra`. `makeSentryContext` also redacts secret-ish
+    // keys as a backstop, but the credential should not be in the error at all.
     throw new ShelfError({
       cause,
       message:
         "Unable to refresh access token. Please try again. If the issue persists, contact support",
       label,
-      additionalData: {
-        refreshToken,
-      },
     });
   }
 }

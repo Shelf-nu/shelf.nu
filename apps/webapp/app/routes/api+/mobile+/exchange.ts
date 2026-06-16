@@ -17,7 +17,7 @@ import {
   redeemMobileAuthCode,
 } from "~/modules/auth/mobile-sso.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import { getActionMethod } from "~/utils/http.server";
+import { getActionMethod, logException } from "~/utils/http.server";
 
 const ExchangeSchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
@@ -77,6 +77,14 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
+    // why: this resource route returns failures as JSON (the companion app
+    // parses `{ error }`) and never re-throws, so without an explicit log a
+    // genuine 5xx (Supabase mint outage, broken auth contract, DB fault) would
+    // never reach Sentry. `logException` mirrors `error()`'s logging (5xx →
+    // Sentry, handled 4xx → low-severity trail, client aborts skipped). NOTE:
+    // every route under `api+/mobile+/` swallows 5xx this same way and none log
+    // yet — `logException` is the shared fix to finish that off route by route.
+    logException(reason);
     return data(
       { error: { message: reason.message } },
       { status: reason.status }

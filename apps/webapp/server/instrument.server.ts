@@ -154,6 +154,61 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
 }
 
 /**
+ * Keys whose values are credentials/secrets and must NEVER reach Sentry, even
+ * if one slips into a ShelfError's `additionalData`. Defense-in-depth: callers
+ * shouldn't put secrets in `additionalData` in the first place, but this
+ * guarantees a stray one can't be spread into the captured event's `extra`.
+ */
+const SENSITIVE_KEY_PATTERN =
+  /token|password|secret|verifier|cookie|authorization|credential|jwt|api[-_]?key/i;
+
+/**
+ * Recursively redact values under sensitive keys. Walks nested objects and
+ * arrays (cycle-safe via `seen`) so a secret tucked under a non-sensitive key
+ * (e.g. `{ session: { refreshToken } }`) is scrubbed too — not just top-level
+ * keys.
+ *
+ * @param value - The value to walk
+ * @param seen - Visited objects, to break reference cycles
+ * @returns The value with secret-keyed entries replaced by `"[redacted]"`
+ */
+function redactValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((v) => redactValue(v, seen));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = SENSITIVE_KEY_PATTERN.test(key)
+      ? "[redacted]"
+      : redactValue(val, seen);
+  }
+  return out;
+}
+
+/**
+ * Redact a ShelfError's `additionalData` for safe inclusion in a Sentry event's
+ * `extra`. Non-object input yields an empty object so the result is spreadable.
+ * Defense-in-depth: callers must still avoid putting secrets in `additionalData`
+ * at all — this guarantees a stray one (at any depth) can't reach Sentry.
+ *
+ * @param data - A ShelfError's `additionalData`
+ * @returns A deep copy with secret-keyed values replaced by `"[redacted]"`
+ */
+function redactSecrets(data: unknown): Record<string, unknown> {
+  if (!data || typeof data !== "object") {
+    return {};
+  }
+  return redactValue(data, new WeakSet<object>()) as Record<string, unknown>;
+}
+
+/**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
@@ -176,12 +231,17 @@ function makeSentryContext(exception: unknown) {
       shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...(exception.additionalData || {}),
+      ...redactSecrets(exception.additionalData),
       traceId: exception.traceId,
       message: exception.message,
       cause: {
         message: (exception.cause as Error | null)?.message,
-        raw: JSON.stringify(exception.cause),
+        // Redact the raw cause chain too; otherwise it bypasses redactSecrets
+        // and the "no secret can reach Sentry (at any depth)" guarantee would
+        // not actually hold.
+        raw: JSON.stringify(
+          redactValue(exception.cause, new WeakSet<object>())
+        ),
       },
     },
   };
