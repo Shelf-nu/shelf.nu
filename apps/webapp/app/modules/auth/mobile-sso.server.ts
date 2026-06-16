@@ -35,10 +35,15 @@ import { mapAuthSession } from "./mappers.server";
 const label: ErrorLabel = "Auth";
 
 /**
- * Lifetime of a mobile auth code. Deliberately short — it only needs to survive
- * the deeplink round-trip from the web callback back into the app.
+ * Lifetime of a mobile auth code. Short by design — the code is minted in the
+ * web callback *after* SSO/MFA completes, so this window only spans the
+ * `shelf://` deeplink hand-back plus the app's exchange POST, not the
+ * human-paced IdP login. 180s (rather than a tighter 60s) leaves margin if iOS
+ * briefly backgrounds the app during the hand-back or the exchange runs on a
+ * slow network, without meaningfully widening the attack surface of a
+ * single-use, hashed code.
  */
-const MOBILE_AUTH_CODE_TTL_MS = 60_000;
+const MOBILE_AUTH_CODE_TTL_MS = 180_000;
 
 /**
  * SHA-256 hex digest. Auth codes are high-entropy (256-bit) single-use tokens,
