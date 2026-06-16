@@ -297,6 +297,28 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
   ReturnType<typeof payload<T>>;
 
 /**
+ * Log a caught server error for observability WITHOUT building a response.
+ *
+ * The logging half of {@link error}, for resource/API routes that catch a
+ * `ShelfError` and return their own JSON shape (so they can't use `error()`,
+ * which also fires a user notification and returns a richer payload). Mirrors
+ * `error()`'s logging exactly: 5xx (and uncaught) reach Sentry via
+ * `Logger.error`; handled 4xx land on the low-severity log trail via
+ * `Logger.handledClientError` (and are dropped from the Sentry error pipeline
+ * by `handleBeforeSendError`); client disconnects (status 499, "Request
+ * aborted") are intentionally skipped from both.
+ *
+ * @param cause - The normalized `ShelfError` to log
+ */
+export function logException(cause: ShelfError) {
+  if (cause.label === "Request aborted") {
+    return;
+  }
+  Logger.error(cause);
+  Logger.handledClientError(cause);
+}
+
+/**
  * Create an error response payload.
  *
  * Normalize the error to return to help type inference.
@@ -305,17 +327,13 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  * @returns The normalized error with `error` key set to the error
  */
 export function error(cause: ShelfError, shouldSendNotification = true) {
-  if (cause.label !== "Request aborted") {
-    Logger.error(cause);
-
-    // Handled client errors (4xx) are dropped from the Sentry error pipeline
-    // (see handleBeforeSendError); record them as a low-severity log trail
-    // instead so we keep visibility without burning the error quota. No-op for
-    // non-4xx errors. Kept inside the abort guard so client disconnects
-    // (status 499 "Request aborted") aren't reintroduced as log noise — they're
-    // intentionally suppressed from both Logger.error and beforeSend.
-    Logger.handledClientError(cause);
-  }
+  // Single source of truth for "how we log a caught ShelfError": 5xx (and
+  // uncaught) reach Sentry via Logger.error; handled 4xx land on the
+  // low-severity log trail via Logger.handledClientError (dropped from the
+  // Sentry error pipeline by handleBeforeSendError); client disconnects
+  // (status 499 "Request aborted") are skipped from both. error() layers the
+  // notification + richer response payload on top of this.
+  logException(cause);
 
   if (
     cause.label !== "Request aborted" &&
