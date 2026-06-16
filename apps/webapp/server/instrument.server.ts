@@ -236,7 +236,12 @@ function makeSentryContext(exception: unknown) {
       message: exception.message,
       cause: {
         message: (exception.cause as Error | null)?.message,
-        raw: JSON.stringify(exception.cause),
+        // Redact the raw cause chain too; otherwise it bypasses redactSecrets
+        // and the "no secret can reach Sentry (at any depth)" guarantee would
+        // not actually hold.
+        raw: JSON.stringify(
+          redactValue(exception.cause, new WeakSet<object>())
+        ),
       },
     },
   };
