@@ -14,12 +14,21 @@ import {
 } from "~/utils/permissions/permission.data";
 
 /**
- * POST /api/mobile/bookings/partial-checkout
+ * Mobile API — progressive (partial) check-out for a booking.
  *
- * Partial check-out: checks out specific assets from a RESERVED/ONGOING/OVERDUE
- * booking. The first checkout transitions the booking to ONGOING/OVERDUE.
+ * `POST /api/mobile/bookings/partial-checkout`. Checks out the given assets from
+ * a RESERVED/ONGOING/OVERDUE booking; the first checkout transitions the booking
+ * to ONGOING (or OVERDUE if past its end). Authenticates the mobile session,
+ * resolves the org, and requires the `booking:checkout` permission before
+ * delegating to {@link partialCheckoutBooking}.
  *
- * Body: { bookingId, assetIds, timeZone? }
+ * @param args - Remix action args; `request` carries the JSON body
+ *   `{ bookingId: string; assetIds: string[]; timeZone?: string }` and mobile
+ *   auth headers.
+ * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
+ *   on success, or `{ error: { message } }` with the appropriate status on failure.
+ * @throws Never throws to the caller — errors are normalized via
+ *   {@link makeShelfError} into the JSON error response.
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {

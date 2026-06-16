@@ -137,19 +137,20 @@ export default function PartialCheckoutDrawer({
   // Get assets that have already been checked out (should be excluded from count)
   const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
 
+  // Exclude in-custody assets from the submit set (both standalone and kit
+  // members). The server rejects them, so including them would fail the whole
+  // batch even when only part of a scanned kit is blocked; the in-custody
+  // blocker still surfaces them to the user.
+  const isCheckoutEligibleAsset = (a: { id: string; status: AssetStatus }) =>
+    bookingAssetIds.has(a.id) &&
+    !alreadyCheckedOut.has(a.id) &&
+    a.status !== AssetStatus.IN_CUSTODY;
+
   const assetIdsForCheckout = Array.from(
     new Set([
-      ...assets
-        .filter(
-          (a) => bookingAssetIds.has(a.id) && !alreadyCheckedOut.has(a.id)
-        )
-        .map((a) => a.id),
+      ...assets.filter(isCheckoutEligibleAsset).map((a) => a.id),
       ...kits.flatMap((k) =>
-        k.assets
-          .filter(
-            (a) => bookingAssetIds.has(a.id) && !alreadyCheckedOut.has(a.id)
-          )
-          .map((a) => a.id)
+        k.assets.filter(isCheckoutEligibleAsset).map((a) => a.id)
       ),
     ])
   );
@@ -160,14 +161,13 @@ export default function PartialCheckoutDrawer({
     (a) => !alreadyCheckedOut.has(a.id)
   ).length;
 
-  // Check if this would be a final check-out (all remaining assets are being checked out)
-  const isFinalCheckout =
-    assetIdsForCheckout.length === remainingBookedAssets &&
-    remainingBookedAssets > 0;
-
-  // Check if it's an early check-out (only relevant for final check-outs)
+  // Early checkout applies to ANY scan that activates a not-yet-started booking,
+  // not just the final batch — the first partial scan transitions RESERVED →
+  // ONGOING, so the user gets the same adjust-the-start-date prompt as the
+  // all-at-once checkout. The dialog's choice flows to the server as
+  // checkoutIntentChoice.
   const isEarlyCheckout = Boolean(
-    isFinalCheckout && isBookingEarlyCheckout(booking.from)
+    assetIdsForCheckout.length > 0 && isBookingEarlyCheckout(booking.from)
   );
 
   // Setup blockers

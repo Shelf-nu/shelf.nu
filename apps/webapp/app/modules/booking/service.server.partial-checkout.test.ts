@@ -1,4 +1,5 @@
 import { BookingStatus, AssetStatus } from "@prisma/client";
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
@@ -196,9 +197,15 @@ describe("partialCheckoutBooking", () => {
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {
     expect.assertions(4);
 
-    (
-      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue(reservedBooking);
+    // First lookup loads the still-RESERVED booking; the post-update re-fetch
+    // (which becomes the returned booking) reflects the ONGOING transition.
+    const ongoingBooking = {
+      ...reservedBooking,
+      status: BookingStatus.ONGOING,
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValue(ongoingBooking);
 
     const result = await partialCheckoutBooking({
       ...baseParams,
@@ -229,11 +236,38 @@ describe("partialCheckoutBooking", () => {
     });
 
     expect(result).toEqual({
-      booking: reservedBooking,
+      booking: ongoingBooking,
       checkedOutAssetCount: 2,
       remainingAssetCount: 1,
       isComplete: false,
     });
+  });
+
+  it("adjusts the booking start date on the first early partial scan when the user opts to adjust", async () => {
+    expect.assertions(1);
+
+    // reservedBooking.from is in the future, so this is an early checkout.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+    });
+
+    // The transition moves `from` to now and preserves the original start —
+    // mirroring the all-at-once checkout's adjusted-date path.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BookingStatus.ONGOING,
+          originalFrom: reservedBooking.from,
+          from: expect.any(Date),
+        }),
+      })
+    );
   });
 
   it("records one BOOKING_PARTIAL_CHECKOUT event per scanned asset", async () => {
@@ -283,8 +317,17 @@ describe("partialCheckoutBooking", () => {
       assetIds: ["asset-1"],
     });
 
-    // Full checkout path does NOT record another partial check-out row.
-    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+    // The final batch is recorded in the partial-checkout source of truth (so
+    // the read helpers see every checked-out asset), then delegates to the full
+    // checkout.
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-1"],
+        checkoutCount: 1,
+      },
+    });
     expect(result.isComplete).toBe(true);
   });
 
@@ -381,6 +424,28 @@ describe("partialCheckoutBooking", () => {
     ).rejects.toThrow("Some assets are not part of this booking");
 
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects (and writes nothing) when the booking status is not eligible for checkout", async () => {
+    expect.assertions(2);
+
+    // A COMPLETE booking must not be mutable via a direct service call (the web
+    // action + mobile endpoint both call this directly).
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...reservedBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow("can't be checked out in its current status");
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects and writes no duplicate record when re-scanning an already-checked-out asset", async () => {

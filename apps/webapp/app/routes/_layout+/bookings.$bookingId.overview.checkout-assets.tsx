@@ -39,6 +39,73 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
+/**
+ * Checkout-eligibility guard shared by the loader and the action.
+ *
+ * Self-service users may check out only their OWN (custodian) booking and only
+ * in a checkout-eligible status; everyone else is gated by
+ * `canUserManageBookingAssets`. This MUST run in the action too, not just the
+ * loader: a Remix action can be POSTed directly (bypassing the loader), and
+ * `PermissionAction.checkout` alone is granted to SELF_SERVICE — so without it a
+ * self-service user could check out assets in another user's booking in the
+ * same organization.
+ *
+ * @throws {ShelfError} when the caller may not check out this booking
+ * @returns the loaded booking (so the loader can reuse it without re-fetching)
+ */
+async function assertUserCanCheckoutBooking({
+  bookingId,
+  organizationId,
+  userId,
+  role,
+  userOrganizations,
+  request,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  role: OrganizationRoles;
+  userOrganizations: Awaited<
+    ReturnType<typeof requirePermission>
+  >["userOrganizations"];
+  request: Request;
+}) {
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+  const booking = await getBooking({
+    id: bookingId,
+    organizationId,
+    userOrganizations,
+    request,
+  });
+
+  // Self-service users are allowed when the booking is reservable/ongoing/overdue
+  // AND they are the custodian. The generic canUserManageBookingAssets blocks
+  // self-service on non-draft bookings, but that restriction is for
+  // adding/removing assets, not for checking out.
+  const isCheckoutEligible =
+    booking.status === "RESERVED" ||
+    booking.status === "ONGOING" ||
+    booking.status === "OVERDUE";
+  const isCustodian = booking.custodianUserId === userId;
+  const canCheckout =
+    isSelfService && isCheckoutEligible && isCustodian
+      ? true
+      : canUserManageBookingAssets(booking, isSelfService);
+
+  if (!canCheckout) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "You cannot check out assets for this booking at the moment. The booking may not be reservable/ongoing or you may not have permission to manage its assets.",
+      label: "Booking",
+      shouldBeCaptured: false,
+    });
+  }
+
+  return booking;
+}
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -57,39 +124,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     );
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    const booking = await getBooking({
-      id: bookingId,
+    const booking = await assertUserCanCheckoutBooking({
+      bookingId,
       organizationId,
+      userId,
+      role,
       userOrganizations,
       request,
     });
-
-    // For check-out, self-service users are allowed when the booking is
-    // reservable/ongoing/overdue (check-out eligible states) AND they are the
-    // custodian. The generic canUserManageBookingAssets blocks self-service on
-    // non-draft bookings, but that restriction is for adding/removing assets,
-    // not for checking out.
-    const isCheckoutEligible =
-      booking.status === "RESERVED" ||
-      booking.status === "ONGOING" ||
-      booking.status === "OVERDUE";
-    const isCustodian = booking.custodianUserId === userId;
-    const canCheckout =
-      isSelfService && isCheckoutEligible && isCustodian
-        ? true
-        : canUserManageBookingAssets(booking, isSelfService);
-
-    if (!canCheckout) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "You cannot check out assets for this booking at the moment. The booking may not be reservable/ongoing or you may not have permission to manage its assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
 
     // Always fetch partial check-out data for scanner validation. We need this
     // to detect blockers for already-checked-out assets/kits and to feed the
@@ -125,11 +167,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }
+    );
+
+    // Re-apply the same custodian/eligibility guard as the loader. The action
+    // is directly POST-able and PermissionAction.checkout is granted to
+    // SELF_SERVICE, so this prevents a self-service user from checking out
+    // another user's booking in the same organization.
+    await assertUserCanCheckoutBooking({
+      bookingId,
+      organizationId,
       userId,
+      role,
+      userOrganizations,
       request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.checkout,
     });
 
     const formData = await request.formData();

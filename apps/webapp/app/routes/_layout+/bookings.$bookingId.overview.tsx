@@ -259,16 +259,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
     // Progressive checkout: a booking can have items scanned out one-by-one.
-    // Fetch the partial-checkout records when the booking could have checkouts —
-    // RESERVED/ONGOING/OVERDUE bookings, or any asset already CHECKED_OUT (which
-    // also covers historical COMPLETE/ARCHIVED bookings that still want to show
-    // the "checked out on/by" columns).
+    // Fetch the partial-checkout records whenever the booking could have them.
+    // This MUST include COMPLETE/ARCHIVED: once a booking is finished all assets
+    // are back to AVAILABLE, so a status check alone (`hasCheckedOutAssets`)
+    // would miss them — and then never-checked-out assets would wrongly render
+    // the "Returned" badge again (hasProgressiveCheckout would be false because
+    // checkedOutAssetIds came back empty). DRAFT/CANCELLED never have records.
     const hasCheckedOutAssets = booking.assets.some(
       (asset) => asset.status === "CHECKED_OUT"
     );
-    const canHavePartialCheckouts = ["RESERVED", "ONGOING", "OVERDUE"].includes(
-      booking.status
-    );
+    const canHavePartialCheckouts = [
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "ARCHIVED",
+    ].includes(booking.status);
     const { checkedOutAssetIds, partialCheckoutDetails } =
       hasCheckedOutAssets || canHavePartialCheckouts
         ? await getDetailedPartialCheckoutData({

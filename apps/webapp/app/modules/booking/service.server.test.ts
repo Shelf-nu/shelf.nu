@@ -460,17 +460,21 @@ describe("partialCheckinBooking", () => {
       },
     });
 
-    // Verify notes created
-    expect(noteService.createNotes).toHaveBeenCalledWith({
-      content:
-        '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
-      type: "UPDATE",
-      userId: "user-1",
-      assetIds: ["asset-1", "asset-2"],
-      // why: createNotes now requires organizationId (it internally runs the
-      // cross-org asset guard); the booking service forwards the booking's org.
-      organizationId: "org-1",
-    });
+    // Verify notes created — passed the transaction client so the note write is
+    // atomic with the partial check-in mutation.
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      {
+        content:
+          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
+        type: "UPDATE",
+        userId: "user-1",
+        assetIds: ["asset-1", "asset-2"],
+        // why: createNotes now requires organizationId (it internally runs the
+        // cross-org asset guard); the booking service forwards the booking's org.
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
 
     expect(result).toEqual({
       booking: bookingWithAssets, // Assets remain in booking with new approach

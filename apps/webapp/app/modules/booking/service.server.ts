@@ -2304,13 +2304,16 @@ export async function partialCheckinBooking({
         lastName: user?.lastName,
       });
       const noteContent = `${actor} checked in via partial check-in.`;
-      await createNotes({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetIds,
-        organizationId,
-      });
+      await createNotes(
+        {
+          content: noteContent,
+          type: "UPDATE",
+          userId,
+          assetIds,
+          organizationId,
+        },
+        tx
+      );
 
       // Activity events — one BOOKING_PARTIAL_CHECKIN per asset, inside the tx.
       await recordEvents(
@@ -2427,13 +2430,16 @@ export async function partialCheckinBooking({
           completedBooking.custodianUserId || undefined
         );
 
-        await createSystemBookingNote({
-          bookingId: id,
-          organizationId,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
-        });
+        await createSystemBookingNote(
+          {
+            bookingId: id,
+            organizationId,
+            content: `${wrapUserLinkForNote(
+              user!
+            )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          },
+          tx
+        );
 
         return {
           booking: completedBooking,
@@ -2445,13 +2451,16 @@ export async function partialCheckinBooking({
         // Regular partial check-in
         const remainingText = ` (Remaining: ${remainingCount})`;
 
-        await createSystemBookingNote({
-          bookingId: id,
-          organizationId,
-          content: `${wrapUserLinkForNote(
-            user!
-          )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
-        });
+        await createSystemBookingNote(
+          {
+            bookingId: id,
+            organizationId,
+            content: `${wrapUserLinkForNote(
+              user!
+            )} performed a partial check-in: ${itemsDescription}${remainingText}.`,
+          },
+          tx
+        );
 
         return {
           booking: updatedBookingForNote,
@@ -2544,6 +2553,28 @@ export async function partialCheckoutBooking({
         });
       });
 
+    // Reject ineligible booking statuses BEFORE any mutation. Only RESERVED
+    // (start the checkout), ONGOING and OVERDUE (continue checking out
+    // still-booked items) are valid. Both the web action and the mobile
+    // endpoint call this service directly, so without this guard a direct POST
+    // against a DRAFT/COMPLETE/CANCELLED/ARCHIVED booking would flip asset
+    // statuses and write checkout records (and a DRAFT would stay DRAFT while
+    // its assets became checked out).
+    if (
+      bookingFound.status !== BookingStatus.RESERVED &&
+      bookingFound.status !== BookingStatus.ONGOING &&
+      bookingFound.status !== BookingStatus.OVERDUE
+    ) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message:
+          "This booking can't be checked out in its current status. Only reserved, ongoing, or overdue bookings can have items checked out.",
+        shouldBeCaptured: false,
+      });
+    }
+
     // Validate that all provided assetIds are actually in the booking BEFORE any
     // completion shortcut. The early-exit below delegates to the full checkout
     // when this batch covers all outstanding assets; without this guard a batch
@@ -2597,6 +2628,26 @@ export async function partialCheckoutBooking({
         to: bookingFound.to,
         userId,
       });
+
+      // Record the final batch in the partial-checkout source of truth.
+      // `checkoutBooking` flips statuses + handles schedulers but does NOT write
+      // PartialBookingCheckout rows, so without this the final assets stay
+      // invisible to getPartiallyCheckedOutAssetIds / getDetailedPartialCheckoutData
+      // — which would leave them "outstanding" (re-scan could re-trigger full
+      // checkout) and mislabel them on the completed-booking "Returned" badge.
+      // We record only the still-outstanding ids so re-scanned assets that were
+      // already recorded in an earlier batch don't get duplicated.
+      if (outstandingAssetIds.length > 0) {
+        await db.partialBookingCheckout.create({
+          data: {
+            bookingId: id,
+            checkedOutById: userId,
+            assetIds: outstandingAssetIds,
+            checkoutCount: outstandingAssetIds.length,
+          },
+        });
+      }
+
       return {
         booking: fullyCheckedOut,
         checkedOutAssetCount: outstandingAssetIds.length,
@@ -2758,12 +2809,36 @@ export async function partialCheckoutBooking({
         const expired = bookingFound.to
           ? isBookingExpired({ to: bookingFound.to })
           : false;
+
+        const transitionData: Prisma.BookingUpdateInput = {
+          status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
+        };
+
+        // Early checkout: if the booking hasn't started yet and the user chose
+        // to adjust the date (via the early-checkout dialog), move `from` to now
+        // and preserve the original start in `originalFrom`. Mirrors the
+        // all-at-once checkoutBooking path so a partial early checkout doesn't
+        // leave a future start time while custody has already begun.
+        if (
+          bookingFound.from &&
+          isBookingEarlyCheckout(bookingFound.from) &&
+          intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+        ) {
+          transitionData.originalFrom = bookingFound.from;
+          const fromDateStr = DateTime.fromJSDate(new Date(), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT);
+          transitionData.from = DateTime.fromFormat(
+            fromDateStr,
+            DATE_TIME_FORMAT,
+            { zone: hints.timeZone }
+          ).toJSDate();
+        }
+
         await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above
           where: { id },
-          data: {
-            status: expired ? BookingStatus.OVERDUE : BookingStatus.ONGOING,
-          },
+          data: transitionData,
           select: { id: true },
         });
         bookingStatusChanged = true;
@@ -2869,11 +2944,20 @@ export async function partialCheckoutBooking({
       };
     });
 
-    // When the first scan transitioned the booking to ONGOING (not expired),
-    // schedule the check-in reminder exactly like the full checkout does.
-    if (result.bookingStatusChanged && bookingFound.to) {
-      const expired = isBookingExpired({ to: bookingFound.to });
-      if (!expired) {
+    // The first scan moved the booking from RESERVED to ONGOING/OVERDUE. Cancel
+    // the checkout-reminder job that reserveBooking queued (tracked in
+    // activeSchedulerReference) so it can't fire after the booking is already
+    // checked out, then schedule the check-in reminder exactly like the full
+    // checkout does (non-expired bookings only). `scheduleNextBookingJob`
+    // overwrites activeSchedulerReference, so without the explicit cancel the
+    // old job would be orphaned in the queue.
+    if (result.bookingStatusChanged) {
+      await cancelScheduler(bookingFound);
+
+      const expired = bookingFound.to
+        ? isBookingExpired({ to: bookingFound.to })
+        : false;
+      if (!expired && bookingFound.to) {
         await scheduleCheckinReminderForBooking(
           { id: bookingFound.id, to: bookingFound.to },
           hints,
@@ -6138,6 +6222,14 @@ export async function getDetailedPartialCheckoutData({
   };
 }
 
+/**
+ * Per-asset progressive check-OUT detail, keyed by asset id. Mirrors
+ * {@link PartialCheckinDetailsType}. Produced by
+ * {@link getDetailedPartialCheckoutData} and consumed by the booking detail
+ * page to render the "Checked out on / by" columns and decide the per-asset
+ * "Returned" badge. `checkoutDate` is the earliest checkout timestamp for the
+ * asset; `checkedOutBy` is the user who performed that checkout.
+ */
 export type PartialCheckoutDetailsType = Record<
   string,
   {

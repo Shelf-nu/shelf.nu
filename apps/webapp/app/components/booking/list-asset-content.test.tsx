@@ -231,11 +231,17 @@ describe("ListAssetContent", () => {
               item={baseAsset}
               partialCheckinDetails={basePartialDetails}
               shouldShowCheckinColumns={false}
-              partialCheckoutDetails={
-                {
-                  "asset-2": { checkedOutAt: "2026-06-01", user: null },
-                } as never
-              }
+              partialCheckoutDetails={{
+                "asset-2": {
+                  checkoutDate: "2026-06-01",
+                  checkedOutBy: {
+                    id: "user-1",
+                    firstName: "Test",
+                    lastName: "User",
+                    profilePicture: null,
+                  },
+                },
+              }}
               shouldShowCheckoutColumns={false}
             />
           </tr>
@@ -266,11 +272,17 @@ describe("ListAssetContent", () => {
               item={baseAsset}
               partialCheckinDetails={basePartialDetails}
               shouldShowCheckinColumns={false}
-              partialCheckoutDetails={
-                {
-                  "asset-1": { checkedOutAt: "2026-06-01", user: null },
-                } as never
-              }
+              partialCheckoutDetails={{
+                "asset-1": {
+                  checkoutDate: "2026-06-01",
+                  checkedOutBy: {
+                    id: "user-1",
+                    firstName: "Test",
+                    lastName: "User",
+                    profilePicture: null,
+                  },
+                },
+              }}
               shouldShowCheckoutColumns={false}
             />
           </tr>
