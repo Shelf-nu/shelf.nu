@@ -6346,9 +6346,40 @@ export async function checkoutAssets({
     intentChoice: checkoutIntentChoice,
   });
 
-  // Report the number of assets the service ACTUALLY checked out, which can be
-  // fewer than the submitted assetIds when the batch contains already-recorded
-  // (idempotent) assets — otherwise the UI would overstate the count.
+  return respondToPartialCheckout({
+    result,
+    bookingId,
+    authSession,
+    returnJson,
+  });
+}
+
+/**
+ * Build the notification + HTTP response shared by the partial check-out entry
+ * points — {@link checkoutAssets} (scan / bulk dialog) and
+ * {@link checkoutRemainingAssets} (booking-header "Check out remaining").
+ *
+ * Reports the count the service ACTUALLY checked out, which can be fewer than
+ * the submitted/resolved assets when the batch contains already-recorded
+ * (idempotent) assets — otherwise the UI would overstate the count.
+ *
+ * @param result - Outcome of {@link partialCheckoutBooking}
+ * @param bookingId - Booking being checked out (for the redirect target)
+ * @param authSession - Auth session (notification sender)
+ * @param returnJson - When true, return a JSON payload instead of redirecting
+ * @returns A JSON payload (bulk dialog) or a redirect to the booking page
+ */
+function respondToPartialCheckout({
+  result,
+  bookingId,
+  authSession,
+  returnJson,
+}: {
+  result: Awaited<ReturnType<typeof partialCheckoutBooking>>;
+  bookingId: string;
+  authSession: AuthSession;
+  returnJson: boolean;
+}) {
   const count = result.checkedOutAssetCount;
   const notificationMessage = result.isComplete
     ? `Successfully checked out ${count} asset${
@@ -6374,6 +6405,137 @@ export async function checkoutAssets({
   }
 
   return redirect(`/bookings/${bookingId}`);
+}
+
+/**
+ * Resolve the still-checkout-eligible asset ids for a booking — the assets in
+ * the "Booked" bucket that can be checked out right now. An asset is eligible
+ * when it belongs to the booking, is currently `AVAILABLE` (so neither already
+ * `CHECKED_OUT` nor `IN_CUSTODY`), and has not been returned via a partial
+ * check-in. Backs {@link checkoutRemainingAssets} so the "Check out remaining"
+ * action never has to enumerate asset ids on the client.
+ *
+ * @param bookingId - Booking to inspect
+ * @param organizationId - Caller's active organization (org-scopes the lookup)
+ * @returns The ids of assets still eligible for check-out (possibly empty)
+ * @throws {ShelfError} If the booking is not found in the organization
+ */
+export async function getRemainingCheckoutAssetIds({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: string;
+  organizationId: string;
+}): Promise<string[]> {
+  const booking = await db.booking
+    .findUniqueOrThrow({
+      where: { id: bookingId, organizationId },
+      select: {
+        assets: { select: { id: true, status: true } },
+        partialCheckins: { select: { assetIds: true } },
+      },
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        status: 404,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?",
+        shouldBeCaptured: !isNotFoundError(cause),
+      });
+    });
+
+  // Assets returned via partial check-in are AVAILABLE again but must NOT be
+  // re-checked out, so exclude them explicitly.
+  const checkedInAssetIds = new Set(
+    booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
+  );
+
+  return booking.assets
+    .filter(
+      (asset) =>
+        asset.status === AssetStatus.AVAILABLE &&
+        !checkedInAssetIds.has(asset.id)
+    )
+    .map((asset) => asset.id);
+}
+
+/**
+ * Action wrapper for "Check out remaining": check out every asset still in the
+ * booking's "Booked" bucket in one go, without the client enumerating ids.
+ * Mirrors {@link checkoutAssets} but resolves the eligible asset ids server-side
+ * via {@link getRemainingCheckoutAssetIds} before delegating to
+ * {@link partialCheckoutBooking}. Surfaced from the booking header dropdown for
+ * ONGOING/OVERDUE bookings so users aren't forced to scan the rest one-by-one.
+ *
+ * @param formData - Submitted form data (optional checkoutIntentChoice/returnJson)
+ * @param request - Incoming request (for client hints)
+ * @param bookingId - Booking being checked out
+ * @param organizationId - Caller's active organization
+ * @param userId - Acting user
+ * @param authSession - Auth session (notification sender)
+ * @returns JSON payload (when returnJson) or a redirect to the booking page
+ * @throws {ShelfError} If no eligible assets remain to check out
+ */
+export async function checkoutRemainingAssets({
+  formData,
+  request,
+  bookingId,
+  organizationId,
+  userId,
+  authSession,
+}: {
+  formData: FormData;
+  request: Request;
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  authSession: AuthSession;
+}) {
+  const { checkoutIntentChoice, returnJson } = parseData(
+    formData,
+    z.object({
+      checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
+      returnJson: z
+        .string()
+        .optional()
+        .transform((val) => val === "true"),
+    })
+  );
+
+  const assetIds = await getRemainingCheckoutAssetIds({
+    bookingId,
+    organizationId,
+  });
+
+  if (assetIds.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      status: 400,
+      label,
+      message: "There are no remaining items to check out for this booking.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  const hints = getClientHint(request);
+
+  const result = await partialCheckoutBooking({
+    id: bookingId,
+    organizationId,
+    assetIds,
+    userId,
+    hints,
+    intentChoice: checkoutIntentChoice,
+  });
+
+  return respondToPartialCheckout({
+    result,
+    bookingId,
+    authSession,
+    returnJson,
+  });
 }
 
 export async function getOngoingBookingForAsset({

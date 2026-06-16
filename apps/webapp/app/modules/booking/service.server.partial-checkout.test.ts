@@ -4,7 +4,10 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
-import { partialCheckoutBooking } from "./service.server";
+import {
+  getRemainingCheckoutAssetIds,
+  partialCheckoutBooking,
+} from "./service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -518,5 +521,98 @@ describe("partialCheckoutBooking", () => {
     ).rejects.toThrow("already checked out for this booking");
 
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("getRemainingCheckoutAssetIds", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("returns only AVAILABLE assets that have not been returned", async () => {
+    expect.assertions(1);
+
+    // Mixed booking: one Booked (AVAILABLE), one already CHECKED_OUT, one
+    // IN_CUSTODY. Only the AVAILABLE one is still eligible to check out.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE },
+        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-3", status: AssetStatus.IN_CUSTODY },
+      ],
+      partialCheckins: [],
+    });
+
+    const ids = await getRemainingCheckoutAssetIds({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(ids).toEqual(["asset-1"]);
+  });
+
+  it("excludes assets returned via partial check-in even though they are AVAILABLE", async () => {
+    expect.assertions(1);
+
+    // asset-2 was checked out then checked back in: it is AVAILABLE again but is
+    // recorded in partialCheckins, so it must NOT be offered for re-checkout.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      assets: [
+        { id: "asset-1", status: AssetStatus.AVAILABLE },
+        { id: "asset-2", status: AssetStatus.AVAILABLE },
+      ],
+      partialCheckins: [{ assetIds: ["asset-2"] }],
+    });
+
+    const ids = await getRemainingCheckoutAssetIds({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(ids).toEqual(["asset-1"]);
+  });
+
+  it("returns an empty array when nothing is eligible", async () => {
+    expect.assertions(1);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      assets: [
+        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", status: AssetStatus.IN_CUSTODY },
+      ],
+      partialCheckins: [],
+    });
+
+    const ids = await getRemainingCheckoutAssetIds({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(ids).toEqual([]);
+  });
+
+  it("org-scopes the booking lookup", async () => {
+    expect.assertions(1);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ assets: [], partialCheckins: [] });
+
+    await getRemainingCheckoutAssetIds({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1", organizationId: "org-1" },
+      })
+    );
   });
 });

@@ -1,5 +1,7 @@
 import type { Booking } from "@prisma/client";
+import { Zap } from "lucide-react";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import { tw } from "~/utils/tw";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -36,6 +38,13 @@ type CheckoutDialogProps = {
    * partial), so it can leave the default.
    */
   intent?: string;
+  /** Custom label for the trigger button */
+  label?: string;
+  /**
+   * Rendering context. `"dropdown"` styles the trigger as a left-aligned link
+   * row so it sits inside a `DropdownMenuItem` like the check-in flow.
+   */
+  variant?: "default" | "dropdown";
 };
 
 export default function CheckoutDialog({
@@ -44,20 +53,42 @@ export default function CheckoutDialog({
   portalContainer,
   formId,
   intent = "checkOut",
+  label = "Check Out",
+  variant = "default",
 }: CheckoutDialogProps) {
   const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
+
+  /** Shared trigger styling so the dropdown row matches the check-in dropdown */
+  const isDropdown = variant === "dropdown";
+  const triggerClassName = tw(
+    "whitespace-nowrap",
+    isDropdown
+      ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+      : "grow"
+  );
+  /** Dropdown rows pair the label with an icon; the default trigger is text-only */
+  const triggerContent = isDropdown ? (
+    <span className="flex items-center gap-2">
+      <Zap className="size-4" /> {label}
+    </span>
+  ) : (
+    label
+  );
 
   if (!isEarlyCheckout) {
     return (
       <Button
         disabled={disabled}
-        className="grow whitespace-nowrap"
-        size="sm"
+        className={triggerClassName}
+        size={isDropdown ? undefined : "sm"}
         type="submit"
         name="intent"
         value={intent}
+        form={formId}
+        variant={isDropdown ? "link" : "primary"}
+        width={isDropdown ? "full" : undefined}
       >
-        Check Out
+        {triggerContent}
       </Button>
     );
   }
@@ -67,11 +98,13 @@ export default function CheckoutDialog({
       <AlertDialogTrigger asChild>
         <Button
           disabled={disabled}
-          className="grow whitespace-nowrap"
-          size="sm"
+          className={triggerClassName}
+          size={isDropdown ? undefined : "sm"}
           type="button"
+          variant={isDropdown ? "link" : "primary"}
+          width={isDropdown ? "full" : undefined}
         >
-          Check Out
+          {triggerContent}
         </Button>
       </AlertDialogTrigger>
 

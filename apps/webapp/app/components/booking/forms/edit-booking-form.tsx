@@ -34,7 +34,7 @@ import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
-import CheckoutDialog from "../checkout-dialog";
+import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
 
@@ -295,39 +295,42 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             ) : null}
 
             {/*
-              Progressive checkout: scan booking items to check them out
-              one-by-one. Available while the booking is RESERVED (start the
-              checkout) and while ONGOING/OVERDUE (continue checking out
-              still-Booked items). Link button → no explicit `type` needed.
+              Check-out control. Collapses the full "Check Out" flow (RESERVED
+              only) and the progressive "Scan to check out" flow
+              (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
+              dropdown — mirroring the check-in dropdown for a consistent header.
+              CheckoutDropdown renders a single button when only one option
+              applies, and nothing when neither does.
             */}
             <When
               truthy={
                 (bookingStatus?.isReserved ||
-                  bookingStatus?.isOngoing ||
-                  bookingStatus?.isOverdue) &&
-                canCheckOutBooking &&
-                hasItemsToCheckOut
+                  ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut)) &&
+                canCheckOutBooking
               }
             >
-              <Button
-                variant="secondary"
-                icon="scan"
-                size="sm"
-                className="grow whitespace-nowrap"
-                to={`/bookings/${id}/overview/checkout-assets`}
-                disabled={disabled}
-              >
-                Scan to check out
-              </Button>
-            </When>
-
-            {/* When booking is reserved, we show the check-out button */}
-            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-              <CheckoutDialog
+              <CheckoutDropdown
                 portalContainer={formElement || undefined}
                 formId="edit-booking-form"
                 booking={{ id, name: name!, from: new Date(startDate!) }}
-                disabled={
+                disabled={disabled}
+                canFullCheckOut={!!bookingStatus?.isReserved}
+                canCheckOutRemaining={
+                  !!(
+                    (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut
+                  )
+                }
+                canScanCheckOut={
+                  !!(
+                    (bookingStatus?.isReserved ||
+                      bookingStatus?.isOngoing ||
+                      bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut
+                  )
+                }
+                checkOutDisabled={
                   disabled ||
                   isLoadingWorkingHours ||
                   bookingFlags?.hasUnavailableAssets ||

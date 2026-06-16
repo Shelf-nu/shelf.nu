@@ -43,6 +43,7 @@ import {
   checkinBooking,
   checkoutAssets,
   checkoutBooking,
+  checkoutRemainingAssets,
   deleteBooking,
   extendBooking,
   getBooking,
@@ -706,6 +707,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "delete",
           "removeAsset",
           "checkOut",
+          "checkOutRemaining",
           "checkIn",
           "archive",
           "cancel",
@@ -735,6 +737,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       save: PermissionAction.update,
       removeAsset: PermissionAction.update,
       checkOut: PermissionAction.checkout,
+      checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
@@ -1010,6 +1013,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         return data(payload({ booking }), {
           headers,
+        });
+      }
+      case "checkOutRemaining": {
+        // "Check out remaining" — check out every asset still in the booking's
+        // Booked bucket at once. The service resolves the eligible ids
+        // server-side (no client-supplied id list) and routes through the
+        // progressive partial-checkout path, which writes notes/events.
+        return await checkoutRemainingAssets({
+          formData,
+          request,
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
         });
       }
       case "checkIn": {
