@@ -473,6 +473,40 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"locationId" IS NULL');
       expect(sql).toContain("Location");
     });
+
+    // why: regression test for SHELF-WEBAPP-1MY — a `withinHierarchy` location
+    // filter pointing at a deleted/stale location expands to a `containsAny`
+    // filter with an empty array of descendant ids. The builder must not call
+    // `Prisma.join([])` (which throws) and should match no assets instead of
+    // crashing the entire /assets index with a 500.
+    it("handles containsAny with an empty array (expanded withinHierarchy to no descendants)", () => {
+      const filter: Filter = {
+        name: "location",
+        type: "enum",
+        operator: "containsAny",
+        value: [],
+      };
+
+      expect(() => generateWhereClause(orgId, null, [filter])).not.toThrow();
+
+      const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+      // An empty location set matches no assets.
+      expect(sql).toContain("1=0");
+    });
+
+    it("handles containsAny with an empty string (no location ids) without throwing", () => {
+      const filter: Filter = {
+        name: "location",
+        type: "enum",
+        operator: "containsAny",
+        value: "",
+      };
+
+      expect(() => generateWhereClause(orgId, null, [filter])).not.toThrow();
+
+      const sql = getSqlString(generateWhereClause(orgId, null, [filter]));
+      expect(sql).toContain("1=0");
+    });
   });
 
   describe("kit filter with special values", () => {
@@ -563,6 +597,37 @@ describe("generateWhereClause - special filter values", () => {
       expect(sql).toContain('"kitId" IS NULL');
       expect(sql).toContain("Kit");
     });
+  });
+
+  // why: regression coverage for SHELF-WEBAPP-1MY and its sibling branches. A
+  // `containsAny` filter whose id list resolves to empty (e.g. a stale
+  // `withinHierarchy` expansion, or an empty submitted value) must never call
+  // `Prisma.join([])` (which throws and 500s the /assets index). Every such
+  // branch should instead emit a no-match clause (`1=0`).
+  describe("containsAny with an empty id set is non-fatal (matches nothing)", () => {
+    const cases: { name: Filter["name"] }[] = [
+      { name: "location" },
+      { name: "category" },
+      { name: "kit" },
+      { name: "custody" },
+      { name: "upcomingBookings" },
+    ];
+
+    for (const { name } of cases) {
+      it(`handles empty containsAny for "${name}" without throwing`, () => {
+        const filter = {
+          name,
+          type: "enum",
+          operator: "containsAny",
+          value: [] as string[],
+        } as Filter;
+
+        expect(() => generateWhereClause(orgId, null, [filter])).not.toThrow();
+        expect(
+          getSqlString(generateWhereClause(orgId, null, [filter]))
+        ).toContain("1=0");
+      });
+    }
   });
 });
 

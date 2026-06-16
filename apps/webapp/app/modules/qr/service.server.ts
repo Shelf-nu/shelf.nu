@@ -580,6 +580,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import are present more than once in the data. Please make sure each QR code is only present once.",
         additionalData: { duplicateCodes },
         label,
+        // This is a user-input validation failure, not a server fault: return a
+        // 400 and don't capture it to Sentry (see SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -594,6 +598,8 @@ export async function parseQrCodesFromImportData({
         message: "Some of the QR codes you are trying to import do not exist",
         additionalData: { nonExistentCodes },
         label,
+        // User-input validation failure: return a 400 (already not captured).
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -611,6 +617,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import are already linked to an asset or a kit. Please use unlinked or unclaimed codes for your import.",
         additionalData: { linkedCodes },
         label,
+        // User-input validation failure: return a 400 and don't capture it to
+        // Sentry (SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -630,6 +640,10 @@ export async function parseQrCodesFromImportData({
           "Some of the QR codes you are trying to import don't belong to your current organization. You can only import codes that are unclaimed, unlinked or linked to your organization.",
         additionalData: { connectedToOtherOrgs },
         label,
+        // User-input validation failure: return a 400 and don't capture it to
+        // Sentry (SHELF-WEBAPP-1J0).
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
