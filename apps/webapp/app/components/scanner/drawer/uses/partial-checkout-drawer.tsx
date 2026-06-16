@@ -137,13 +137,15 @@ export default function PartialCheckoutDrawer({
   // Get assets that have already been checked out (should be excluded from count)
   const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
 
-  // Exclude in-custody assets from the submit set (both standalone and kit
-  // members). The server rejects them, so including them would fail the whole
-  // batch even when only part of a scanned kit is blocked; the in-custody
-  // blocker still surfaces them to the user.
+  // Eligible to check out = in this booking, not already checked out (by a
+  // partial-checkout record OR a live CHECKED_OUT status — the latter covers
+  // all-at-once checkouts that left no records), and not in custody. The server
+  // rejects in-custody/already-out assets, so including them would fail the
+  // whole batch; the corresponding blockers still surface them to the user.
   const isCheckoutEligibleAsset = (a: { id: string; status: AssetStatus }) =>
     bookingAssetIds.has(a.id) &&
     !alreadyCheckedOut.has(a.id) &&
+    a.status !== AssetStatus.CHECKED_OUT &&
     a.status !== AssetStatus.IN_CUSTODY;
 
   const assetIdsForCheckout = Array.from(
@@ -157,8 +159,9 @@ export default function PartialCheckoutDrawer({
 
   // Assets in this booking still available to check out (asset-scoped, so it
   // matches the asset-counted numerator regardless of the kits-as-unit setting).
+  // Excludes both recorded checkouts AND live CHECKED_OUT status.
   const remainingBookedAssets = booking.assets.filter(
-    (a) => !alreadyCheckedOut.has(a.id)
+    (a) => !alreadyCheckedOut.has(a.id) && a.status !== AssetStatus.CHECKED_OUT
   ).length;
 
   // Early checkout applies to ANY scan that activates a not-yet-started booking,

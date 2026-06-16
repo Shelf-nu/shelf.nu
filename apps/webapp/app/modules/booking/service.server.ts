@@ -2618,18 +2618,30 @@ export async function partialCheckoutBooking({
       });
     }
 
-    // Assets already checked out for THIS booking (per-booking source of truth).
+    // Assets already checked out for THIS booking. Source of truth is the
+    // PartialBookingCheckout records, but a booking checked out via the
+    // all-at-once flow leaves NO records while its assets are live CHECKED_OUT —
+    // so also treat any currently-CHECKED_OUT booking asset as already checked
+    // out. Without this, a progressive scan over an all-at-once booking would
+    // re-check-out CHECKED_OUT assets (dup records/events) and misreport
+    // outstanding/remaining counts.
     const alreadyCheckedOutAssetIds = await getPartiallyCheckedOutAssetIds({
       bookingId: id,
       organizationId,
     });
     const recordedAssetIdSet = new Set(alreadyCheckedOutAssetIds);
+    const alreadyCheckedOutSet = new Set([
+      ...recordedAssetIdSet,
+      ...bookingFound.assets
+        .filter((asset) => asset.status === AssetStatus.CHECKED_OUT)
+        .map((asset) => asset.id),
+    ]);
     const providedAssetIds = new Set(assetIds);
 
-    // Booking assets not yet covered by any partial check-OUT record = still Booked.
+    // Booking assets not yet checked out (by record OR live status) = still Booked.
     const outstandingAssetIds = bookingFound.assets
       .map((asset) => asset.id)
-      .filter((assetId) => !recordedAssetIdSet.has(assetId));
+      .filter((assetId) => !alreadyCheckedOutSet.has(assetId));
 
     // Delegate to the full checkout ONLY on the very first all-items scan of a
     // RESERVED booking (no prior partial-checkout records). `checkoutBooking`
@@ -2737,9 +2749,11 @@ export async function partialCheckoutBooking({
       }
     }
 
-    // Defensive: skip assets already checked out for this booking (idempotent re-scan).
+    // Defensive: skip assets already checked out for this booking — by record
+    // OR by live CHECKED_OUT status (idempotent re-scan, incl. all-at-once
+    // checkouts that left no records).
     const assetIdsToCheckOut = assetIds.filter(
-      (assetId) => !recordedAssetIdSet.has(assetId)
+      (assetId) => !alreadyCheckedOutSet.has(assetId)
     );
     if (assetIdsToCheckOut.length === 0) {
       throw new ShelfError({
@@ -2950,10 +2964,11 @@ export async function partialCheckoutBooking({
         tx
       );
 
-      // Remaining = booking assets not covered by any partial check-out record
-      // (previous sessions + this batch).
+      // Remaining = booking assets not checked out after this batch — by record
+      // OR live status (so all-at-once checkouts aren't miscounted as Booked) —
+      // plus the assets just checked out.
       const checkedOutAfterThisBatch = new Set([
-        ...recordedAssetIdSet,
+        ...alreadyCheckedOutSet,
         ...assetIdsToCheckOut,
       ]);
       const remainingAssetCount = updatedBookingForNote.assets.filter(
