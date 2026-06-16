@@ -94,9 +94,22 @@ Shelf is multi-tenant. The most common security bug here is cross-organization a
 
 ### 7. Supabase RLS
 
-- New Prisma models or tables MUST have a matching RLS policy migration. Flag any new `model` in `packages/database/prisma/schema.prisma` without an RLS policy in the same PR.
-- The webapp uses both the Supabase client (RLS-enforcing) and the direct Prisma client (RLS-bypassing). Flag direct-Prisma access to per-tenant data in places that should be using Supabase + RLS, especially in routes that proxy unverified user input.
-- Migrations: invoke the `supabase` skill for RLS review; check `USING` and `WITH CHECK` clauses for the `auth.uid()` org-membership pattern Shelf uses.
+**7a. RLS-enablement audit for new tables (MECHANICAL — run this on every diff that touches `packages/database/prisma/migrations/`).** This is the regression that shipped on 2026-06-16: a new `MobileAuthCode` table was created without an `ENABLE ROW LEVEL SECURITY` line, leaving it readable/writable through the Supabase anon/PostgREST surface. Every `public` table in Shelf MUST have RLS enabled — RLS-disabled is the unsafe default.
+
+Procedure (do this literally, do not eyeball it):
+
+1. Enumerate the migration files added in this PR: `git diff --name-only --diff-filter=A main...HEAD -- 'packages/database/prisma/migrations/**/migration.sql'` (substitute the real base branch). Also re-check any existing migration the diff modifies.
+2. For each such file, grep every newly-created table: `grep -ioE 'CREATE TABLE (IF NOT EXISTS )?"?(public"?\.)?"?[A-Za-z0-9_]+"?' <file>`. Ignore `CREATE TABLE` inside comments.
+3. For each table `T` found, confirm the **same PR** contains a matching `ALTER TABLE … "T" … ENABLE ROW LEVEL SECURITY;` (the repo writes it lowercase: `alter table "T" ENABLE row level security;`). Match case-insensitively; the enable statement may live in the same migration or a later one in the same PR.
+4. Any `CREATE TABLE` with **no** matching enable line is a finding:
+   - **🟠 High / P1** by default.
+   - **🔴 Critical / P0** when the table holds credentials, tokens, auth codes, sessions, PII, or any per-tenant (`organizationId`-scoped) data — i.e. the realistic Shelf case. `MobileAuthCode` would have been Critical.
+   - Only downgrade to a nit (or N/A) if it is provably a global, non-tenant lookup/enum table with no sensitive rows, AND there is an explicit `-- no RLS: <reason>` comment in the migration. Absent that comment, flag it.
+   - **Fix** to suggest: add `ALTER TABLE "T" ENABLE row level security;` to the migration (Shelf's convention is RLS-enabled, usually with **no** policies — see 7b).
+
+**7b. Policies are a separate, weaker requirement.** Shelf's standard for most tables is _RLS enabled with no policies_, which denies all access to the Supabase anon/authenticated roles while the direct Prisma client (service role) bypasses RLS for app queries. So a new table **must** have RLS enabled (7a), but the absence of `CREATE POLICY` is **not** automatically a finding — only flag missing policies when the table is intended to be reached directly by a Supabase client (rare; e.g. realtime/storage-backed reads). When policies do exist, invoke the `supabase` skill and check `USING` / `WITH CHECK` clauses for the `auth.uid()` org-membership pattern Shelf uses.
+
+**7c. Schema ↔ migration cross-check.** Flag any new `model` in `packages/database/prisma/schema.prisma` whose backing migration in the same PR is missing the RLS enable line (this is the same defect viewed from the schema side). Also flag direct-Prisma access to per-tenant data in routes that proxy unverified user input where Supabase + RLS would be the safer boundary.
 
 ### 8. Session / auth flow
 
@@ -171,7 +184,8 @@ Produce one markdown report with these sections, in order:
 | requirePermission on mutating routes  | …                  | …     |
 | Zod validation + server-side fallback | …                  | …     |
 | Secrets / env                         | …                  | …     |
-| Supabase RLS                          | …                  | …     |
+| RLS enabled on new tables (migration) | …                  | …     |
+| Supabase RLS policies (if applicable) | …                  | …     |
 | Session / cookie flags                | …                  | …     |
 | Open redirect                         | …                  | …     |
 | File upload validation                | …                  | …     |
