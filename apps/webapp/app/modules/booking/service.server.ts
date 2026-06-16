@@ -2098,7 +2098,7 @@ export async function checkinBooking({
 export async function partialCheckinBooking({
   id,
   organizationId,
-  assetIds,
+  assetIds: rawAssetIds,
   userId,
   hints,
   intentChoice,
@@ -2109,6 +2109,11 @@ export async function partialCheckinBooking({
   intentChoice?: CheckinIntentEnum;
 }) {
   try {
+    // Dedupe once up front so counts, the PartialBookingCheckin record, and the
+    // per-asset events are idempotent — the mobile endpoint's body schema does
+    // not enforce unique assetIds, so a client could submit duplicates.
+    const assetIds = [...new Set(rawAssetIds)];
+
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -2533,7 +2538,7 @@ export async function partialCheckinBooking({
 export async function partialCheckoutBooking({
   id,
   organizationId,
-  assetIds,
+  assetIds: rawAssetIds,
   userId,
   hints,
   intentChoice,
@@ -2544,6 +2549,11 @@ export async function partialCheckoutBooking({
   intentChoice?: CheckoutIntentEnum;
 }) {
   try {
+    // Dedupe once up front so counts, the PartialBookingCheckout record, and the
+    // per-asset events are idempotent — the mobile endpoint's body schema does
+    // not enforce unique assetIds, so a client could submit duplicates.
+    const assetIds = [...new Set(rawAssetIds)];
+
     const user = await getUserByID(userId, {
       select: {
         id: true,

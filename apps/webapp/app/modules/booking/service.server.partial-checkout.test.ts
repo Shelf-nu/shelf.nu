@@ -194,6 +194,30 @@ describe("partialCheckoutBooking", () => {
     ).mockResolvedValue([]);
   });
 
+  it("deduplicates submitted assetIds (idempotent count/record)", async () => {
+    expect.assertions(1);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+
+    // The mobile endpoint's schema doesn't enforce unique ids — a duplicate must
+    // not inflate the count or write a duplicate into the record.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-1"],
+    });
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: {
+        bookingId: "booking-1",
+        checkedOutById: "user-1",
+        assetIds: ["asset-1"],
+        checkoutCount: 1,
+      },
+    });
+  });
+
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {
     expect.assertions(4);
 
