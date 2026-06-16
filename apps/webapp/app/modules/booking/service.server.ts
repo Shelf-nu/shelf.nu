@@ -6293,12 +6293,16 @@ export async function checkoutAssets({
     intentChoice: checkoutIntentChoice,
   });
 
+  // Report the number of assets the service ACTUALLY checked out, which can be
+  // fewer than the submitted assetIds when the batch contains already-recorded
+  // (idempotent) assets — otherwise the UI would overstate the count.
+  const count = result.checkedOutAssetCount;
   const notificationMessage = result.isComplete
-    ? `Successfully checked out ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
+    ? `Successfully checked out ${count} asset${
+        count > 1 ? "s" : ""
       } and checked out the booking.`
-    : `Successfully checked out ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
+    : `Successfully checked out ${count} asset${
+        count > 1 ? "s" : ""
       } from booking.`;
 
   sendNotification({
@@ -6312,9 +6316,7 @@ export async function checkoutAssets({
   if (returnJson) {
     return payload({
       success: true,
-      message: `Successfully checked out ${assetIds.length} asset${
-        assetIds.length > 1 ? "s" : ""
-      }`,
+      message: `Successfully checked out ${count} asset${count > 1 ? "s" : ""}`,
     });
   }
 
