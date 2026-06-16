@@ -2569,7 +2569,10 @@ export async function partialCheckoutBooking({
     }
 
     // Assets already checked out for THIS booking (per-booking source of truth).
-    const alreadyCheckedOutAssetIds = await getPartiallyCheckedOutAssetIds(id);
+    const alreadyCheckedOutAssetIds = await getPartiallyCheckedOutAssetIds({
+      bookingId: id,
+      organizationId,
+    });
     const recordedAssetIdSet = new Set(alreadyCheckedOutAssetIds);
     const providedAssetIds = new Set(assetIds);
 
@@ -2628,6 +2631,7 @@ export async function partialCheckoutBooking({
         inCustody.length > 3 ? ` and ${inCustody.length - 3} more` : "";
       throw new ShelfError({
         cause: null,
+        status: 400,
         label,
         title: "Assets in custody",
         message: `Cannot check out. Some assets are currently in custody: ${names}${more}. Release custody first or remove them from the booking.`,
@@ -2648,6 +2652,7 @@ export async function partialCheckoutBooking({
           conflicted.length > 3 ? ` and ${conflicted.length - 3} more` : "";
         throw new ShelfError({
           cause: null,
+          status: 400,
           label,
           title: "Booking conflict",
           message: `Cannot check out. Some assets are already booked or checked out elsewhere: ${names}${more}. Remove the conflicted assets and try again.`,
@@ -2722,13 +2727,16 @@ export async function partialCheckoutBooking({
         lastName: user?.lastName,
       });
       const noteContent = `${actor} checked out via partial check-out.`;
-      await createNotes({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetIds: assetIdsToCheckOut,
-        organizationId,
-      });
+      await createNotes(
+        {
+          content: noteContent,
+          type: "UPDATE",
+          userId,
+          assetIds: assetIdsToCheckOut,
+          organizationId,
+        },
+        tx
+      );
 
       // Activity events — one BOOKING_PARTIAL_CHECKOUT per asset, inside the tx.
       await recordEvents(
@@ -2831,13 +2839,16 @@ export async function partialCheckoutBooking({
               : "Ongoing"
           })`
         : "";
-      await createSystemBookingNote({
-        bookingId: id,
-        organizationId,
-        content: `${wrapUserLinkForNote(
-          user!
-        )} performed a partial check-out: ${itemsDescription}${statusNote}.`,
-      });
+      await createSystemBookingNote(
+        {
+          bookingId: id,
+          organizationId,
+          content: `${wrapUserLinkForNote(
+            user!
+          )} performed a partial check-out: ${itemsDescription}${statusNote}.`,
+        },
+        tx
+      );
 
       // Remaining = booking assets not covered by any partial check-out record
       // (previous sessions + this batch).
@@ -6028,14 +6039,25 @@ export async function checkinAssets({
  * direction; this is the per-booking source of truth for what has been scanned
  * out so far (progress bar + completion detection).
  *
- * @param bookingId - Booking id to read partial check-out records for
+ * Org-scoped: the query filters on `booking.organizationId` via the relation so
+ * a caller can only read partial-checkout records whose booking belongs to the
+ * supplied organization (cross-org IDOR guard enforced in the query itself, not
+ * by caller convention).
+ *
+ * @param params.bookingId - Booking id to read partial check-out records for
+ * @param params.organizationId - Caller's validated organization id; the
+ *   booking must belong to it for any records to be returned
  * @returns Deduplicated list of asset ids checked out for this booking
  */
-export async function getPartiallyCheckedOutAssetIds(
-  bookingId: string
-): Promise<string[]> {
+export async function getPartiallyCheckedOutAssetIds({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: string;
+  organizationId: string;
+}): Promise<string[]> {
   const partialCheckouts = await db.partialBookingCheckout.findMany({
-    where: { bookingId },
+    where: { bookingId, booking: { organizationId } },
     select: { assetIds: true },
   });
 
@@ -6049,12 +6071,24 @@ export async function getPartiallyCheckedOutAssetIds(
  * asset. Mirrors {@link getDetailedPartialCheckinData}. Returns both the asset
  * IDs and the detailed check-out data in one query.
  *
- * @param bookingId - Booking id to read partial check-out records for
+ * Org-scoped: the query filters on `booking.organizationId` via the relation so
+ * a caller can only read partial-checkout records whose booking belongs to the
+ * supplied organization (cross-org IDOR guard enforced in the query itself).
+ *
+ * @param params.bookingId - Booking id to read partial check-out records for
+ * @param params.organizationId - Caller's validated organization id; the
+ *   booking must belong to it for any records to be returned
  * @returns checkedOutAssetIds + a record of assetId → { checkoutDate, checkedOutBy }
  */
-export async function getDetailedPartialCheckoutData(bookingId: string) {
+export async function getDetailedPartialCheckoutData({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: string;
+  organizationId: string;
+}) {
   const partialCheckouts = await db.partialBookingCheckout.findMany({
-    where: { bookingId },
+    where: { bookingId, booking: { organizationId } },
     include: {
       checkedOutBy: {
         select: {

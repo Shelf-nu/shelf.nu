@@ -94,9 +94,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Always fetch partial check-out data for scanner validation. We need this
     // to detect blockers for already-checked-out assets/kits and to feed the
     // drawer's asset-scoped "remaining to check out" count.
-    const { checkedOutAssetIds } = await getDetailedPartialCheckoutData(
-      booking.id
-    );
+    const { checkedOutAssetIds } = await getDetailedPartialCheckoutData({
+      bookingId: booking.id,
+      organizationId,
+    });
 
     const title = `Scan assets to check out | ${booking.name}`;
     const header: HeaderData = {

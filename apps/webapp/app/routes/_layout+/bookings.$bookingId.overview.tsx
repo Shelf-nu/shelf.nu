@@ -271,7 +271,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     const { checkedOutAssetIds, partialCheckoutDetails } =
       hasCheckedOutAssets || canHavePartialCheckouts
-        ? await getDetailedPartialCheckoutData(booking.id)
+        ? await getDetailedPartialCheckoutData({
+            bookingId: booking.id,
+            organizationId,
+          })
         : { checkedOutAssetIds: [] as string[], partialCheckoutDetails: {} };
 
     // `booking` already has full asset+kit light data; alias for clarity.
