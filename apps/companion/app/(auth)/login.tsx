@@ -10,20 +10,20 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
+  Linking,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
+import { API_BASE_URL } from "@/lib/api";
 import ShelfIcon from "@/components/brand/shelf-icon";
 import ShelfWordmark from "@/components/brand/shelf-wordmark";
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -88,6 +88,21 @@ export default function LoginScreen() {
     if (ssoError) {
       setError(ssoError);
     }
+  };
+
+  /**
+   * Opens the web password-reset flow in the system browser. The companion app
+   * has no in-app reset: the web OTP flow at /forgot-password is the source of
+   * truth and it rejects SSO users server-side. The external browser (rather
+   * than an in-app tab) lets the user switch to their email app for the code
+   * and back without tearing down the reset page.
+   */
+  const handleForgotPassword = () => {
+    Keyboard.dismiss();
+    setError(null);
+    Linking.openURL(`${API_BASE_URL}/forgot-password`).catch(() => {
+      setError("Couldn't open the password reset page. Please try again.");
+    });
   };
 
   return (
@@ -183,9 +198,9 @@ export default function LoginScreen() {
             <TouchableOpacity
               testID="forgot-password-link"
               style={styles.forgotLink}
-              onPress={() => router.push("/(auth)/forgot-password")}
+              onPress={handleForgotPassword}
               activeOpacity={0.7}
-              accessibilityLabel="Forgot your password? Reset it"
+              accessibilityLabel="Forgot your password? Reset it on the web"
               accessibilityRole="link"
             >
               <Text style={styles.forgotText}>Forgot password?</Text>
