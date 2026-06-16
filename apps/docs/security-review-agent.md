@@ -107,8 +107,13 @@ The agent operates against a Shelf-specific checklist baked into
 - **Secrets / env** — no hardcoded credentials; no leaking of
   `SESSION_SECRET`, `SUPABASE_SERVICE_ROLE`, Stripe keys, SMTP creds, etc.
   into client bundles.
-- **Supabase RLS** — new models in `schema.prisma` must ship with an RLS
-  policy migration; direct-Prisma access to per-tenant data is flagged where
+- **Supabase RLS** — every `CREATE TABLE` in a new migration must have a
+  matching `ENABLE ROW LEVEL SECURITY` line in the same PR (a `CREATE TABLE`
+  without it is High, or Critical for credential/token/PII/tenant tables —
+  this is the `MobileAuthCode` regression of 2026-06-16). Policies are a
+  separate, weaker requirement: Shelf's norm is RLS-enabled-with-no-policies,
+  so missing `CREATE POLICY` is only flagged for tables read directly by a
+  Supabase client. Direct-Prisma access to per-tenant data is flagged where
   RLS-enforcing Supabase access would be safer.
 - **Session / cookie flags** — new `Set-Cookie` entries must set
   `httpOnly`, `secure`, and `sameSite` for auth cookies.
