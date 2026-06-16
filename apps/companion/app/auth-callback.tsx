@@ -31,6 +31,17 @@ import { getStartPage, getStartPageRoute } from "@/lib/start-page";
  */
 const SIGN_IN_TIMEOUT_MS = 20_000;
 
+/**
+ * Native SSO callback landing screen.
+ *
+ * Rendered while the web-auth exchange (owned by `signInViaWeb`) installs the
+ * Supabase session. Shows a "Signing you in…" spinner, then redirects to the
+ * user's start page once the session lands — or to `/(auth)/login` if sign-in
+ * times out (see {@link SIGN_IN_TIMEOUT_MS}). Takes no props.
+ *
+ * @returns A `<Redirect>` once auth resolves or times out; the loading spinner
+ *   otherwise.
+ */
 export default function AuthCallback() {
   const { session } = useAuth();
   const { colors } = useTheme();
