@@ -20,6 +20,7 @@ import {
   checkoutAssets,
   getBooking,
   getDetailedPartialCheckoutData,
+  getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -141,6 +142,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
     });
 
+    // Assets already returned via partial check-in are AVAILABLE again but are
+    // DONE for this booking — they must be excluded from the "remaining to
+    // check out" count and from checkout eligibility, otherwise the scanner
+    // denominator over-counts (e.g. 16 booked, 2 returned would wrongly show
+    // /16 instead of /14).
+    const checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
+
     const title = `Scan assets to check out | ${booking.name}`;
     const header: HeaderData = {
       title,
@@ -151,6 +159,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       booking,
       checkedOutAssetIds,
+      checkedInAssetIds,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

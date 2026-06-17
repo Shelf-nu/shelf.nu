@@ -19,7 +19,11 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Progress } from "~/components/shared/progress";
-import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import {
+  countRemainingCheckoutAssets,
+  isAssetCheckoutEligible,
+  isBookingEarlyCheckout,
+} from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
 import type {
   AssetFromQr,
@@ -113,7 +117,8 @@ export default function PartialCheckoutDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking, checkedOutAssetIds } = useLoaderData<typeof loader>();
+  const { booking, checkedOutAssetIds, checkedInAssetIds } =
+    useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
@@ -137,16 +142,22 @@ export default function PartialCheckoutDrawer({
   // Get assets that have already been checked out (should be excluded from count)
   const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
 
-  // Eligible to check out = in this booking, not already checked out (by a
-  // partial-checkout record OR a live CHECKED_OUT status — the latter covers
-  // all-at-once checkouts that left no records), and not in custody. The server
-  // rejects in-custody/already-out assets, so including them would fail the
-  // whole batch; the corresponding blockers still surface them to the user.
+  // Assets already returned via partial check-in. They are AVAILABLE again but
+  // DONE for this booking, so they must NOT be offered for checkout nor counted
+  // in the "remaining to check out" denominator. Without this, a returned asset
+  // that was checked out via the all-at-once flow (which leaves no
+  // partial-checkout record) would be re-counted as still-bookable.
+  const alreadyReturned = new Set(checkedInAssetIds || []);
+
+  // Eligible to check out = in this booking AND still checkout-eligible (not
+  // already checked out, not returned via check-in, not in custody). The
+  // eligibility rule itself lives in the shared `isAssetCheckoutEligible` helper
+  // so this filter and the "remaining" denominator below describe the SAME set.
+  // The server rejects in-custody/already-out assets, so including them would
+  // fail the whole batch; the corresponding blockers still surface them.
   const isCheckoutEligibleAsset = (a: { id: string; status: AssetStatus }) =>
     bookingAssetIds.has(a.id) &&
-    !alreadyCheckedOut.has(a.id) &&
-    a.status !== AssetStatus.CHECKED_OUT &&
-    a.status !== AssetStatus.IN_CUSTODY;
+    isAssetCheckoutEligible(a, alreadyCheckedOut, alreadyReturned);
 
   const assetIdsForCheckout = Array.from(
     new Set([
@@ -159,10 +170,14 @@ export default function PartialCheckoutDrawer({
 
   // Assets in this booking still available to check out (asset-scoped, so it
   // matches the asset-counted numerator regardless of the kits-as-unit setting).
-  // Excludes both recorded checkouts AND live CHECKED_OUT status.
-  const remainingBookedAssets = booking.assets.filter(
-    (a) => !alreadyCheckedOut.has(a.id) && a.status !== AssetStatus.CHECKED_OUT
-  ).length;
+  // Uses the same shared eligibility rule as the filter above, so the
+  // denominator equals the set a user can actually scan out: excludes recorded
+  // checkouts, live CHECKED_OUT, already-returned (check-in), and in-custody.
+  const remainingBookedAssets = countRemainingCheckoutAssets(
+    booking.assets,
+    checkedOutAssetIds || [],
+    checkedInAssetIds || []
+  );
 
   // Early checkout applies to ANY scan that activates a not-yet-started booking,
   // not just the final batch — the first partial scan transitions RESERVED →
