@@ -14,6 +14,7 @@
  * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
  */
+import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { API_BASE_URL } from "./api";
@@ -33,6 +34,57 @@ type ExchangeResponse = {
   error?: { message?: string };
 };
 
+/** Base64url alphabet (RFC 4648 §5) — URL-safe, no padding. */
+const BASE64URL_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * Encode raw bytes as base64url (no padding). 32 bytes → 43 chars, all within
+ * the server's strict `^[A-Za-z0-9_-]{43,128}$` verifier charset.
+ */
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : undefined;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : undefined;
+    out += BASE64URL_ALPHABET[b0 >> 2];
+    out += BASE64URL_ALPHABET[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)];
+    if (b1 === undefined) break;
+    out += BASE64URL_ALPHABET[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)];
+    if (b2 === undefined) break;
+    out += BASE64URL_ALPHABET[b2 & 0x3f];
+  }
+  return out;
+}
+
+/** Convert standard base64 to base64url (no padding). */
+function base64ToBase64Url(b64: string): string {
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+/**
+ * Generate a PKCE (RFC 7636, S256) verifier + challenge pair.
+ *
+ * `verifier` = base64url of 32 random bytes (43 chars). `challenge` =
+ * base64url(SHA-256(verifier)) — what the server binds to the minted code and
+ * later recomputes from the verifier we send at exchange. The base64url
+ * encoding must match the server byte-for-byte (it validates a 43-char base64url
+ * challenge), so we convert Expo's base64 digest to base64url here.
+ */
+async function createPkcePair(): Promise<{
+  verifier: string;
+  challenge: string;
+}> {
+  const verifier = bytesToBase64Url(await Crypto.getRandomBytesAsync(32));
+  const digestBase64 = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    verifier,
+    { encoding: Crypto.CryptoEncoding.BASE64 }
+  );
+  return { verifier, challenge: base64ToBase64Url(digestBase64) };
+}
+
 /**
  * Runs the full web-delegated SSO sign-in and installs the resulting session.
  *
@@ -48,7 +100,15 @@ type ExchangeResponse = {
  */
 export async function signInViaWeb(): Promise<SsoSignInResult> {
   try {
-    const startUrl = `${API_BASE_URL}/sso-login?platform=mobile`;
+    // PKCE (S256): generate a verifier now and send only its challenge to the
+    // web SSO start, so the server binds the challenge to the minted code. The
+    // verifier never leaves the app and is presented at exchange — an
+    // intercepted `shelf://` code is useless without it (this closes the Android
+    // custom-scheme deeplink interception risk).
+    const { verifier, challenge } = await createPkcePair();
+    const startUrl = `${API_BASE_URL}/sso-login?platform=mobile&code_challenge=${encodeURIComponent(
+      challenge
+    )}`;
 
     const result = await WebBrowser.openAuthSessionAsync(
       startUrl,
@@ -76,7 +136,7 @@ export async function signInViaWeb(): Promise<SsoSignInResult> {
       response = await fetch(`${API_BASE_URL}/api/mobile/exchange`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, codeVerifier: verifier }),
         signal: controller.signal,
       });
     } catch (cause) {
