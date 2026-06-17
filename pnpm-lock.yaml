@@ -375,8 +375,8 @@ importers:
         specifier: ^3.7.2
         version: 3.7.2
       nodemailer:
-        specifier: ^8.0.5
-        version: 8.0.7
+        specifier: ^8.0.9
+        version: 8.0.9
       nprogress:
         specifier: ^0.2.0
         version: 0.2.0
@@ -623,7 +623,7 @@ importers:
         version: 2.14.2(@types/node@25.3.0)(typescript@6.0.3)
       nodemailer-mock:
         specifier: ^2.0.10
-        version: 2.0.11(nodemailer@8.0.7)
+        version: 2.0.11(nodemailer@8.0.9)
       npm-run-all:
         specifier: ^4.1.5
         version: 4.1.5
@@ -8608,8 +8608,8 @@ packages:
     peerDependencies:
       nodemailer: ^6.x || ^7.x || ^8.x
 
-  nodemailer@8.0.7:
-    resolution: {integrity: sha512-pkjE4mkBzQjdJT4/UmlKl3pX0rC9fZmjh7c6C9o7lv66Ac6w9WCnzPzhbPNxwZAzlF4mdq4CSWB5+FbK6FWCow==}
+  nodemailer@8.0.9:
+    resolution: {integrity: sha512-5ofa7BUN8+C+Hckh5V2GjeeOGRQBx0CJQA6KxrvuZfC8iU4/q7sLn8XrtEEhJkjV6HdyIiQs7Bba6bTao8JhkA==}
     engines: {node: '>=6.0.0'}
 
   normalize-package-data@2.5.0:
@@ -19838,14 +19838,14 @@ snapshots:
 
   node-releases@2.0.27: {}
 
-  nodemailer-mock@2.0.11(nodemailer@8.0.7):
+  nodemailer-mock@2.0.11(nodemailer@8.0.9):
     dependencies:
       debug: 4.4.3
-      nodemailer: 8.0.7
+      nodemailer: 8.0.9
     transitivePeerDependencies:
       - supports-color
 
-  nodemailer@8.0.7: {}
+  nodemailer@8.0.9: {}
 
   normalize-package-data@2.5.0:
     dependencies:
