@@ -8,6 +8,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
 import { LocationBadge } from "~/components/location/location-badge";
 import { LocationDescriptionColumn } from "~/components/location/location-description-column";
@@ -17,6 +18,7 @@ import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
+import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -45,7 +47,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
     const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const { page, perPageParam, search, orderBy, orderDirection } =
+      getParamsValues(searchParams);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
@@ -55,6 +58,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
+      orderBy,
+      orderDirection,
     });
     const totalPages = Math.ceil(totalLocations / perPage);
 
@@ -108,7 +113,17 @@ export default function LocationsIndexPage() {
         </Button>
       </Header>
       <ListContentWrapper>
-        <Filters />
+        <Filters
+          slots={{
+            "right-of-search": (
+              <SortBy
+                sortingOptions={LOCATION_SORTING_OPTIONS}
+                defaultSortingBy="createdAt"
+                defaultSortingDirection="desc"
+              />
+            ),
+          }}
+        />
         <List
           bulkActions={
             isBaseOrSelfService ? undefined : <BulkActionsDropdown />
