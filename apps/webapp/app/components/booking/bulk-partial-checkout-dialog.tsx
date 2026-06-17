@@ -29,7 +29,7 @@ import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useDisabled } from "~/hooks/use-disabled";
-import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import { shouldPromptEarlyCheckout } from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
@@ -170,10 +170,12 @@ export default function BulkPartialCheckoutDialog({
     selectedAssetIds.length === remainingBookedAssetIds.size &&
     selectedAssetIds.every((id) => remainingBookedAssetIds.has(id));
 
-  // Early checkout is only relevant for final checkouts (checking out the whole
-  // remaining booking before the start date).
+  // Early checkout is only relevant for final checkouts of a still-RESERVED
+  // booking (checking out the whole remaining booking before the start date).
+  // Once the booking is ONGOING/OVERDUE the start date is fixed and the date
+  // choice is ignored server-side, so the prompt would be a confusing no-op.
   const isEarlyCheckout = Boolean(
-    isFinalCheckout && isBookingEarlyCheckout(booking.from)
+    isFinalCheckout && shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
   function handleCloseDialog() {

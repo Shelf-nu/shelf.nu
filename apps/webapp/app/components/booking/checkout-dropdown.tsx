@@ -163,6 +163,7 @@ export default function CheckoutDropdown({
         disabled={quickCheckoutDisabled}
         intent={quickCheckoutIntent}
         label={quickCheckoutLabel}
+        suppressEarlyCheckoutPrompt={canCheckOutRemaining}
       />
     );
   }
@@ -236,6 +237,7 @@ export default function CheckoutDropdown({
                 intent={quickCheckoutIntent}
                 label={quickCheckoutLabel}
                 variant="dropdown"
+                suppressEarlyCheckoutPrompt={canCheckOutRemaining}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

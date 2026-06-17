@@ -1,10 +1,11 @@
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
   countRemainingCheckoutAssets,
   filterBookingAssets,
   groupAndSortAssetsByKit,
   isAssetCheckoutEligible,
+  shouldPromptEarlyCheckout,
   type SearchableBookingAsset,
 } from "./helpers";
 
@@ -512,5 +513,44 @@ describe("countRemainingCheckoutAssets", () => {
       { id: "a2", status: AssetStatus.IN_CUSTODY },
     ];
     expect(countRemainingCheckoutAssets(bookingAssets, [], [])).toBe(0);
+  });
+});
+
+describe("shouldPromptEarlyCheckout", () => {
+  const future = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1); // well beyond the 15-min buffer
+    return d;
+  };
+  const past = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d;
+  };
+
+  it("prompts when the booking is RESERVED and starts in the future", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.RESERVED, future())).toBe(
+      true
+    );
+  });
+
+  it("does NOT prompt when the booking is already ONGOING (start date fixed)", () => {
+    // The reported bug: 'Check out remaining' on an ONGOING booking must not
+    // trigger the adjust-start-date prompt.
+    expect(shouldPromptEarlyCheckout(BookingStatus.ONGOING, future())).toBe(
+      false
+    );
+  });
+
+  it("does NOT prompt when the booking is OVERDUE", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.OVERDUE, future())).toBe(
+      false
+    );
+  });
+
+  it("does NOT prompt when RESERVED but the start date has already passed", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.RESERVED, past())).toBe(
+      false
+    );
   });
 });

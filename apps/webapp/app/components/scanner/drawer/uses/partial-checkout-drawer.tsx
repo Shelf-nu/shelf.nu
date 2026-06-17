@@ -22,7 +22,7 @@ import { Progress } from "~/components/shared/progress";
 import {
   countRemainingCheckoutAssets,
   isAssetCheckoutEligible,
-  isBookingEarlyCheckout,
+  shouldPromptEarlyCheckout,
 } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
 import type {
@@ -179,13 +179,14 @@ export default function PartialCheckoutDrawer({
     checkedInAssetIds || []
   );
 
-  // Early checkout applies to ANY scan that activates a not-yet-started booking,
-  // not just the final batch — the first partial scan transitions RESERVED →
-  // ONGOING, so the user gets the same adjust-the-start-date prompt as the
-  // all-at-once checkout. The dialog's choice flows to the server as
-  // checkoutIntentChoice.
+  // Early checkout only applies while the booking is still RESERVED, because
+  // only that first scan transitions RESERVED → ONGOING and can adjust the
+  // start date. Once the booking is ONGOING/OVERDUE the start date is fixed and
+  // `partialCheckoutBooking` ignores the date choice, so prompting again on
+  // subsequent scans would be a confusing no-op.
   const isEarlyCheckout = Boolean(
-    assetIdsForCheckout.length > 0 && isBookingEarlyCheckout(booking.from)
+    assetIdsForCheckout.length > 0 &&
+      shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
   // Setup blockers

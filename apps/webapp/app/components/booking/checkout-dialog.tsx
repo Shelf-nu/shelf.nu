@@ -45,6 +45,15 @@ type CheckoutDialogProps = {
    * row so it sits inside a `DropdownMenuItem` like the check-in flow.
    */
   variant?: "default" | "dropdown";
+  /**
+   * Skip the early-checkout "adjust start date" prompt and submit directly.
+   * Pass `true` when the booking has already started (ONGOING/OVERDUE) — e.g.
+   * "Check out remaining" — because adjusting the start date only makes sense
+   * for the first checkout that transitions RESERVED → ONGOING.
+   * `partialCheckoutBooking` ignores the date choice unless the booking is
+   * RESERVED, so prompting here would be a confusing no-op.
+   */
+  suppressEarlyCheckoutPrompt?: boolean;
 };
 
 export default function CheckoutDialog({
@@ -55,8 +64,10 @@ export default function CheckoutDialog({
   intent = "checkOut",
   label = "Check Out",
   variant = "default",
+  suppressEarlyCheckoutPrompt = false,
 }: CheckoutDialogProps) {
-  const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
+  const isEarlyCheckout =
+    !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
 
   /** Shared trigger styling so the dropdown row matches the check-in dropdown */
   const isDropdown = variant === "dropdown";

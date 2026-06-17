@@ -189,6 +189,26 @@ export function isBookingEarlyCheckout(from: Date): boolean {
   return isAfter(fromWithBuffer, now);
 }
 
+/**
+ * Decide whether a checkout should show the early-checkout "adjust start date"
+ * prompt. This is ONLY appropriate for the first checkout that transitions the
+ * booking RESERVED → ONGOING: adjusting the start date once the booking has
+ * already started is meaningless, and `partialCheckoutBooking` ignores the date
+ * choice unless the booking is RESERVED. Used by the scanner drawer and the
+ * bulk partial-checkout dialog so a progressive checkout of remaining items on
+ * an ONGOING/OVERDUE booking never re-prompts.
+ *
+ * @param status - The booking's current status
+ * @param from - The booking's start date
+ * @returns `true` only when the booking is RESERVED and starts >15min from now
+ */
+export function shouldPromptEarlyCheckout(
+  status: BookingStatus,
+  from: Date
+): boolean {
+  return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
+}
+
 /** Minimal asset shape needed to decide check-out eligibility. */
 type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
 
