@@ -5,7 +5,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { checkinBooking } from "~/modules/booking/service.server";
+import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -14,12 +14,21 @@ import {
 } from "~/utils/permissions/permission.data";
 
 /**
- * POST /api/mobile/bookings/checkin
+ * Mobile API — progressive (partial) check-out for a booking.
  *
- * Full check-in: transitions ONGOING/OVERDUE → COMPLETE.
- * All CHECKED_OUT assets return to AVAILABLE.
+ * `POST /api/mobile/bookings/partial-checkout`. Checks out the given assets from
+ * a RESERVED/ONGOING/OVERDUE booking; the first checkout transitions the booking
+ * to ONGOING (or OVERDUE if past its end). Authenticates the mobile session,
+ * resolves the org, and requires the `booking:checkout` permission before
+ * delegating to {@link partialCheckoutBooking}.
  *
- * Body: { bookingId: string, timeZone?: string }
+ * @param args - Remix action args; `request` carries the JSON body
+ *   `{ bookingId: string; assetIds: string[]; timeZone?: string }` and mobile
+ *   auth headers.
+ * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
+ *   on success, or `{ error: { message } }` with the appropriate status on failure.
+ * @throws Never throws to the caller — errors are normalized via
+ *   {@link makeShelfError} into the JSON error response.
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -30,13 +39,14 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       entity: PermissionEntity.booking,
-      action: PermissionAction.checkin,
+      action: PermissionAction.checkout,
     });
 
     const body = await request.json();
-    const { bookingId, timeZone } = z
+    const { bookingId, assetIds, timeZone } = z
       .object({
         bookingId: z.string().min(1),
+        assetIds: z.array(z.string().min(1)).min(1),
         timeZone: z.string().optional(),
       })
       .parse(body);
@@ -50,19 +60,23 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(timeZone ? { timeZone } : {}),
     };
 
-    const booking = await checkinBooking({
+    const result = await partialCheckoutBooking({
       id: bookingId,
       organizationId,
-      hints,
+      assetIds,
       userId: user.id,
+      hints,
     });
 
     return data({
       success: true,
+      checkedOutCount: result.checkedOutAssetCount,
+      remainingCount: result.remainingAssetCount,
+      isComplete: result.isComplete,
       booking: {
-        id: booking.id,
-        name: booking.name,
-        status: booking.status,
+        id: result.booking.id,
+        name: result.booking.name,
+        status: result.booking.status,
       },
     });
   } catch (cause) {

@@ -34,7 +34,7 @@ import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
-import CheckoutDialog from "../checkout-dialog";
+import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
 
@@ -82,8 +82,18 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = booking;
 
   const bookingStatus = useBookingStatusHelpers(status);
-  const { teamMembers, teamMembersForForm, userId, currentOrganization } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    teamMembers,
+    teamMembersForForm,
+    userId,
+    currentOrganization,
+    lifecycleProgress,
+  } = useLoaderData<BookingPageLoaderData>();
+
+  // Progressive checkout is only offered while there are still items that
+  // haven't been checked out yet (the Booked bucket). Once everything has been
+  // checked out, hide the "Scan to check out" entry point.
+  const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -284,13 +294,43 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </Button>
             ) : null}
 
-            {/* When booking is reserved, we show the check-out button */}
-            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
-              <CheckoutDialog
+            {/*
+              Check-out control. Collapses the full "Check Out" flow (RESERVED
+              only) and the progressive "Scan to check out" flow
+              (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
+              dropdown — mirroring the check-in dropdown for a consistent header.
+              CheckoutDropdown renders a single button when only one option
+              applies, and nothing when neither does.
+            */}
+            <When
+              truthy={
+                (bookingStatus?.isReserved ||
+                  ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut)) &&
+                canCheckOutBooking
+              }
+            >
+              <CheckoutDropdown
                 portalContainer={formElement || undefined}
                 formId="edit-booking-form"
                 booking={{ id, name: name!, from: new Date(startDate!) }}
-                disabled={
+                disabled={disabled}
+                canFullCheckOut={!!bookingStatus?.isReserved}
+                canCheckOutRemaining={
+                  !!(
+                    (bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut
+                  )
+                }
+                canScanCheckOut={
+                  !!(
+                    (bookingStatus?.isReserved ||
+                      bookingStatus?.isOngoing ||
+                      bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut
+                  )
+                }
+                checkOutDisabled={
                   disabled ||
                   isLoadingWorkingHours ||
                   bookingFlags?.hasUnavailableAssets ||
