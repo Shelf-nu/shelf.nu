@@ -1,5 +1,7 @@
 import type { Booking } from "@prisma/client";
+import { Zap } from "lucide-react";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import { tw } from "~/utils/tw";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -26,6 +28,32 @@ type CheckoutDialogProps = {
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
+  /**
+   * The form `intent` submitted with the checkout. Defaults to the full-booking
+   * `"checkOut"` flow. The bulk partial-checkout dialog passes
+   * `"partial-checkout"` so that an early checkout of the SELECTED assets routes
+   * through `checkoutAssets` / `partialCheckoutBooking` (which records the batch
+   * and applies the adjusted-date choice) instead of the whole-booking
+   * `checkoutBooking`. The scanner checkout-assets route ignores intent (always
+   * partial), so it can leave the default.
+   */
+  intent?: string;
+  /** Custom label for the trigger button */
+  label?: string;
+  /**
+   * Rendering context. `"dropdown"` styles the trigger as a left-aligned link
+   * row so it sits inside a `DropdownMenuItem` like the check-in flow.
+   */
+  variant?: "default" | "dropdown";
+  /**
+   * Skip the early-checkout "adjust start date" prompt and submit directly.
+   * Pass `true` when the booking has already started (ONGOING/OVERDUE) — e.g.
+   * "Check out remaining" — because adjusting the start date only makes sense
+   * for the first checkout that transitions RESERVED → ONGOING.
+   * `partialCheckoutBooking` ignores the date choice unless the booking is
+   * RESERVED, so prompting here would be a confusing no-op.
+   */
+  suppressEarlyCheckoutPrompt?: boolean;
 };
 
 export default function CheckoutDialog({
@@ -33,20 +61,45 @@ export default function CheckoutDialog({
   booking,
   portalContainer,
   formId,
+  intent = "checkOut",
+  label = "Check Out",
+  variant = "default",
+  suppressEarlyCheckoutPrompt = false,
 }: CheckoutDialogProps) {
-  const isEarlyCheckout = isBookingEarlyCheckout(booking.from);
+  const isEarlyCheckout =
+    !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
+
+  /** Shared trigger styling so the dropdown row matches the check-in dropdown */
+  const isDropdown = variant === "dropdown";
+  const triggerClassName = tw(
+    "whitespace-nowrap",
+    isDropdown
+      ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+      : "grow"
+  );
+  /** Dropdown rows pair the label with an icon; the default trigger is text-only */
+  const triggerContent = isDropdown ? (
+    <span className="flex items-center gap-2">
+      <Zap className="size-4" /> {label}
+    </span>
+  ) : (
+    label
+  );
 
   if (!isEarlyCheckout) {
     return (
       <Button
         disabled={disabled}
-        className="grow"
-        size="sm"
+        className={triggerClassName}
+        size={isDropdown ? undefined : "sm"}
         type="submit"
         name="intent"
-        value="checkOut"
+        value={intent}
+        form={formId}
+        variant={isDropdown ? "link" : "primary"}
+        width={isDropdown ? "full" : undefined}
       >
-        Check Out
+        {triggerContent}
       </Button>
     );
   }
@@ -54,8 +107,15 @@ export default function CheckoutDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button disabled={disabled} className="grow" size="sm" type="button">
-          Check Out
+        <Button
+          disabled={disabled}
+          className={triggerClassName}
+          size={isDropdown ? undefined : "sm"}
+          type="button"
+          variant={isDropdown ? "link" : "primary"}
+          width={isDropdown ? "full" : undefined}
+        >
+          {triggerContent}
         </Button>
       </AlertDialogTrigger>
 
@@ -82,7 +142,7 @@ export default function CheckoutDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value="checkOut" form={formId} />
+          <input type="hidden" name="intent" value={intent} form={formId} />
           <Button
             disabled={disabled}
             className="flex-1"

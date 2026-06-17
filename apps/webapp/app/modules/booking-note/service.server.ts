@@ -1,8 +1,30 @@
-import type { Booking, BookingNote, User } from "@prisma/client";
+import type { Booking, BookingNote, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
+
+/**
+ * Minimal Prisma surface the booking-note CREATE helpers need when run inside a
+ * transaction. Covers the booking existence/ownership read used by
+ * `assertBookingInOrganization` and the `bookingNote.create` write. Typed
+ * structurally because the extended transaction client is not directly
+ * assignable to the generated `Prisma.TransactionClient` (same approach as
+ * `RecordEventTxClient` / `OrgValidationTxClient`).
+ */
+export type BookingNoteTxClient = {
+  booking: {
+    findFirst: (args: {
+      where: { id: string; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
+  };
+  bookingNote: {
+    create: (args: {
+      data: Prisma.BookingNoteCreateInput;
+    }) => Promise<BookingNote>;
+  };
+};
 
 /**
  * BOOKING ACTIVITY LOG SERVICE
@@ -47,16 +69,23 @@ const label = "Booking";
  * relational `where` filter on `db.bookingNote.deleteMany` rather than by
  * calling this helper directly — see {@link deleteBookingNote}.
  *
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`.
+ *   Pass it so the ownership check runs in the same transaction as the note
+ *   write it guards.
  * @throws {ShelfError} 404 if the booking does not exist in `organizationId`
  */
-async function assertBookingInOrganization({
-  bookingId,
-  organizationId,
-}: {
-  bookingId: Booking["id"];
-  organizationId: string;
-}): Promise<void> {
-  const booking = await db.booking.findFirst({
+async function assertBookingInOrganization(
+  {
+    bookingId,
+    organizationId,
+  }: {
+    bookingId: Booking["id"];
+    organizationId: string;
+  },
+  tx?: BookingNoteTxClient
+): Promise<void> {
+  const client = tx ?? db;
+  const booking = await client.booking.findFirst({
     where: { id: bookingId, organizationId },
     select: { id: true },
   });
@@ -81,22 +110,30 @@ async function assertBookingInOrganization({
  * @param userId - User ID for manual notes, undefined for system notes
  * @param bookingId - Booking ID to associate the note with
  * @param organizationId - Organization ID the booking MUST belong to. Verified before write.
+ * @param tx - Optional Prisma transaction client. When the caller already runs
+ *   inside a `db.$transaction`, pass it so the ownership check and the note
+ *   write commit atomically with the surrounding mutation. Defaults to `db`.
  * @throws {ShelfError} 404 if the booking is not in `organizationId`
  */
-export async function createBookingNote({
-  content,
-  type,
-  userId,
-  bookingId,
-  organizationId,
-}: Pick<BookingNote, "content"> & {
-  type?: BookingNote["type"];
-  userId?: User["id"];
-  bookingId: Booking["id"];
-  organizationId: string;
-}) {
+export async function createBookingNote(
+  {
+    content,
+    type,
+    userId,
+    bookingId,
+    organizationId,
+  }: Pick<BookingNote, "content"> & {
+    type?: BookingNote["type"];
+    userId?: User["id"];
+    bookingId: Booking["id"];
+    organizationId: string;
+  },
+  tx?: BookingNoteTxClient
+) {
   try {
-    await assertBookingInOrganization({ bookingId, organizationId });
+    const client = tx ?? db;
+
+    await assertBookingInOrganization({ bookingId, organizationId }, tx);
 
     const data = {
       content,
@@ -115,7 +152,7 @@ export async function createBookingNote({
       }),
     };
 
-    return await db.bookingNote.create({
+    return await client.bookingNote.create({
       data,
     });
   } catch (cause) {
@@ -142,21 +179,30 @@ export async function createBookingNote({
  * @param content - Activity description with markdown formatting
  * @param bookingId - Booking ID to log activity for
  * @param organizationId - Organization ID the booking MUST belong to
+ * @param tx - Optional Prisma transaction client, forwarded to
+ *   {@link createBookingNote} so the note commits atomically with the caller's
+ *   surrounding mutation. Defaults to `db`.
  */
-export function createSystemBookingNote({
-  content,
-  bookingId,
-  organizationId,
-}: Pick<BookingNote, "content"> & {
-  bookingId: Booking["id"];
-  organizationId: string;
-}) {
-  return createBookingNote({
+export function createSystemBookingNote(
+  {
     content,
-    type: "UPDATE",
     bookingId,
     organizationId,
-  });
+  }: Pick<BookingNote, "content"> & {
+    bookingId: Booking["id"];
+    organizationId: string;
+  },
+  tx?: BookingNoteTxClient
+) {
+  return createBookingNote(
+    {
+      content,
+      type: "UPDATE",
+      bookingId,
+      organizationId,
+    },
+    tx
+  );
 }
 
 /**
