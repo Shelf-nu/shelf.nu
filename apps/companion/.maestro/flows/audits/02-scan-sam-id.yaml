@@ -8,8 +8,9 @@
 # EXPECTED asset in the PENDING audit "QA select-all Simulation Suites"
 # (GRANULAR WORKSPACE). The scan persists, so the run resets it afterward.
 #
-# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_SAM_ID
-#      SHELF_TEST_SAM_TITLE (regex fragment) / SHELF_TEST_AUDIT_NAME
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_AUDIT_NAME
+#      SHELF_TEST_SAM_ID (provide LOWERCASE, e.g. "sam-0001", to exercise the
+#      resolver's trim+uppercase normalization) / SHELF_TEST_SAM_TITLE (regex)
 appId: com.shelf.companion.carlos
 ---
 - runFlow: ../../shared/login.yaml
@@ -17,8 +18,9 @@ appId: com.shelf.companion.carlos
 # ── Switch to the QA workspace ──
 - tapOn: "Settings"
 - assertVisible: "WORKSPACE"
-- tapOn:
-    point: 50%, 32%
+# Open the workspace picker via the switcher's stable a11y label
+# ("Current workspace: …", settings.tsx) — not a brittle screen coordinate.
+- tapOn: ".*Current workspace.*"
 - tapOn: "GRANULAR WORKSPACE"
 - waitForAnimationToEnd
 
@@ -43,7 +45,11 @@ appId: com.shelf.companion.carlos
       id: "dev-scan-toggle"
     timeout: 15000
 
-# ── Scan the SAM id (lowercase → proves normalization) ──
+# ── Scan the SAM id → proves the resolver normalizes case ──
+# SHELF_TEST_SAM_ID must be LOWERCASE (see the env note above): the resolver
+# trims + uppercases before matching Asset.sequentialId, so a lowercase value
+# resolving the expected asset is what proves normalization. Maestro can't
+# case-fold the value itself, so this lowercase precondition is by convention.
 - tapOn:
     id: "dev-scan-toggle"
 - tapOn:

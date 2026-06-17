@@ -22,8 +22,9 @@ appId: com.shelf.companion.carlos
 # ── Switch to the QA workspace ──
 - tapOn: "Settings"
 - assertVisible: "WORKSPACE"
-- tapOn:
-    point: 50%, 32%
+# Open the workspace picker via the switcher's stable a11y label
+# ("Current workspace: …", settings.tsx) — not a brittle screen coordinate.
+- tapOn: ".*Current workspace.*"
 - tapOn: "GRANULAR WORKSPACE"
 - waitForAnimationToEnd
 

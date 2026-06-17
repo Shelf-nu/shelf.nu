@@ -1,3 +1,14 @@
+/**
+ * Mobile API route — kit detail.
+ *
+ * Serves full kit detail to the companion app's kit screen (status, custody,
+ * description, image, and the contained assets). Org-scoped and gated by the
+ * mobile bearer auth + `kit:read` permission, mirroring the web kit-detail
+ * loader. Failures are caught and returned as `{ error }` responses, not
+ * thrown.
+ *
+ * @see {@link file://./assets.$assetId.ts} the asset twin of this route
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -20,6 +31,13 @@ import {
  * custody, description, image, and the contained assets (each tappable
  * through to the asset detail screen).
  *
+ * @param args - React Router loader args.
+ * @param args.request - Incoming request; carries the mobile bearer auth and
+ *   the `?orgId=` that scopes the lookup.
+ * @param args.params - Route params; `kitId` identifies the kit.
+ * @returns A JSON response: the org-scoped kit detail on success, or an
+ *   `{ error }` payload with the appropriate status on failure (401/403 for
+ *   auth or `kit:read` failures, 404 for a foreign-org or missing kit id).
  * @see {@link file://./assets.$assetId.ts} the asset twin of this route
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {

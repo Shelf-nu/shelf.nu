@@ -29,7 +29,15 @@ type Props = {
 
 /**
  * Warning card listing why the batch cannot be submitted yet, with one-tap
- * fixes. Returns null when there are no blockers.
+ * fixes for each blocker group.
+ *
+ * @param props - Component props.
+ * @param props.blockers - Blocker groups from `computeBlockers`; the card
+ *   renders nothing when this is empty.
+ * @param props.onResolve - Removes one group's items from the scan list.
+ * @param props.onResolveAll - Removes every blocked item at once (shown with
+ *   2+ groups).
+ * @returns The blocker warning card, or `null` when there are no blockers.
  */
 export function BatchBlockers({ blockers, onResolve, onResolveAll }: Props) {
   const styles = useStyles();
