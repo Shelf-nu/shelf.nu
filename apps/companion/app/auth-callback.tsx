@@ -62,9 +62,18 @@ export default function AuthCallback() {
     return <Redirect href={startRoute as any} />;
   }
 
-  // Exchange failed or the user abandoned the flow → back to login.
+  // Session never landed (exchange stalled, or the user abandoned the flow) → back
+  // to login. Carry a message so the bounce isn't silent — the common Android
+  // failure is surfaced faster by handleSsoLogin; this is the backstop.
   if (timedOut) {
-    return <Redirect href="/(auth)/login" />;
+    return (
+      <Redirect
+        href={{
+          pathname: "/(auth)/login",
+          params: { error: "Sign-in timed out. Please try again." },
+        }}
+      />
+    );
   }
 
   return (

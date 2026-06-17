@@ -12,6 +12,7 @@ import {
   ScrollView,
   Linking,
 } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -33,6 +34,17 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
+  const router = useRouter();
+  const params = useLocalSearchParams<{ error?: string }>();
+
+  // Surface a sign-in error passed via navigation — e.g. an SSO exchange failure
+  // that resolved while the auth-callback route was covering this screen on Android
+  // (see handleSsoLogin), or the auth-callback timeout backstop.
+  useEffect(() => {
+    if (params.error) {
+      setError(String(params.error));
+    }
+  }, [params.error]);
 
   // ── iOS credential autofill detection ──────────────────────────────
   // Face ID autofill sets each field exactly once (count=1).
@@ -86,7 +98,20 @@ export default function LoginScreen() {
     const { error: ssoError } = await signInViaWeb();
     setIsSsoSubmitting(false);
     if (ssoError) {
-      setError(ssoError);
+      // On Android the auth-callback route is mounted on top of this screen while
+      // the exchange runs, so a plain setError would be hidden — the user would sit
+      // on the "Signing you in…" spinner until the 20s timeout bounced them to a
+      // fresh, error-less login. Replace that route with login carrying the error so
+      // the failure shows immediately. On iOS the exchange resolves in-frame (no
+      // auth-callback on the stack), so just set the error on the visible screen.
+      if (Platform.OS === "android") {
+        router.replace({
+          pathname: "/(auth)/login",
+          params: { error: ssoError },
+        });
+      } else {
+        setError(ssoError);
+      }
     }
   };
 
