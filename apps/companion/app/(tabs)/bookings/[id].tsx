@@ -28,6 +28,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { BookingDetailSkeleton } from "@/components/skeleton-loader";
 import { announce } from "@/lib/a11y";
+import { maybeAskForReview } from "@/lib/review-prompt";
 
 const bookingAssetKeyExtractor = (item: BookingAsset) => item.id;
 
@@ -154,7 +155,15 @@ export default function BookingDetailScreen() {
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert("Complete", `"${booking.name}" is now complete.`, [
-              { text: "OK", onPress: () => fetchBooking() },
+              {
+                text: "OK",
+                onPress: () => {
+                  fetchBooking();
+                  // Fully checking a booking back in is a natural success
+                  // moment — ask for a review (throttled, OS-gated).
+                  void maybeAskForReview();
+                },
+              },
             ]);
           },
         },
