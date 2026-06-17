@@ -651,8 +651,11 @@ model Location {
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, parentId])
-  // Trigram index for substring search from the asset-list search bar
+  // Trigram indexes for substring (ILIKE '%term%') search from the locations
+  // index search bar, which matches name + description + address.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_description_trgm_idx")
+  @@index([address(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_address_trgm_idx")
 }
 
 // Master data for roles
