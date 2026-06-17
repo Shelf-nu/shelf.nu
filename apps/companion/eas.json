@@ -30,6 +30,9 @@
         "appleId": "cv@shelf.nu",
         "ascAppId": "6765639874",
         "appleTeamId": "27Q4MHFB8K"
+      },
+      "android": {
+        "track": "production"
       }
     }
   }
