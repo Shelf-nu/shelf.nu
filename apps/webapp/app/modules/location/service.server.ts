@@ -564,13 +564,22 @@ export async function getLocations(params: {
       : "createdAt";
 
     /**
+     * orderDirection is also user-supplied via the URL (typed at the boundary
+     * but not validated by getParamsValues). Normalize to a safe Prisma sort
+     * order so a malformed value (e.g. "sideways") can't reach Prisma and 500
+     * the index. Anything other than "asc" falls back to "desc".
+     */
+    const safeOrderDirection: Prisma.SortOrder =
+      orderDirection === "asc" ? "asc" : "desc";
+
+    /**
      * "Number of assets" sorts on a relation count, which requires the
      * _count shape rather than a scalar field.
      */
     const orderByClause: Prisma.LocationOrderByWithRelationInput =
       safeOrderBy === "assets"
-        ? { assets: { _count: orderDirection } }
-        : { [safeOrderBy]: orderDirection };
+        ? { assets: { _count: safeOrderDirection } }
+        : { [safeOrderBy]: safeOrderDirection };
 
     const [locations, totalLocations] = await Promise.all([
       /** Get the items */

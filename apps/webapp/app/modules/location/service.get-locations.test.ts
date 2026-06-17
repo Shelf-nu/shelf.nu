@@ -80,6 +80,19 @@ describe("getLocations", () => {
     );
   });
 
+  it("normalizes an invalid orderDirection to desc", async () => {
+    await getLocations({
+      organizationId,
+      orderBy: "name",
+      // @ts-expect-error - simulating a malformed URL-supplied direction
+      orderDirection: "sideways",
+    });
+
+    expect(findManyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { name: "desc" } })
+    );
+  });
+
   it("searches across name, description, and address (case-insensitive)", async () => {
     await getLocations({ organizationId, search: "warehouse" });
 
