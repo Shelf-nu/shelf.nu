@@ -245,7 +245,11 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toMatchObject({
       id: "SAM-Q1",
-      message: expect.stringContaining("assetModel"),
+      // Warning now comes from the diff layer (single source of truth);
+      // the message is prefixed with the display label "Asset model: "
+      // not the camelCase internal key. See `compareCoreField` case
+      // "assetModel" in `import-update-diff.ts`.
+      message: expect.stringMatching(/asset model/i),
     });
     // The model name was NOT pushed to the batch resolver — no findMany +
     // no create on assetModel.
@@ -361,10 +365,7 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     //  1. SAM-Q1 (QUANTITY_TRACKED) — quantity changes, succeeds → updated
     //  2. SAM-Q2 (QUANTITY_TRACKED) — Name + assetModel cell. Name applies
     //     (lands in `updated`); the assetModel cell is warn + dropped per
-    //     decision #3. Note: a row needs ≥1 other updatable cell to reach
-    //     the apply loop's warning channel — a row with ONLY an
-    //     assetModel cell on a QUANTITY_TRACKED asset is no-op'd in the
-    //     diff layer and never reaches the warning path.
+    //     decision #3 and surfaces in `result.warnings`.
     //  3. SAM-Q3 (QUANTITY_TRACKED) — invalid quantity → fails
     vi.mocked(db.asset.findMany).mockResolvedValueOnce([
       makeDbAsset({
@@ -410,12 +411,61 @@ describe("applyBulkUpdatesFromImport — qty-tracked + AssetModel", () => {
     // SAM-Q1 should be in updated.
     expect(result.updated.find((u) => u.id === "SAM-Q1")).toBeDefined();
     // SAM-Q2 should have produced a warning (assetModel on QUANTITY_TRACKED).
+    // Warning message now uses the display label "Asset model" — see
+    // diff-layer source-of-truth note above.
     expect(
       result.warnings.find(
-        (w) => w.id === "SAM-Q2" && /assetModel/.test(w.message)
+        (w) => w.id === "SAM-Q2" && /asset model/i.test(w.message)
       )
     ).toBeDefined();
     // SAM-Q3 should be in failed.
     expect(result.failed.find((f) => f.id === "SAM-Q3")).toBeDefined();
+  });
+
+  it("surfaces a warning when an update row carries ONLY an assetModel cell on a QUANTITY_TRACKED asset (single-cell edge)", async () => {
+    // Regression guard for the 2026-06-17 fix. Before this, a row with
+    // no other updatable cells AND an assetModel value on a qty-tracked
+    // asset landed in `skipped` with the generic "No changes detected"
+    // reason — hiding from the user that their intent didn't take
+    // effect. The diff layer now emits a warning-marked FieldChange so
+    // the row reaches the apply loop and the warning flows into
+    // `result.warnings`. No write happens against `updateAsset` (the
+    // field's `.warning` short-circuits it) and the assetModel resolver
+    // is never invoked.
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({
+        id: "uuid-q-only",
+        sequentialId: "SAM-QONLY",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 10,
+        consumptionType: ConsumptionType.ONE_WAY,
+        title: "Q-only",
+      }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const csvData = [
+      ["Asset ID", "Asset model"],
+      ["SAM-QONLY", "Dell Latitude"],
+    ];
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData,
+      organizationId,
+      userId,
+      request,
+    });
+
+    // Exactly one warning, pointing at the right row + naming the cell.
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({
+      id: "SAM-QONLY",
+      message: expect.stringMatching(/asset model/i),
+    });
+    // No write attempted.
+    expect(updateAsset).not.toHaveBeenCalled();
+    expect(db.assetModel.findMany).not.toHaveBeenCalled();
+    expect(db.assetModel.create).not.toHaveBeenCalled();
+    // Row goes into the all-warnings-skipped branch, NOT updated.
+    expect(result.summary.updated).toBe(0);
   });
 });

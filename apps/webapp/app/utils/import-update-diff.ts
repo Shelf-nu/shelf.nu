@@ -449,11 +449,25 @@ export function compareCoreField(
     }
 
     case "assetModel": {
-      // Silently no-op on QUANTITY_TRACKED rows — the apply path warns
-      // and drops the cell. Suppressing the diff here keeps the
-      // preview honest (otherwise we'd advertise a change we won't
-      // actually apply).
-      if (asset.type !== "INDIVIDUAL") return null;
+      // QUANTITY_TRACKED rows: emit a warning-marked FieldChange instead
+      // of swallowing the cell silently. The apply layer skips fields
+      // with `.warning` set (mirrors invalid-quantity / invalid-enum
+      // behaviour) AND the apply layer's per-row post-pass forwards the
+      // text into `result.warnings`, so the user sees the dropped cell
+      // in both the per-row summary AND the top-level "Warnings" pill.
+      // Previously this returned `null`, which meant a row carrying
+      // ONLY an assetModel cell on a QUANTITY_TRACKED asset landed in
+      // `skippedAssets` with the generic "No changes detected" reason —
+      // hiding from the user that their intent didn't take effect.
+      if (asset.type !== "INDIVIDUAL") {
+        return {
+          field: displayName,
+          currentValue: "(quantity-tracked)",
+          newValue: csvValue,
+          warning:
+            "Asset model can only be set on INDIVIDUAL assets — this asset is quantity-tracked, so the cell was ignored.",
+        };
+      }
       // Preview can't pre-resolve the model name → id; surface the cell
       // value vs current model id so the user sees a change is queued.
       // The apply path does the real resolution.

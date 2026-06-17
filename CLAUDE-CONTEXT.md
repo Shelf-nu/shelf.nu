@@ -2020,16 +2020,28 @@ measure"`, `"Consumption type"` added as direct aliases (the
   the 5 new updatable fields. Silent no-op on wrong-type rows mirrors
   the apply layer's behavior.
 
-**Known sharp edge documented in Wave 2 findings:**
+**Single-cell `assetModel`-on-qty-tracked edge — CLOSED 2026-06-17.**
 
-- If a customer's update CSV row has ONLY an `assetModel` cell AND no
-  other updatable cells AND the existing asset is QUANTITY_TRACKED, the
-  row lands in `skipped` with "No changes detected" instead of
-  surfacing a warning. The warning only fires when at least one other
-  cell on the row produces a real diff so the row reaches the apply
-  loop. Common case (full export re-import with many cells) works
-  correctly; this edge case is rare. Worth documenting; not a release
-  blocker.
+Wave 2 surfaced an edge: a row carrying ONLY an `assetModel` cell on a
+QUANTITY_TRACKED asset landed in `skipped` with "No changes detected"
+instead of surfacing a warning, because the diff layer silently
+returned `null` and the row never reached the apply loop's warning
+channel. Closed in a follow-up:
+
+- `compareCoreField` for `"assetModel"` on QUANTITY_TRACKED now returns
+  a **warning-marked `FieldChange`** (was `null`). The row enters
+  `assetsToUpdate`, the apply loop's per-change handler skips the field
+  (because `.warning` is set, mirroring invalid-quantity / invalid-enum
+  behaviour) AND forwards the message into `result.warnings` so the
+  user sees it in the yellow "Warnings" pill.
+- Pre-pass warning emission in `parseQtyTrackedUpdateRow` was removed
+  so the diff layer is the single source of truth — the row's warning
+  surfaces exactly once.
+- New regression test in `import-update.server.test.ts` covers the
+  single-cell case; the existing diff test was updated to expect a
+  warning-marked diff instead of `null`; the existing apply-server
+  tests were retargeted at the new "Asset model: …" display-label
+  prefix.
 
 #### Phase 4e — Quantity-aware notes + activity-feed audit (original scope)
 

@@ -504,8 +504,19 @@ export async function applyBulkUpdatesFromImport({
       const otherChanges: FieldChange[] = [];
 
       for (const change of changes) {
-        // Skip fields with validation warnings (e.g. bad date format)
-        if (change.warning) continue;
+        // Skip fields with validation warnings (e.g. bad date format,
+        // assetModel-on-qty-tracked, invalid enum) AND forward the
+        // warning text into `result.warnings` so the user sees the
+        // field-level reason in the yellow "Warnings" pill — not just
+        // the row-level "N fields had invalid values" summary.
+        if (change.warning) {
+          warnings.push({
+            id: matchId,
+            rowNumber,
+            message: `${change.field}: ${change.warning}`,
+          });
+          continue;
+        }
 
         // Match by field display name
         const col = headerAnalysis.updatableColumns.find(

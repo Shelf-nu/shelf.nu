@@ -456,21 +456,19 @@ export function parseQtyTrackedUpdateRow(
   // ── assetModel cell handling ────────────────────────────────────────
   // INDIVIDUAL: forward the trimmed name to the caller for batch
   //   resolution.
-  // QUANTITY_TRACKED: warn + drop (per decision #3). The row's other
-  //   updatable cells still flow through.
+  // QUANTITY_TRACKED: drop (per decision #3) — the user-facing warning
+  //   is surfaced by the diff layer's warning-marked FieldChange (see
+  //   `compareCoreField` case "assetModel" in `import-update-diff.ts`),
+  //   which the apply layer forwards into `result.warnings`. Emitting
+  //   a warning here too would duplicate the entry in the UI's yellow
+  //   pill — the diff layer is the single source of truth so the same
+  //   row never shows the same warning twice.
   const rawModel =
     typeof cells.assetModel === "string" ? cells.assetModel.trim() : "";
 
   let assetModelLookupKey: string | undefined;
-  if (rawModel !== "") {
-    if (isQuantityTracked) {
-      warnings.push({
-        rowIndex,
-        message: `assetModel cell ignored on row ${rowIndex}: this asset is QUANTITY_TRACKED and asset models can only be linked to INDIVIDUAL assets.`,
-      });
-    } else {
-      assetModelLookupKey = rawModel;
-    }
+  if (rawModel !== "" && !isQuantityTracked) {
+    assetModelLookupKey = rawModel;
   }
 
   return {

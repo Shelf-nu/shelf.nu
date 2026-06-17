@@ -325,7 +325,13 @@ describe("parseQtyTrackedUpdateRow", () => {
     expect(result.patch.consumptionType).toBeUndefined();
   });
 
-  it("warns + drops assetModel on a QUANTITY_TRACKED existing asset (decision #3)", () => {
+  it("drops assetModel on a QUANTITY_TRACKED existing asset (decision #3); warning is surfaced by the diff layer", () => {
+    // The parser still drops the cell so it never reaches `updateAsset`.
+    // The user-facing warning fires from `compareCoreField` in the diff
+    // layer (see `import-update-diff.ts`'s "assetModel" case) and is
+    // forwarded into `result.warnings` by `applyBulkUpdatesFromImport`'s
+    // per-change loop. Emitting a warning here too would double-surface
+    // the same dropped cell in the UI's yellow pill.
     const result = parseQtyTrackedUpdateRow(
       { assetModel: "Dell Latitude" },
       { type: AssetType.QUANTITY_TRACKED },
@@ -333,11 +339,7 @@ describe("parseQtyTrackedUpdateRow", () => {
     );
 
     expect(result.errors).toEqual([]);
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toMatchObject({
-      rowIndex: 14,
-      message: expect.stringContaining("assetModel"),
-    });
+    expect(result.warnings).toEqual([]);
     expect(result.patch.assetModelLookupKey).toBeUndefined();
   });
 

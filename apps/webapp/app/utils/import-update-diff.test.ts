@@ -606,15 +606,29 @@ describe("compareCoreField", () => {
       expect(result?.newValue).toBe("Dell Latitude");
     });
 
-    it("silently no-ops on QUANTITY_TRACKED assets (warn-path lives in apply)", () => {
+    it("emits a warning-marked diff on QUANTITY_TRACKED assets so the dropped cell surfaces in the warnings pill", () => {
+      // Regression guard for the edge case where a row carrying ONLY
+      // an assetModel cell on a quantity-tracked asset previously landed
+      // in skippedAssets with the generic "No changes detected" reason —
+      // hiding the dropped cell from the user. The diff now emits a
+      // warning-marked FieldChange; the apply layer skips the field
+      // (because `.warning` is set) AND forwards the warning text into
+      // `result.warnings` so the user sees a yellow "Warnings" entry.
       const asset = makeAsset({
         type: "QUANTITY_TRACKED",
         quantity: 10,
         assetModelId: null,
       });
-      expect(
-        compareCoreField("assetModel", "Dell Latitude", asset, "Asset model")
-      ).toBeNull();
+      const result = compareCoreField(
+        "assetModel",
+        "Dell Latitude",
+        asset,
+        "Asset model"
+      );
+      expect(result).not.toBeNull();
+      expect(result?.warning).toMatch(/quantity-tracked/i);
+      expect(result?.warning).toMatch(/INDIVIDUAL/);
+      expect(result?.newValue).toBe("Dell Latitude");
     });
   });
 
