@@ -582,21 +582,37 @@ function ScannerContent() {
               return;
             }
 
-            const eligible = members.filter(
+            // Only assets currently checked out for this booking are eligible
+            // to check in — mirror the single-asset gate (line ~933). A kit
+            // member that was never checked out (e.g. skipped during a
+            // progressive check-out) would otherwise be submitted and
+            // 400-rejected by partialCheckinBooking's progressive-checkout
+            // guard, failing the entire batch including its checked-out peers.
+            const checkedOutMembers = members.filter(
+              (a) => a.status === "CHECKED_OUT"
+            );
+            const eligible = checkedOutMembers.filter(
               (a) =>
                 !bookingCtx.checkedInAssetIds.has(a.id) &&
                 !bookingCheckinItems.some((item) => item.targetId === a.id)
             );
             if (eligible.length === 0) {
+              // Distinguish "none are checked out" from "all already covered".
+              const reason =
+                checkedOutMembers.length === 0
+                  ? {
+                      title: "Not Checked Out",
+                      message: `None of "${kit.name}"'s assets in this booking are checked out.`,
+                    }
+                  : {
+                      title: "Already Covered",
+                      message: `All of "${kit.name}"'s checked-out assets are already checked in or scanned.`,
+                    };
               flashFrame("error");
               Haptics.notificationAsync(
                 Haptics.NotificationFeedbackType.Warning
               );
-              setScanResult({
-                type: "error",
-                title: "Already Covered",
-                message: `All of "${kit.name}"'s assets in this booking are already checked in or scanned.`,
-              });
+              setScanResult({ type: "error", ...reason });
               finalizeScan();
               return;
             }
