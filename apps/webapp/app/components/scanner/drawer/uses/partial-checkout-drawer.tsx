@@ -13,19 +13,22 @@ import {
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
-import CheckinDialog from "~/components/booking/checkin-dialog";
+import CheckoutDialog from "~/components/booking/checkout-dialog";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Progress } from "~/components/shared/progress";
-import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkin-assets";
+import {
+  countRemainingCheckoutAssets,
+  isAssetCheckoutEligible,
+  shouldPromptEarlyCheckout,
+} from "~/modules/booking/helpers";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
-import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -35,8 +38,8 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 
-// Export the schema so it can be reused
-export const partialCheckinAssetsSchema = z.object({
+// Export the schema so it can be reused (e.g. by checkoutAssets in service.server)
+export const partialCheckoutAssetsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
@@ -47,7 +50,7 @@ type BookingHeaderBooking = Pick<
 >;
 
 /**
- * Renders the booking summary strip at the top of the partial check-in drawer.
+ * Renders the booking summary strip at the top of the partial check-out drawer.
  * Hoisted to module scope (instead of being a nested component) to avoid
  * remounting the header on every render of the parent drawer.
  */
@@ -100,10 +103,10 @@ function BookingHeader({ booking }: { booking: BookingHeaderBooking }) {
 }
 
 /**
- * Drawer component for managing scanned assets to be checked in from bookings
+ * Drawer component for managing scanned assets to be checked out from bookings
  */
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export default function PartialCheckinDrawer({
+export default function PartialCheckoutDrawer({
   className,
   style,
   isLoading,
@@ -114,7 +117,7 @@ export default function PartialCheckinDrawer({
   isLoading?: boolean;
   defaultExpanded?: boolean;
 }) {
-  const { booking, partialCheckinProgress, partialCheckinDetails } =
+  const { booking, checkedOutAssetIds, checkedInAssetIds } =
     useLoaderData<typeof loader>();
 
   // Get the scanned items from jotai
@@ -136,47 +139,54 @@ export default function PartialCheckinDrawer({
   // List of asset IDs for the form - only include assets that are actually in the booking
   const bookingAssetIds = new Set(booking.assets.map((a) => a.id));
 
-  // Get assets that have already been checked in (should be excluded from count)
-  const checkedInAssetIds = new Set(
-    partialCheckinProgress?.checkedInAssetIds || []
-  );
+  // Get assets that have already been checked out (should be excluded from count)
+  const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
 
-  // Only assets that were actually checked out can be checked in. This excludes
-  // still-Booked (not CHECKED_OUT) assets from the submit payload — they are
-  // surfaced to the user via a blocker instead (progressive checkout guard).
-  const assetIdsForCheckin = Array.from(
+  // Assets already returned via partial check-in. They are AVAILABLE again but
+  // DONE for this booking, so they must NOT be offered for checkout nor counted
+  // in the "remaining to check out" denominator. Without this, a returned asset
+  // that was checked out via the all-at-once flow (which leaves no
+  // partial-checkout record) would be re-counted as still-bookable.
+  const alreadyReturned = new Set(checkedInAssetIds || []);
+
+  // Eligible to check out = in this booking AND still checkout-eligible (not
+  // already checked out, not returned via check-in, not in custody). The
+  // eligibility rule itself lives in the shared `isAssetCheckoutEligible` helper
+  // so this filter and the "remaining" denominator below describe the SAME set.
+  // The server rejects in-custody/already-out assets, so including them would
+  // fail the whole batch; the corresponding blockers still surface them.
+  const isCheckoutEligibleAsset = (a: { id: string; status: AssetStatus }) =>
+    bookingAssetIds.has(a.id) &&
+    isAssetCheckoutEligible(a, alreadyCheckedOut, alreadyReturned);
+
+  const assetIdsForCheckout = Array.from(
     new Set([
-      ...assets
-        .filter(
-          (a) =>
-            bookingAssetIds.has(a.id) &&
-            !checkedInAssetIds.has(a.id) &&
-            a.status === AssetStatus.CHECKED_OUT
-        )
-        .map((a) => a.id),
+      ...assets.filter(isCheckoutEligibleAsset).map((a) => a.id),
       ...kits.flatMap((k) =>
-        k.assets
-          .filter(
-            (a) =>
-              bookingAssetIds.has(a.id) &&
-              !checkedInAssetIds.has(a.id) &&
-              a.status === AssetStatus.CHECKED_OUT
-          )
-          .map((a) => a.id)
+        k.assets.filter(isCheckoutEligibleAsset).map((a) => a.id)
       ),
     ])
   );
 
-  // Check if this would be a final check-in (all remaining assets are being checked in)
-  const remainingAssetCount =
-    partialCheckinProgress?.uncheckedCount || booking.assets.length;
-  const isFinalCheckin =
-    assetIdsForCheckin.length === remainingAssetCount &&
-    remainingAssetCount > 0;
+  // Assets in this booking still available to check out (asset-scoped, so it
+  // matches the asset-counted numerator regardless of the kits-as-unit setting).
+  // Uses the same shared eligibility rule as the filter above, so the
+  // denominator equals the set a user can actually scan out: excludes recorded
+  // checkouts, live CHECKED_OUT, already-returned (check-in), and in-custody.
+  const remainingBookedAssets = countRemainingCheckoutAssets(
+    booking.assets,
+    checkedOutAssetIds || [],
+    checkedInAssetIds || []
+  );
 
-  // Check if it's an early check-in (only relevant for final check-ins)
-  const isEarlyCheckin = Boolean(
-    isFinalCheckin && isBookingEarlyCheckin(booking.to)
+  // Early checkout only applies while the booking is still RESERVED, because
+  // only that first scan transitions RESERVED → ONGOING and can adjust the
+  // start date. Once the booking is ONGOING/OVERDUE the start date is fixed and
+  // `partialCheckoutBooking` ignores the date choice, so prompting again on
+  // subsequent scans would be a confusing no-op.
+  const isEarlyCheckout = Boolean(
+    assetIdsForCheckout.length > 0 &&
+      shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
   // Setup blockers
@@ -187,60 +197,46 @@ export default function PartialCheckinDrawer({
     .filter((asset) => !bookingAssetIds.has(asset.id))
     .map((a) => a.id);
 
-  // Assets that are already checked in for this booking
-  const alreadyCheckedInAssets = assets
+  // Assets that are already checked out for this booking (status CHECKED_OUT or
+  // recorded in a prior partial check-out for this booking).
+  const alreadyCheckedOutAssets = assets
     .filter(
       (asset) =>
         bookingAssetIds.has(asset.id) &&
-        isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+        (asset.status === AssetStatus.CHECKED_OUT ||
+          alreadyCheckedOut.has(asset.id))
     )
     .map((a) => a.id);
 
-  const qrIdsOfAlreadyCheckedInAssets = Object.entries(items)
+  const qrIdsOfAlreadyCheckedOutAssets = Object.entries(items)
     .filter(([, item]) => {
       if (!item || item.type !== "asset") return false;
-      return alreadyCheckedInAssets.includes((item?.data as any)?.id);
+      return alreadyCheckedOutAssets.includes((item?.data as any)?.id);
     })
     .map(([qrId]) => qrId);
 
-  // Progressive checkout guard: an asset can only be checked IN if it was first
-  // checked OUT. A still-Booked (not CHECKED_OUT) asset that is part of this
-  // booking was never scanned out, so it cannot be checked in. We only flag
-  // assets that ARE in the booking (the not-in-booking blocker handles the rest)
-  // and are NOT already checked in (that has its own blocker).
-  // Consider BOTH standalone scans and kit-member assets — scanning a kit QR
-  // queues its assets, so a kit whose in-booking assets were never checked out
-  // must surface a blocker too (otherwise submit is silently disabled).
-  const scannedBookingAssets = [
-    ...assets,
-    ...kits.flatMap((kit) => kit.assets),
-  ].filter(
-    (asset) =>
-      bookingAssetIds.has(asset.id) &&
-      asset.status !== AssetStatus.CHECKED_OUT &&
-      !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
-  );
-  const neverCheckedOutAssetIds = [
-    ...new Set(scannedBookingAssets.map((a) => a.id)),
-  ];
-  const neverCheckedOutAssetIdSet = new Set(neverCheckedOutAssetIds);
+  // Assets currently held in custody — custody must be released before they can
+  // be checked out.
+  const assetsInCustody = assets
+    .filter(
+      (asset) =>
+        bookingAssetIds.has(asset.id) && asset.status === AssetStatus.IN_CUSTODY
+    )
+    .map((a) => a.id);
 
-  const qrIdsOfNeverCheckedOutAssets = Object.entries(items)
+  const qrIdsOfAssetsInCustody = Object.entries(items)
     .filter(([, item]) => {
-      if (!item) return false;
-      if (item.type === "asset") {
-        return neverCheckedOutAssetIdSet.has((item?.data as any)?.id);
-      }
-      if (item.type === "kit") {
-        return (item?.data as any)?.assets?.some((a: { id: string }) =>
-          neverCheckedOutAssetIdSet.has(a.id)
-        );
-      }
-      return false;
+      if (!item || item.type !== "asset") return false;
+      return assetsInCustody.includes((item?.data as any)?.id);
     })
     .map(([qrId]) => qrId);
 
-  // Note: In partial check-in context, we allow individual kit assets to be checked in
+  // why: conflict validation (asset checked out under a different booking) is
+  // enforced server-side in partialCheckoutBooking, which throws a friendly
+  // error. The scanned-asset payload (AssetFromQr) doesn't carry conflicting
+  // bookings, so we deliberately don't build a client-side conflict blocker.
+
+  // Note: In partial check-out context, we allow individual kit assets to be checked out
   // so we don't create blockers for assets that are part of kits
 
   // Kit blockers - kits not in this booking
@@ -255,35 +251,33 @@ export default function PartialCheckinDrawer({
     })
     .map(([qrId]) => qrId);
 
-  // Kits that are already checked in for this booking (ALL kit assets in booking are checked in)
-  const alreadyCheckedInKits = kits
+  // Kits that are already checked out for this booking (ALL kit assets in booking are checked out)
+  const alreadyCheckedOutKits = kits
     .filter((kit) => {
       // Get kit assets that are in this booking
       const kitAssetsInBooking = kit.assets.filter((asset) =>
         bookingAssetIds.has(asset.id)
       );
 
-      // Kit is considered already checked in only if ALL its assets in booking are checked in
+      // Kit is considered already checked out only if ALL its assets in booking are checked out
       return (
         kitAssetsInBooking.length > 0 &&
-        kitAssetsInBooking.every((asset) =>
-          isAssetPartiallyCheckedIn(
-            asset,
-            partialCheckinDetails,
-            booking.status
-          )
+        kitAssetsInBooking.every(
+          (asset) =>
+            asset.status === AssetStatus.CHECKED_OUT ||
+            alreadyCheckedOut.has(asset.id)
         )
       );
     })
     .map((kit) => kit.id);
 
-  const qrIdsOfAlreadyCheckedInKits = Object.entries(items)
+  const qrIdsOfAlreadyCheckedOutKits = Object.entries(items)
     .filter(([_qrId, item]) => {
       if (!item || item.type !== "kit") return false;
       const kitId = (item?.data as any)?.id;
-      const isAlreadyCheckedIn = alreadyCheckedInKits.includes(kitId);
+      const isAlreadyCheckedOut = alreadyCheckedOutKits.includes(kitId);
 
-      return isAlreadyCheckedIn;
+      return isAlreadyCheckedOut;
     })
     .map(([qrId]) => qrId);
 
@@ -326,43 +320,40 @@ export default function PartialCheckinDrawer({
       onResolve: () => removeAssetsFromList(assetsNotInBookingIds),
     },
     {
-      condition: alreadyCheckedInAssets.length > 0,
-      count: alreadyCheckedInAssets.length,
+      condition: alreadyCheckedOutAssets.length > 0,
+      count: alreadyCheckedOutAssets.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong>{" "}
-          already been checked in for this booking.
+          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> already
+          checked out for this booking.
         </>
       ),
-      description: "These assets cannot be checked in again",
-      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedInAssets),
+      description: "These assets cannot be checked out again",
+      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedOutAssets),
     },
     {
-      condition: neverCheckedOutAssetIds.length > 0,
-      count: neverCheckedOutAssetIds.length,
+      condition: assetsInCustody.length > 0,
+      count: assetsInCustody.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} asset${
-            count > 1 ? "s haven't" : " hasn't"
-          }`}</strong>{" "}
-          been checked out yet and can't be checked in.
+          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> currently
+          in custody — release custody first.
         </>
       ),
-      description:
-        "Only assets that were checked out can be checked back in. Check these out first.",
-      onResolve: () => removeItemsFromList(qrIdsOfNeverCheckedOutAssets),
+      description: "Release custody before checking these assets out",
+      onResolve: () => removeItemsFromList(qrIdsOfAssetsInCustody),
     },
     {
-      condition: alreadyCheckedInKits.length > 0,
-      count: alreadyCheckedInKits.length,
+      condition: alreadyCheckedOutKits.length > 0,
+      count: alreadyCheckedOutKits.length,
       message: (count: number) => (
         <>
           <strong>{`${count} kit${count > 1 ? "s have" : " has"}`}</strong>{" "}
-          already been checked in for this booking.
+          already been checked out for this booking.
         </>
       ),
-      description: "All assets from these kits have already been checked in",
-      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedInKits),
+      description: "All assets from these kits have already been checked out",
+      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedOutKits),
     },
     {
       condition: redundantAssetIds.length > 0,
@@ -408,9 +399,9 @@ export default function PartialCheckinDrawer({
         ...errors.map(([qrId]) => qrId),
         ...qrIdsOfKitsNotInBooking,
         ...qrIdsOfRedundantAssets,
-        ...qrIdsOfAlreadyCheckedInAssets,
-        ...qrIdsOfNeverCheckedOutAssets,
-        ...qrIdsOfAlreadyCheckedInKits,
+        ...qrIdsOfAlreadyCheckedOutAssets,
+        ...qrIdsOfAssetsInCustody,
+        ...qrIdsOfAlreadyCheckedOutKits,
       ]);
     },
   });
@@ -438,13 +429,13 @@ export default function PartialCheckinDrawer({
 
   return (
     <ConfigurableDrawer
-      schema={partialCheckinAssetsSchema}
+      schema={partialCheckoutAssetsSchema}
       items={items}
       onClearItems={clearList}
       form={
         <CustomForm
-          assetIdsForCheckin={assetIdsForCheckin}
-          isEarlyCheckin={isEarlyCheckin}
+          assetIdsForCheckout={assetIdsForCheckout}
+          isEarlyCheckout={isEarlyCheckout}
           booking={booking}
           isLoading={isLoading}
           hasBlockers={hasBlockers}
@@ -453,9 +444,7 @@ export default function PartialCheckinDrawer({
       title={
         <div className="text-right">
           <span className="flex items-center justify-end gap-1 text-gray-600">
-            {assetIdsForCheckin.length}/
-            {partialCheckinProgress?.uncheckedCount || booking.assets.length}{" "}
-            Assets scanned
+            {assetIdsForCheckout.length}/{remainingBookedAssets} Assets scanned
             <InfoTooltip
               iconClassName="size-4"
               content={<p>All assets inside kits are counted individually</p>}
@@ -464,10 +453,9 @@ export default function PartialCheckinDrawer({
           <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
             <Progress
               value={
-                (assetIdsForCheckin.length /
-                  (partialCheckinProgress?.uncheckedCount ||
-                    booking.assets.length)) *
-                100
+                remainingBookedAssets > 0
+                  ? (assetIdsForCheckout.length / remainingBookedAssets) * 100
+                  : 0
               }
             />
           </span>
@@ -489,18 +477,20 @@ export default function PartialCheckinDrawer({
 
 // Asset row renderer
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
-  const { booking, partialCheckinDetails } = useLoaderData<typeof loader>();
+  const { booking, checkedOutAssetIds } = useLoaderData<typeof loader>();
   const items = useAtomValue(scannedItemsAtom);
+
+  const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
 
   // Check if asset is in this booking
   const isInBooking = booking.assets.some((a) => a.id === asset.id);
 
-  // Check if asset is already checked in within this booking using centralized helper
-  const isAlreadyCheckedIn = isAssetPartiallyCheckedIn(
-    asset,
-    partialCheckinDetails,
-    booking.status
-  );
+  // Check if asset is already checked out within this booking
+  const isAlreadyCheckedOut =
+    asset.status === AssetStatus.CHECKED_OUT || alreadyCheckedOut.has(asset.id);
+
+  // Check if asset is currently in custody (must be released before check-out)
+  const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
 
   // Check if this asset is redundant (kit is also scanned)
   const isRedundant =
@@ -524,7 +514,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       );
     })();
 
-  // Use custom configurations for partial check-in context
+  // Use custom configurations for partial check-out context
   const availabilityConfigs = [
     // Custom preset for redundant assets (highest priority - blocking issue)
     {
@@ -535,14 +525,24 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         "This asset is already covered by the scanned kit QR code. Remove this individual asset scan.",
       priority: 90, // Highest priority - blocking issue
     },
-    // Custom preset for already checked in assets
+    // Custom preset for already checked out assets — in check-out context this
+    // IS the relevant/blocking state, so we surface it.
     {
-      condition: isAlreadyCheckedIn && isInBooking,
-      badgeText: "Already checked in",
-      tooltipTitle: "Asset already checked in",
+      condition: isAlreadyCheckedOut && isInBooking,
+      badgeText: "Already checked out",
+      tooltipTitle: "Asset already checked out",
       tooltipContent:
-        "This asset has already been checked in for this booking and cannot be checked in again.",
+        "This asset has already been checked out for this booking and cannot be checked out again.",
       priority: 85, // High priority - blocking issue
+    },
+    // Custom preset for assets in custody
+    {
+      condition: isInCustody && isInBooking,
+      badgeText: "In custody",
+      tooltipTitle: "Asset in custody",
+      tooltipContent:
+        "This asset is currently in custody. Release the custody before checking it out.",
+      priority: 84, // High priority - blocking issue
     },
     // Custom preset for "not in this booking"
     {
@@ -550,7 +550,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       badgeText: "Not in this booking",
       tooltipTitle: "Asset not part of booking",
       tooltipContent:
-        "This asset is not part of the current booking and cannot be checked in.",
+        "This asset is not part of the current booking and cannot be checked out.",
       priority: 80,
       // Uses default warning colors (appropriate for blocking issue)
     },
@@ -560,8 +560,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       badgeText: "Part of kit",
       tooltipTitle: "Asset is part of a kit",
       tooltipContent: isLastKitAssetInBooking
-        ? "This is the last asset from this kit in the booking. Checking it in will also mark the entire kit as available."
-        : "This asset belongs to a kit. Checking in this asset individually will not affect the kit status or other kit assets.",
+        ? "This is the last asset from this kit in the booking. Checking it out will also mark the entire kit as checked out."
+        : "This asset belongs to a kit. Checking out this asset individually will not affect the kit status or other kit assets.",
       priority: 60, // Lower priority than blocking issues
       className: "bg-blue-50 border-blue-200 text-blue-700", // Informational blue
     },
@@ -594,8 +594,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 }
 
 export function KitRow({ kit }: { kit: KitFromQr }) {
-  const { booking, partialCheckinProgress, partialCheckinDetails } =
-    useLoaderData<typeof loader>();
+  const { booking, checkedOutAssetIds } = useLoaderData<typeof loader>();
   const items = useAtomValue(scannedItemsAtom);
 
   // Check how many assets from this kit are in the booking
@@ -606,47 +605,44 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   const allKitAssetsInBooking = kitAssetsInBooking.length === kit.assets.length;
   const noKitAssetsInBooking = kitAssetsInBooking.length === 0;
 
-  // Calculate remaining assets that are still CHECKED_OUT
-  const checkedInAssetIds = new Set(
-    partialCheckinProgress?.checkedInAssetIds || []
-  );
+  // Assets already checked out for this booking
+  const alreadyCheckedOut = new Set(checkedOutAssetIds || []);
+
+  const isAssetCheckedOut = (asset: { id: string; status: AssetStatus }) =>
+    asset.status === AssetStatus.CHECKED_OUT || alreadyCheckedOut.has(asset.id);
 
   // Check if this kit is currently scanned
   const isKitScanned = Object.values(items).some(
     (item) => item?.type === "kit" && (item?.data as KitFromQr)?.id === kit.id
   );
 
-  // Calculate remaining assets (not already checked in)
+  // Calculate remaining assets (not already checked out)
   const uncheckedKitAssetsInBooking = kitAssetsInBooking.filter(
-    (asset) => !checkedInAssetIds.has(asset.id)
+    (asset) => !isAssetCheckedOut(asset)
   );
 
   const remainingKitAssetsInBooking = isKitScanned
-    ? [] // If kit is scanned, no assets are remaining (the unchecked ones will be checked in)
+    ? [] // If kit is scanned, no assets are remaining (the unchecked ones will be checked out)
     : uncheckedKitAssetsInBooking;
   const totalKitAssetsInBooking = kitAssetsInBooking.length;
 
-  // Check if all kit assets in booking are already checked in
-  const allKitAssetsInBookingAreCheckedIn =
+  // Check if all kit assets in booking are already checked out
+  const allKitAssetsInBookingAreCheckedOut =
     kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
-    );
+    kitAssetsInBooking.every((asset) => isAssetCheckedOut(asset));
 
   // Use preset configurations to define the availability labels
-  // Note: In check-in context, we don't show "checked out" labels as that's expected
   const availabilityConfigs = [
-    // Custom preset for "already checked in" kits (highest priority - blocking issue)
+    // Custom preset for "already checked out" kits (highest priority - blocking issue)
     {
-      condition: allKitAssetsInBookingAreCheckedIn,
-      badgeText: "Already checked in",
-      tooltipTitle: "Kit already checked in",
+      condition: allKitAssetsInBookingAreCheckedOut,
+      badgeText: "Already checked out",
+      tooltipTitle: "Kit already checked out",
       tooltipContent:
-        "All assets from this kit have already been checked in for this booking and cannot be checked in again.",
+        "All assets from this kit have already been checked out for this booking and cannot be checked out again.",
       priority: 85, // High priority - blocking issue
     },
     kitLabelPresets.inCustody(kit.status === AssetStatus.IN_CUSTODY),
-    // Removed checkedOut label - expected in check-in context
     kitLabelPresets.hasAssetsInCustody(
       kit.assets.some((asset) => asset.status === AssetStatus.IN_CUSTODY)
     ),
@@ -683,7 +679,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
           {isKitScanned ? (
             <>
               ({uncheckedKitAssetsInBooking.length} of {totalKitAssetsInBooking}{" "}
-              assets to be checked in)
+              assets to be checked out)
             </>
           ) : (
             <>
@@ -710,37 +706,37 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
   );
 }
 
-// Custom form component that handles early check-in dialog
+// Custom form component that handles early check-out dialog
 type CustomFormProps = {
-  assetIdsForCheckin: string[];
-  isEarlyCheckin: boolean;
+  assetIdsForCheckout: string[];
+  isEarlyCheckout: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   isLoading?: boolean;
   hasBlockers: boolean;
 };
 
 const CustomForm = ({
-  assetIdsForCheckin,
-  isEarlyCheckin,
+  assetIdsForCheckout,
+  isEarlyCheckout,
   booking,
   isLoading,
   hasBlockers,
 }: CustomFormProps) => {
   /** Use state instead of ref so the component re-renders once the form
    * mounts — this guarantees portalContainer is always the real DOM node
-   * when the user opens the early-checkin dialog. */
+   * when the user opens the early-checkout dialog. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
 
   return (
     <Form
       ref={setFormElement}
-      id="partial-checkin-form"
+      id="partial-checkout-form"
       className="mb-4 flex max-h-full w-full"
       method="post"
     >
       <div className="flex w-full gap-2 p-3">
         {/* Hidden form fields */}
-        {assetIdsForCheckin.map((assetId, index) => (
+        {assetIdsForCheckout.map((assetId, index) => (
           <input
             key={`assetIds-${assetId}`}
             type="hidden"
@@ -754,33 +750,29 @@ const CustomForm = ({
           Cancel
         </Button>
 
-        {/* Submit button - conditional based on early check-in */}
-        {isEarlyCheckin ? (
-          <CheckinDialog
+        {/* Submit button - conditional based on early check-out */}
+        {isEarlyCheckout ? (
+          <CheckoutDialog
             booking={{
               id: booking.id,
               name: booking.name,
-              to: booking.to,
               from: booking.from,
             }}
-            label="Check in assets"
-            variant="default"
             disabled={
-              isLoading || hasBlockers || assetIdsForCheckin.length === 0
+              isLoading || hasBlockers || assetIdsForCheckout.length === 0
             }
             portalContainer={formElement || undefined}
-            formId="partial-checkin-form"
-            specificAssetIds={assetIdsForCheckin}
+            formId="partial-checkout-form"
           />
         ) : (
           <Button
             type="submit"
             disabled={
-              isLoading || hasBlockers || assetIdsForCheckin.length === 0
+              isLoading || hasBlockers || assetIdsForCheckout.length === 0
             }
             className="w-auto"
           >
-            Check in assets
+            Check out assets
           </Button>
         )}
       </div>

@@ -211,6 +211,189 @@ export function calculateUnitCheckinProgress(
   };
 }
 
+/** One asset's minimal shape for lifecycle bucketing. */
+type LifecycleAsset = {
+  id: string;
+  kitId: string | null;
+  status: AssetStatus;
+};
+
+/** Result of {@link calculateBookingLifecycleProgress}. */
+export type BookingLifecycleProgress = {
+  totalUnits: number;
+  bookedCount: number;
+  checkedOutCount: number;
+  returnedCount: number;
+  /** checkedOut + returned — items that have left the Booked bucket. */
+  checkoutProgressCount: number;
+  checkoutProgressPercentage: number;
+  /** returned only. */
+  checkinProgressCount: number;
+  checkinProgressPercentage: number;
+  hasPartialCheckouts: boolean;
+  hasPartialCheckins: boolean;
+  countMode: "assets" | "units";
+};
+
+/**
+ * Compute the three lifecycle buckets (Booked / Checked out / Returned) for a
+ * booking, backing the segmented progress bar on the booking detail page.
+ *
+ * Per-asset bucket (resolution order matters):
+ * - **Checked out**: `status === CHECKED_OUT`.
+ * - **Returned**: `AVAILABLE` and present in `checkedInAssetIds` (was checked
+ *   out, then checked back in).
+ * - **Booked**: everything else (reserved, not yet scanned out).
+ *
+ * In unit mode (`countKitsAsSingleUnit`), each standalone asset is one unit and
+ * each distinct kit is one unit that falls into a bucket ONLY when every one of
+ * its assets shares that bucket; a kit split across buckets counts as Booked.
+ *
+ * For COMPLETE/ARCHIVED bookings, live status is no longer meaningful (all
+ * assets are AVAILABLE), so a unit is "Returned" only if it was actually
+ * checked out (`checkedOutAssetIds`); never-checked-out assets — which only
+ * exist when progressive checkout was used — stay in the Booked bucket.
+ * Percentages reflect that split rather than being forced to 100%.
+ *
+ * @returns bucket counts, checkout/check-in counts + percentages, and flags.
+ */
+export function calculateBookingLifecycleProgress({
+  bookingAssets,
+  checkedInAssetIds,
+  checkedOutAssetIds = [],
+  bookingStatus,
+  countKitsAsSingleUnit = false,
+}: {
+  bookingAssets: LifecycleAsset[];
+  checkedInAssetIds: string[];
+  /**
+   * Asset ids that were ACTUALLY checked out in this booking (have a
+   * PartialBookingCheckout record). Used in the COMPLETE/ARCHIVED branch to
+   * avoid marking never-checked-out assets as "Returned". An EMPTY array means
+   * "no progressive-checkout records" → every asset was checked out (a pure
+   * quick/all-at-once checkout leaves no records).
+   */
+  checkedOutAssetIds?: string[];
+  bookingStatus?: BookingStatus;
+  countKitsAsSingleUnit?: boolean;
+}): BookingLifecycleProgress {
+  const countMode = countKitsAsSingleUnit ? "units" : "assets";
+  const checkedInSet = new Set(checkedInAssetIds);
+  const isFinal =
+    bookingStatus === BookingStatus.COMPLETE ||
+    bookingStatus === BookingStatus.ARCHIVED;
+
+  // An asset "was actually checked out" iff it has a checkout record. When no
+  // records exist at all (empty array), every asset was checked out.
+  const checkedOutSet = new Set(checkedOutAssetIds);
+  const wasCheckedOut = (id: string) =>
+    checkedOutAssetIds.length === 0 || checkedOutSet.has(id);
+
+  // Live-status bucketing for non-final bookings.
+  const bucketOf = (
+    a: LifecycleAsset
+  ): "checkedOut" | "returned" | "booked" => {
+    if (a.status === AssetStatus.CHECKED_OUT) return "checkedOut";
+    if (checkedInSet.has(a.id)) return "returned";
+    return "booked";
+  };
+
+  // Final (COMPLETE/ARCHIVED) bucketing. Live status is AVAILABLE for every
+  // asset at this point, so it carries no signal — instead, an asset is
+  // "Returned" only if it was ever checked out; never-checked-out assets fall
+  // into "Booked". (CHECKED_OUT live status, if somehow present, is treated as
+  // returned defensively since nothing should still be out at COMPLETE.)
+  const finalBucketOf = (
+    a: LifecycleAsset
+  ): "checkedOut" | "returned" | "booked" =>
+    a.status === AssetStatus.CHECKED_OUT || wasCheckedOut(a.id)
+      ? "returned"
+      : "booked";
+
+  const resolveBucket = isFinal ? finalBucketOf : bucketOf;
+
+  let booked = 0;
+  let checkedOut = 0;
+  let returned = 0;
+
+  if (!countKitsAsSingleUnit) {
+    for (const a of bookingAssets) {
+      const b = resolveBucket(a);
+      if (b === "checkedOut") checkedOut += 1;
+      else if (b === "returned") returned += 1;
+      else booked += 1;
+    }
+  } else {
+    for (const a of bookingAssets.filter((x) => x.kitId === null)) {
+      const b = resolveBucket(a);
+      if (b === "checkedOut") checkedOut += 1;
+      else if (b === "returned") returned += 1;
+      else booked += 1;
+    }
+    const kitGroups = new Map<string, LifecycleAsset[]>();
+    for (const a of bookingAssets) {
+      if (a.kitId === null) continue;
+      const g = kitGroups.get(a.kitId);
+      if (g) g.push(a);
+      else kitGroups.set(a.kitId, [a]);
+    }
+    for (const group of kitGroups.values()) {
+      const buckets = new Set(group.map(resolveBucket));
+      if (buckets.size === 1) {
+        const only = [...buckets][0];
+        if (only === "checkedOut") checkedOut += 1;
+        else if (only === "returned") returned += 1;
+        else booked += 1;
+      } else {
+        booked += 1;
+      }
+    }
+  }
+
+  const totalUnits = booked + checkedOut + returned;
+
+  if (isFinal) {
+    // No asset is still CHECKED_OUT at COMPLETE — finalBucketOf only yields
+    // "returned" or "booked", so checkedOut is 0 and progress is derived from
+    // the returned/booked split (NOT hard-coded to 100%).
+    const checkoutProgressCount = checkedOut + returned;
+    const pctFinal = (n: number) =>
+      totalUnits > 0 ? Math.round((n / totalUnits) * 100) : 0;
+
+    return {
+      totalUnits,
+      bookedCount: booked,
+      checkedOutCount: checkedOut,
+      returnedCount: returned,
+      checkoutProgressCount,
+      checkoutProgressPercentage: pctFinal(checkoutProgressCount),
+      checkinProgressCount: returned,
+      checkinProgressPercentage: pctFinal(returned),
+      hasPartialCheckouts: checkoutProgressCount > 0,
+      hasPartialCheckins: returned > 0,
+      countMode,
+    };
+  }
+
+  const checkoutProgressCount = checkedOut + returned;
+  const pct = (n: number) =>
+    totalUnits > 0 ? Math.round((n / totalUnits) * 100) : 0;
+
+  return {
+    totalUnits,
+    bookedCount: booked,
+    checkedOutCount: checkedOut,
+    returnedCount: returned,
+    checkoutProgressCount,
+    checkoutProgressPercentage: pct(checkoutProgressCount),
+    checkinProgressCount: returned,
+    checkinProgressPercentage: pct(returned),
+    hasPartialCheckouts: checkoutProgressCount > 0,
+    hasPartialCheckins: returned > 0,
+    countMode,
+  };
+}
+
 /**
  * Determines if a booking page should redirect to apply appropriate status filters
  * Handles smart status param management for better UX

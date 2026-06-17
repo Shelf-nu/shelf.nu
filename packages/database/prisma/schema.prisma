@@ -101,6 +101,7 @@ model User {
   assetIndexSettings AssetIndexSettings[]
 
   partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+  partialCheckouts PartialBookingCheckout[] @relation("PartialCheckoutUser")
 
   // Updates feature
   createdUpdates Update[]
@@ -650,8 +651,11 @@ model Location {
   @@index([organizationId])
   @@index([userId])
   @@index([organizationId, parentId])
-  // Trigram index for substring search from the asset-list search bar
+  // Trigram indexes for substring (ILIKE '%term%') search from the locations
+  // index search bar, which matches name + description + address.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_description_trgm_idx")
+  @@index([address(ops: raw("gin_trgm_ops"))], type: Gin, name: "Location_address_trgm_idx")
 }
 
 // Master data for roles
@@ -1268,6 +1272,7 @@ model Booking {
 
   tags            Tag[]
   partialCheckins PartialBookingCheckin[]
+  partialCheckouts PartialBookingCheckout[]
 
   // Datetime
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -1358,6 +1363,33 @@ model PartialBookingCheckin {
   @@index([checkedInById])
   @@index([checkinTimestamp])
   @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+}
+
+model PartialBookingCheckout {
+  id String @id @default(cuid())
+
+  // Track which assets were checked out during this session
+  assetIds      String[] // Array of asset IDs checked out
+  checkoutCount Int // Number of assets checked out (for quick reference)
+
+  // Metadata
+  checkoutTimestamp DateTime @default(now()) @db.Timestamptz(3)
+
+  // Relationships
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String
+
+  checkedOutBy   User   @relation("PartialCheckoutUser", fields: [checkedOutById], references: [id])
+  checkedOutById String
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([checkedOutById])
+  @@index([checkoutTimestamp])
+  @@index([bookingId, checkoutTimestamp]) // Composite for efficient booking history queries
 }
 
 model Kit {
@@ -1896,6 +1928,7 @@ enum ActivityAction {
   BOOKING_CHECKED_OUT
   BOOKING_CHECKED_IN
   BOOKING_PARTIAL_CHECKIN
+  BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
 

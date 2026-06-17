@@ -44,6 +44,8 @@ export function BookingAssetsColumn() {
     items: paginatedItems,
     partialCheckinDetails,
     partialCheckinProgress,
+    partialCheckoutDetails,
+    checkedOutAssetIds,
   } = useLoaderData<BookingPageLoaderData>();
   // const [searchParams] = useSearchParams();
 
@@ -72,6 +74,27 @@ export function BookingAssetsColumn() {
     partialCheckinProgress?.hasPartialCheckins,
     // searchParams,
   ]);
+
+  // Determine if we should show the check-OUT columns. Mirrors the check-in
+  // columns above. The gate is RECORD-based (`checkedOutAssetIds`, derived from
+  // PartialBookingCheckout records) — NOT the status-derived
+  // `lifecycleProgress.hasPartialCheckouts`. The cell values come from
+  // `partialCheckoutDetails` (the same records), so gating on status would
+  // render empty columns for ordinary all-at-once checkouts (which flip assets
+  // to CHECKED_OUT without writing any partial-checkout records). RESERVED is a
+  // valid status here (assets can be progressively checked out while the booking
+  // is still reserved), alongside the in-progress and finished states.
+  const shouldShowCheckoutColumns = useMemo(() => {
+    const hasValidStatus =
+      booking.status === BookingStatus.RESERVED ||
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE ||
+      booking.status === BookingStatus.COMPLETE ||
+      booking.status === BookingStatus.ARCHIVED;
+    const hasPartialCheckouts = checkedOutAssetIds.length > 0;
+
+    return hasValidStatus && hasPartialCheckouts;
+  }, [booking.status, checkedOutAssetIds.length]);
 
   const manageAssetsUrl = `manage-assets?${new URLSearchParams({
     bookingFrom: new Date(booking.from).toISOString(),
@@ -193,6 +216,34 @@ export function BookingAssetsColumn() {
                     <Th>Category</Th>
                     <Th>Tags</Th>
                     <Th>Location</Th>
+                    {shouldShowCheckoutColumns && (
+                      <>
+                        <Th className="whitespace-nowrap">
+                          Checked out on{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the date when the asset was checked out
+                                via a partial check-out.
+                              </p>
+                            }
+                          />
+                        </Th>
+                        <Th className="whitespace-nowrap">
+                          Checked out by{" "}
+                          <InfoTooltip
+                            iconClassName="size-4"
+                            content={
+                              <p>
+                                Shows the user who checked out the asset via a
+                                partial check-out.
+                              </p>
+                            }
+                          />
+                        </Th>
+                      </>
+                    )}
                     {shouldShowCheckinColumns && (
                       <>
                         <Th className="whitespace-nowrap">
@@ -244,6 +295,10 @@ export function BookingAssetsColumn() {
                             assets={asEnrichedAssets(item.assets)}
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
+                            partialCheckoutDetails={partialCheckoutDetails}
+                            shouldShowCheckoutColumns={
+                              shouldShowCheckoutColumns
+                            }
                           />
                         );
                       }
@@ -256,6 +311,10 @@ export function BookingAssetsColumn() {
                             item={asEnrichedAsset(asset)}
                             partialCheckinDetails={partialCheckinDetails}
                             shouldShowCheckinColumns={shouldShowCheckinColumns}
+                            partialCheckoutDetails={partialCheckoutDetails}
+                            shouldShowCheckoutColumns={
+                              shouldShowCheckoutColumns
+                            }
                           />
                         </ListItem>
                       );

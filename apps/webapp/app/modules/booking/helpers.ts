@@ -190,6 +190,85 @@ export function isBookingEarlyCheckout(from: Date): boolean {
 }
 
 /**
+ * Decide whether a checkout should show the early-checkout "adjust start date"
+ * prompt. This is ONLY appropriate for the first checkout that transitions the
+ * booking RESERVED → ONGOING: adjusting the start date once the booking has
+ * already started is meaningless, and `partialCheckoutBooking` ignores the date
+ * choice unless the booking is RESERVED. Used by the scanner drawer and the
+ * bulk partial-checkout dialog so a progressive checkout of remaining items on
+ * an ONGOING/OVERDUE booking never re-prompts.
+ *
+ * @param status - The booking's current status
+ * @param from - The booking's start date
+ * @returns `true` only when the booking is RESERVED and starts >15min from now
+ */
+export function shouldPromptEarlyCheckout(
+  status: BookingStatus,
+  from: Date
+): boolean {
+  return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
+}
+
+/** Minimal asset shape needed to decide check-out eligibility. */
+type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
+
+/**
+ * Decide whether a booking asset is still eligible to be checked out right now.
+ *
+ * An asset is eligible when it has NOT already left the "Booked" bucket and can
+ * physically be checked out. Specifically it must not be:
+ * - already checked out — by a partial-checkout record (`checkedOutIds`) OR a
+ *   live `CHECKED_OUT` status (the all-at-once flow leaves no record);
+ * - already returned via partial check-in (`returnedIds`) — those are AVAILABLE
+ *   again but DONE for this booking;
+ * - in custody (must be released before it can be checked out).
+ *
+ * Shared by the scanner drawer's eligibility filter and its "remaining to check
+ * out" denominator so the numerator and denominator always describe the SAME
+ * set (the progress bar can reach 100%).
+ *
+ * @param asset - The asset (id + live status)
+ * @param checkedOutIds - Set of asset ids already checked out for this booking
+ * @param returnedIds - Set of asset ids already returned via partial check-in
+ * @returns `true` when the asset can still be scanned out
+ */
+export function isAssetCheckoutEligible(
+  asset: CheckoutEligibilityAsset,
+  checkedOutIds: Set<string>,
+  returnedIds: Set<string>
+): boolean {
+  return (
+    !checkedOutIds.has(asset.id) &&
+    !returnedIds.has(asset.id) &&
+    asset.status !== AssetStatus.CHECKED_OUT &&
+    asset.status !== AssetStatus.IN_CUSTODY
+  );
+}
+
+/**
+ * Count the booking assets still available to check out — the scanner's
+ * "remaining to check out" denominator. Asset-scoped (kit assets counted
+ * individually) and uses {@link isAssetCheckoutEligible}, so it stays in lock
+ * step with the scanner's eligibility filter.
+ *
+ * @param bookingAssets - All assets on the booking (id + live status)
+ * @param checkedOutAssetIds - Asset ids already checked out (record or status)
+ * @param checkedInAssetIds - Asset ids already returned via partial check-in
+ * @returns Number of assets still eligible to be checked out
+ */
+export function countRemainingCheckoutAssets(
+  bookingAssets: CheckoutEligibilityAsset[],
+  checkedOutAssetIds: string[],
+  checkedInAssetIds: string[]
+): number {
+  const checkedOutIds = new Set(checkedOutAssetIds);
+  const returnedIds = new Set(checkedInAssetIds);
+  return bookingAssets.filter((asset) =>
+    isAssetCheckoutEligible(asset, checkedOutIds, returnedIds)
+  ).length;
+}
+
+/**
  * This function checks if the booking is being early checkin.
  * It only considers it early if it's more than 15 minutes before the booking end time.
  */
