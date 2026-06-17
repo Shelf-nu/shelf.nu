@@ -139,6 +139,7 @@ export default function AssetDetailsPage() {
   const shouldHideHeader = [
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
+    "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
   return (

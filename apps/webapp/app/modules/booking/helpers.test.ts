@@ -1,7 +1,11 @@
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
+  countRemainingCheckoutAssets,
   filterBookingAssets,
   groupAndSortAssetsByKit,
+  isAssetCheckoutEligible,
+  shouldPromptEarlyCheckout,
   type SearchableBookingAsset,
 } from "./helpers";
 
@@ -413,5 +417,140 @@ describe("filterBookingAssets", () => {
     ];
     const result = filterBookingAssets(assets, "match");
     expect(result.map((a) => a.id)).toEqual(["a3", "a1", "a2"]);
+  });
+});
+
+describe("isAssetCheckoutEligible", () => {
+  const noneCheckedOut = new Set<string>();
+  const noneReturned = new Set<string>();
+
+  it("is eligible when AVAILABLE and not checked out or returned", () => {
+    expect(
+      isAssetCheckoutEligible(
+        { id: "a1", status: AssetStatus.AVAILABLE },
+        noneCheckedOut,
+        noneReturned
+      )
+    ).toBe(true);
+  });
+
+  it("is not eligible when live status is CHECKED_OUT", () => {
+    expect(
+      isAssetCheckoutEligible(
+        { id: "a1", status: AssetStatus.CHECKED_OUT },
+        noneCheckedOut,
+        noneReturned
+      )
+    ).toBe(false);
+  });
+
+  it("is not eligible when in custody", () => {
+    expect(
+      isAssetCheckoutEligible(
+        { id: "a1", status: AssetStatus.IN_CUSTODY },
+        noneCheckedOut,
+        noneReturned
+      )
+    ).toBe(false);
+  });
+
+  it("is not eligible when recorded as already checked out (even if AVAILABLE)", () => {
+    expect(
+      isAssetCheckoutEligible(
+        { id: "a1", status: AssetStatus.AVAILABLE },
+        new Set(["a1"]),
+        noneReturned
+      )
+    ).toBe(false);
+  });
+
+  it("is not eligible when already returned via partial check-in (AVAILABLE again but done)", () => {
+    expect(
+      isAssetCheckoutEligible(
+        { id: "a1", status: AssetStatus.AVAILABLE },
+        noneCheckedOut,
+        new Set(["a1"])
+      )
+    ).toBe(false);
+  });
+});
+
+describe("countRemainingCheckoutAssets", () => {
+  it("counts only assets still eligible to check out", () => {
+    const bookingAssets = [
+      { id: "a1", status: AssetStatus.AVAILABLE },
+      { id: "a2", status: AssetStatus.AVAILABLE },
+      { id: "a3", status: AssetStatus.CHECKED_OUT },
+      { id: "a4", status: AssetStatus.IN_CUSTODY },
+    ];
+    // a3 is live CHECKED_OUT, a4 is in custody → only a1, a2 remain.
+    expect(countRemainingCheckoutAssets(bookingAssets, [], [])).toBe(2);
+  });
+
+  it("excludes assets returned via partial check-in from the denominator", () => {
+    // The reported bug: 16 booked, 2 returned via check-in must show /14, not
+    // /16. Returned assets are AVAILABLE again but must not be re-counted.
+    const bookingAssets = Array.from({ length: 16 }, (_, i) => ({
+      id: `a${i + 1}`,
+      status: AssetStatus.AVAILABLE,
+    }));
+    expect(countRemainingCheckoutAssets(bookingAssets, [], ["a1", "a2"])).toBe(
+      14
+    );
+  });
+
+  it("excludes already-checked-out (recorded) assets even when AVAILABLE", () => {
+    const bookingAssets = [
+      { id: "a1", status: AssetStatus.AVAILABLE },
+      { id: "a2", status: AssetStatus.AVAILABLE },
+    ];
+    expect(countRemainingCheckoutAssets(bookingAssets, ["a1"], [])).toBe(1);
+  });
+
+  it("returns 0 when nothing is eligible", () => {
+    const bookingAssets = [
+      { id: "a1", status: AssetStatus.CHECKED_OUT },
+      { id: "a2", status: AssetStatus.IN_CUSTODY },
+    ];
+    expect(countRemainingCheckoutAssets(bookingAssets, [], [])).toBe(0);
+  });
+});
+
+describe("shouldPromptEarlyCheckout", () => {
+  const future = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1); // well beyond the 15-min buffer
+    return d;
+  };
+  const past = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d;
+  };
+
+  it("prompts when the booking is RESERVED and starts in the future", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.RESERVED, future())).toBe(
+      true
+    );
+  });
+
+  it("does NOT prompt when the booking is already ONGOING (start date fixed)", () => {
+    // The reported bug: 'Check out remaining' on an ONGOING booking must not
+    // trigger the adjust-start-date prompt.
+    expect(shouldPromptEarlyCheckout(BookingStatus.ONGOING, future())).toBe(
+      false
+    );
+  });
+
+  it("does NOT prompt when the booking is OVERDUE", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.OVERDUE, future())).toBe(
+      false
+    );
+  });
+
+  it("does NOT prompt when RESERVED but the start date has already passed", () => {
+    expect(shouldPromptEarlyCheckout(BookingStatus.RESERVED, past())).toBe(
+      false
+    );
   });
 });

@@ -1,14 +1,11 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
-import type {
-  calculatePartialCheckinProgress,
-  calculateUnitCheckinProgress,
-} from "~/modules/booking/utils.server";
+import type { BookingLifecycleProgress as BookingLifecycleProgressType } from "~/modules/booking/utils.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { BookingLifecycleProgress as BookingLifecycleProgressBar } from "./booking-lifecycle-progress";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { Progress } from "../shared/progress";
 import { Separator } from "../shared/separator";
 import { Tag as TagBadge } from "../shared/tag";
 import { UserBadge } from "../shared/user-badge";
@@ -22,7 +19,7 @@ export function BookingStatistics({
   allCategories,
   tags,
   creator,
-  partialCheckinProgress,
+  lifecycleProgress,
   autoArchivedAt,
   status,
 }: {
@@ -34,9 +31,12 @@ export function BookingStatistics({
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
   creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
-  partialCheckinProgress?:
-    | ReturnType<typeof calculatePartialCheckinProgress>
-    | ReturnType<typeof calculateUnitCheckinProgress>;
+  /**
+   * Segmented checkout/check-in lifecycle progress. When present (and the
+   * booking has any partial checkout/check-in activity), renders the
+   * {@link BookingLifecycleProgressBar} segmented bar.
+   */
+  lifecycleProgress?: BookingLifecycleProgressType;
   autoArchivedAt?: Date | null;
   status: BookingStatus;
 }) {
@@ -55,44 +55,15 @@ export function BookingStatistics({
           <span className="text-sm text-gray-500">Assets</span>
           <span className="text-right font-medium">{assetsCount}</span>
         </div>
-        {partialCheckinProgress?.hasPartialCheckins && (
-          <>
-            <Separator />
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Check-in progress</span>
-                <span className="flex min-w-[150px] items-center gap-2 text-right text-sm font-medium">
-                  <span className="flex items-center gap-1 whitespace-nowrap">
-                    {partialCheckinProgress.checkedInCount} /{" "}
-                    {partialCheckinProgress.totalAssets}
-                    {partialCheckinProgress.countMode === "units" ? (
-                      <>
-                        <span className="text-gray-500">items</span>
-                        <InfoTooltip
-                          iconClassName="size-4"
-                          content={<p>Kits count as one item</p>}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-gray-500">assets</span>
-                        <InfoTooltip
-                          iconClassName="size-4"
-                          content={
-                            <p>
-                              All assets inside kits are counted individually
-                            </p>
-                          }
-                        />
-                      </>
-                    )}
-                  </span>
-                  <Progress value={partialCheckinProgress.progressPercentage} />
-                </span>
-              </div>
-            </div>
-          </>
-        )}
+        {lifecycleProgress &&
+          lifecycleProgress.totalUnits > 0 &&
+          (lifecycleProgress.hasPartialCheckouts ||
+            lifecycleProgress.hasPartialCheckins) && (
+            <>
+              <Separator />
+              <BookingLifecycleProgressBar progress={lifecycleProgress} />
+            </>
+          )}
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-500">Kits</span>

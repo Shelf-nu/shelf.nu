@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { AssetStatus } from "@prisma/client";
 import type { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
-import { ChevronRight, PackageCheck } from "lucide-react";
+import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
@@ -11,6 +12,7 @@ import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingI
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
+import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
 import BulkRemoveAssetAndKitDialog from "./bulk-remove-asset-and-kit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import type { ListItemData } from "../list/list-item";
@@ -45,8 +47,11 @@ export default function ListBulkActionsDropdown() {
 
 function ConditionalDropdown() {
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
-  const { booking, partialCheckinDetails = {} } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    booking,
+    partialCheckinDetails = {},
+    checkedOutAssetIds = [],
+  } = useLoaderData<BookingPageLoaderData>();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus
   );
@@ -55,6 +60,13 @@ function ConditionalDropdown() {
   // Show partial check-in option only for ONGOING/OVERDUE bookings
   const showPartialCheckin =
     bookingStatus?.isOngoing || bookingStatus?.isOverdue;
+
+  // Show partial check-out option for RESERVED/ONGOING/OVERDUE bookings.
+  // Unlike check-in, checkout can START from a RESERVED booking.
+  const showPartialCheckout =
+    bookingStatus?.isReserved ||
+    bookingStatus?.isOngoing ||
+    bookingStatus?.isOverdue;
 
   // Check if any selected items are already checked in using context-aware status
   // Filter out kit entries (which have undefined title) since bulk selection includes both kit AND its individual assets
@@ -82,6 +94,31 @@ function ConditionalDropdown() {
       }
     : false;
 
+  // Disable the checkout menu item when EVERY selected asset is already checked
+  // out (so there is nothing left to check out). Kits (undefined title) are
+  // excluded — only the individual assets are validated.
+  const assetsToCheckOut = selectedItems.filter(
+    (item) => item.title !== undefined
+  );
+
+  const hasOnlyAlreadyCheckedOut =
+    assetsToCheckOut.length > 0 &&
+    assetsToCheckOut.every((item) => {
+      // Type assertion: ListItemData carries asset props via [x: string]: any
+      const asset = item as ListItemData & { status: string };
+      return (
+        asset.status === AssetStatus.CHECKED_OUT ||
+        checkedOutAssetIds.includes(asset.id)
+      );
+    });
+
+  const partialCheckoutDisabled = hasOnlyAlreadyCheckedOut
+    ? {
+        reason:
+          "All selected assets are already checked out. Select assets that are still booked.",
+      }
+    : false;
+
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -95,6 +132,8 @@ function ConditionalDropdown() {
   }
 
   const [partialCheckinDialogOpen, setPartialCheckinDialogOpen] =
+    useState(false);
+  const [partialCheckoutDialogOpen, setPartialCheckoutDialogOpen] =
     useState(false);
 
   return (
@@ -111,6 +150,10 @@ function ConditionalDropdown() {
       <BulkPartialCheckinDialog
         open={partialCheckinDialogOpen}
         setOpen={setPartialCheckinDialogOpen}
+      />
+      <BulkPartialCheckoutDialog
+        open={partialCheckoutDialogOpen}
+        setOpen={setPartialCheckoutDialogOpen}
       />
 
       <DropdownMenu
@@ -163,7 +206,7 @@ function ConditionalDropdown() {
                   type="button"
                   variant="link"
                   className={tw(
-                    "flex w-full items-center  justify-start gap-2 px-4 py-3 text-gray-700 hover:text-gray-700"
+                    "flex w-full items-center justify-start gap-2 whitespace-nowrap px-4 py-3 text-gray-700 hover:text-gray-700"
                   )}
                   onClick={() => {
                     setPartialCheckinDialogOpen(true);
@@ -173,6 +216,30 @@ function ConditionalDropdown() {
                 >
                   <PackageCheck className="mr-2 inline size-5" />
                   <span>Check in selected items</span>
+                </Button>
+              </DropdownMenuItem>
+            )}
+            {showPartialCheckout && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <Button
+                  type="button"
+                  variant="link"
+                  className={tw(
+                    "flex w-full items-center justify-start gap-2 whitespace-nowrap px-4 py-3 text-gray-700 hover:text-gray-700"
+                  )}
+                  onClick={() => {
+                    setPartialCheckoutDialogOpen(true);
+                    closeMenu();
+                  }}
+                  disabled={partialCheckoutDisabled}
+                >
+                  <PackageMinus className="mr-2 inline size-5" />
+                  <span>Check out selected items</span>
                 </Button>
               </DropdownMenuItem>
             )}

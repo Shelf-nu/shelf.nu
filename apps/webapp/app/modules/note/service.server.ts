@@ -29,9 +29,28 @@ import {
   wrapUserLinkForNote,
   wrapTagForNote,
 } from "~/utils/markdoc-wrappers";
-import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
+import {
+  assertAssetsBelongToOrg,
+  type OrgValidationTxClient,
+} from "~/utils/org-validation.server";
 
 const label = "Note";
+
+/**
+ * Minimal Prisma surface `createNotes` needs when run inside a transaction.
+ * Extends {@link OrgValidationTxClient} (so the same `tx` can be forwarded to
+ * `assertAssetsBelongToOrg`) with the `note.createMany` write. Typed
+ * structurally because the extended transaction client is not directly
+ * assignable to the generated `Prisma.TransactionClient` (same approach as
+ * `RecordEventTxClient` / `OrgValidationTxClient`).
+ */
+export type NotesTxClient = OrgValidationTxClient & {
+  note: {
+    createMany: (args: {
+      data: Prisma.NoteUncheckedCreateInput[];
+    }) => Promise<{ count: number }>;
+  };
+};
 
 export type TagSummary = Pick<Tag, "id" | "name">;
 
@@ -95,22 +114,31 @@ export async function createNote({
  * to that organization before the notes are written (cross-org IDOR guard).
  *
  * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional Prisma transaction client. When the caller already runs
+ *   inside a `db.$transaction`, pass it so the org guard and the note write
+ *   commit atomically with the surrounding mutation (and roll back together).
+ *   Defaults to the global `db`.
  * @throws {ShelfError} 400 if any asset is not in `organizationId`
  */
-export async function createNotes({
-  content,
-  type,
-  userId,
-  assetIds,
-  organizationId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetIds: Asset["id"][];
-  organizationId: string;
-}) {
+export async function createNotes(
+  {
+    content,
+    type,
+    userId,
+    assetIds,
+    organizationId,
+  }: Pick<Note, "content"> & {
+    type?: Note["type"];
+    userId: User["id"];
+    assetIds: Asset["id"][];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
   try {
-    await assertAssetsBelongToOrg({ assetIds, organizationId });
+    const client = tx ?? db;
+
+    await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
 
     const data = assetIds.map((id) => ({
       content,
@@ -119,7 +147,7 @@ export async function createNotes({
       assetId: id,
     }));
 
-    return await db.note.createMany({
+    return await client.note.createMany({
       data,
     });
   } catch (cause) {
