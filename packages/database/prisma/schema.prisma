@@ -820,9 +820,17 @@ model UserOrganization {
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
 
+  // Last time this user used the mobile companion app in this organization.
+  // Powers companion-app adoption metrics (weekly/monthly active users & orgs)
+  // from our own database — no external analytics dependency. Updated debounced
+  // and fire-and-forget by the mobile API; null until first post-migration use.
+  lastMobileActiveAt DateTime?
+
   @@unique([userId, organizationId])
   // Index for foreign key
   @@index([organizationId])
+  // Index for mobile-adoption "active since <date>" range scans
+  @@index([lastMobileActiveAt])
 }
 
 enum OrganizationType {

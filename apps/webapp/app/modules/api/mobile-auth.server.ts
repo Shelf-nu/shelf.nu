@@ -8,6 +8,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
+import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -144,7 +145,7 @@ export async function requireOrganizationAccess(
 
   const membership = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId: orgId } },
-    select: { id: true },
+    select: { lastMobileActiveAt: true },
   });
 
   if (!membership) {
@@ -155,6 +156,11 @@ export async function requireOrganizationAccess(
       status: 403,
     });
   }
+
+  // Record companion-app usage for adoption metrics. Debounced + fire-and-forget
+  // (see mobile-usage.server.ts) so it never delays or breaks the request. This
+  // is the chokepoint nearly every org-scoped mobile route passes through.
+  recordMobileActivity(userId, orgId, membership.lastMobileActiveAt);
 
   return orgId;
 }
