@@ -56,8 +56,10 @@ vitest.mock("~/database/db.server", () => ({
                 id,
                 title: `Asset ${id}`,
                 status: AssetStatus.AVAILABLE,
-                bookings: [],
-                kit: null,
+                // Post-pivot: conflicts come through bookingAssets[].booking,
+                // kit membership through assetKits[].
+                bookingAssets: [],
+                assetKits: [],
               }))
             : []
         );
@@ -66,6 +68,24 @@ vitest.mock("~/database/db.server", () => ({
     },
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // why: post-pivot, full-checkout delegate (checkoutBooking) reads the
+    // BookingAsset pivot directly for outstanding-row enumeration and
+    // post-scan availability checks. Default to empty arrays so the delegate's
+    // pivot reads no-op; the partial path uses bookingFound.bookingAssets above.
+    bookingAsset: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
+      count: vitest.fn().mockResolvedValue(0),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // why: checkoutBooking's defence-in-depth guard reads
+    // `bookingModelRequest` for outstanding model-request rows that would
+    // block checkout. Default to none so the delegate path proceeds.
+    bookingModelRequest: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      findUnique: vitest.fn().mockResolvedValue(null),
+      update: vitest.fn().mockResolvedValue({}),
     },
     // why: per-booking source of truth for what's already been checked out.
     // Default to no prior partial check-outs; tests override to simulate
@@ -143,6 +163,9 @@ const mockHints = {
 };
 
 /** RESERVED booking with 3 standalone assets, all still Booked. */
+// why (post-pivot): assets now live behind the BookingAsset pivot — each row
+// shaped { asset: { ... } }. `_count.bookingAssets` replaces `_count.assets`.
+// Kit membership lives on `Asset.assetKits[]` (empty arrays for standalones).
 const reservedBooking = {
   id: "booking-1",
   name: "Test Booking",
@@ -152,13 +175,19 @@ const reservedBooking = {
   custodianTeamMemberId: null,
   from: futureFrom,
   to: futureTo,
-  // why: checkoutBooking (the full-op delegate) reads `_count.assets` for the
-  // reminder email; the email-include re-fetch returns the same shape.
-  _count: { assets: 3 },
-  assets: [
-    { id: "asset-1", kitId: null, status: AssetStatus.AVAILABLE },
-    { id: "asset-2", kitId: null, status: AssetStatus.AVAILABLE },
-    { id: "asset-3", kitId: null, status: AssetStatus.AVAILABLE },
+  // why: checkoutBooking (the full-op delegate) reads `_count.bookingAssets`
+  // for the reminder email; the email-include re-fetch returns the same shape.
+  _count: { bookingAssets: 3 },
+  bookingAssets: [
+    {
+      asset: { id: "asset-1", status: AssetStatus.AVAILABLE, assetKits: [] },
+    },
+    {
+      asset: { id: "asset-2", status: AssetStatus.AVAILABLE, assetKits: [] },
+    },
+    {
+      asset: { id: "asset-3", status: AssetStatus.AVAILABLE, assetKits: [] },
+    },
   ],
 };
 
@@ -185,8 +214,9 @@ describe("partialCheckoutBooking", () => {
                 id,
                 title: `Asset ${id}`,
                 status: AssetStatus.AVAILABLE,
-                bookings: [],
-                kit: null,
+                // Post-pivot shape (see top-of-file mock for full comment).
+                bookingAssets: [],
+                assetKits: [],
               }))
             : []
         );
@@ -332,8 +362,16 @@ describe("partialCheckoutBooking", () => {
     // Only one asset on the booking; scanning it covers everything outstanding.
     const singleAssetBooking = {
       ...reservedBooking,
-      _count: { assets: 1 },
-      assets: [{ id: "asset-1", kitId: null, status: AssetStatus.AVAILABLE }],
+      _count: { bookingAssets: 1 },
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            status: AssetStatus.AVAILABLE,
+            assetKits: [],
+          },
+        },
+      ],
     };
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -389,21 +427,23 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(reservedBooking);
 
-    // The scanned-batch lookup reports asset-1 in custody.
+    // The scanned-batch lookup reports asset-1 in custody. Post-pivot, the
+    // findMany include returns `bookingAssets` (not `bookings`) for conflict
+    // detection; an empty array means no conflicts on these assets.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
         id: "asset-1",
         title: "Camera",
         status: AssetStatus.IN_CUSTODY,
-        bookings: [],
-        kit: null,
+        bookingAssets: [],
+        assetKits: [],
       },
       {
         id: "asset-2",
         title: "Tripod",
         status: AssetStatus.AVAILABLE,
-        bookings: [],
-        kit: null,
+        bookingAssets: [],
+        assetKits: [],
       },
     ]);
 
@@ -427,23 +467,28 @@ describe("partialCheckoutBooking", () => {
 
     // why: the scanned-batch conflict lookup returns asset-1 with a conflicting
     // overlapping booking (a different RESERVED booking), which makes
-    // hasAssetBookingConflicts() return true. This guard is unique to
-    // partial check-OUT (check-in has no conflict validation), so it needs its
-    // own coverage.
+    // hasAssetBookingConflicts() return true. Post-pivot, conflicting bookings
+    // are projected through `asset.bookingAssets[].booking`, not the removed
+    // implicit `asset.bookings[]`. This guard is unique to partial check-OUT
+    // (check-in has no conflict validation), so it needs its own coverage.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
         id: "asset-1",
         title: "Camera",
         status: AssetStatus.AVAILABLE,
-        bookings: [{ id: "other-booking", status: BookingStatus.RESERVED }],
-        kit: null,
+        bookingAssets: [
+          {
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+        assetKits: [],
       },
       {
         id: "asset-2",
         title: "Tripod",
         status: AssetStatus.AVAILABLE,
-        bookings: [],
-        kit: null,
+        bookingAssets: [],
+        assetKits: [],
       },
     ]);
 
@@ -537,10 +582,10 @@ describe("getRemainingCheckoutAssetIds", () => {
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE },
-        { id: "asset-2", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-3", status: AssetStatus.IN_CUSTODY },
+      bookingAssets: [
+        { asset: { id: "asset-1", status: AssetStatus.AVAILABLE } },
+        { asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT } },
+        { asset: { id: "asset-3", status: AssetStatus.IN_CUSTODY } },
       ],
       partialCheckins: [],
     });
@@ -561,9 +606,9 @@ describe("getRemainingCheckoutAssetIds", () => {
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
-      assets: [
-        { id: "asset-1", status: AssetStatus.AVAILABLE },
-        { id: "asset-2", status: AssetStatus.AVAILABLE },
+      bookingAssets: [
+        { asset: { id: "asset-1", status: AssetStatus.AVAILABLE } },
+        { asset: { id: "asset-2", status: AssetStatus.AVAILABLE } },
       ],
       partialCheckins: [{ assetIds: ["asset-2"] }],
     });
@@ -582,9 +627,9 @@ describe("getRemainingCheckoutAssetIds", () => {
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
-      assets: [
-        { id: "asset-1", status: AssetStatus.CHECKED_OUT },
-        { id: "asset-2", status: AssetStatus.IN_CUSTODY },
+      bookingAssets: [
+        { asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT } },
+        { asset: { id: "asset-2", status: AssetStatus.IN_CUSTODY } },
       ],
       partialCheckins: [],
     });
@@ -602,7 +647,7 @@ describe("getRemainingCheckoutAssetIds", () => {
 
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ assets: [], partialCheckins: [] });
+    ).mockResolvedValue({ bookingAssets: [], partialCheckins: [] });
 
     await getRemainingCheckoutAssetIds({
       bookingId: "booking-1",

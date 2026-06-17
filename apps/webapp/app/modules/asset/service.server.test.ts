@@ -2366,7 +2366,11 @@ describe("moveAssetLocationUnits", () => {
     const err = await moveAssetLocationUnits(baseArgs).catch((e) => e);
 
     expect(err).toBeInstanceOf(ShelfError);
-    expect((err as ShelfError).status).toBe(404);
+    // assertLocationBelongsToOrg throws 400 ("Invalid location") for both
+    // missing and cross-org IDs — same status as the asset-side
+    // assertAssetsBelongToOrg guard. Treating either as 404 would let
+    // attackers probe ID existence across orgs.
+    expect((err as ShelfError).status).toBe(400);
   });
 
   it("does not touch AssetKit, Custody, or BookingAsset rows (orthogonal-axes invariant)", async () => {
@@ -2536,7 +2540,10 @@ describe("placeUnplacedUnits", () => {
     expect((err as ShelfError).message).toContain("positive");
   });
 
-  it("rejects a cross-org destination location with status 404", async () => {
+  it("rejects a cross-org destination location with status 400", async () => {
+    // assertLocationBelongsToOrg throws 400 ("Invalid location") for both
+    // missing and cross-org IDs — uniform with the other org-scope guards so
+    // attackers can't probe ID existence across orgs.
     mockLocationFindFirst.mockImplementation(
       ({ where }: { where: { id: string } }) =>
         Promise.resolve(
@@ -2547,7 +2554,7 @@ describe("placeUnplacedUnits", () => {
     const err = await placeUnplacedUnits(baseArgs).catch((e) => e);
 
     expect(err).toBeInstanceOf(ShelfError);
-    expect((err as ShelfError).status).toBe(404);
+    expect((err as ShelfError).status).toBe(400);
   });
 
   it("rejects a cross-org asset (assertAssetsBelongToOrg)", async () => {
@@ -2670,8 +2677,10 @@ describe("getAssets search fallback", () => {
       OR: expect.arrayContaining([titleClause]),
     });
     // ...and the team-member filter clause survived the fallback.
+    // Post-pivot: custody is now a relation (multiple per-unit rows), so the
+    // teamMember predicate is nested under `some` (was the direct field).
     expect(secondWhere.OR).toContainEqual({
-      custody: { teamMemberId: { in: ["tm-1"] } },
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
     });
   });
 });
