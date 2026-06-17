@@ -125,9 +125,22 @@ Per `CLAUDE.md`: Zod schemas with server-side error display.
 
 ### 7. Supabase RLS
 
-- New Prisma models or tables MUST have a matching RLS policy migration. Flag any new `model` in `schema.prisma` without an RLS policy in the same PR.
-- Webapp uses both Supabase client (RLS-enforcing) and direct Prisma client (RLS-bypassing). Flag direct-Prisma access to per-tenant data where Supabase + RLS would be safer.
-- For migrations: check `USING` and `WITH CHECK` clauses for the `auth.uid()` org-membership pattern.
+**7a. RLS-enablement audit for new tables (MECHANICAL — run on every diff that touches `packages/database/prisma/migrations/`).** This is the regression that shipped on 2026-06-16: a new `MobileAuthCode` table was created without an `ENABLE ROW LEVEL SECURITY` line, leaving it exposed through the Supabase anon/PostgREST surface. Every `public` table in Shelf MUST have RLS enabled — RLS-disabled is the unsafe default. You work from the diff only; a new migration file appears entirely as added (`+`) lines, so everything you need is in the hunk.
+
+Procedure (do this literally, do not eyeball it):
+
+1. In the added lines, find every newly-created table: each `CREATE TABLE [IF NOT EXISTS] "public"."T"` (or unqualified `"T"`). Ignore `CREATE TABLE` text inside SQL comments (`--`).
+2. For each table `T`, scan all added lines across the whole diff for a matching `ALTER TABLE … "T" … ENABLE ROW LEVEL SECURITY;` (the repo writes it lowercase: `alter table "T" ENABLE row level security;`). Match case-insensitively; the enable statement may be in the same migration file or another migration added in the same diff.
+3. Any `CREATE TABLE` with **no** matching enable line is a finding:
+   - **🟠 High / P1** by default.
+   - **🔴 Critical / P0** when the table holds credentials, tokens, auth codes, sessions, PII, or any per-tenant (`organizationId`-scoped) data — the realistic Shelf case. `MobileAuthCode` would have been Critical.
+   - Downgrade only if it is provably a global, non-tenant lookup/enum table AND the migration carries an explicit `-- no RLS: <reason>` comment. Absent that comment, flag it.
+   - Cite the migration file path (and the `CREATE TABLE` line from the hunk). **Fix:** add `ALTER TABLE "T" ENABLE row level security;` to the migration.
+   - This finding makes the diff `security_relevant: true` and sets `risk_level`/`verdict` to match the highest severity above.
+
+**7b. Policies are a separate, weaker requirement.** Shelf's standard for most tables is _RLS enabled with no policies_ (denies the Supabase anon/authenticated roles; the direct Prisma service-role client bypasses RLS for app queries). So a new table **must** have RLS enabled (7a), but a missing `CREATE POLICY` is **not** automatically a finding — only flag it when the table is meant to be read directly by a Supabase client. When policies exist, check `USING` / `WITH CHECK` clauses for the `auth.uid()` org-membership pattern.
+
+**7c. Schema ↔ migration cross-check.** Flag any new `model` in `schema.prisma` whose backing migration in the same diff lacks the RLS enable line. Also flag direct-Prisma access to per-tenant data where Supabase + RLS would be the safer boundary.
 
 ### 8. Session / auth flow
 
@@ -189,10 +202,11 @@ Use the same structure as the interactive reviewer:
 
 ## Checklist coverage
 
-| Area               | Status             | Notes |
-| ------------------ | ------------------ | ----- |
-| Org-scoping / IDOR | ✅ / ⚠️ / ❌ / N/A | …     |
-| …                  | …                  | …     |
+| Area                                  | Status             | Notes |
+| ------------------------------------- | ------------------ | ----- |
+| Org-scoping / IDOR                    | ✅ / ⚠️ / ❌ / N/A | …     |
+| RLS enabled on new tables (migration) | …                  | …     |
+| …                                     | …                  | …     |
 
 ## Skills consulted
 

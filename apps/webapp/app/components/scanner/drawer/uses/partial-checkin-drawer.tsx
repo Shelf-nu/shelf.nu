@@ -488,18 +488,27 @@ export default function PartialCheckinDrawer({
     partialCheckinProgress?.checkedInAssetIds || []
   );
 
+  // Only assets that were actually checked out can be checked in. This excludes
+  // still-Booked (not CHECKED_OUT) assets from the submit payload — they are
+  // surfaced to the user via a blocker instead (progressive checkout guard).
   const assetIdsForCheckin = Array.from(
     new Set([
       ...assets
         .filter(
-          (a) => bookingAssetIds.has(a.id) && !checkedInAssetIds.has(a.id)
+          (a) =>
+            bookingAssetIds.has(a.id) &&
+            !checkedInAssetIds.has(a.id) &&
+            a.status === AssetStatus.CHECKED_OUT
         )
         .map((a) => a.id),
       ...kits.flatMap((k) =>
         k.assetKits
           .map((ak) => ak.asset)
           .filter(
-            (a) => bookingAssetIds.has(a.id) && !checkedInAssetIds.has(a.id)
+            (a) =>
+              bookingAssetIds.has(a.id) &&
+              !checkedInAssetIds.has(a.id) &&
+              a.status === AssetStatus.CHECKED_OUT
           )
           .map((a) => a.id)
       ),
@@ -649,6 +658,43 @@ export default function PartialCheckinDrawer({
     })
     .map(([qrId]) => qrId);
 
+  // Progressive checkout guard: an asset can only be checked IN if it was first
+  // checked OUT. A still-Booked (not CHECKED_OUT) asset that is part of this
+  // booking was never scanned out, so it cannot be checked in. We only flag
+  // assets that ARE in the booking (the not-in-booking blocker handles the rest)
+  // and are NOT already checked in (that has its own blocker).
+  // Consider BOTH standalone scans and kit-member assets — scanning a kit QR
+  // queues its assets, so a kit whose in-booking assets were never checked out
+  // must surface a blocker too (otherwise submit is silently disabled).
+  const scannedBookingAssets = [
+    ...assets,
+    ...kits.flatMap((kit) => kit.assetKits.map((ak) => ak.asset)),
+  ].filter(
+    (asset) =>
+      bookingAssetIds.has(asset.id) &&
+      asset.status !== AssetStatus.CHECKED_OUT &&
+      !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
+  );
+  const neverCheckedOutAssetIds = [
+    ...new Set(scannedBookingAssets.map((a) => a.id)),
+  ];
+  const neverCheckedOutAssetIdSet = new Set(neverCheckedOutAssetIds);
+
+  const qrIdsOfNeverCheckedOutAssets = Object.entries(items)
+    .filter(([, item]) => {
+      if (!item) return false;
+      if (item.type === "asset") {
+        return neverCheckedOutAssetIdSet.has((item?.data as any)?.id);
+      }
+      if (item.type === "kit") {
+        return (item?.data as any)?.assets?.some((a: { id: string }) =>
+          neverCheckedOutAssetIdSet.has(a.id)
+        );
+      }
+      return false;
+    })
+    .map(([qrId]) => qrId);
+
   // Note: In partial check-in context, we allow individual kit assets to be checked in
   // so we don't create blockers for assets that are part of kits
 
@@ -794,6 +840,21 @@ export default function PartialCheckinDrawer({
       onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedInAssets),
     },
     {
+      condition: neverCheckedOutAssetIds.length > 0,
+      count: neverCheckedOutAssetIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${
+            count > 1 ? "s haven't" : " hasn't"
+          }`}</strong>{" "}
+          been checked out yet and can't be checked in.
+        </>
+      ),
+      description:
+        "Only assets that were checked out can be checked back in. Check these out first.",
+      onResolve: () => removeItemsFromList(qrIdsOfNeverCheckedOutAssets),
+    },
+    {
       condition: alreadyCheckedInKits.length > 0,
       count: alreadyCheckedInKits.length,
       message: (count: number) => (
@@ -880,6 +941,7 @@ export default function PartialCheckinDrawer({
         ...qrIdsOfKitsNotInBooking,
         ...qrIdsOfRedundantAssets,
         ...qrIdsOfAlreadyCheckedInAssets,
+        ...qrIdsOfNeverCheckedOutAssets,
         ...qrIdsOfAlreadyCheckedInKits,
         ...qrIdsOfZeroDispositionQty,
         ...qrIdsOfOverReturnQty,

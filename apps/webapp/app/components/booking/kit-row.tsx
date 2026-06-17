@@ -7,7 +7,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
-import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
+import type {
+  PartialCheckinDetailsType,
+  PartialCheckoutDetailsType,
+} from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { getBookingContextKitStatus } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
@@ -51,6 +54,10 @@ type KitRowProps = {
   onToggleExpansion?: (kitId: string) => void;
   partialCheckinDetails: PartialCheckinDetailsType;
   shouldShowCheckinColumns: boolean;
+  /** Per-asset partial check-OUT details (date + user) keyed by asset id. */
+  partialCheckoutDetails: PartialCheckoutDetailsType;
+  /** Whether the "Checked out on/by" columns should render. */
+  shouldShowCheckoutColumns: boolean;
 };
 
 export default function KitRow({
@@ -62,6 +69,8 @@ export default function KitRow({
   bookingId,
   partialCheckinDetails,
   shouldShowCheckinColumns,
+  partialCheckoutDetails,
+  shouldShowCheckoutColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved, isInProgress, isFinished } =
@@ -92,6 +101,17 @@ export default function KitRow({
   const isOverlapping =
     kit.status !== "AVAILABLE" &&
     assets.some((asset) => hasAssetBookingConflicts(asset, bookingId));
+
+  // A kit "returned" as a unit only when EVERY one of its assets was actually
+  // checked out — the same unanimity rule the lifecycle bar uses in unit mode
+  // (a kit split across buckets counts as Booked). When the booking used
+  // progressive checkout, partialCheckoutDetails identifies the checked-out
+  // assets; when it has no checkout records (quick/all-at-once checkout), every
+  // asset was checked out.
+  const hasProgressiveCheckout = Object.keys(partialCheckoutDetails).length > 0;
+  const kitWasCheckedOut = hasProgressiveCheckout
+    ? assets.every((a) => Boolean(partialCheckoutDetails[a.id]))
+    : true;
 
   return (
     <React.Fragment>
@@ -129,7 +149,7 @@ export default function KitRow({
                 status first, code chip second. flex-wrap handles narrow viewports.
               */}
               <div className="flex flex-wrap items-center gap-2">
-                {isFinished ? (
+                {isFinished && kitWasCheckedOut ? (
                   <ReturnedBadge />
                 ) : (
                   <KitStatusBadge
@@ -177,6 +197,19 @@ export default function KitRow({
             <EmptyTableValue />
           )}
         </Td>
+        {shouldShowCheckoutColumns && (
+          <>
+            {/* Checked out on - for kits we don't show specific dates */}
+            <Td>
+              <EmptyTableValue />
+            </Td>
+
+            {/* Checked out by - for kits we don't show specific users */}
+            <Td>
+              <EmptyTableValue />
+            </Td>
+          </>
+        )}
         {shouldShowCheckinColumns && (
           <>
             {/* Checked in on - for kits we don't show specific dates */}
@@ -234,6 +267,8 @@ export default function KitRow({
               isKitAsset
               partialCheckinDetails={partialCheckinDetails}
               shouldShowCheckinColumns={shouldShowCheckinColumns}
+              partialCheckoutDetails={partialCheckoutDetails}
+              shouldShowCheckoutColumns={shouldShowCheckoutColumns}
             />
           </ListItem>
         ))}
@@ -241,7 +276,14 @@ export default function KitRow({
 
       {/* Add a separator row after the kit assets */}
       <tr className="kit-separator h-1 bg-gray-100">
-        <td colSpan={shouldShowCheckinColumns ? 9 : 7} className="h-1 p-0"></td>
+        <td
+          colSpan={
+            7 +
+            (shouldShowCheckinColumns ? 2 : 0) +
+            (shouldShowCheckoutColumns ? 2 : 0)
+          }
+          className="h-1 p-0"
+        ></td>
       </tr>
     </React.Fragment>
   );

@@ -8,7 +8,10 @@ import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
+import type {
+  PartialCheckinDetailsType,
+  PartialCheckoutDetailsType,
+} from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import {
@@ -45,6 +48,10 @@ type ListAssetContentProps = {
   isKitAsset?: boolean;
   partialCheckinDetails: PartialCheckinDetailsType;
   shouldShowCheckinColumns: boolean;
+  /** Per-asset partial check-OUT details (date + user) keyed by asset id. */
+  partialCheckoutDetails: PartialCheckoutDetailsType;
+  /** Whether the "Checked out on/by" columns should render. */
+  shouldShowCheckoutColumns: boolean;
 };
 
 export default function ListAssetContent({
@@ -52,6 +59,8 @@ export default function ListAssetContent({
   isKitAsset,
   partialCheckinDetails,
   shouldShowCheckinColumns,
+  partialCheckoutDetails,
+  shouldShowCheckoutColumns,
 }: ListAssetContentProps) {
   const { category, tags } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
@@ -135,7 +144,7 @@ export default function ListAssetContent({
   );
 
   /**
-   * Phase 3c: qty-tracked partial dispositioning.
+   * Qty-tracked partial dispositioning.
    *
    * A qty-tracked asset doesn't get added to `PartialBookingCheckin.assetIds`
    * until its `remaining` hits zero, so `partialCheckinDetails` is blind to
@@ -165,10 +174,10 @@ export default function ListAssetContent({
     damaged: 0,
   };
   /**
-   * Per-row attribution for qty-tracked rows. With Polish-6 multi-row
-   * slices, an asset can have its kit-driven slice fully reconciled
-   * while a parallel standalone slice is still partly out. The badge
-   * needs the state of THIS row, not the asset's global rollup.
+   * Per-row attribution for qty-tracked rows. With multi-row slices, an asset
+   * can have its kit-driven slice fully reconciled while a parallel standalone
+   * slice is still partly out. The badge needs the state of THIS row, not the
+   * asset's global rollup.
    *
    *  - Fully reconciled for this row → PARTIALLY_CHECKED_IN ("Already
    *    checked in", blue) — same label as the INDIVIDUAL fully-checked-
@@ -191,6 +200,27 @@ export default function ListAssetContent({
     qtyRemaining > 0 &&
     isActiveBooking;
 
+  // Per-asset partial check-OUT record (if any). Presence of a record drives
+  // the "Checked out on/by" cell content for this asset.
+  const checkoutDetails = partialCheckoutDetails[item.id];
+
+  // An asset only "returned" if it was actually checked out. When the booking
+  // used progressive checkout, partialCheckoutDetails identifies the checked-out
+  // assets; when it has no checkout records (quick/all-at-once checkout), every
+  // asset was checked out.
+  const hasProgressiveCheckout = Object.keys(partialCheckoutDetails).length > 0;
+  const wasCheckedOut =
+    !hasProgressiveCheckout || Boolean(partialCheckoutDetails[item.id]);
+
+  /**
+   * Final status resolution priority:
+   *  1. Qty-tracked partial dispositioning (qty breakdown wins — it's the most
+   *     specific signal we have on an active booking).
+   *  2. The base status from `getBookingContextAssetStatus`, which already
+   *     reflects INDIVIDUAL asset progressive-checkout state via the
+   *     `partialCheckinDetails` map. `wasCheckedOut` (from main) is consumed
+   *     separately by the `ReturnedBadge` branch on finished bookings.
+   */
   const contextStatus = isQtyFullyCheckedIn
     ? "PARTIALLY_CHECKED_IN"
     : isQtyPartiallyCheckedIn
@@ -254,7 +284,7 @@ export default function ListAssetContent({
                 narrow viewports.
               */}
               <div className="flex flex-wrap items-center gap-2">
-                {isFinished ? (
+                {isFinished && wasCheckedOut ? (
                   <ReturnedBadge />
                 ) : (
                   <AssetStatusBadge
@@ -414,6 +444,43 @@ export default function ListAssetContent({
           <EmptyTableValue />
         )}
       </Td>
+
+      {shouldShowCheckoutColumns && (
+        <>
+          {/* Checked out on */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {checkoutDetails ? (
+              <span className="text-sm text-gray-600">
+                <DateS date={checkoutDetails.checkoutDate} includeTime />
+              </span>
+            ) : (
+              <EmptyTableValue />
+            )}
+          </Td>
+
+          {/* Checked out by */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {checkoutDetails ? (
+              <span className="text-sm text-gray-600">
+                <UserBadge
+                  name={resolveUserDisplayName(checkoutDetails.checkedOutBy)}
+                  img={checkoutDetails.checkedOutBy.profilePicture}
+                />
+              </span>
+            ) : (
+              <EmptyTableValue />
+            )}
+          </Td>
+        </>
+      )}
 
       {shouldShowCheckinColumns && (
         <>

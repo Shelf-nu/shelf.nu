@@ -42,6 +42,7 @@ import {
   formatLocationLink,
   buildAssetListMarkup,
   buildKitListMarkup,
+  LOCATION_SORTING_OPTIONS,
 } from "./utils";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -587,23 +588,67 @@ export async function getLocations(params: {
   /** Items to be loaded per page */
   perPage?: number;
   search?: string | null;
+  /** Sort field. Must be a key of LOCATION_SORTING_OPTIONS; falls back to "createdAt". */
+  orderBy?: string;
+  /** Sort direction. Defaults to "desc". */
+  orderDirection?: "asc" | "desc";
 }) {
-  const { organizationId, page = 1, perPage = 8, search } = params;
+  const {
+    organizationId,
+    page = 1,
+    perPage = 8,
+    search,
+    orderBy = "createdAt",
+    orderDirection = "desc",
+  } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
+    /** Default value of where. Takes the items belonging to current org */
     const where: Prisma.LocationWhereInput = { organizationId };
 
-    /** If the search string exists, add it to the where object */
+    /** If the search string exists, match it across the text fields */
     if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+        { address: { contains: search, mode: "insensitive" } },
+      ];
     }
+
+    /**
+     * orderBy is user-supplied via the URL. Guard against arbitrary values
+     * reaching Prisma by restricting to known sort keys; otherwise fall back
+     * to "createdAt".
+     */
+    const safeOrderBy = Object.prototype.hasOwnProperty.call(
+      LOCATION_SORTING_OPTIONS,
+      orderBy
+    )
+      ? orderBy
+      : "createdAt";
+
+    /**
+     * orderDirection is also user-supplied via the URL (typed at the boundary
+     * but not validated by getParamsValues). Normalize to a safe Prisma sort
+     * order so a malformed value (e.g. "sideways") can't reach Prisma and 500
+     * the index. Anything other than "asc" falls back to "desc".
+     */
+    const safeOrderDirection: Prisma.SortOrder =
+      orderDirection === "asc" ? "asc" : "desc";
+
+    /**
+     * "Number of assets" sorts on a relation count, which requires the
+     * _count shape rather than a scalar field. Post-pivot, asset placement
+     * lives on the `AssetLocation` pivot — sort on its row count instead of
+     * the removed implicit `assets` relation.
+     */
+    const orderByClause: Prisma.LocationOrderByWithRelationInput =
+      safeOrderBy === "assets"
+        ? { assetLocations: { _count: safeOrderDirection } }
+        : { [safeOrderBy]: safeOrderDirection };
 
     const [locations, totalLocations] = await Promise.all([
       /** Get the items */
@@ -611,7 +656,7 @@ export async function getLocations(params: {
         skip,
         take,
         where,
-        orderBy: { updatedAt: "desc" },
+        orderBy: orderByClause,
         include: LOCATION_LIST_INCLUDE,
       }),
 

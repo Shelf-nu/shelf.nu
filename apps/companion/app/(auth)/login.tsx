@@ -10,19 +10,21 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
+  Linking,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { signInViaWeb } from "@/lib/web-auth";
+import { API_BASE_URL } from "@/lib/api";
 import ShelfIcon from "@/components/brand/shelf-icon";
 import ShelfWordmark from "@/components/brand/shelf-wordmark";
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -31,6 +33,18 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSsoSubmitting, setIsSsoSubmitting] = useState(false);
+  const router = useRouter();
+  const params = useLocalSearchParams<{ error?: string }>();
+
+  // Surface a sign-in error passed via navigation — e.g. an SSO exchange failure
+  // that resolved while the auth-callback route was covering this screen on Android
+  // (see handleSsoLogin), or the auth-callback timeout backstop.
+  useEffect(() => {
+    if (params.error) {
+      setError(String(params.error));
+    }
+  }, [params.error]);
 
   // ── iOS credential autofill detection ──────────────────────────────
   // Face ID autofill sets each field exactly once (count=1).
@@ -73,6 +87,47 @@ export default function LoginScreen() {
     if (signInError) {
       setError(signInError);
     }
+  };
+
+  const handleSsoLogin = async () => {
+    Keyboard.dismiss();
+    setError(null);
+    setIsSsoSubmitting(true);
+    // Opens the web SSO flow in the system browser; resolves once the app
+    // receives the callback and installs the session (or the user cancels).
+    const { error: ssoError } = await signInViaWeb();
+    setIsSsoSubmitting(false);
+    if (ssoError) {
+      // On Android the auth-callback route is mounted on top of this screen while
+      // the exchange runs, so a plain setError would be hidden — the user would sit
+      // on the "Signing you in…" spinner until the 20s timeout bounced them to a
+      // fresh, error-less login. Replace that route with login carrying the error so
+      // the failure shows immediately. On iOS the exchange resolves in-frame (no
+      // auth-callback on the stack), so just set the error on the visible screen.
+      if (Platform.OS === "android") {
+        router.replace({
+          pathname: "/(auth)/login",
+          params: { error: ssoError },
+        });
+      } else {
+        setError(ssoError);
+      }
+    }
+  };
+
+  /**
+   * Opens the web password-reset flow in the system browser. The companion app
+   * has no in-app reset: the web OTP flow at /forgot-password is the source of
+   * truth and it rejects SSO users server-side. The external browser (rather
+   * than an in-app tab) lets the user switch to their email app for the code
+   * and back without tearing down the reset page.
+   */
+  const handleForgotPassword = () => {
+    Keyboard.dismiss();
+    setError(null);
+    Linking.openURL(`${API_BASE_URL}/forgot-password`).catch(() => {
+      setError("Couldn't open the password reset page. Please try again.");
+    });
   };
 
   return (
@@ -168,9 +223,9 @@ export default function LoginScreen() {
             <TouchableOpacity
               testID="forgot-password-link"
               style={styles.forgotLink}
-              onPress={() => router.push("/(auth)/forgot-password")}
+              onPress={handleForgotPassword}
               activeOpacity={0.7}
-              accessibilityLabel="Forgot your password? Reset it"
+              accessibilityLabel="Forgot your password? Reset it on the web"
               accessibilityRole="link"
             >
               <Text style={styles.forgotText}>Forgot password?</Text>
@@ -191,6 +246,32 @@ export default function LoginScreen() {
                 <ActivityIndicator color={colors.primaryForeground} />
               ) : (
                 <Text style={styles.buttonText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* ── SSO (web-delegated) ─────────────────────────────── */}
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              testID="sso-sign-in-button"
+              style={[
+                styles.ssoButton,
+                (isSubmitting || isSsoSubmitting) && styles.buttonDisabled,
+              ]}
+              onPress={handleSsoLogin}
+              disabled={isSubmitting || isSsoSubmitting}
+              activeOpacity={0.8}
+              accessibilityLabel="Sign in with SSO"
+              accessibilityRole="button"
+            >
+              {isSsoSubmitting ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -286,6 +367,36 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   buttonText: {
     color: colors.primaryForeground,
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+  },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.gray300,
+  },
+  dividerText: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  ssoButton: {
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    borderRadius: borderRadius.xl,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: spacing.xl,
+    backgroundColor: colors.white,
+    ...shadows.sm,
+  },
+  ssoButtonText: {
+    color: colors.foreground,
     fontSize: fontSize.lg,
     fontWeight: "600",
   },

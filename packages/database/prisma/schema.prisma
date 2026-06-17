@@ -100,7 +100,11 @@ model User {
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
 
-  partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+  partialCheckins  PartialBookingCheckin[]  @relation("PartialCheckinUser")
+  partialCheckouts PartialBookingCheckout[] @relation("PartialCheckoutUser")
+
+  // Native-app SSO web-delegated login — single-use session-handoff codes
+  mobileAuthCodes MobileAuthCode[]
 
   // Updates feature
   createdUpdates Update[]
@@ -1481,8 +1485,9 @@ model Booking {
   // concrete `bookingAssets` at scan-to-assign time.
   modelRequests   BookingModelRequest[]
 
-  tags            Tag[]
-  partialCheckins PartialBookingCheckin[]
+  tags             Tag[]
+  partialCheckins  PartialBookingCheckin[]
+  partialCheckouts PartialBookingCheckout[]
 
   // Datetime
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -1573,6 +1578,65 @@ model PartialBookingCheckin {
   @@index([checkedInById])
   @@index([checkinTimestamp])
   @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
+}
+
+model PartialBookingCheckout {
+  id String @id @default(cuid())
+
+  // Track which assets were checked out during this session
+  assetIds      String[] // Array of asset IDs checked out
+  checkoutCount Int // Number of assets checked out (for quick reference)
+
+  // Metadata
+  checkoutTimestamp DateTime @default(now()) @db.Timestamptz(3)
+
+  // Relationships
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId String
+
+  checkedOutBy   User   @relation("PartialCheckoutUser", fields: [checkedOutById], references: [id])
+  checkedOutById String
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([checkedOutById])
+  @@index([checkoutTimestamp])
+  @@index([bookingId, checkoutTimestamp]) // Composite for efficient booking history queries
+}
+
+/// Native-app SSO web-delegated login — single-use session-handoff codes.
+/// @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
+model MobileAuthCode {
+  id String @id @default(cuid())
+
+  // The user this code authorizes a session for.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  // SHA-256 hash of the single-use plaintext code. The plaintext only ever
+  // lives in the deeplink + the exchange request body — never stored.
+  codeHash String @unique
+
+  // PKCE (S256) challenge — base64url(SHA-256(verifier)) — set when the minting
+  // client is PKCE-capable. NULL for legacy (pre-PKCE) app builds, which redeem
+  // without a verifier (backward compatible).
+  codeChallenge String?
+
+  // Single-use guard: set when redeemed. A non-null value rejects reuse.
+  consumedAt DateTime?
+
+  // Short TTL (~60s). Rejected once `now > expiresAt`.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  // Indexes for foreign keys
+  @@index([userId])
+  // For periodic cleanup of expired, unredeemed rows
+  @@index([expiresAt])
 }
 
 model Kit {
@@ -2213,6 +2277,7 @@ enum ActivityAction {
   BOOKING_CHECKED_OUT
   BOOKING_CHECKED_IN
   BOOKING_PARTIAL_CHECKIN
+  BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
 

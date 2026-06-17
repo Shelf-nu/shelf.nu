@@ -140,6 +140,7 @@ export default function AssetDetailsPage() {
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
     "booking.overview.fulfil-and-checkout",
+    "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
   return (

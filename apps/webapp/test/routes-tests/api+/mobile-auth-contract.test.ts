@@ -15,14 +15,33 @@ import { describe, expect, it } from "vitest";
  */
 const MOBILE_DIR = path.resolve(__dirname, "../../../app/routes/api+/mobile+");
 
+/**
+ * Routes intentionally exempt from `requireMobileAuth`. These authenticate by a
+ * different mechanism and MUST be reviewed individually before being added here.
+ *
+ * - `exchange.ts`: the mobile SSO token exchange. It is pre-session by design —
+ *   the caller has no token yet; the single-use, short-TTL authorization code
+ *   from the SSO deeplink IS the credential (see `modules/auth/mobile-sso.server`).
+ */
+const AUTH_EXEMPT = new Set<string>(["exchange.ts"]);
+
 const ROUTE_FILES = readdirSync(MOBILE_DIR).filter((f) => f.endsWith(".ts"));
+const GUARDED_FILES = ROUTE_FILES.filter((f) => !AUTH_EXEMPT.has(f));
 
 describe("mobile route auth contract", () => {
   it("the directory is non-empty (sanity)", () => {
     expect(ROUTE_FILES.length).toBeGreaterThan(0);
   });
 
-  it.each(ROUTE_FILES)(
+  it("exempt routes still exist (catch stale exemptions)", () => {
+    for (const exempt of AUTH_EXEMPT) {
+      expect(ROUTE_FILES, `${exempt} is exempt but no longer exists`).toContain(
+        exempt
+      );
+    }
+  });
+
+  it.each(GUARDED_FILES)(
     "%s imports requireMobileAuth from mobile-auth.server",
     (file) => {
       const src = readFileSync(path.join(MOBILE_DIR, file), "utf8");

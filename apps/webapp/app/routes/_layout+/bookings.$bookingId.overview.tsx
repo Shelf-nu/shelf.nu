@@ -1,4 +1,5 @@
 import {
+  AssetStatus,
   BookingStatus,
   TagUseFor,
   OrganizationRoles,
@@ -42,12 +43,15 @@ import {
   checkinAssets,
   attributeCategorizedDispositionsByBookingAsset,
   checkinBooking,
+  checkoutAssets,
   checkoutBooking,
+  checkoutRemainingAssets,
   deleteBooking,
   extendBooking,
   getBooking,
   getBookingFlags,
   getDetailedPartialCheckinData,
+  getDetailedPartialCheckoutData,
   removeAssets,
   reserveBooking,
   revertBookingToDraft,
@@ -56,6 +60,7 @@ import {
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
 import {
+  calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
 } from "~/modules/booking/utils.server";
@@ -296,6 +301,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       hasAvailableAssets || canHavePartialCheckins
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
+
+    // Progressive checkout: a booking can have items scanned out one-by-one.
+    // Fetch the partial-checkout records whenever the booking could have them.
+    // This MUST include COMPLETE/ARCHIVED: once a booking is finished all assets
+    // are back to AVAILABLE, so a status check alone (`hasCheckedOutAssets`)
+    // would miss them — and then never-checked-out assets would wrongly render
+    // the "Returned" badge again (hasProgressiveCheckout would be false because
+    // checkedOutAssetIds came back empty). DRAFT/CANCELLED never have records.
+    // `booking.assets` no longer exists post-pivot — derive the CHECKED_OUT
+    // probe from `booking.bookingAssets` (whose `asset.status` is selected via
+    // BOOKING_WITH_ASSETS_INCLUDE).
+    const hasCheckedOutAssets = booking.bookingAssets.some(
+      (ba) => ba.asset.status === "CHECKED_OUT"
+    );
+    const canHavePartialCheckouts = [
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "ARCHIVED",
+    ].includes(booking.status);
+    const { checkedOutAssetIds, partialCheckoutDetails } =
+      hasCheckedOutAssets || canHavePartialCheckouts
+        ? await getDetailedPartialCheckoutData({
+            bookingId: booking.id,
+            organizationId,
+          })
+        : { checkedOutAssetIds: [] as string[], partialCheckoutDetails: {} };
 
     // `booking` already has full asset+kit light data via the BookingAsset pivot.
     // Derive all asset IDs and all (current-booking) kit IDs from the
@@ -733,6 +766,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           booking.status
         );
 
+    // Segmented lifecycle progress (Booked / Checked out / Returned) backing
+    // the new progress bar on the booking detail page. Reuses the pivot
+    // projection built at `enrichedAssetsForView` — each row already carries
+    // `id`, `kitId` (resolved through the slice's `assetKitId`), and `status`
+    // (selected by BOOKING_WITH_ASSETS_INCLUDE). "Checked out" is derived
+    // from asset `status`, "Returned" from the per-booking partial check-in
+    // records (`checkedInAssetIds`).
+    const lifecycleProgress = calculateBookingLifecycleProgress({
+      bookingAssets: enrichedAssetsForView.map((a) => ({
+        id: a.id,
+        kitId: a.kitId,
+        status: a.status,
+      })),
+      checkedInAssetIds,
+      checkedOutAssetIds,
+      bookingStatus: booking.status,
+      countKitsAsSingleUnit,
+    });
+
     const modelName = {
       singular: "item",
       plural: "items",
@@ -788,6 +840,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
+        // Progressive checkout: segmented lifecycle bar + per-asset checkout
+        // details (date/user) for the "Checked out on/by" columns.
+        lifecycleProgress,
+        checkedOutAssetIds,
+        partialCheckoutDetails,
         // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
         // so clientLoader can re-shape without a server round-trip on
         // search/sort/pagination navigations. `rawAssets` here is the per-
@@ -924,6 +981,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "delete",
           "removeAsset",
           "checkOut",
+          "checkOutRemaining",
           "checkIn",
           "archive",
           "cancel",
@@ -932,6 +990,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
+          "partial-checkout",
           "updateNotificationRecipients",
         ]),
         nameChangeOnly: z
@@ -952,6 +1011,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       save: PermissionAction.update,
       removeAsset: PermissionAction.update,
       checkOut: PermissionAction.checkout,
+      checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
@@ -960,6 +1020,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
+      "partial-checkout": PermissionAction.checkout,
       updateNotificationRecipients: PermissionAction.update,
     };
 
@@ -1234,6 +1295,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
+      case "checkOutRemaining": {
+        // "Check out remaining" — check out every asset still in the booking's
+        // Booked bucket at once. The service resolves the eligible ids
+        // server-side (no client-supplied id list) and routes through the
+        // progressive partial-checkout path, which writes notes/events.
+        return await checkoutRemainingAssets({
+          formData,
+          request,
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
+        });
+      }
       case "checkIn": {
         // Enforce explicit check-in requirement based on role and settings
         if (
@@ -1270,6 +1345,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "specificAssetIds[]"
         ) as string[];
 
+        // Only assets that were actually checked out get a check-in note —
+        // progressive checkout can leave never-checked-out assets in the booking.
+        // Post-pivot, asset → booking lookup goes via the `BookingAsset` pivot.
+        const checkedOutAssetIdsBeforeCheckin = (
+          await db.asset.findMany({
+            where: {
+              bookingAssets: { some: { bookingId: id } },
+              organizationId,
+              status: AssetStatus.CHECKED_OUT,
+            },
+            select: { id: true },
+          })
+        ).map((a) => a.id);
+
         const booking = await checkinBooking({
           id,
           organizationId,
@@ -1280,24 +1369,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
-        const bookingLink = wrapLinkForNote(
-          `/bookings/${booking.id}`,
-          booking.name
-        );
-        await createNotes({
-          content: `${actor} checked in asset with ${bookingLink}.`,
-          type: "UPDATE",
-          userId: user.id,
-          assetIds: [
-            ...new Set(booking.bookingAssets.map((ba) => ba.asset.id)),
-          ],
-          organizationId,
-        });
+        // Only write notes for assets that were actually checked out before
+        // this check-in. With progressive checkout, a booking may still have
+        // un-checked-out assets at check-in time — those shouldn't get a
+        // "checked in" note. Falls back to no-op when nothing was out.
+        if (checkedOutAssetIdsBeforeCheckin.length > 0) {
+          const actor = wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          });
+          const bookingLink = wrapLinkForNote(
+            `/bookings/${booking.id}`,
+            booking.name
+          );
+          await createNotes({
+            content: `${actor} checked in asset with ${bookingLink}.`,
+            type: "UPDATE",
+            userId: user.id,
+            assetIds: checkedOutAssetIdsBeforeCheckin,
+            organizationId,
+          });
+        }
 
         sendNotification({
           title: "Booking checked-in",
@@ -1312,6 +1405,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "partial-checkin": {
         return await checkinAssets({
+          formData,
+          request,
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
+        });
+      }
+      case "partial-checkout": {
+        return await checkoutAssets({
           formData,
           request,
           bookingId: id,
@@ -1663,6 +1766,7 @@ export default function BookingPage() {
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
     "booking.overview.fulfil-and-checkout",
+    "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

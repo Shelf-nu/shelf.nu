@@ -11,7 +11,6 @@ import { pushIntoTab } from "./navigation";
  *   shelf://bookings/{id}       → Booking detail
  *   shelf://qr/{qrId}           → QR code resolve → asset detail
  *   shelf://scanner             → Open scanner
- *   shelf://reset-password      → Handled by Supabase auth (no-op in app)
  *
  * Also handles HTTPS universal links:
  *   https://app.shelf.nu/qr/{id}
@@ -103,7 +102,7 @@ export function useDeepLinkHandler() {
           router.push("/(tabs)/scanner");
           break;
         case "unknown":
-          // Ignore unrecognized links (e.g., reset-password handled by Supabase)
+          // Ignore unrecognized links — nothing to navigate to.
           break;
       }
     }
@@ -112,7 +111,7 @@ export function useDeepLinkHandler() {
     Linking.getInitialURL().then((url) => {
       if (url) {
         const link = parseDeepLink(url);
-        // Don't navigate for reset-password — Supabase handles it
+        // Skip navigation for unrecognized links.
         if (link.type !== "unknown") {
           // Small delay to let navigation mount
           setTimeout(() => navigateToLink(link), 500);

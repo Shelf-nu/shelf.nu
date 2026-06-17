@@ -34,7 +34,7 @@ import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
-import CheckoutDialog from "../checkout-dialog";
+import CheckoutDropdown from "../checkout-dropdown";
 import type { BookingFormSchemaType } from "./forms-schema";
 import { BookingFormSchema } from "./forms-schema";
 
@@ -94,19 +94,25 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     userId,
     currentOrganization,
     booking: loaderBooking,
+    lifecycleProgress,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
-   * Phase 3d-Polish: bookings with outstanding `BookingModelRequest` rows
-   * must route through the fulfil-and-checkout scanner instead of the
-   * normal checkout alert — the server's `RESERVED → ONGOING` guard
-   * refuses transitions while any request still has `quantity > 0`.
-   * Derived inline from `booking.modelRequests` (already loaded via
-   * `BOOKING_WITH_ASSETS_INCLUDE`) to avoid a new loader field.
+   * Bookings with outstanding `BookingModelRequest` rows must route through
+   * the fulfil-and-checkout scanner instead of the normal checkout alert —
+   * the server's `RESERVED → ONGOING` guard refuses transitions while any
+   * request still has `quantity > 0`. Derived inline from
+   * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
+   * to avoid a new loader field.
    */
   const outstandingModelRequestCount =
     loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
     0;
+
+  // Progressive checkout is only offered while there are still items that
+  // haven't been checked out yet (the Booked bucket). Once everything has been
+  // checked out, hide the "Scan to check out" entry point.
+  const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
   const [startDate, setStartDate] = useState(incomingStartDate);
   const [endDate, setEndDate] = useState(incomingEndDate);
 
@@ -308,8 +314,28 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               </Button>
             ) : null}
 
-            {/* When booking is reserved, we show the check-out button */}
-            <When truthy={bookingStatus?.isReserved && canCheckOutBooking}>
+            {/*
+              Check-out control. Collapses the full "Check Out" flow (RESERVED
+              only) and the progressive "Scan to check out" flow
+              (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
+              dropdown — mirroring the check-in dropdown for a consistent header.
+              CheckoutDropdown renders a single button when only one option
+              applies, and nothing when neither does.
+
+              When the booking has outstanding `BookingModelRequest` rows the
+              normal RESERVED → ONGOING transition is refused by the server
+              (qty > 0 model requests must be fulfilled first), so we bypass
+              the dropdown entirely and route through the fulfil-and-checkout
+              scanner — HEAD's qty-tracked behaviour.
+            */}
+            <When
+              truthy={
+                (bookingStatus?.isReserved ||
+                  ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+                    hasItemsToCheckOut)) &&
+                canCheckOutBooking
+              }
+            >
               {(() => {
                 const checkoutDisabled =
                   disabled ||
@@ -329,22 +355,46 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       }
                     : false;
 
-                // When requests are outstanding, the normal checkout would hit the guard — route through the fulfil scanner instead.
-                return outstandingModelRequestCount > 0 ? (
-                  <Button
-                    to="fulfil-and-checkout"
-                    disabled={checkoutDisabled}
-                    className="grow"
-                    size="sm"
-                  >
-                    Check Out
-                  </Button>
-                ) : (
-                  <CheckoutDialog
+                // When requests are outstanding, the normal checkout would hit
+                // the guard — route through the fulfil scanner instead. This
+                // takes precedence over the progressive-checkout dropdown
+                // because the booking can't transition until requests are met.
+                if (outstandingModelRequestCount > 0) {
+                  return (
+                    <Button
+                      to="fulfil-and-checkout"
+                      disabled={checkoutDisabled}
+                      className="grow"
+                      size="sm"
+                    >
+                      Check Out
+                    </Button>
+                  );
+                }
+
+                return (
+                  <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
                     booking={{ id, name: name!, from: new Date(startDate!) }}
-                    disabled={checkoutDisabled}
+                    disabled={disabled}
+                    canFullCheckOut={!!bookingStatus?.isReserved}
+                    canCheckOutRemaining={
+                      !!(
+                        (bookingStatus?.isOngoing ||
+                          bookingStatus?.isOverdue) &&
+                        hasItemsToCheckOut
+                      )
+                    }
+                    canScanCheckOut={
+                      !!(
+                        (bookingStatus?.isReserved ||
+                          bookingStatus?.isOngoing ||
+                          bookingStatus?.isOverdue) &&
+                        hasItemsToCheckOut
+                      )
+                    }
+                    checkOutDisabled={checkoutDisabled}
                   />
                 );
               })()}

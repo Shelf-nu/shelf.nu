@@ -566,6 +566,13 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           )`;
         }
 
+        // An empty category set matches no assets. Guard before
+        // `Prisma.join([])` (which throws) — same crash class as
+        // SHELF-WEBAPP-1MY on the location branch.
+        if (values.length === 0) {
+          return Prisma.sql`${whereClause} AND 1=0`;
+        }
+
         const categoryIdsArray = Prisma.join(
           values.map((id) => Prisma.sql`${id}`),
           ", "
@@ -653,6 +660,15 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
               WHERE al."assetId" = a.id AND al."locationId" = ANY(ARRAY[${locationIdsArray}]::text[])
             )
           )`;
+        }
+
+        // An empty location set matches no assets. This happens when a
+        // `withinHierarchy` filter is expanded against a deleted/stale location
+        // whose descendant lookup returns no ids (SHELF-WEBAPP-1MY). Guard here
+        // so we never call `Prisma.join([])`, which throws and 500s the whole
+        // /assets index.
+        if (values.length === 0) {
+          return Prisma.sql`${whereClause} AND 1=0`;
         }
 
         const locationIdsArray = Prisma.join(
@@ -796,6 +812,12 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
               WHERE ak."assetId" = a.id AND ak."kitId" = ANY(ARRAY[${kitIdsArray}]::text[])
             )
           )`;
+        }
+
+        // An empty kit set matches no assets. Guard before `Prisma.join([])`
+        // (which throws) — same crash class as SHELF-WEBAPP-1MY.
+        if (values.length === 0) {
+          return Prisma.sql`${whereClause} AND 1=0`;
         }
 
         const kitIdsArray = Prisma.join(
@@ -1120,6 +1142,12 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )`;
       }
 
+      // An empty custodian set matches no assets. Guard before
+      // `Prisma.join([])` (which throws) — same crash class as SHELF-WEBAPP-1MY.
+      if (values.length === 0) {
+        return Prisma.sql`${whereClause} AND 1=0`;
+      }
+
       const custodianIdsArray = Prisma.join(
         values.map((id) => Prisma.sql`${id}`),
         ", "
@@ -1239,6 +1267,12 @@ function addUpcomingBookingsFilter(
             AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
           )
         )`;
+      }
+
+      // An empty booking set matches no assets. Guard before `Prisma.join([])`
+      // (which throws) — same crash class as SHELF-WEBAPP-1MY.
+      if (values.length === 0) {
+        return Prisma.sql`${whereClause} AND 1=0`;
       }
 
       const bookingIdsArray = Prisma.join(

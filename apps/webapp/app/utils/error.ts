@@ -105,7 +105,8 @@ export type FailureReason = {
     | "Audit"
     | "Activity"
     | "Consumption Log"
-    | "Update";
+    | "Update"
+    | "Analytics";
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

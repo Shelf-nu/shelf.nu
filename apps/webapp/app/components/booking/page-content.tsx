@@ -19,7 +19,7 @@ export function BookingPageContent() {
     totalValue,
     allCategories,
     assetsCount,
-    partialCheckinProgress,
+    lifecycleProgress,
   } = useLoaderData<BookingPageLoaderData>();
 
   // For finding the custodian, use teamMembersForForm which guarantees custodian availability
@@ -62,7 +62,7 @@ export function BookingPageContent() {
             kitsCount={totalKits}
             assetsCount={assetsCount}
             totalValue={totalValue}
-            partialCheckinProgress={partialCheckinProgress}
+            lifecycleProgress={lifecycleProgress}
             allCategories={allCategories}
             tags={booking.tags}
             creator={booking.creator}
