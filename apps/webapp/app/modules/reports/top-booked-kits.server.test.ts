@@ -199,4 +199,19 @@ describe("topBookedKitsReport", () => {
     expect(where.organizationId).toBe("org-1");
     expect(where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
   });
+
+  it("uses an interval-overlap timeframe predicate (counts bookings spanning the window)", async () => {
+    await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    const where = vi.mocked(db.booking.findMany).mock.calls[0][0]?.where as any;
+    // Overlap = starts on/before window end AND ends on/after window start.
+    // A naive start-OR-end-in-window test (where.OR) would miss bookings that
+    // span the entire window, so assert we are NOT using it.
+    expect(where.from).toEqual({ lte: TIMEFRAME.to });
+    expect(where.to).toEqual({ gte: TIMEFRAME.from });
+    expect(where.OR).toBeUndefined();
+  });
 });

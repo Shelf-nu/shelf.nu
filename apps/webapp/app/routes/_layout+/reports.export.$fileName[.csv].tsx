@@ -391,10 +391,19 @@ function formatReturnStatus(
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  if (field.includes(",") || field.includes('"') || field.includes("\n")) {
-    return `"${field.replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
+  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
+  // values with a single quote so the cell is treated as literal text. Applied
+  // here in the shared helper so every report export is protected.
+  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  if (
+    safeField.includes(",") ||
+    safeField.includes('"') ||
+    safeField.includes("\n")
+  ) {
+    return `"${safeField.replace(/"/g, '""')}"`;
   }
-  return field;
+  return safeField;
 }
 
 /**
@@ -507,10 +516,10 @@ function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
 
   const csvRows = rows.map((row, index) => [
     (index + 1).toString(),
-    row.kitId,
+    escapeCsvField(row.kitId),
     escapeCsvField(row.kitName),
-    row.category || "",
-    row.location || "",
+    escapeCsvField(row.category || ""),
+    escapeCsvField(row.location || ""),
     row.bookingCount.toString(),
     row.totalDaysBooked.toString(),
     row.bookingCount > 0

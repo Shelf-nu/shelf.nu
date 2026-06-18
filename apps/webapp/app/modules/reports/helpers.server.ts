@@ -2323,16 +2323,17 @@ async function fetchTopBookedKitData(
   topKit: TopBookedKitRow | null;
   totalKitBookings: number;
 }> {
-  // Step 1 — lightweight scan: only each booking's assets' kitIds. The same
-  // start-OR-end timeframe predicate as the asset report, so the two reports
-  // reconcile against the same booking set.
+  // Step 1 — lightweight scan: only each booking's assets' kitIds.
+  // Interval-overlap predicate: a booking counts if it overlaps the window at
+  // all — it starts on/before the window end AND ends on/after the window
+  // start. This deliberately covers bookings that span the entire window
+  // (start before `from`, end after `to`), which a naive start-OR-end-in-window
+  // test would miss (e.g. a month-long booking viewed with a one-week range).
   const bookings = await db.booking.findMany({
     where: {
       organizationId,
-      OR: [
-        { from: { gte: timeframe.from, lte: timeframe.to } },
-        { to: { gte: timeframe.from, lte: timeframe.to } },
-      ],
+      from: { lte: timeframe.to },
+      to: { gte: timeframe.from },
       status: { notIn: ["DRAFT", "CANCELLED"] },
     },
     select: {
