@@ -36,6 +36,7 @@ export {
   NumberCell,
   BooleanCell,
   AssetCell,
+  KitCell,
 } from "./report-table";
 export type { ReportTableProps } from "./report-table";
 
@@ -112,6 +113,7 @@ export { OverdueItemsContent } from "./overdue-items-content";
 export { IdleAssetsContent } from "./idle-assets-content";
 export { CustodySnapshotContent } from "./custody-snapshot-content";
 export { TopBookedAssetsContent } from "./top-booked-assets-content";
+export { TopBookedKitsContent } from "./top-booked-kits-content";
 export { AssetDistributionContent } from "./asset-distribution-content";
 export { AssetInventoryContent } from "./asset-inventory-content";
 export { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";

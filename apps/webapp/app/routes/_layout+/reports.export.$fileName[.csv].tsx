@@ -16,6 +16,7 @@ import {
   overdueItemsReport,
   idleAssetsReport,
   topBookedAssetsReport,
+  topBookedKitsReport,
   assetInventoryReport,
   assetUtilizationReport,
   assetActivityReport,
@@ -30,6 +31,7 @@ import type {
   OverdueItemRow,
   IdleAssetRow,
   TopBookedAssetRow,
+  TopBookedKitRow,
   AssetInventoryRow,
   AssetUtilizationRow,
   AssetActivityRow,
@@ -166,6 +168,19 @@ export const loader = async ({
         });
         csvString = generateTopBookedAssetsCsv(
           reportData.rows as TopBookedAssetRow[]
+        );
+        break;
+      }
+
+      case "top-booked-kits": {
+        const reportData = await topBookedKitsReport({
+          organizationId,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateTopBookedKitsCsv(
+          reportData.rows as TopBookedKitRow[]
         );
         break;
       }
@@ -463,6 +478,37 @@ function generateTopBookedAssetsCsv(rows: TopBookedAssetRow[]): string {
     (index + 1).toString(),
     row.assetId,
     escapeCsvField(row.assetName),
+    row.category || "",
+    row.location || "",
+    row.bookingCount.toString(),
+    row.totalDaysBooked.toString(),
+    row.bookingCount > 0
+      ? (row.totalDaysBooked / row.bookingCount).toFixed(1)
+      : "0",
+  ]);
+
+  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+}
+
+/**
+ * Generate CSV for Top Booked Kits report.
+ */
+function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
+  const headers = [
+    "Rank",
+    "Kit ID",
+    "Kit Name",
+    "Category",
+    "Location",
+    "Booking Count",
+    "Total Days Booked",
+    "Avg Days per Booking",
+  ];
+
+  const csvRows = rows.map((row, index) => [
+    (index + 1).toString(),
+    row.kitId,
+    escapeCsvField(row.kitName),
     row.category || "",
     row.location || "",
     row.bookingCount.toString(),

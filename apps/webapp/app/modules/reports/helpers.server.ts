@@ -51,9 +51,11 @@ import type {
   ReportPayload,
   ResolvedTimeframe,
   TopBookedAssetRow,
+  TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
 import { refreshExpiredAssetImages } from "../asset/service.server";
+import { refreshExpiredKitImages } from "../kit/service.server";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -2213,6 +2215,299 @@ async function computeTopBookedKpis(
         mostBookedAsset.length > 20
           ? `${mostBookedAsset.slice(0, 20)}...`
           : mostBookedAsset,
+      rawValue: mostBookedCount,
+      format: "number",
+      delta: mostBookedCount > 0 ? `${mostBookedCount}x` : null,
+      deltaType: "positive",
+    },
+  ];
+}
+
+// -----------------------------------------------------------------------------
+// Top Booked Kits Report
+// -----------------------------------------------------------------------------
+
+interface TopBookedKitsArgs {
+  organizationId: string;
+  timeframe: ResolvedTimeframe;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Generate the Top Booked Kits report.
+ *
+ * The kit analogue of {@link topBookedAssetsReport}: identifies the most
+ * frequently booked kits. Kits have no direct relation to bookings — a kit is
+ * "booked" when its member assets (carrying its `kitId`) are added to a
+ * booking, and kits move atomically (you cannot book a single item out of a
+ * kit, see `bookings.$bookingId.overview.manage-assets.tsx`). So each kit is
+ * counted **once per booking** it appears in.
+ *
+ * Answers: "Which kits are most in demand?"
+ *
+ * @param args - Report parameters
+ * @returns Complete report payload
+ */
+export async function topBookedKitsReport(
+  args: TopBookedKitsArgs
+): Promise<ReportPayload<TopBookedKitRow>> {
+  const { organizationId, timeframe, page = 1, pageSize = 50 } = args;
+
+  const startTime = performance.now();
+
+  try {
+    // A single booking scan feeds both the rows and the KPIs (the asset report
+    // runs two parallel scans; for kits one scan + one kit-hydration query is
+    // cheaper and keeps the per-booking dedupe in one place).
+    const data = await fetchTopBookedKitData(
+      organizationId,
+      timeframe,
+      page,
+      pageSize
+    );
+
+    const kpis = buildTopBookedKitsKpis({
+      totalKitBookings: data.totalKitBookings,
+      uniqueKitsBooked: data.totalCount,
+      topKit: data.topKit,
+    });
+
+    const computedMs = Math.round(performance.now() - startTime);
+
+    return {
+      report: {
+        id: "top-booked-kits",
+        title: "Top Booked Kits",
+        description:
+          "Identify your most frequently booked kits and their utilization patterns.",
+      },
+      filters: {
+        timeframe,
+        filters: [],
+      },
+      kpis,
+      rows: data.rows,
+      computedMs,
+      totalRows: data.totalCount,
+      page,
+      pageSize,
+      topBookedKit: data.topKit,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label: "Report",
+      message: "Failed to generate Top Booked Kits report",
+      additionalData: { organizationId, timeframe: timeframe.preset },
+    });
+  }
+}
+
+/**
+ * Scans bookings in the timeframe, aggregates booking frequency per kit
+ * (deduped once per booking), hydrates kit metadata in a single org-scoped
+ * query, and re-signs expired kit image URLs server-side.
+ *
+ * @returns Paginated rows, total unique-kit count, the #1 kit, and the total
+ *   kit-booking incidences (sum of every kit's booking count) for the KPIs.
+ */
+async function fetchTopBookedKitData(
+  organizationId: string,
+  timeframe: ResolvedTimeframe,
+  page: number,
+  pageSize: number
+): Promise<{
+  rows: TopBookedKitRow[];
+  totalCount: number;
+  topKit: TopBookedKitRow | null;
+  totalKitBookings: number;
+}> {
+  // Step 1 — lightweight scan: only each booking's assets' kitIds. The same
+  // start-OR-end timeframe predicate as the asset report, so the two reports
+  // reconcile against the same booking set.
+  const bookings = await db.booking.findMany({
+    where: {
+      organizationId,
+      OR: [
+        { from: { gte: timeframe.from, lte: timeframe.to } },
+        { to: { gte: timeframe.from, lte: timeframe.to } },
+      ],
+      status: { notIn: ["DRAFT", "CANCELLED"] },
+    },
+    select: {
+      from: true,
+      to: true,
+      assets: {
+        where: { kitId: { not: null } },
+        select: { id: true, kitId: true },
+      },
+    },
+  });
+
+  // Aggregate booking count + total days per kit, counting each kit once per
+  // booking (kits are atomic in a booking).
+  const kitAgg = new Map<string, { bookingCount: number; totalDays: number }>();
+  for (const booking of bookings) {
+    // Clamp to ≥1 day; handles inverted dates defensively (matches asset report).
+    const bookingDays =
+      booking.from && booking.to
+        ? Math.max(
+            1,
+            Math.ceil(
+              (booking.to.getTime() - booking.from.getTime()) /
+                (1000 * 60 * 60 * 24)
+            )
+          )
+        : 1;
+
+    // Distinct, non-null kitIds present in this booking — counted once each
+    // (kits are atomic in a booking). Mirrors `getKitIdsByAssets`; inlined to
+    // avoid pulling the booking service's heavy (scanner/lottie) import graph
+    // into this server module.
+    const bookingKitIds = new Set<string>();
+    for (const asset of booking.assets) {
+      if (asset.kitId) bookingKitIds.add(asset.kitId);
+    }
+    for (const kitId of bookingKitIds) {
+      if (!kitAgg.has(kitId)) {
+        kitAgg.set(kitId, { bookingCount: 0, totalDays: 0 });
+      }
+      const entry = kitAgg.get(kitId)!;
+      entry.bookingCount++;
+      entry.totalDays += bookingDays;
+    }
+  }
+
+  if (kitAgg.size === 0) {
+    return { rows: [], totalCount: 0, topKit: null, totalKitBookings: 0 };
+  }
+
+  const totalKitBookings = Array.from(kitAgg.values()).reduce(
+    (sum, entry) => sum + entry.bookingCount,
+    0
+  );
+
+  // Step 2 — hydrate kit metadata in one org-scoped query. Explicit
+  // `organizationId` even though kitIds derive from this org's bookings
+  // (defence-in-depth per the org-scope rule). Kits deleted between the two
+  // queries simply drop out — `results` is built from the rows we got back.
+  const kits = await db.kit.findMany({
+    where: { id: { in: Array.from(kitAgg.keys()) }, organizationId },
+    select: {
+      id: true,
+      organizationId: true,
+      name: true,
+      image: true,
+      imageExpiration: true,
+      category: { select: { name: true } },
+      location: { select: { name: true } },
+    },
+  });
+
+  // Re-sign expired kit image signed URLs server-side so the report table
+  // doesn't trigger a client-side KitImage refresh storm (render-stability).
+  const refreshedKits = await refreshExpiredKitImages(kits);
+
+  const periodDays = Math.ceil(
+    (timeframe.to.getTime() - timeframe.from.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  const results = refreshedKits
+    .map((kit) => {
+      const agg = kitAgg.get(kit.id)!;
+      return {
+        id: kit.id,
+        kitId: kit.id,
+        kitName: kit.name,
+        image: kit.image,
+        imageExpiration: kit.imageExpiration,
+        category: kit.category?.name || null,
+        location: kit.location?.name || null,
+        bookingCount: agg.bookingCount,
+        totalDaysBooked: agg.totalDays,
+        timeBookedRate:
+          periodDays > 0
+            ? Math.min(100, Math.round((agg.totalDays / periodDays) * 100))
+            : 0,
+      };
+    })
+    .sort((a, b) => b.bookingCount - a.bookingCount);
+
+  // The #1 most booked kit (before pagination) — always the first sorted result.
+  const topKit = results[0] || null;
+
+  const paginatedRows = results.slice((page - 1) * pageSize, page * pageSize);
+
+  return {
+    rows: paginatedRows,
+    totalCount: results.length,
+    topKit,
+    totalKitBookings,
+  };
+}
+
+/**
+ * Builds the KPI cards for the Top Booked Kits report from pre-computed
+ * aggregates (pure — no DB access).
+ *
+ * `total_kit_bookings` is the sum of every kit's booking count, so it
+ * reconciles exactly with the table's Bookings column (deliberately defined
+ * differently from the asset report's raw booking count, which would be
+ * inflated here by bookings that contain no kits).
+ */
+function buildTopBookedKitsKpis({
+  totalKitBookings,
+  uniqueKitsBooked,
+  topKit,
+}: {
+  totalKitBookings: number;
+  uniqueKitsBooked: number;
+  topKit: TopBookedKitRow | null;
+}): ReportKpi[] {
+  const avgBookingsPerKit =
+    uniqueKitsBooked > 0
+      ? Math.round((totalKitBookings / uniqueKitsBooked) * 10) / 10
+      : 0;
+
+  const mostBookedKit = topKit?.kitName ?? "—";
+  const mostBookedCount = topKit?.bookingCount ?? 0;
+
+  return [
+    {
+      id: "total_kit_bookings",
+      label: "Total Bookings",
+      value: totalKitBookings.toLocaleString(),
+      rawValue: totalKitBookings,
+      format: "number",
+      delta: null,
+      deltaType: "neutral",
+    },
+    {
+      id: "unique_kits_booked",
+      label: "Kits Booked",
+      value: uniqueKitsBooked.toLocaleString(),
+      rawValue: uniqueKitsBooked,
+      format: "number",
+      delta: null,
+      deltaType: "neutral",
+    },
+    {
+      id: "avg_bookings_per_kit",
+      label: "Avg. per Kit",
+      value: avgBookingsPerKit > 0 ? `${avgBookingsPerKit}x` : "—",
+      rawValue: avgBookingsPerKit,
+      format: "number",
+      delta: null,
+      deltaType: "neutral",
+    },
+    {
+      id: "most_booked_kit",
+      label: "Most Popular",
+      value:
+        mostBookedKit.length > 20
+          ? `${mostBookedKit.slice(0, 20)}...`
+          : mostBookedKit,
       rawValue: mostBookedCount,
       format: "number",
       delta: mostBookedCount > 0 ? `${mostBookedCount}x` : null,
