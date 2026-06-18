@@ -6,7 +6,6 @@ import { DownloadIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
-import useApiQuery from "~/hooks/use-api-query";
 import type { BulkQrDownloadLoaderData } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
 import { generateHtmlFromComponent } from "~/utils/component-to-html";
 import { isSelectingAllItems } from "~/utils/list";
@@ -39,19 +38,26 @@ export default function BulkDownloadQrDialog({
   const [downloadState, setDownloadState] = useState<DownloadState>({
     status: "idle",
   });
-  const [shouldFetchAssets, setShouldFetchAssets] = useState(false);
   const [searchParams] = useSearchParams();
 
   /**
-   * Tracks whether a download the user explicitly requested is still pending.
+   * Monotonically increasing id of the most recent download request.
    *
    * The dialog stays mounted while the user filters/re-selects behind it (only
-   * `isDialogOpen` toggles), so the fetched response must never be reused across
-   * requests. This ref lets the (stable) success/error callbacks ignore a
-   * resolution whose request was cancelled — e.g. the dialog was closed while
-   * the fetch was in flight — instead of triggering a stale download.
+   * `isDialogOpen` toggles), and a download can be dismissed (header X, Escape,
+   * backdrop) while its fetch is still in flight. A single boolean can't tell
+   * which request a late response belongs to once a newer request has started,
+   * so every click (and every close) bumps this token; a resolution is only
+   * acted on while its captured id still matches the latest one.
    */
-  const isDownloadPendingRef = useRef(false);
+  const requestIdRef = useRef(0);
+
+  /**
+   * AbortController for the in-flight request, so starting a new download (or
+   * closing the dialog) aborts the previous fetch instead of leaving it to
+   * resolve and zip stale assets.
+   */
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const allAssetsSelected = isSelectingAllItems(selectedAssets);
@@ -63,11 +69,12 @@ export default function BulkDownloadQrDialog({
     selectedAssets.length === 0 || downloadState.status === "loading";
 
   function handleClose() {
-    // Cancel any in-flight request so a late resolution cannot trigger a
-    // download after the dialog has been closed.
-    isDownloadPendingRef.current = false;
+    // Supersede and abort any in-flight request so a late resolution cannot
+    // trigger a download after the dialog has been dismissed.
+    requestIdRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setDownloadState({ status: "idle" });
-    setShouldFetchAssets(false);
     onClose();
   }
 
@@ -91,9 +98,11 @@ export default function BulkDownloadQrDialog({
    * the user just made — not a response cached from a previous filter/selection.
    *
    * @param data - Asset + QR payload for the current selection/filters
+   * @param requestId - Token of the request that produced `data`; the browser
+   * download is skipped if a newer request has since superseded this one.
    */
   const processDownload = useCallback(
-    async (data: BulkQrDownloadLoaderData) => {
+    async (data: BulkQrDownloadLoaderData, requestId: number) => {
       try {
         const { assets, qrIdDisplayPreference, showShelfBranding } = data;
 
@@ -162,6 +171,11 @@ export default function BulkDownloadQrDialog({
         });
 
         const zipBlob = await zip.generateAsync({ type: "blob" });
+
+        // A newer request may have superseded this one while we were
+        // rasterizing; if so, drop this download silently.
+        if (requestId !== requestIdRef.current) return;
+
         const downloadLink = document.createElement("a");
 
         downloadLink.href = URL.createObjectURL(zipBlob);
@@ -175,68 +189,66 @@ export default function BulkDownloadQrDialog({
 
         setDownloadState({ status: "success" });
       } catch (error) {
+        // A superseded request must not clobber the UI with its own error.
+        if (requestId !== requestIdRef.current) return;
         setDownloadState({
           status: "error",
           error:
             error instanceof Error ? error.message : "Something went wrong.",
         });
-      } finally {
-        // Re-arm the fetch gate so the NEXT Download click triggers a fresh
-        // fetch (useApiQuery refires on the enabled false->true edge).
-        setShouldFetchAssets(false);
       }
     },
     []
   );
 
   /**
-   * Stable success handler for the assets query. Drives the download with the
-   * freshly fetched payload, ignoring a resolution whose request was cancelled
-   * (e.g. the dialog was closed while the fetch was in flight).
+   * Starts a download for the CURRENT selection/filters.
+   *
+   * Each click supersedes any in-flight request (bumping the token and aborting
+   * the previous fetch) and fetches fresh data directly, so a slower earlier
+   * response can never be processed in place of this one. We fetch imperatively
+   * here — rather than via `useApiQuery` — precisely because this flow needs
+   * per-request cancellation that a shared, cache-retaining query hook can't
+   * provide.
    */
-  const handleQuerySuccess = useCallback(
-    (data: BulkQrDownloadLoaderData) => {
-      if (!isDownloadPendingRef.current) return;
-      isDownloadPendingRef.current = false;
-      void processDownload(data);
-    },
-    [processDownload]
-  );
-
-  /** Stable error handler for the assets query. */
-  const handleQueryError = useCallback((message: string) => {
-    if (!isDownloadPendingRef.current) return;
-    isDownloadPendingRef.current = false;
-    setShouldFetchAssets(false);
-    setDownloadState({ status: "error", error: message });
-  }, []);
-
-  /**
-   * Fetches assets for the CURRENT request. `enabled` is true only while a
-   * download is pending and is re-armed on every click, so each download fetches
-   * fresh data for the live selection/filters instead of reusing a cached
-   * response. The download is driven by `onSuccess` (not the cached `data`) so a
-   * stale response can never be acted on.
-   */
-  useApiQuery<BulkQrDownloadLoaderData>({
-    api: "/api/assets/get-assets-for-bulk-qr-download",
-    searchParams: apiSearchParams,
-    enabled: shouldFetchAssets && !isSelectingMoreThan100,
-    onSuccess: handleQuerySuccess,
-    onError: handleQueryError,
-  });
-
-  function handleBulkDownloadQr() {
-    if (isSelectingMoreThan100) {
+  async function handleBulkDownloadQr() {
+    if (isSelectingMoreThan100 || !apiSearchParams) {
       return;
     }
 
-    // Mark a fresh request and (re)arm the fetch. shouldFetchAssets is always
-    // false here (it is reset after each download/close), so this false->true
-    // edge is what makes useApiQuery fetch the CURRENT selection/filters.
-    isDownloadPendingRef.current = true;
+    // Supersede any in-flight request before starting a fresh one.
+    requestIdRef.current += 1;
+    const requestId = requestIdRef.current;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setDownloadState({ status: "loading" });
-    setShouldFetchAssets(true);
+
+    try {
+      const response = await fetch(
+        `/api/assets/get-assets-for-bulk-qr-download?${apiSearchParams.toString()}`,
+        { signal: controller.signal }
+      );
+      const data = (await response.json()) as BulkQrDownloadLoaderData;
+
+      // Ignore the response if a newer request superseded this one in flight.
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      await processDownload(data, requestId);
+    } catch (error) {
+      // Aborted/superseded requests resolve here too; only the latest one may
+      // surface an error.
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      setDownloadState({
+        status: "error",
+        error: error instanceof Error ? error.message : "Something went wrong.",
+      });
+    }
   }
 
   return (
@@ -303,7 +315,7 @@ export default function BulkDownloadQrDialog({
                   <Button
                     type="button"
                     className="flex-1"
-                    onClick={handleBulkDownloadQr}
+                    onClick={() => void handleBulkDownloadQr()}
                     disabled={disabled || isSelectingMoreThan100}
                   >
                     Download
