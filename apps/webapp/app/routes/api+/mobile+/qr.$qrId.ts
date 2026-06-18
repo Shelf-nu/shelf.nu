@@ -5,6 +5,7 @@ import {
   requireMobileAuth,
   MOBILE_ASSET_SELECT,
 } from "~/modules/api/mobile-auth.server";
+import { recordMobileActivity } from "~/modules/api/mobile-usage.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 
@@ -52,7 +53,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           organizationId: qr.organizationId,
         },
       },
-      select: { id: true },
+      select: { id: true, lastMobileActiveAt: true },
     });
 
     if (!membership) {
@@ -65,6 +66,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { status: 403 }
       );
     }
+
+    // Record companion-app usage for adoption metrics. This scanner endpoint
+    // does its own membership check (above) instead of requireOrganizationAccess,
+    // so it would otherwise miss QR scans — a core companion action. Debounced +
+    // fire-and-forget (see mobile-usage.server.ts).
+    recordMobileActivity(
+      user.id,
+      qr.organizationId,
+      membership.lastMobileActiveAt
+    );
 
     // Now fetch the full data (only after authorization passes).
     // Scope by qr.organizationId — proven above (line 38 ensures it exists,

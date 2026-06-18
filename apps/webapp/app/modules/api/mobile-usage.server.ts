@@ -28,9 +28,10 @@ const ACTIVITY_DEBOUNCE_MS = 60 * 60 * 1000; // 1 hour
  * adoption metrics. Debounced and fire-and-forget — safe to call on every
  * authenticated mobile request: it never throws and never delays the response.
  *
- * The write targets the `(userId, organizationId)` composite key, so it is
- * org-scoped by construction — no cross-org write is possible regardless of
- * what the caller passes.
+ * The write uses `updateMany` filtered on `(userId, organizationId)` (a unique
+ * pair), so it is org-scoped by construction — no cross-org write is possible —
+ * and it is a no-op rather than an error if the membership was removed between
+ * the caller's read and this write.
  *
  * @param userId - the authenticated user
  * @param organizationId - the organization the user is acting in
@@ -54,9 +55,11 @@ export function recordMobileActivity(
 
   // Fire-and-forget: usage telemetry must never slow down or break a mobile
   // request, so we don't await it and we swallow errors (best-effort).
+  // updateMany (not update) so a membership removed between read and write is a
+  // silent no-op instead of a thrown P2025.
   void db.userOrganization
-    .update({
-      where: { userId_organizationId: { userId, organizationId } },
+    .updateMany({
+      where: { userId, organizationId },
       data: { lastMobileActiveAt: new Date() },
     })
     .catch((cause) => {
@@ -65,7 +68,10 @@ export function recordMobileActivity(
           cause,
           message: "Failed to record mobile activity",
           additionalData: { userId, organizationId },
-          label: "Auth",
+          label: "Analytics",
+          // Best-effort telemetry — a failed activity write must never add
+          // Sentry noise for a non-critical, optional metric.
+          shouldBeCaptured: false,
         })
       );
     });
