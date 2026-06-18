@@ -285,12 +285,14 @@ export default function BookingDetailScreen() {
       const isCheckedOut = item.status === "CHECKED_OUT";
       const isSelected = selectedAssetIds.has(item.id);
       // What's selectable depends on the mode: returning checked-out assets
-      // (check-in) vs. taking not-yet-out assets (check-out).
+      // (check-in) vs. taking never-checked-out assets (check-out). A returned
+      // asset is back to AVAILABLE, so `!isCheckedOut` alone would re-offer it
+      // for check-out — exclude the already-returned ones with `!isCheckedIn`.
       const selectable =
         selectMode === "checkin"
           ? isCheckedOut && !isCheckedIn
           : selectMode === "checkout"
-          ? !isCheckedOut
+          ? !isCheckedOut && !isCheckedIn
           : false;
 
       return (
@@ -421,15 +423,17 @@ export default function BookingDetailScreen() {
       .join(" ") ||
     null;
 
-  // Lifecycle counts for the progress bar: assets move reserved → out → returned.
-  // checkedOutCount counts assets still flagged CHECKED_OUT (incl. ones already
-  // returned this session); checkedInAssetIds are the ones returned.
-  const checkedInCount = checkedInAssetIds.length;
-  const onJobCount = Math.max(0, booking.checkedOutCount - checkedInCount);
+  // Lifecycle counts for the progress bar: every asset is in exactly one of three
+  // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
+  // assets — partial check-in flips them back to AVAILABLE — so it IS the live
+  // "on job" count, and returns are subtracted from the reserved bucket (not from
+  // checkedOutCount again, which would double-count them).
+  const checkedInCount = checkedInAssetIds.length; // returned
+  const onJobCount = booking.checkedOutCount; // still out
   const reservedCount = Math.max(
     0,
-    booking.assetCount - booking.checkedOutCount
-  );
+    booking.assetCount - onJobCount - checkedInCount
+  ); // never checked out
   // Only show the bar once there's check-out activity — otherwise it's a flat,
   // single-colour bar that adds noise to a freshly-reserved booking.
   const showProgress =
@@ -437,6 +441,16 @@ export default function BookingDetailScreen() {
     (booking.checkedOutCount > 0 ||
       checkedInCount > 0 ||
       ["ONGOING", "OVERDUE", "COMPLETE"].includes(booking.status));
+
+  // Progressive check-out stays available while the booking is active AND still
+  // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
+  // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
+  // gates the full "Check Out All" button), so we derive our own flag for the
+  // partial path — otherwise "Select to Check Out" disappears the moment the
+  // first batch flips the booking to ONGOING.
+  const canPartialCheckout =
+    reservedCount > 0 &&
+    ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   return (
     <View style={styles.container}>
@@ -640,66 +654,66 @@ export default function BookingDetailScreen() {
                 </TouchableOpacity>
               )}
 
+            {/* Full check-out is RESERVED-only (web parity); the loader's
+                canCheckout reflects that. */}
             {canCheckout && (
-              <View style={styles.checkinActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleCheckout}
-                  accessibilityLabel="Check out all assets in this booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="log-out-outline"
-                    size={18}
-                    color={colors.primaryForeground}
-                  />
-                  <Text style={styles.actionButtonText}>
-                    Check Out All Assets
-                  </Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleCheckout}
+                accessibilityLabel="Check out all assets in this booking"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="log-out-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>
+                  Check Out All Assets
+                </Text>
+              </TouchableOpacity>
+            )}
 
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "checkout" &&
-                      styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    setSelectMode(
-                      selectMode === "checkout" ? null : "checkout"
-                    );
-                    setSelectedAssetIds(new Set());
-                  }}
-                  accessibilityLabel={
-                    selectMode === "checkout"
-                      ? "Cancel selection"
-                      : "Select assets to check out"
+            {/* Progressive check-out persists while reserved assets remain, even
+                after the booking has gone ONGOING (canPartialCheckout, not
+                canCheckout) so the user can keep taking the rest. */}
+            {canPartialCheckout && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButtonOutline,
+                  selectMode === "checkout" && styles.actionButtonOutlineActive,
+                ]}
+                onPress={() => {
+                  setSelectMode(selectMode === "checkout" ? null : "checkout");
+                  setSelectedAssetIds(new Set());
+                }}
+                accessibilityLabel={
+                  selectMode === "checkout"
+                    ? "Cancel selection"
+                    : "Select assets to check out"
+                }
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={
+                    selectMode === "checkout" ? "close" : "checkbox-outline"
                   }
-                  accessibilityRole="button"
+                  size={18}
+                  color={
+                    selectMode === "checkout"
+                      ? colors.error
+                      : colors.buttonSecondaryText
+                  }
+                />
+                <Text
+                  style={[
+                    styles.actionButtonOutlineText,
+                    selectMode === "checkout" && { color: colors.error },
+                  ]}
                 >
-                  <Ionicons
-                    name={
-                      selectMode === "checkout" ? "close" : "checkbox-outline"
-                    }
-                    size={18}
-                    color={
-                      selectMode === "checkout"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "checkout" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "checkout"
-                      ? "Cancel"
-                      : "Select to Check Out"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                  {selectMode === "checkout" ? "Cancel" : "Select to Check Out"}
+                </Text>
+              </TouchableOpacity>
             )}
 
             {canCheckin && (
