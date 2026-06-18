@@ -31,13 +31,15 @@ import { InventorySegment } from "@/components/kits/inventory-segment";
 
 const PAGE_SIZE = 20;
 
-/** Status filter pills shown above the list. */
-const FILTERS = [
-  { key: "", label: "All" },
-  { key: "AVAILABLE", label: "Available" },
-  { key: "IN_CUSTODY", label: "In Custody" },
-  { key: "CHECKED_OUT", label: "Checked Out" },
-] as const;
+/** Filter pills — status filters plus the special "My Custody" filter. */
+type KitFilter = { label: string; status: string; myCustody?: boolean };
+const FILTERS: KitFilter[] = [
+  { label: "All", status: "" },
+  { label: "My Custody", status: "", myCustody: true },
+  { label: "Available", status: "AVAILABLE" },
+  { label: "In Custody", status: "IN_CUSTODY" },
+  { label: "Checked Out", status: "CHECKED_OUT" },
+];
 
 const kitKeyExtractor = (item: KitListItem) => item.id;
 
@@ -61,7 +63,7 @@ export default function KitsListScreen() {
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [activeFilter, setActiveFilter] = useState(0);
   const nextPageRef = useRef(2);
   const hasMoreRef = useRef(true);
   // Re-entrancy guard for pagination. A ref (not the isLoadingMore state) so
@@ -88,9 +90,11 @@ export default function KitsListScreen() {
       setError(null);
 
       const page = mode === "more" ? nextPageRef.current : 1;
+      const filter = FILTERS[activeFilter];
       const { data, error: fetchErr } = await api.kits(currentOrg.id, {
         search: debouncedSearch || undefined,
-        status: statusFilter || undefined,
+        status: filter.status || undefined,
+        myCustody: filter.myCustody || undefined,
         page,
         perPage: PAGE_SIZE,
       });
@@ -110,7 +114,7 @@ export default function KitsListScreen() {
       setIsLoadingMore(false);
       isLoadingMoreRef.current = false;
     },
-    [currentOrg, debouncedSearch, statusFilter]
+    [currentOrg, debouncedSearch, activeFilter]
   );
 
   // Initial load + reload on search/filter change
@@ -147,10 +151,25 @@ export default function KitsListScreen() {
             <Text style={styles.rowTitle} numberOfLines={1}>
               {item.name}
             </Text>
-            <Text style={styles.rowMeta} numberOfLines={1}>
-              {item._count.assets} asset{item._count.assets === 1 ? "" : "s"}
-              {item.custody ? ` • ${item.custody.custodian.name}` : ""}
-            </Text>
+            <View style={styles.rowMeta}>
+              <Text style={styles.rowCount} numberOfLines={1}>
+                {item._count.assets} asset
+                {item._count.assets === 1 ? "" : "s"}
+                {item.category ? ` • ${item.category.name}` : ""}
+              </Text>
+              {item.location ? (
+                <View style={styles.locationRow}>
+                  <Ionicons
+                    name="location-outline"
+                    size={11}
+                    color={colors.mutedLight}
+                  />
+                  <Text style={styles.rowLocation} numberOfLines={1}>
+                    {item.location.name}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
@@ -199,21 +218,21 @@ export default function KitsListScreen() {
         style={styles.filterRow}
         contentContainerStyle={styles.filterRowContent}
       >
-        {FILTERS.map((f) => (
+        {FILTERS.map((f, i) => (
           <TouchableOpacity
-            key={f.key}
+            key={f.label}
             style={[
               styles.filterPill,
-              statusFilter === f.key && styles.filterPillActive,
+              activeFilter === i && styles.filterPillActive,
             ]}
-            onPress={() => setStatusFilter(f.key)}
+            onPress={() => setActiveFilter(i)}
             accessibilityLabel={`Filter: ${f.label}`}
             accessibilityRole="button"
           >
             <Text
               style={[
                 styles.filterPillText,
-                statusFilter === f.key && styles.filterPillTextActive,
+                activeFilter === i && styles.filterPillTextActive,
               ]}
             >
               {f.label}
@@ -250,8 +269,12 @@ export default function KitsListScreen() {
           <Text style={styles.stateText}>
             {debouncedSearch
               ? "No kits match your search"
-              : statusFilter
-              ? `No ${formatStatus(statusFilter).toLowerCase()} kits`
+              : FILTERS[activeFilter].myCustody
+              ? "No kits in your custody"
+              : FILTERS[activeFilter].status
+              ? `No ${formatStatus(
+                  FILTERS[activeFilter].status
+                ).toLowerCase()} kits`
               : "No kits yet. Create kits in the web app to group assets."}
           </Text>
         </View>
@@ -375,8 +398,20 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.foreground,
   },
   rowMeta: {
+    gap: 2,
+  },
+  rowCount: {
     fontSize: fontSize.sm,
     color: colors.muted,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  rowLocation: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
   },
   statusBadge: {
     flexDirection: "row",

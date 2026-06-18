@@ -8,6 +8,7 @@ import { pushIntoTab } from "./navigation";
  * Supported deep link patterns:
  *
  *   shelf://assets/{id}         → Asset detail
+ *   shelf://kits/{id}           → Kit detail
  *   shelf://bookings/{id}       → Booking detail
  *   shelf://qr/{qrId}           → QR code resolve → asset detail
  *   shelf://scanner             → Open scanner
@@ -19,6 +20,7 @@ import { pushIntoTab } from "./navigation";
 
 type ParsedLink =
   | { type: "asset"; id: string }
+  | { type: "kit"; id: string }
   | { type: "booking"; id: string }
   | { type: "qr"; id: string }
   | { type: "scanner" }
@@ -37,6 +39,8 @@ function parseDeepLink(url: string): ParsedLink {
     switch (resource) {
       case "assets":
         return id ? { type: "asset", id } : { type: "unknown" };
+      case "kits":
+        return id ? { type: "kit", id } : { type: "unknown" };
       case "bookings":
         return id ? { type: "booking", id } : { type: "unknown" };
       case "qr":
@@ -90,6 +94,9 @@ export function useDeepLinkHandler() {
       switch (link.type) {
         case "asset":
           pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${link.id}`);
+          break;
+        case "kit":
+          pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${link.id}`);
           break;
         case "booking":
           pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${link.id}`);

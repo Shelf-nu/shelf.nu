@@ -175,6 +175,8 @@ export type KitListItem = {
   image: string | null;
   imageExpiration: string | null;
   _count: { assets: number };
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
   custody: { custodian: { id: string; name: string } } | null;
 };
 
@@ -190,6 +192,7 @@ export type KitDetailAsset = {
   id: string;
   title: string;
   status: string;
+  valuation: number | null;
   mainImage: string | null;
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
@@ -204,6 +207,13 @@ export type KitDetail = {
   image: string | null;
   imageExpiration: string | null;
   createdAt: string;
+  updatedAt: string;
+  category: { id: string; name: string; color: string } | null;
+  location: { id: string; name: string } | null;
+  qrCodes: { id: string }[];
+  organization: { currency: string };
+  /** Sum of the contained assets' valuation (computed server-side). */
+  totalValue: number;
   custody: {
     createdAt: string;
     custodian: {
@@ -380,6 +390,18 @@ export type BookingActionResponse = {
 export type PartialCheckinResponse = {
   success: boolean;
   checkedInCount: number;
+  remainingCount: number;
+  isComplete: boolean;
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+export type PartialCheckoutResponse = {
+  success: boolean;
+  checkedOutCount: number;
   remainingCount: number;
   isComplete: boolean;
   booking: {

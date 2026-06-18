@@ -22,6 +22,8 @@ type KitListParams = {
   page?: number;
   perPage?: number;
   status?: string;
+  /** Only kits in the current user's custody. */
+  myCustody?: boolean;
 };
 
 export const kitsApi = {
@@ -32,6 +34,7 @@ export const kitsApi = {
     if (params.page) qs.set("page", String(params.page));
     if (params.perPage) qs.set("perPage", String(params.perPage));
     if (params.status) qs.set("status", params.status);
+    if (params.myCustody) qs.set("myCustody", "true");
     return apiFetch<KitsResponse>(`/api/mobile/kits?${qs.toString()}`);
   },
 

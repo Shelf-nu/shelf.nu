@@ -52,11 +52,17 @@ export default function BookingDetailScreen() {
   const [isActioning, setIsActioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // For partial check-in: selected assets
+  // For progressive check-in/check-out: selected assets
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(
     new Set()
   );
-  const [isSelectMode, setIsSelectMode] = useState(false);
+  // Selection mode picks a subset of assets to act on. "checkin" selects
+  // checked-out assets to return; "checkout" selects not-yet-out assets to take.
+  // null = not selecting.
+  const [selectMode, setSelectMode] = useState<"checkin" | "checkout" | null>(
+    null
+  );
+  const isSelectMode = selectMode !== null;
 
   const lastFetchedAt = useRef(0);
 
@@ -204,7 +210,52 @@ export default function BookingDetailScreen() {
                 text: "OK",
                 onPress: () => {
                   setSelectedAssetIds(new Set());
-                  setIsSelectMode(false);
+                  setSelectMode(null);
+                  fetchBooking();
+                },
+              },
+            ]);
+          },
+        },
+      ]
+    );
+  };
+
+  const handlePartialCheckout = () => {
+    if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
+    const count = selectedAssetIds.size;
+    Alert.alert(
+      "Check Out Selected",
+      `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Check Out",
+          onPress: async () => {
+            setIsActioning(true);
+            const { data, error: err } = await api.partialCheckoutBooking(
+              currentOrg.id,
+              booking.id,
+              Array.from(selectedAssetIds),
+              getTimeZone()
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Error", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            const msg = data?.isComplete
+              ? `All assets are now checked out for "${booking.name}".`
+              : `${data?.checkedOutCount ?? count} checked out, ${
+                  data?.remainingCount ?? "some"
+                } still reserved.`;
+            Alert.alert("Checked Out", msg, [
+              {
+                text: "OK",
+                onPress: () => {
+                  setSelectedAssetIds(new Set());
+                  setSelectMode(null);
                   fetchBooking();
                 },
               },
@@ -233,7 +284,14 @@ export default function BookingDetailScreen() {
       const isCheckedIn = checkedInAssetIds.includes(item.id);
       const isCheckedOut = item.status === "CHECKED_OUT";
       const isSelected = selectedAssetIds.has(item.id);
-      const selectable = isSelectMode && isCheckedOut && !isCheckedIn;
+      // What's selectable depends on the mode: returning checked-out assets
+      // (check-in) vs. taking not-yet-out assets (check-out).
+      const selectable =
+        selectMode === "checkin"
+          ? isCheckedOut && !isCheckedIn
+          : selectMode === "checkout"
+          ? !isCheckedOut
+          : false;
 
       return (
         <TouchableOpacity
@@ -257,7 +315,7 @@ export default function BookingDetailScreen() {
           }`}
           accessibilityRole="button"
         >
-          {isSelectMode && isCheckedOut && !isCheckedIn && (
+          {selectable && (
             <View
               style={[styles.checkbox, isSelected && styles.checkboxChecked]}
             >
@@ -321,7 +379,7 @@ export default function BookingDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       checkedInAssetIds,
-      isSelectMode,
+      selectMode,
       selectedAssetIds,
       router,
       colors,
@@ -362,6 +420,23 @@ export default function BookingDetailScreen() {
       .filter(Boolean)
       .join(" ") ||
     null;
+
+  // Lifecycle counts for the progress bar: assets move reserved → out → returned.
+  // checkedOutCount counts assets still flagged CHECKED_OUT (incl. ones already
+  // returned this session); checkedInAssetIds are the ones returned.
+  const checkedInCount = checkedInAssetIds.length;
+  const onJobCount = Math.max(0, booking.checkedOutCount - checkedInCount);
+  const reservedCount = Math.max(
+    0,
+    booking.assetCount - booking.checkedOutCount
+  );
+  // Only show the bar once there's check-out activity — otherwise it's a flat,
+  // single-colour bar that adds noise to a freshly-reserved booking.
+  const showProgress =
+    booking.assetCount > 0 &&
+    (booking.checkedOutCount > 0 ||
+      checkedInCount > 0 ||
+      ["ONGOING", "OVERDUE", "COMPLETE"].includes(booking.status));
 
   return (
     <View style={styles.container}>
@@ -462,6 +537,80 @@ export default function BookingDetailScreen() {
               </View>
             </View>
 
+            {/* Lifecycle progress: reserved → out → returned (single bar) */}
+            {showProgress && (
+              <View style={styles.progressCard}>
+                <View style={styles.progressLabelRow}>
+                  <Text style={styles.progressTitle}>Check-out progress</Text>
+                  <Text style={styles.progressCount}>
+                    {checkedInCount}/{booking.assetCount} returned
+                  </Text>
+                </View>
+                <View
+                  style={styles.progressBar}
+                  accessibilityLabel={`${reservedCount} reserved, ${onJobCount} checked out, ${checkedInCount} returned`}
+                >
+                  {reservedCount > 0 && (
+                    <View
+                      style={{
+                        flex: reservedCount,
+                        backgroundColor: colors.backgroundTertiary,
+                      }}
+                    />
+                  )}
+                  {onJobCount > 0 && (
+                    <View
+                      style={{
+                        flex: onJobCount,
+                        backgroundColor: colors.primary,
+                      }}
+                    />
+                  )}
+                  {checkedInCount > 0 && (
+                    <View
+                      style={{
+                        flex: checkedInCount,
+                        backgroundColor: colors.success,
+                      }}
+                    />
+                  )}
+                </View>
+                <View style={styles.progressLegend}>
+                  <View style={styles.legendItem}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: colors.backgroundTertiary },
+                      ]}
+                    />
+                    <Text style={styles.legendText}>
+                      {reservedCount} reserved
+                    </Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: colors.primary },
+                      ]}
+                    />
+                    <Text style={styles.legendText}>{onJobCount} out</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View
+                      style={[
+                        styles.legendDot,
+                        { backgroundColor: colors.success },
+                      ]}
+                    />
+                    <Text style={styles.legendText}>
+                      {checkedInCount} returned
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
             {/* Action buttons */}
             {booking &&
               !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
@@ -492,21 +641,65 @@ export default function BookingDetailScreen() {
               )}
 
             {canCheckout && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleCheckout}
-                accessibilityLabel="Check out all assets in this booking"
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name="log-out-outline"
-                  size={18}
-                  color={colors.primaryForeground}
-                />
-                <Text style={styles.actionButtonText}>
-                  Check Out All Assets
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.checkinActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={handleCheckout}
+                  accessibilityLabel="Check out all assets in this booking"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="log-out-outline"
+                    size={18}
+                    color={colors.primaryForeground}
+                  />
+                  <Text style={styles.actionButtonText}>
+                    Check Out All Assets
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.actionButtonOutline,
+                    selectMode === "checkout" &&
+                      styles.actionButtonOutlineActive,
+                  ]}
+                  onPress={() => {
+                    setSelectMode(
+                      selectMode === "checkout" ? null : "checkout"
+                    );
+                    setSelectedAssetIds(new Set());
+                  }}
+                  accessibilityLabel={
+                    selectMode === "checkout"
+                      ? "Cancel selection"
+                      : "Select assets to check out"
+                  }
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name={
+                      selectMode === "checkout" ? "close" : "checkbox-outline"
+                    }
+                    size={18}
+                    color={
+                      selectMode === "checkout"
+                        ? colors.error
+                        : colors.buttonSecondaryText
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.actionButtonOutlineText,
+                      selectMode === "checkout" && { color: colors.error },
+                    ]}
+                  >
+                    {selectMode === "checkout"
+                      ? "Cancel"
+                      : "Select to Check Out"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             {canCheckin && (
@@ -550,33 +743,38 @@ export default function BookingDetailScreen() {
                 <TouchableOpacity
                   style={[
                     styles.actionButtonOutline,
-                    isSelectMode && styles.actionButtonOutlineActive,
+                    selectMode === "checkin" &&
+                      styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setIsSelectMode(!isSelectMode);
+                    setSelectMode(selectMode === "checkin" ? null : "checkin");
                     setSelectedAssetIds(new Set());
                   }}
                   accessibilityLabel={
-                    isSelectMode
+                    selectMode === "checkin"
                       ? "Cancel selection"
                       : "Select assets to check in"
                   }
                   accessibilityRole="button"
                 >
                   <Ionicons
-                    name={isSelectMode ? "close" : "checkbox-outline"}
+                    name={
+                      selectMode === "checkin" ? "close" : "checkbox-outline"
+                    }
                     size={18}
                     color={
-                      isSelectMode ? colors.error : colors.buttonSecondaryText
+                      selectMode === "checkin"
+                        ? colors.error
+                        : colors.buttonSecondaryText
                     }
                   />
                   <Text
                     style={[
                       styles.actionButtonOutlineText,
-                      isSelectMode && { color: colors.error },
+                      selectMode === "checkin" && { color: colors.error },
                     ]}
                   >
-                    {isSelectMode ? "Cancel" : "Select to Check In"}
+                    {selectMode === "checkin" ? "Cancel" : "Select to Check In"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -590,22 +788,31 @@ export default function BookingDetailScreen() {
         }
       />
 
-      {/* Floating partial check-in button */}
+      {/* Floating progressive check-in / check-out button */}
       {isSelectMode && selectedAssetIds.size > 0 && (
         <View style={styles.floatingAction}>
           <TouchableOpacity
             style={styles.floatingButton}
-            onPress={handlePartialCheckin}
-            accessibilityLabel={`Check in ${selectedAssetIds.size} selected assets`}
+            onPress={
+              selectMode === "checkout"
+                ? handlePartialCheckout
+                : handlePartialCheckin
+            }
+            accessibilityLabel={`${
+              selectMode === "checkout" ? "Check out" : "Check in"
+            } ${selectedAssetIds.size} selected assets`}
             accessibilityRole="button"
           >
             <Ionicons
-              name="log-in-outline"
+              name={
+                selectMode === "checkout" ? "log-out-outline" : "log-in-outline"
+              }
               size={20}
               color={colors.primaryForeground}
             />
             <Text style={styles.floatingButtonText}>
-              Check In {selectedAssetIds.size}{" "}
+              {selectMode === "checkout" ? "Check Out" : "Check In"}{" "}
+              {selectedAssetIds.size}{" "}
               {selectedAssetIds.size === 1 ? "Asset" : "Assets"}
             </Text>
           </TouchableOpacity>
@@ -655,6 +862,56 @@ const useStyles = createStyles((colors, shadows) => ({
     borderWidth: 1,
     borderColor: colors.border,
     gap: spacing.md,
+  },
+
+  // Lifecycle progress bar
+  progressCard: {
+    backgroundColor: colors.white,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  progressLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  progressTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  progressCount: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  progressBar: {
+    flexDirection: "row",
+    height: 8,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: colors.backgroundTertiary,
+  },
+  progressLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
   infoHeader: {
     flexDirection: "row",
