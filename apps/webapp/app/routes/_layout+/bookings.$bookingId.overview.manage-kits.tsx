@@ -394,17 +394,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
+      // Only the kits actually being added now (those contributing a new asset) —
+      // NOT the full submitted selection. Passing the whole selection would flip
+      // still-available kits already on an ongoing booking to CHECKED_OUT.
+      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
+
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets from kits
-        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
+        kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
       });
 
-      /** We create notes for the newly added kits instead of individual assets */
-      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,
