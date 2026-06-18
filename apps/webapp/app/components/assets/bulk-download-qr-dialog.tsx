@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { toBlob } from "html-to-image";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
@@ -42,6 +42,17 @@ export default function BulkDownloadQrDialog({
   const [shouldFetchAssets, setShouldFetchAssets] = useState(false);
   const [searchParams] = useSearchParams();
 
+  /**
+   * Tracks whether a download the user explicitly requested is still pending.
+   *
+   * The dialog stays mounted while the user filters/re-selects behind it (only
+   * `isDialogOpen` toggles), so the fetched response must never be reused across
+   * requests. This ref lets the (stable) success/error callbacks ignore a
+   * resolution whose request was cancelled — e.g. the dialog was closed while
+   * the fetch was in flight — instead of triggering a stale download.
+   */
+  const isDownloadPendingRef = useRef(false);
+
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const allAssetsSelected = isSelectingAllItems(selectedAssets);
 
@@ -52,6 +63,9 @@ export default function BulkDownloadQrDialog({
     selectedAssets.length === 0 || downloadState.status === "loading";
 
   function handleClose() {
+    // Cancel any in-flight request so a late resolution cannot trigger a
+    // download after the dialog has been closed.
+    isDownloadPendingRef.current = false;
     setDownloadState({ status: "idle" });
     setShouldFetchAssets(false);
     onClose();
@@ -68,129 +82,161 @@ export default function BulkDownloadQrDialog({
     return query;
   }, [selectedAssets, searchParams]);
 
-  // Use useApiQuery to fetch assets data
-  const { data: apiResponse } = useApiQuery<BulkQrDownloadLoaderData>({
+  /**
+   * Builds the QR zip from the assets returned for THIS request and triggers the
+   * browser download.
+   *
+   * The freshly fetched payload is passed in as an argument and never read from
+   * the query cache, so the zip always contains the assets matching the request
+   * the user just made — not a response cached from a previous filter/selection.
+   *
+   * @param data - Asset + QR payload for the current selection/filters
+   */
+  const processDownload = useCallback(
+    async (data: BulkQrDownloadLoaderData) => {
+      try {
+        const { assets, qrIdDisplayPreference, showShelfBranding } = data;
+
+        const zip = new JSZip();
+        const qrFolder = zip.folder("qr-codes");
+
+        /* Converting our React component to html so that we can later convert it into an image */
+        const qrNodes = assets.map((asset) =>
+          generateHtmlFromComponent(
+            <QrLabel
+              data={{ qr: asset.qr }}
+              title={asset.title}
+              qrIdDisplayPreference={qrIdDisplayPreference}
+              sequentialId={asset.sequentialId}
+              showShelfBranding={showShelfBranding}
+            />
+          )
+        );
+
+        const toBlobOptions = {
+          width: 300,
+          height: 300,
+          backgroundColor: "white",
+          style: {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
+          },
+        };
+
+        /**
+         * We are converting first qr to image separately because toBlob will cache the font
+         * and will not make further network requests for other qr codes.
+         */
+        const firstQrImage = await toBlob(qrNodes[0], toBlobOptions);
+
+        /* Converting all qr nodes into images */
+        const qrImages = await Promise.all(
+          qrNodes.slice(1).map((qrNode) => toBlob(qrNode, toBlobOptions))
+        );
+
+        /* Appending qr code image to zip file */
+        [firstQrImage, ...qrImages].forEach((qrImage, index) => {
+          const asset = assets[index];
+
+          // Generate filename based on preference
+          let filename: string;
+          if (qrIdDisplayPreference === "SAM_ID" && asset.sequentialId) {
+            filename = `${asset.sequentialId}_${sanitizeFilename(
+              asset.title
+            )}_${asset.qr.id}.jpg`;
+          } else {
+            filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
+          }
+
+          if (!qrImage) {
+            return;
+          }
+
+          if (qrFolder) {
+            qrFolder.file(filename, qrImage);
+          } else {
+            zip.file(filename, qrImage);
+          }
+        });
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const downloadLink = document.createElement("a");
+
+        downloadLink.href = URL.createObjectURL(zipBlob);
+        downloadLink.download = `qr-codes-${new Date().getTime()}.zip`;
+
+        downloadLink.click();
+
+        setTimeout(() => {
+          URL.revokeObjectURL(downloadLink.href);
+        }, 4e4);
+
+        setDownloadState({ status: "success" });
+      } catch (error) {
+        setDownloadState({
+          status: "error",
+          error:
+            error instanceof Error ? error.message : "Something went wrong.",
+        });
+      } finally {
+        // Re-arm the fetch gate so the NEXT Download click triggers a fresh
+        // fetch (useApiQuery refires on the enabled false->true edge).
+        setShouldFetchAssets(false);
+      }
+    },
+    []
+  );
+
+  /**
+   * Stable success handler for the assets query. Drives the download with the
+   * freshly fetched payload, ignoring a resolution whose request was cancelled
+   * (e.g. the dialog was closed while the fetch was in flight).
+   */
+  const handleQuerySuccess = useCallback(
+    (data: BulkQrDownloadLoaderData) => {
+      if (!isDownloadPendingRef.current) return;
+      isDownloadPendingRef.current = false;
+      void processDownload(data);
+    },
+    [processDownload]
+  );
+
+  /** Stable error handler for the assets query. */
+  const handleQueryError = useCallback((message: string) => {
+    if (!isDownloadPendingRef.current) return;
+    isDownloadPendingRef.current = false;
+    setShouldFetchAssets(false);
+    setDownloadState({ status: "error", error: message });
+  }, []);
+
+  /**
+   * Fetches assets for the CURRENT request. `enabled` is true only while a
+   * download is pending and is re-armed on every click, so each download fetches
+   * fresh data for the live selection/filters instead of reusing a cached
+   * response. The download is driven by `onSuccess` (not the cached `data`) so a
+   * stale response can never be acted on.
+   */
+  useApiQuery<BulkQrDownloadLoaderData>({
     api: "/api/assets/get-assets-for-bulk-qr-download",
     searchParams: apiSearchParams,
     enabled: shouldFetchAssets && !isSelectingMoreThan100,
+    onSuccess: handleQuerySuccess,
+    onError: handleQueryError,
   });
-
-  const processDownload = useCallback(async () => {
-    if (!apiResponse) return;
-
-    try {
-      const { assets, qrIdDisplayPreference, showShelfBranding } = apiResponse;
-
-      const zip = new JSZip();
-      const qrFolder = zip.folder("qr-codes");
-
-      /* Converting our React component to html so that we can later convert it into an image */
-      const qrNodes = assets.map((asset) =>
-        generateHtmlFromComponent(
-          <QrLabel
-            data={{ qr: asset.qr }}
-            title={asset.title}
-            qrIdDisplayPreference={qrIdDisplayPreference}
-            sequentialId={asset.sequentialId}
-            showShelfBranding={showShelfBranding}
-          />
-        )
-      );
-
-      const toBlobOptions = {
-        width: 300,
-        height: 300,
-        backgroundColor: "white",
-        style: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-        },
-      };
-
-      /**
-       * We are converting first qr to image separately because toBlob will cache the font
-       * and will not make further network requests for other qr codes.
-       */
-      const firstQrImage = await toBlob(qrNodes[0], toBlobOptions);
-
-      /* Converting all qr nodes into images */
-      const qrImages = await Promise.all(
-        qrNodes.slice(1).map((qrNode) => toBlob(qrNode, toBlobOptions))
-      );
-
-      /* Appending qr code image to zip file */
-      [firstQrImage, ...qrImages].forEach((qrImage, index) => {
-        const asset = assets[index];
-
-        // Generate filename based on preference
-        let filename: string;
-        if (qrIdDisplayPreference === "SAM_ID" && asset.sequentialId) {
-          filename = `${asset.sequentialId}_${sanitizeFilename(asset.title)}_${
-            asset.qr.id
-          }.jpg`;
-        } else {
-          filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
-        }
-
-        if (!qrImage) {
-          return;
-        }
-
-        if (qrFolder) {
-          qrFolder.file(filename, qrImage);
-        } else {
-          zip.file(filename, qrImage);
-        }
-      });
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const downloadLink = document.createElement("a");
-
-      downloadLink.href = URL.createObjectURL(zipBlob);
-      downloadLink.download = `qr-codes-${new Date().getTime()}.zip`;
-
-      downloadLink.click();
-
-      setTimeout(() => {
-        URL.revokeObjectURL(downloadLink.href);
-      }, 4e4);
-
-      setDownloadState({ status: "success" });
-    } catch (error) {
-      setDownloadState({
-        status: "error",
-        error: error instanceof Error ? error.message : "Something went wrong.",
-      });
-    }
-  }, [apiResponse]);
-
-  // Trigger download when API response is ready
-  useEffect(() => {
-    if (
-      shouldFetchAssets &&
-      apiResponse &&
-      downloadState.status === "loading"
-    ) {
-      void processDownload();
-    }
-  }, [shouldFetchAssets, apiResponse, downloadState.status, processDownload]);
 
   function handleBulkDownloadQr() {
     if (isSelectingMoreThan100) {
       return;
     }
 
-    // Set loading state immediately
+    // Mark a fresh request and (re)arm the fetch. shouldFetchAssets is always
+    // false here (it is reset after each download/close), so this false->true
+    // edge is what makes useApiQuery fetch the CURRENT selection/filters.
+    isDownloadPendingRef.current = true;
     setDownloadState({ status: "loading" });
-
-    // Trigger the API call if not already done
-    if (!apiResponse) {
-      setShouldFetchAssets(true);
-    } else {
-      void processDownload();
-    }
+    setShouldFetchAssets(true);
   }
 
   return (
