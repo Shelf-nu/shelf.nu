@@ -12,11 +12,11 @@ import {
 } from "~/utils/permissions/permission.data";
 
 /**
- * GET /api/mobile/kits?orgId=xxx&search=xxx&page=1&perPage=20&status=IN_CUSTODY
+ * GET /api/mobile/kits?orgId=xxx&search=xxx&page=1&perPage=20&status=X&myCustody=true
  *
- * Returns paginated kits for the given organization. Mirrors the mobile
- * assets list route so the companion app's Kits screen can reuse the same
- * list patterns (search, infinite scroll, status filter).
+ * Returns paginated kits for the given organization, each with its category,
+ * location, asset count, and custodian. Mirrors the mobile assets list route
+ * (search, infinite scroll, status filter, and the my-custody filter).
  *
  * @see {@link file://./assets.ts} the asset twin of this route
  */
@@ -48,6 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const skip = (page - 1) * perPage;
 
     const statusFilter = url.searchParams.get("status");
+    const myCustody = url.searchParams.get("myCustody") === "true";
 
     const where: Record<string, unknown> = {
       organizationId,
@@ -55,6 +56,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ? { name: { contains: search, mode: "insensitive" as const } }
         : {}),
       ...(statusFilter ? { status: statusFilter } : {}),
+      // Scope to the current user's custody — mirrors the asset list filter.
+      ...(myCustody ? { custody: { custodian: { userId: user.id } } } : {}),
     };
 
     const [kits, totalCount] = await Promise.all([
@@ -67,6 +70,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           image: true,
           imageExpiration: true,
           _count: { select: { assets: true } },
+          category: { select: { id: true, name: true } },
+          location: { select: { id: true, name: true } },
           custody: {
             select: {
               custodian: { select: { id: true, name: true } },

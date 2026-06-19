@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import {
   borderRadius,
   formatStatus,
   formatDate,
+  formatCurrency,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -34,6 +35,7 @@ import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
+import { InfoRow } from "@/components/shared/info-row";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
@@ -193,19 +195,6 @@ export default function AssetDetailScreen() {
       Alert.alert("Deleted", `"${asset.title}" has been deleted.`, [
         { text: "OK", onPress: () => router.back() },
       ]);
-    }
-  };
-
-  // ── Helpers ─────────────────────────────────────────
-
-  const formatCurrency = (value: number, currency: string) => {
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency,
-      }).format(value);
-    } catch {
-      return `${currency} ${value.toFixed(2)}`;
     }
   };
 
@@ -552,59 +541,6 @@ export default function AssetDetailScreen() {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────
-
-const InfoRow = memo(function InfoRow({
-  icon,
-  label,
-  value,
-  onPress,
-  accessibilityLabel,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-  /** When set, the row becomes tappable and shows a chevron affordance. */
-  onPress?: () => void;
-  /** A11y label for the tappable row (defaults to the value text). */
-  accessibilityLabel?: string;
-}) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-
-  const content = (
-    <>
-      <View style={styles.infoLabel}>
-        <Ionicons name={icon as any} size={16} color={colors.muted} />
-        <Text style={styles.infoLabelText}>{label}</Text>
-      </View>
-      {/* why: selectable text claims touches — only enable it on static rows */}
-      <Text style={styles.infoValue} numberOfLines={2} selectable={!onPress}>
-        {value}
-      </Text>
-      {onPress && (
-        <Ionicons name="chevron-forward" size={16} color={colors.mutedLight} />
-      )}
-    </>
-  );
-
-  if (onPress) {
-    return (
-      <TouchableOpacity
-        style={styles.infoRow}
-        onPress={onPress}
-        activeOpacity={0.6}
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel ?? value}
-      >
-        {content}
-      </TouchableOpacity>
-    );
-  }
-
-  return <View style={styles.infoRow}>{content}</View>;
-});
-
 // ── Styles ─────────────────────────────────────────────
 
 const useStyles = createStyles((colors, shadows) => ({
@@ -705,24 +641,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
     overflow: "hidden",
     ...shadows.sm,
-  },
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  infoLabel: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  infoLabelText: { fontSize: fontSize.base, color: colors.muted },
-  infoValue: {
-    fontSize: fontSize.base,
-    fontWeight: "600",
-    color: colors.foreground,
-    maxWidth: "55%",
-    textAlign: "right",
   },
 
   // Section containers (tags, QR)

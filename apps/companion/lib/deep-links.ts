@@ -8,8 +8,9 @@ import { pushIntoTab } from "./navigation";
  * Supported deep link patterns:
  *
  *   shelf://assets/{id}         → Asset detail
+ *   shelf://kits/{id}           → Kit detail
  *   shelf://bookings/{id}       → Booking detail
- *   shelf://qr/{qrId}           → QR code resolve → asset detail
+ *   shelf://qr/{qrId}           → QR code resolve → asset or kit detail
  *   shelf://scanner             → Open scanner
  *
  * Also handles HTTPS universal links:
@@ -19,6 +20,7 @@ import { pushIntoTab } from "./navigation";
 
 type ParsedLink =
   | { type: "asset"; id: string }
+  | { type: "kit"; id: string }
   | { type: "booking"; id: string }
   | { type: "qr"; id: string }
   | { type: "scanner" }
@@ -28,7 +30,15 @@ function parseDeepLink(url: string): ParsedLink {
   try {
     const parsed = Linking.parse(url);
     const path = parsed.path ?? "";
-    const segments = path.split("/").filter(Boolean);
+    // Custom app scheme (shelf://kits/abc) vs https universal link
+    // (https://app.shelf.nu/kits/abc): for the custom scheme expo-linking puts
+    // the first segment in `hostname` ("kits") and the rest in `path` ("abc"),
+    // whereas for https the hostname is the domain and the resource lives in the
+    // path. Normalise both to one segment list so native scheme links resolve.
+    const isHttp = parsed.scheme === "http" || parsed.scheme === "https";
+    const segments = (
+      isHttp ? path.split("/") : [parsed.hostname ?? "", ...path.split("/")]
+    ).filter(Boolean);
 
     if (segments.length === 0) return { type: "unknown" };
 
@@ -37,6 +47,8 @@ function parseDeepLink(url: string): ParsedLink {
     switch (resource) {
       case "assets":
         return id ? { type: "asset", id } : { type: "unknown" };
+      case "kits":
+        return id ? { type: "kit", id } : { type: "unknown" };
       case "bookings":
         return id ? { type: "booking", id } : { type: "unknown" };
       case "qr":
@@ -53,8 +65,8 @@ function parseDeepLink(url: string): ParsedLink {
 }
 
 /**
- * Resolves a QR code ID to an asset and navigates to it.
- * Falls back to scanner tab if the QR doesn't map to an asset.
+ * Resolves a QR code ID to its linked asset or kit and navigates to it.
+ * Falls back to the scanner tab if the QR maps to neither.
  */
 async function resolveQrAndNavigate(
   qrId: string,
@@ -66,10 +78,17 @@ async function resolveQrAndNavigate(
       pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${data.qr.asset.id}`);
       return;
     }
+    // Kit-linked QR: open the kit detail (it lives in the Assets stack). Without
+    // this, scanning a kit's own QR falls through to the scanner instead of the
+    // kit it points at.
+    if (!error && data?.qr?.kitId) {
+      pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${data.qr.kitId}`);
+      return;
+    }
   } catch {
     // Fall through to scanner
   }
-  // If QR doesn't resolve to an asset, open the scanner
+  // If the QR resolves to neither an asset nor a kit, open the scanner
   router.push("/(tabs)/scanner");
 }
 
@@ -90,6 +109,9 @@ export function useDeepLinkHandler() {
       switch (link.type) {
         case "asset":
           pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${link.id}`);
+          break;
+        case "kit":
+          pushIntoTab("/(tabs)/assets", `/(tabs)/assets/kits/${link.id}`);
           break;
         case "booking":
           pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${link.id}`);

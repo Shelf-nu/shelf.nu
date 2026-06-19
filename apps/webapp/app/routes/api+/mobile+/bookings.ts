@@ -25,6 +25,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
+    const search = (url.searchParams.get("search") || "").trim().slice(0, 100);
     const page = Math.max(
       1,
       parseInt(url.searchParams.get("page") || "1", 10) || 1
@@ -33,6 +34,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       50,
       Math.max(1, parseInt(url.searchParams.get("perPage") || "20", 10) || 20)
     );
+
+    // Sort: allowlisted column + direction (mirrors the web list's sortable
+    // columns). Defaults to the original `from asc` so existing callers are
+    // unaffected. The allowlist prevents arbitrary Prisma orderBy injection.
+    const SORTABLE = ["from", "to", "name", "createdAt"] as const;
+    const sortByParam = url.searchParams.get("sortBy") || "";
+    const sortBy = (SORTABLE as readonly string[]).includes(sortByParam)
+      ? (sortByParam as (typeof SORTABLE)[number])
+      : "from";
+    const sortOrder =
+      url.searchParams.get("sortOrder") === "desc" ? "desc" : "asc";
 
     // Build status filter
     const validStatuses = Object.values(BookingStatus);
@@ -71,6 +83,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       organizationId,
       status: { in: statusFilter },
       ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+      // Keyword search over booking name + description (the field-tech "find my
+      // booking" case). Web also searches tags/custodian/asset names; name +
+      // description covers the common case without a heavier query.
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" as const } },
+              {
+                description: {
+                  contains: search,
+                  mode: "insensitive" as const,
+                },
+              },
+            ],
+          }
+        : {}),
     };
 
     const [bookings, totalCount] = await Promise.all([
@@ -97,7 +125,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: { assets: true },
           },
         },
-        orderBy: [{ from: "asc" }],
+        orderBy: [{ [sortBy]: sortOrder }],
         skip: (page - 1) * perPage,
         take: perPage,
       }),

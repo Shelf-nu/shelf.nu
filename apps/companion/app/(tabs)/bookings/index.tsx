@@ -2,11 +2,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
+  ScrollView,
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Animated,
+  Platform,
+  ActionSheetIOS,
+  Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -20,6 +25,7 @@ import {
   borderRadius,
   formatStatus,
   formatDateTime,
+  bookingCountdown,
   hitSlop,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -32,16 +38,42 @@ import { announce } from "@/lib/a11y";
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
 
-/** Which status filters to show as pills */
+/**
+ * Status filter pills. The mobile list route already accepts any
+ * comma-separated subset of statuses, so we expose the field-critical
+ * individual statuses (Reserved = upcoming, Ongoing = in progress, Overdue =
+ * needs attention) alongside the grouped Active/Completed/All — letting a tech
+ * isolate exactly what they care about on a job.
+ */
 const STATUS_FILTERS: { label: string; value: string }[] = [
   // DRAFT counts as active: a booking being built (e.g. scan-to-add) must
   // not vanish from the default view the moment the user leaves it.
   { label: "Active", value: "DRAFT,RESERVED,ONGOING,OVERDUE" },
+  { label: "Reserved", value: "RESERVED" },
+  { label: "Ongoing", value: "ONGOING" },
+  { label: "Overdue", value: "OVERDUE" },
   { label: "Completed", value: "COMPLETE" },
   {
     label: "All",
     value: "DRAFT,RESERVED,ONGOING,OVERDUE,COMPLETE,ARCHIVED,CANCELLED",
   },
+];
+
+/**
+ * Sort options surfaced in the sort menu. Each maps to the list route's
+ * allowlisted `sortBy`/`sortOrder` params (default = the first entry, which
+ * matches the route's own default of `from asc`). Directions are chosen to be
+ * the useful one per column (soonest dates first, names A–Z, newest created).
+ */
+const SORT_OPTIONS: {
+  label: string;
+  sortBy: string;
+  sortOrder: "asc" | "desc";
+}[] = [
+  { label: "Start date (earliest)", sortBy: "from", sortOrder: "asc" },
+  { label: "Due date (soonest)", sortBy: "to", sortOrder: "asc" },
+  { label: "Name (A–Z)", sortBy: "name", sortOrder: "asc" },
+  { label: "Recently created", sortBy: "createdAt", sortOrder: "desc" },
 ];
 
 export default function BookingsListScreen() {
@@ -68,6 +100,9 @@ function BookingsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortIndex, setSortIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   const listRef = useRef<FlatList>(null);
@@ -93,6 +128,9 @@ function BookingsListContent() {
       if (!currentOrg) return;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
+        search: debouncedSearch || undefined,
+        sortBy: SORT_OPTIONS[sortIndex].sortBy,
+        sortOrder: SORT_OPTIONS[sortIndex].sortOrder,
         page: pageNum,
         perPage: PAGE_SIZE,
       });
@@ -108,7 +146,7 @@ function BookingsListContent() {
       if (reset) setBookings(data.bookings);
       else setBookings((prev) => [...prev, ...data.bookings]);
     },
-    [currentOrg, activeFilter]
+    [currentOrg, activeFilter, debouncedSearch, sortIndex]
   );
 
   // Refresh on tab focus — skip if data is fresh (< 60s old)
@@ -124,14 +162,20 @@ function BookingsListContent() {
     nextPage.current = 1;
   }, [currentOrg?.id]);
 
-  // Re-fetch immediately when filter changes
+  // Debounce the search box (mirrors the assets/kits list debounce).
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Re-fetch immediately when the filter, search, or sort changes
   useEffect(() => {
     if (!currentOrg || !hasFetchedBookings.current) return;
     nextPage.current = 1;
     fetchBookings(1, true).finally(() => {
       lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, debouncedSearch, sortIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(
     useCallback(() => {
@@ -182,6 +226,33 @@ function BookingsListContent() {
     setIsLoadingMore(false);
   };
 
+  // Cross-platform sort picker: native action sheet on iOS, Alert on Android
+  // (mirrors the image-source picker pattern in assets/new.tsx).
+  const openSortMenu = () => {
+    Haptics.selectionAsync();
+    const labels = SORT_OPTIONS.map((o) => o.label);
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: "Sort bookings",
+          options: ["Cancel", ...labels],
+          cancelButtonIndex: 0,
+        },
+        (i) => {
+          if (i > 0) setSortIndex(i - 1);
+        }
+      );
+    } else {
+      Alert.alert("Sort bookings", undefined, [
+        { text: "Cancel", style: "cancel" },
+        ...SORT_OPTIONS.map((o, i) => ({
+          text: o.label,
+          onPress: () => setSortIndex(i),
+        })),
+      ]);
+    }
+  };
+
   const renderBooking = useCallback(
     ({ item }: { item: BookingListItem }) => {
       const badge = bookingStatusBadge[item.status] ?? {
@@ -191,6 +262,7 @@ function BookingsListContent() {
 
       const isUrgent = item.status === "OVERDUE";
       const isActive = item.status === "ONGOING" || item.status === "RESERVED";
+      const countdown = bookingCountdown(item.from, item.to, item.status);
 
       return (
         <TouchableOpacity
@@ -229,6 +301,24 @@ function BookingsListContent() {
                 {formatDateTime(item.from)} → {formatDateTime(item.to)}
               </Text>
             </View>
+
+            {countdown && (
+              <View style={styles.metaRow}>
+                <Ionicons
+                  name={countdown.urgent ? "alert-circle" : "time-outline"}
+                  size={13}
+                  color={countdown.urgent ? colors.error : colors.mutedLight}
+                />
+                <Text
+                  style={[
+                    styles.metaText,
+                    countdown.urgent && styles.metaTextUrgent,
+                  ]}
+                >
+                  {countdown.text}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.metaRow}>
               <Ionicons
@@ -319,8 +409,54 @@ function BookingsListContent() {
 
   return (
     <View style={styles.container}>
-      {/* Status filter pills */}
-      <View style={styles.filterRow} accessibilityRole="tablist">
+      {/* Keyword search + sort */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color={colors.mutedLight} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="Search bookings..."
+            placeholderTextColor={colors.mutedLight}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search bookings"
+          />
+          {searchInput.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setSearchInput("")}
+              hitSlop={hitSlop.sm}
+              accessibilityLabel="Clear search"
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <TouchableOpacity
+          style={styles.sortButton}
+          onPress={openSortMenu}
+          accessibilityLabel="Sort bookings"
+          accessibilityRole="button"
+        >
+          <Ionicons name="swap-vertical" size={20} color={colors.muted} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Status filter pills — scrollable: more statuses than fit one row */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+        accessibilityRole="tablist"
+      >
         {STATUS_FILTERS.map((f, i) => (
           <TouchableOpacity
             key={f.value}
@@ -347,7 +483,7 @@ function BookingsListContent() {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Swipeable content area — swipe left/right to cycle filter pills */}
       <View style={styles.flexFill} {...swipePanHandlers}>
@@ -445,7 +581,47 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.md,
   },
 
+  // Keyword search box + sort button
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  searchContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.md,
+    color: colors.foreground,
+    padding: 0,
+  },
+  sortButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
   // Filter pills
+  filterScroll: {
+    flexGrow: 0,
+  },
   filterRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -540,6 +716,10 @@ const useStyles = createStyles((colors) => ({
   metaText: {
     fontSize: fontSize.sm,
     color: colors.muted,
+  },
+  metaTextUrgent: {
+    color: colors.error,
+    fontWeight: "600",
   },
 
   // Action hint

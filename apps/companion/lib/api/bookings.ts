@@ -4,18 +4,29 @@ import type {
   BookingDetailResponse,
   BookingActionResponse,
   PartialCheckinResponse,
+  PartialCheckoutResponse,
 } from "./types";
 
 export const bookingsApi = {
   /** Get paginated bookings for an organization */
   bookings: (
     orgId: string,
-    params?: { status?: string; page?: number; perPage?: number }
+    params?: {
+      status?: string;
+      page?: number;
+      perPage?: number;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: "asc" | "desc";
+    }
   ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (params?.status) searchParams.set("status", params.status);
     if (params?.page) searchParams.set("page", String(params.page));
     if (params?.perPage) searchParams.set("perPage", String(params.perPage));
+    if (params?.search) searchParams.set("search", params.search);
+    if (params?.sortBy) searchParams.set("sortBy", params.sortBy);
+    if (params?.sortOrder) searchParams.set("sortOrder", params.sortOrder);
     return apiFetch<BookingsResponse>(`/api/mobile/bookings?${searchParams}`);
   },
 
@@ -73,6 +84,26 @@ export const bookingsApi = {
   ) =>
     apiFetch<PartialCheckinResponse>(
       `/api/mobile/bookings/partial-checkin?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, assetIds, timeZone }),
+      }
+    ),
+
+  /**
+   * Partial check-out: check out a subset of a booking's assets (progressive
+   * check-out — "take some now"). The first checkout transitions the booking to
+   * ONGOING; the rest stay reserved until checked out. Mirrors
+   * {@link partialCheckinBooking}.
+   */
+  partialCheckoutBooking: (
+    orgId: string,
+    bookingId: string,
+    assetIds: string[],
+    timeZone?: string
+  ) =>
+    apiFetch<PartialCheckoutResponse>(
+      `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, timeZone }),
