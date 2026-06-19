@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { AssetStatus } from "@prisma/client";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
 import {
+  clearSelectedBulkItemsAtom,
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
@@ -13,7 +13,11 @@ import type {
   BookingPageLoaderData,
   BookingPageActionData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { getBookingContextAssetStatus } from "~/utils/booking-assets";
+import type { AssetWithStatus } from "~/utils/booking-assets";
+import {
+  flattenSelectedBookingItems,
+  isAssetCheckableIn,
+} from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import CheckinDialog from "./checkin-dialog";
 import { AssetImage } from "../assets/asset-image/component";
@@ -39,59 +43,34 @@ export default function BulkPartialCheckinDialog({
   const { booking, partialCheckinProgress, partialCheckinDetails } =
     useLoaderData<BookingPageLoaderData>();
 
-  let selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
-  // Create a map for quick asset lookup
-  const bookingAssetsMap = new Map(
-    booking.assets.map((asset) => [asset.id, asset])
+  // Flatten/enrich the selection via the SHARED resolver (single source of
+  // truth with the dropdown and checkout dialog), then keep kits + the assets
+  // that are actually checkable-in.
+  const flattenedItems = flattenSelectedBookingItems(
+    rawSelectedItems,
+    booking.assets
   );
+  const selectedItems = flattenedItems.filter((item) => {
+    if (item.type === "kit" || (item.name && item._count)) return true;
+    return isAssetCheckableIn(
+      item as AssetWithStatus,
+      partialCheckinDetails,
+      booking.status
+    );
+  });
 
-  // Enrich selection data with booking asset information and filter for CHECKED_OUT
-  selectedItems = selectedItems
-    .flatMap((item: any) => {
-      // Handle pagination wrapper objects (has type: "asset" and assets array)
-      if (item.type === "asset" && item.assets) {
-        return item.assets.map((asset: any) => {
-          const bookingAsset = bookingAssetsMap.get(asset.id);
-          return bookingAsset ? { ...asset, ...bookingAsset } : asset;
-        });
-      }
-
-      // Handle kit objects (has type: "kit")
-      if (item.type === "kit") {
-        // Flatten kit properties to match rendering expectations
-        const flattenedKit = {
-          ...item,
-          name: item.kit?.name,
-          _count: item.kit?._count,
-        };
-        return flattenedKit;
-      }
-
-      // Handle kit objects with traditional structure (has name and _count, not title)
-      if (item.name && item._count) {
-        return item; // Return kit as-is, no need to filter by status
-      }
-
-      // Handle direct asset objects (has title, not name)
-      if (item.title) {
-        const bookingAsset = bookingAssetsMap.get(item.id);
-        return bookingAsset ? { ...item, ...bookingAsset } : item;
-      }
-
-      return item; // Fallback for any other structure
-    })
-    .filter((item) => {
-      // Keep kits regardless of status (both type structures)
-      if (item.type === "kit" || (item.name && item._count)) return true;
-      const contextStatus = getBookingContextAssetStatus(
-        item,
-        partialCheckinDetails,
-        booking.status
-      );
-      // Only keep assets that are CHECKED_OUT
-      return contextStatus === AssetStatus.CHECKED_OUT;
-    });
+  // Distinct selected vs. eligible asset ids, for the skip-note and submit
+  // guard. Kits (which carry _count) are excluded — only assets are submitted.
+  const allSelectedAssetIds = new Set(
+    flattenedItems.filter((i) => i.title && !i._count).map((i) => i.id)
+  );
+  const eligibleAssetIds = new Set(
+    selectedItems.filter((i) => i.title && !i._count).map((i) => i.id)
+  );
+  const skippedCount = allSelectedAssetIds.size - eligibleAssetIds.size;
+  const noAssetsToCheckIn = eligibleAssetIds.size === 0;
 
   /** Use state instead of ref so the component re-renders once the form
    * mounts — this guarantees portalContainer is the real DOM node
@@ -129,6 +108,10 @@ export default function BulkPartialCheckinDialog({
 
   const actionData = useActionData<BookingPageActionData>();
 
+  // Clear the bulk selection once the action succeeds so the user does not need
+  // to manually "unselect all" before selecting the next batch.
+  const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
+
   // First, detect when we get a success response
   useEffect(() => {
     if (actionData && "success" in actionData && actionData.success) {
@@ -141,8 +124,9 @@ export default function BulkPartialCheckinDialog({
     if (shouldClose && !disabled) {
       setOpen(false);
       setShouldClose(false); // Reset for future uses
+      clearSelectedBulkItems();
     }
-  }, [shouldClose, disabled, setOpen]);
+  }, [shouldClose, disabled, setOpen, clearSelectedBulkItems]);
 
   return (
     <DialogPortal>
@@ -152,7 +136,7 @@ export default function BulkPartialCheckinDialog({
         className={tw("bulk-tagging-dialog lg:w-[400px]")}
         title={
           <div className="w-full">
-            <div className={tw("mb-5")}>
+            <div className={tw("mb-2")}>
               <h4>Check in selected items</h4>
               <p>
                 The following items will be checked in and marked as Available.
@@ -180,6 +164,14 @@ export default function BulkPartialCheckinDialog({
                 value={asset.id}
               />
             ))}
+
+          {skippedCount > 0 && (
+            <p className="mb-3 rounded border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
+              {skippedCount} selected item{skippedCount === 1 ? "" : "s"}{" "}
+              {skippedCount === 1 ? "isn't" : "aren't"} checked out and will be
+              skipped.
+            </p>
+          )}
 
           {/* List of items being checked in */}
           <div className="mb-4 max-h-48 overflow-y-auto rounded border bg-gray-50 p-3">
@@ -325,13 +317,14 @@ export default function BulkPartialCheckinDialog({
                 formId="bulk-partial-checkin-form"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedItems.map((item: any) => item.id)}
+                fullWidth
               />
             ) : (
               <Button
                 type="submit"
                 variant="primary"
                 width="full"
-                disabled={disabled}
+                disabled={disabled || noAssetsToCheckIn}
                 name="intent"
                 value="partial-checkin"
               >
