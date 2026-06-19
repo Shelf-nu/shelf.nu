@@ -60,7 +60,7 @@
     "react-native-web": "~0.21.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.2",
+    "@babel/core": "^7.29.6",
     "@types/react": "^19.2.14",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
