@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { AssetStatus } from "@prisma/client";
-import type { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -9,13 +8,18 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import type { AssetWithStatus } from "~/utils/booking-assets";
+import {
+  flattenSelectedBookingItems,
+  isAssetCheckableIn,
+  isAssetCheckableOut,
+  isAssetPartiallyCheckedIn,
+} from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
 import BulkRemoveAssetAndKitDialog from "./bulk-remove-asset-and-kit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
-import type { ListItemData } from "../list/list-item";
 import { Button } from "../shared/button";
 import {
   DropdownMenu,
@@ -57,66 +61,82 @@ function ConditionalDropdown() {
   );
   const actionsButtonDisabled = selectedItems.length === 0;
 
-  // Show partial check-in option only for ONGOING/OVERDUE bookings
+  // Show partial check-in only for ONGOING/OVERDUE bookings.
   const showPartialCheckin =
     bookingStatus?.isOngoing || bookingStatus?.isOverdue;
 
-  // Show partial check-out option for RESERVED/ONGOING/OVERDUE bookings.
-  // Unlike check-in, checkout can START from a RESERVED booking.
+  // Show partial check-out for RESERVED/ONGOING/OVERDUE bookings. Unlike
+  // check-in, checkout can START from a RESERVED booking.
   const showPartialCheckout =
     bookingStatus?.isReserved ||
     bookingStatus?.isOngoing ||
     bookingStatus?.isOverdue;
 
-  // Check if any selected items are already checked in using context-aware status
-  // Filter out kit entries (which have undefined title) since bulk selection includes both kit AND its individual assets
-  // We only need to check the individual assets for validation
-  const assetsToCheck = selectedItems.filter(
-    (item) => item.title !== undefined
-  );
+  // Finished = COMPLETE/ARCHIVED. Computed directly from status: the helper's
+  // `isFinished` flag isn't present on its undefined-status return shape, and a
+  // direct compare matches how the rest of the booking UI checks status.
+  const isFinished =
+    booking.status === BookingStatus.COMPLETE ||
+    booking.status === BookingStatus.ARCHIVED;
 
-  const hasOnlyAlreadyCheckedInItems = assetsToCheck.every((item) => {
-    // Type assertion since ListItemData includes asset properties via [x: string]: any
-    // and we know these are asset items with status property
-    const asset = item as ListItemData & { status: string };
-    // For individual assets, check if already partially checked in
-    return isAssetPartiallyCheckedIn(
-      asset,
+  // Resolve the selection to enriched asset rows (kits excluded) with the SAME
+  // resolver the dialogs use, so the dropdown's enable/disable state can never
+  // disagree with what a dialog would actually act on.
+  const selectedAssets = flattenSelectedBookingItems(
+    selectedItems,
+    booking.assets
+  ).filter((item) => item.title && !item._count);
+
+  const checkedOutIdsSet = new Set(checkedOutAssetIds);
+
+  // How many selected assets each action can act on.
+  const checkInEligibleCount = selectedAssets.filter((asset) =>
+    isAssetCheckableIn(
+      asset as AssetWithStatus,
       partialCheckinDetails,
       booking.status
+    )
+  ).length;
+  const checkOutEligibleCount = selectedAssets.filter((asset) =>
+    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet)
+  ).length;
+
+  // Grey out check-in when nothing in the selection is checked out. Tailor the
+  // reason: "already checked in" reads better when that's the actual cause.
+  const allSelectedAlreadyCheckedIn =
+    selectedAssets.length > 0 &&
+    selectedAssets.every((asset) =>
+      isAssetPartiallyCheckedIn(
+        asset as AssetWithStatus,
+        partialCheckinDetails,
+        booking.status
+      )
     );
-  });
+  const partialCheckinDisabled =
+    selectedAssets.length === 0
+      ? { reason: "Select one or more assets to check in." }
+      : checkInEligibleCount === 0
+      ? {
+          reason: allSelectedAlreadyCheckedIn
+            ? "All selected items are already checked in. Select items that are still checked out."
+            : "None of the selected items are checked out, so there's nothing to check in.",
+        }
+      : false;
 
-  const partialCheckinDisabled = hasOnlyAlreadyCheckedInItems
-    ? {
-        reason:
-          "All selected assets are already checked in. Please select assets that are still checked out.",
-      }
-    : false;
+  // Grey out check-out when every selected asset is already checked out.
+  const partialCheckoutDisabled =
+    selectedAssets.length === 0
+      ? { reason: "Select one or more assets to check out." }
+      : checkOutEligibleCount === 0
+      ? {
+          reason:
+            "All selected items are already checked out. Select items that are still booked.",
+        }
+      : false;
 
-  // Disable the checkout menu item when EVERY selected asset is already checked
-  // out (so there is nothing left to check out). Kits (undefined title) are
-  // excluded — only the individual assets are validated.
-  const assetsToCheckOut = selectedItems.filter(
-    (item) => item.title !== undefined
-  );
-
-  const hasOnlyAlreadyCheckedOut =
-    assetsToCheckOut.length > 0 &&
-    assetsToCheckOut.every((item) => {
-      // Type assertion: ListItemData carries asset props via [x: string]: any
-      const asset = item as ListItemData & { status: string };
-      return (
-        asset.status === AssetStatus.CHECKED_OUT ||
-        checkedOutAssetIds.includes(asset.id)
-      );
-    });
-
-  const partialCheckoutDisabled = hasOnlyAlreadyCheckedOut
-    ? {
-        reason:
-          "All selected assets are already checked out. Select assets that are still booked.",
-      }
+  // Mirror per-row Remove: can't remove items from a finished booking.
+  const removeDisabled = isFinished
+    ? { reason: "Can't remove items from a completed or archived booking." }
     : false;
 
   const {
@@ -195,30 +215,6 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            {showPartialCheckin && (
-              <DropdownMenuItem
-                className="px-4 py-1 md:p-0"
-                onSelect={(e) => {
-                  e.preventDefault();
-                }}
-              >
-                <Button
-                  type="button"
-                  variant="link"
-                  className={tw(
-                    "flex w-full items-center justify-start gap-2 whitespace-nowrap px-4 py-3 text-gray-700 hover:text-gray-700"
-                  )}
-                  onClick={() => {
-                    setPartialCheckinDialogOpen(true);
-                    closeMenu();
-                  }}
-                  disabled={partialCheckinDisabled}
-                >
-                  <PackageCheck className="mr-2 inline size-5" />
-                  <span>Check in selected items</span>
-                </Button>
-              </DropdownMenuItem>
-            )}
             {showPartialCheckout && (
               <DropdownMenuItem
                 className="px-4 py-1 md:p-0"
@@ -243,6 +239,30 @@ function ConditionalDropdown() {
                 </Button>
               </DropdownMenuItem>
             )}
+            {showPartialCheckin && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <Button
+                  type="button"
+                  variant="link"
+                  className={tw(
+                    "flex w-full items-center justify-start gap-2 whitespace-nowrap px-4 py-3 text-gray-700 hover:text-gray-700"
+                  )}
+                  onClick={() => {
+                    setPartialCheckinDialogOpen(true);
+                    closeMenu();
+                  }}
+                  disabled={partialCheckinDisabled}
+                >
+                  <PackageCheck className="mr-2 inline size-5" />
+                  <span>Check in selected items</span>
+                </Button>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {
@@ -253,6 +273,7 @@ function ConditionalDropdown() {
                 type="trash"
                 label="Remove assets/kits"
                 onClick={closeMenu}
+                disabled={removeDisabled}
               />
             </DropdownMenuItem>
           </div>
