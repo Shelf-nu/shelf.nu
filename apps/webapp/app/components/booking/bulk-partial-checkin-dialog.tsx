@@ -86,10 +86,11 @@ export default function BulkPartialCheckinDialog({
     (asset) =>
       asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
   );
-  // Count only individual assets (exclude kit IDs) for final check-in detection
-  const selectedAssetIds = selectedItems
-    .filter((item: any) => item.title && !item._count) // Only assets, not kits
-    .map((asset: any) => asset.id);
+  // Deduped asset ids being checked in (kits excluded). The selection can
+  // contain the same asset twice (e.g. selected standalone and as a kit
+  // member), so reuse the eligibleAssetIds Set to guarantee uniqueness for both
+  // final-checkin detection and submission.
+  const selectedAssetIds = Array.from(eligibleAssetIds);
 
   const isFinalCheckin =
     selectedAssetIds.length === remainingCheckedOutAssets.length &&
@@ -169,17 +170,16 @@ export default function BulkPartialCheckinDialog({
         >
           <input type="hidden" name="returnJson" value="true" />
 
-          {/* Filter out kit IDs - only send asset IDs to backend */}
-          {selectedItems
-            .filter((item: any) => item.title && !item._count) // Only assets, not kits
-            .map((asset: any, index: number) => (
-              <input
-                key={asset.id}
-                type="hidden"
-                name={`assetIds[${index}]`}
-                value={asset.id}
-              />
-            ))}
+          {/* Deduped asset ids only (kits excluded); same list used for
+              final-checkin detection above. */}
+          {selectedAssetIds.map((assetId: string, index: number) => (
+            <input
+              key={assetId}
+              type="hidden"
+              name={`assetIds[${index}]`}
+              value={assetId}
+            />
+          ))}
 
           {skippedCount > 0 && (
             <p className="mb-3 rounded border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
@@ -332,9 +332,7 @@ export default function BulkPartialCheckinDialog({
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
                 onClose={handleCloseDialog}
-                specificAssetIds={selectedItems
-                  .filter((item: any) => item.title && !item._count)
-                  .map((item: any) => item.id)}
+                specificAssetIds={selectedAssetIds}
                 fullWidth
               />
             ) : (
