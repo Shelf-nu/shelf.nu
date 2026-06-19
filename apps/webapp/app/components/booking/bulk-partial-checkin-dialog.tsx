@@ -184,8 +184,7 @@ export default function BulkPartialCheckinDialog({
           {skippedCount > 0 && (
             <p className="mb-3 rounded border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
               {skippedCount} selected item{skippedCount === 1 ? "" : "s"}{" "}
-              {skippedCount === 1 ? "isn't" : "aren't"} checked out and will be
-              skipped.
+              {skippedCount === 1 ? "is" : "are"} not eligible for check-in and will be skipped.
             </p>
           )}
 
