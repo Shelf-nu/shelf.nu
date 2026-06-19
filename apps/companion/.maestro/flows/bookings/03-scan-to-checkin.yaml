@@ -1,0 +1,120 @@
+# Booking — scan to check in (P3)
+#
+# Verifies the hardened check-in scan mode end-to-end:
+#   1. an asset NOT in the booking is rejected at scan time (web parity:
+#      "not part of this booking")
+#   2. a member asset scans into the check-in list
+#   3. a KIT QR expands to the kit's member assets that are in this booking
+#      (web partial-check-in parity — kits never check in as a unit)
+#   4. submitting checks everything in; covering all assets completes the
+#      booking and navigation lands back on the booking detail (anchored)
+#
+# Fixture (set up via DB before the run):
+#   "QA Scan Booking" ONGOING containing the standalone asset + the kit's
+#   member asset, both CHECKED_OUT; one outsider asset CHECKED_OUT but NOT
+#   in the booking; no PartialBookingCheckin rows.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_ASSET_QR_ID
+#      SHELF_TEST_KIT_QR_ID / SHELF_TEST_OUTSIDER_QR_ID
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+# ── Switch to the QA workspace ──
+- tapOn: "Settings"
+- assertVisible: "WORKSPACE"
+# Open the workspace picker via the switcher's stable a11y label
+# ("Current workspace: …", settings.tsx) — not a brittle screen coordinate.
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Open the booking ──
+- tapOn: "Bookings"
+- assertVisible: "Filter: All"
+- tapOn: "Filter: All"
+- scrollUntilVisible:
+    element: ".*QA Scan Booking.*"
+    direction: DOWN
+    timeout: 60000
+- tapOn: ".*QA Scan Booking.*"
+
+# ── Enter check-in scan mode ──
+- assertVisible: "Scan assets to check in"
+- takeScreenshot: checkin-entry
+- tapOn: "Scan assets to check in"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*QA Scan Booking.*"
+    timeout: 15000
+
+# ── 1. Outsider asset → rejected at scan time ──
+# A scan that lands before the booking context fetch completes gets
+# "Booking Still Loading" (membership can't be judged yet) — rescan then.
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_OUTSIDER_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*(Not in This Booking|Booking Still Loading).*"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: ".*Booking Still Loading.*"
+    commands:
+      - tapOn:
+          id: "dev-scan-input"
+      - inputText: ${SHELF_TEST_OUTSIDER_QR_ID}
+      - pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*Not in This Booking.*"
+    timeout: 15000
+- takeScreenshot: checkin-not-in-booking-rejected
+
+# ── 2. Member asset → added ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ASSET_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 asset to check in"
+    timeout: 15000
+
+# ── 3. Kit QR → expands to the in-booking member asset ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "2 assets to check in"
+    timeout: 15000
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- assertVisible: ".*Nasco Life/form IV Training Arm.*"
+- takeScreenshot: checkin-kit-expanded
+
+# ── 4. Submit — covering both booking assets completes the booking ──
+# why id: the mode header also says "check in" — text matching is ambiguous
+- tapOn:
+    id: "batch-drawer-submit"
+- tapOn: "Check In"
+- extendedWaitUntil:
+    visible: ".*All assets checked in.*"
+    timeout: 20000
+- takeScreenshot: checkin-complete-alert
+- tapOn: "OK"
+
+# ── Back on booking detail, now Complete ──
+- extendedWaitUntil:
+    visible: ".*Complete.*"
+    timeout: 20000
+- assertVisible: ".*QA Scan Booking.*"
+- takeScreenshot: checkin-booking-complete
