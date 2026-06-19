@@ -48,8 +48,23 @@ export const assetsApi = {
       `/api/mobile/assets/${assetId}?orgId=${orgId}`
     ),
 
-  /** Resolve a QR code to an asset */
-  qr: (qrId: string) => apiFetch<QrResponse>(`/api/mobile/qr/${qrId}`),
+  /**
+   * Resolve a scanned code to an asset or kit.
+   *
+   * Handles both a Shelf QR id and a SAM / sequential id (e.g. `SAM-0001`).
+   * A QR id self-identifies its org, but a SAM id is unique only within a
+   * workspace, so callers pass `orgId` to scope SAM resolution (the server
+   * ignores it on the QR path). Mirrors the web scan resolver.
+   *
+   * @param codeId - The scanned QR id or normalized SAM id.
+   * @param orgId - Caller's current workspace id; required for SAM lookups.
+   */
+  qr: (codeId: string, orgId?: string) =>
+    apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${
+        orgId ? `?orgId=${orgId}` : ""
+      }`
+    ),
 
   /** Resolve a barcode (additional code) to an asset */
   barcode: (value: string, orgId: string) =>

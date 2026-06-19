@@ -30,6 +30,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
+import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
@@ -406,15 +407,23 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
-        // 1. Resolve code -> asset (QR or barcode)
+        // 1. Resolve code -> asset (QR, SAM id, or barcode)
         const qrId = extractQrId(data);
+        // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
+        // sequentialId branch, scoped to the workspace (web parity, ungated
+        // by the Barcodes add-on). currentOrg is non-null here (guard above).
+        const samId = !qrId ? parseSequentialId(data) : null;
+        const qrLookupId = qrId ?? samId;
         let codeId: string;
         let codeOrgId: string | null;
         let asset: { id: string; title: string } | null;
 
-        if (qrId) {
-          // ── Shelf QR path ──
-          const { data: qrData, error } = await api.qr(qrId);
+        if (qrLookupId) {
+          // ── Shelf QR / SAM path ──
+          const { data: qrData, error } = await api.qr(
+            qrLookupId,
+            currentOrg.id
+          );
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -427,7 +436,7 @@ function AuditScannerContent() {
             return;
           }
 
-          codeId = qrId;
+          codeId = qrLookupId;
           codeOrgId = qrData.qr.organizationId ?? null;
           asset = qrData.qr.asset;
         } else {
@@ -1054,62 +1063,66 @@ function AuditScannerContent() {
         )}
       </View>
 
-      {/* ── Dev Scan Injection (DEV only) ───────────── */}
-      {__DEV__ && (
-        <View style={styles.devScanContainer}>
-          {devScanVisible ? (
-            <View style={styles.devScanRow}>
-              <TextInput
-                testID="dev-scan-input"
-                style={styles.devScanInput}
-                value={devScanInput}
-                onChangeText={setDevScanInput}
-                placeholder="QR ID or barcode value"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="go"
-                onSubmitEditing={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-              />
-              <TouchableOpacity
-                testID="dev-scan-submit"
-                style={styles.devScanButton}
-                onPress={() => {
-                  if (devScanInput.trim()) {
-                    handleBarCodeScanned({ data: devScanInput.trim() });
-                    setDevScanInput("");
-                  }
-                }}
-                accessibilityLabel="Inject scan"
-              >
-                <Ionicons name="scan" size={16} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.devScanClose}
-                onPress={() => setDevScanVisible(false)}
-                accessibilityLabel="Close dev scanner"
-              >
-                <Ionicons name="close" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
+      {/* ── Manual code entry ───────────────────────────
+          Type a QR id, barcode value, or SAM id when a label can't be
+          scanned. Feeds the same resolution pipeline as the camera. Web
+          parity: the web audit scanner (audits.$auditId.scan.tsx) uses the
+          shared CodeScanner, which exposes a manual code-entry Input.
+          NOTE: testIDs/state keep the `dev-scan`/`devScan` prefix from this
+          control's origin so the existing e2e flows stay stable. */}
+      <View style={styles.devScanContainer}>
+        {devScanVisible ? (
+          <View style={styles.devScanRow}>
+            <TextInput
+              testID="dev-scan-input"
+              style={styles.devScanInput}
+              value={devScanInput}
+              onChangeText={setDevScanInput}
+              placeholder="Enter QR, barcode, or SAM ID"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="go"
+              onSubmitEditing={() => {
+                if (devScanInput.trim()) {
+                  handleBarCodeScanned({ data: devScanInput.trim() });
+                  setDevScanInput("");
+                }
+              }}
+            />
             <TouchableOpacity
-              testID="dev-scan-toggle"
-              style={styles.devScanToggle}
-              onPress={() => setDevScanVisible(true)}
-              accessibilityLabel="Open dev scanner input"
+              testID="dev-scan-submit"
+              style={styles.devScanButton}
+              onPress={() => {
+                if (devScanInput.trim()) {
+                  handleBarCodeScanned({ data: devScanInput.trim() });
+                  setDevScanInput("");
+                }
+              }}
+              accessibilityLabel="Look up code"
             >
-              <Ionicons name="code-working-outline" size={14} color="#fff" />
-              <Text style={styles.devScanToggleText}>DEV SCAN</Text>
+              <Ionicons name="arrow-forward" size={16} color="#fff" />
             </TouchableOpacity>
-          )}
-        </View>
-      )}
+            <TouchableOpacity
+              style={styles.devScanClose}
+              onPress={() => setDevScanVisible(false)}
+              accessibilityLabel="Close manual entry"
+            >
+              <Ionicons name="close" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            testID="dev-scan-toggle"
+            style={styles.devScanToggle}
+            onPress={() => setDevScanVisible(true)}
+            accessibilityLabel="Enter a code manually"
+          >
+            <Ionicons name="keypad-outline" size={14} color="#fff" />
+            <Text style={styles.devScanToggleText}>Enter code</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Bottom 40%: Progress + scanned list */}
       <View style={styles.bottomPanel}>
@@ -1453,7 +1466,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderRadius: borderRadius.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   devScanButton: {
     backgroundColor: colors.primary,
@@ -1474,9 +1486,9 @@ const useStyles = createStyles((colors, shadows) => ({
     gap: 4,
   },
   devScanToggleText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 10,
-    fontWeight: "700" as const,
-    letterSpacing: 1,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: fontSize.xs,
+    fontWeight: "600" as const,
+    letterSpacing: 0.2,
   },
 }));

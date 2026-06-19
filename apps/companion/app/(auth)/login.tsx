@@ -10,8 +10,8 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
-  Linking,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
@@ -116,16 +116,17 @@ export default function LoginScreen() {
   };
 
   /**
-   * Opens the web password-reset flow in the system browser. The companion app
-   * has no in-app reset: the web OTP flow at /forgot-password is the source of
-   * truth and it rejects SSO users server-side. The external browser (rather
-   * than an in-app tab) lets the user switch to their email app for the code
-   * and back without tearing down the reset page.
+   * Opens the web password-reset flow in an in-app browser — the same
+   * `WebBrowser` session the SSO button uses, so the web takes over *inside* the
+   * app (SFSafariViewController on iOS / Custom Tab on Android) instead of
+   * kicking the user out to the external browser. The web `/forgot-password` OTP
+   * flow is the source of truth and rejects SSO users server-side; the in-app
+   * sheet survives the user switching to their mail app for the code and back.
    */
   const handleForgotPassword = () => {
     Keyboard.dismiss();
     setError(null);
-    Linking.openURL(`${API_BASE_URL}/forgot-password`).catch(() => {
+    WebBrowser.openBrowserAsync(`${API_BASE_URL}/forgot-password`).catch(() => {
       setError("Couldn't open the password reset page. Please try again.");
     });
   };
