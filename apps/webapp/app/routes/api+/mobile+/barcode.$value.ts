@@ -5,6 +5,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
+  MOBILE_KIT_SELECT,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -59,7 +60,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       organizationId,
       include: {
         asset: { select: MOBILE_ASSET_SELECT },
-        kit: true,
+        kit: { select: MOBILE_KIT_SELECT },
       },
     });
 
@@ -94,6 +95,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kitId: barcode.kitId,
         organizationId,
         asset: barcode.asset ?? null,
+        // Kit-linked barcodes return the kit so the scanner can batch-operate
+        // on it (previously fetched but dropped from the response).
+        kit: barcode.kit ?? null,
       },
     });
   } catch (cause) {

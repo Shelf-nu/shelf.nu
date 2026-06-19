@@ -238,6 +238,29 @@ export const MOBILE_ASSET_SELECT = {
   title: true,
   status: true,
   mainImage: true,
+  // why: kitId powers the scanner's "part of a kit" batch blocker — assets
+  // inside a kit must be (un)assigned via the kit, mirroring the web drawers.
+  kitId: true,
+  // why: powers the scan-to-booking "not available to book" blocker.
+  availableToBook: true,
   category: { select: { name: true } },
   location: { select: { name: true } },
+} as const;
+
+/**
+ * Shared Prisma select shape for kit data returned by mobile scanner
+ * endpoints (QR/barcode resolution). The per-asset statuses power the
+ * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
+ * web scanner drawers.
+ */
+export const MOBILE_KIT_SELECT = {
+  id: true,
+  name: true,
+  status: true,
+  image: true,
+  _count: { select: { assets: true } },
+  // why: per-asset status powers the "kit has assets in custody" blocker;
+  // availableToBook powers the scan-to-booking "kit has unavailable assets"
+  // blocker — both mirror the web scanner drawers.
+  assets: { select: { id: true, status: true, availableToBook: true } },
 } as const;
