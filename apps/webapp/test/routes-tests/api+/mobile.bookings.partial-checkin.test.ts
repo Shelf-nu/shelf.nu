@@ -30,12 +30,27 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: external service — we mock partial checkin to avoid database calls
 vi.mock("~/modules/booking/service.server", () => ({
   partialCheckinBooking: vi.fn(),
 }));
+
+// why: external database — the route does an org-scoped booking lookup
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
+}));
+
+// why: rate limiting hits a shared store; no-op it in tests
+vi.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vi.fn(),
+}));
+
+// Note: canUserManageBookingAssets (~/utils/bookings) is intentionally NOT
+// mocked — it is the real authorization gate, exercised via the booking
+// status / role / custodian fixtures below.
 
 // why: we need to control error formatting in the catch block
 vi.mock("~/utils/error", () => ({
@@ -53,8 +68,10 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckinBooking } from "~/modules/booking/service.server";
+import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
 
 const mockUser = {
@@ -92,6 +109,19 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+
+    // Org-scoped booking lookup + eligibility added by the check-in hardening.
+    (getMobileUserContext as any).mockResolvedValue({ role: "OWNER" });
+    // ONGOING + non-self-service role => the real canUserManageBookingAssets
+    // returns true (it only blocks COMPLETE/ARCHIVED/CANCELLED, and
+    // self-service on non-DRAFT bookings).
+    (db.booking.findFirst as any).mockResolvedValue({
+      id: "booking-1",
+      status: "ONGOING",
+      from: new Date(),
+      to: new Date(),
+      custodianUserId: "user-1",
+    });
   });
 
   it("should partially checkin assets and return counts", async () => {

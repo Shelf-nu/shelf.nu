@@ -1,0 +1,59 @@
+# Scanner — resolve a SAM / sequential ID (P4)
+#
+# Verifies SAM-ID scan resolution, matching the web scan resolver
+# (api+/get-scanned-item.$qrId: parseSequentialId before the QR lookup,
+# org-scoped, ungated by the Barcodes add-on):
+#   1. a non-existent SAM id → "doesn't exist" error, stays on the scanner
+#   2. a lowercase SAM id → normalized + resolved → navigates to the asset
+#      detail (proves case-insensitive parity with the web util)
+#
+# Fixture: asset SAM-0001 = "Laerdal SimMan 3G Wireless Patient Simulator"
+# exists in GRANULAR WORKSPACE (25 SAM-bearing assets there).
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_SAM_ID
+#      SHELF_TEST_SAM_TITLE (regex fragment of the resolved asset's title)
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+# ── Switch to the QA workspace ──
+- tapOn: "Settings"
+- assertVisible: "WORKSPACE"
+- tapOn:
+    point: 50%, 32%
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Open the scanner (default view mode) ──
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 15000
+
+# ── 1. Non-existent SAM id → "doesn't exist" error ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-9999"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*SAM ID doesn't exist.*"
+    timeout: 15000
+- takeScreenshot: sam-not-found
+
+# ── 2. Lowercase SAM id → normalized + resolved → asset detail ──
+# why lowercase: proves the client mirrors the web util's trim+uppercase
+# normalization (sam-0001 → SAM-0001) rather than only matching exact case.
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_SAM_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*${SHELF_TEST_SAM_TITLE}.*"
+    timeout: 20000
+- takeScreenshot: sam-resolved-to-asset
