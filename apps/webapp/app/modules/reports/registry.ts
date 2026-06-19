@@ -60,6 +60,21 @@ export const REPORTS: ReportDefinition[] = [
     exportable: true,
   },
   {
+    id: "top-booked-kits",
+    title: "Top Booked Kits",
+    description:
+      "Identify your most frequently booked kits and their utilization patterns.",
+    category: "bookings",
+    icon: "Boxes",
+    enabled: true,
+    filters: [
+      { type: "category", label: "Category", multi: true },
+      { type: "location", label: "Location", multi: false },
+    ],
+    hasChart: false,
+    exportable: true,
+  },
+  {
     id: "monthly-booking-trends",
     title: "Monthly Booking Trends",
     description:

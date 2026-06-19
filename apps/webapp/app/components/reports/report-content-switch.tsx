@@ -28,6 +28,7 @@ import type {
   ReportKpi,
   ResolvedTimeframe,
   TopBookedAssetRow,
+  TopBookedKitRow,
 } from "~/modules/reports/types";
 
 import { AssetActivityContent } from "./asset-activity-content";
@@ -41,6 +42,7 @@ import { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
 import { OverdueItemsContent } from "./overdue-items-content";
 import { ReportEmptyState } from "./report-empty-state";
 import { TopBookedAssetsContent } from "./top-booked-assets-content";
+import { TopBookedKitsContent } from "./top-booked-kits-content";
 import type { ReportRowHandlers } from "./use-report-row-handlers";
 
 /** Props for {@link ReportContentSwitch}. */
@@ -61,6 +63,8 @@ type Props = {
   complianceData?: ComplianceData;
   /** Top-booked-assets-only payload extra (the singular #1 asset). */
   topBookedAsset?: TopBookedAssetRow | null;
+  /** Top-booked-kits-only payload extra (the singular #1 kit). */
+  topBookedKit?: TopBookedKitRow | null;
   /** Distribution-only payload extra. */
   distributionBreakdown?: DistributionBreakdown;
   /** Monthly-booking-trends-only payload extra. */
@@ -81,6 +85,7 @@ export function ReportContentSwitch({
   timeframe,
   complianceData,
   topBookedAsset,
+  topBookedKit,
   distributionBreakdown,
   chartSeries,
   handlers,
@@ -168,6 +173,18 @@ export function ReportContentSwitch({
         />
       );
 
+    case "top-booked-kits":
+      return (
+        <TopBookedKitsContent
+          rows={rows as TopBookedKitRow[]}
+          kpis={kpis}
+          totalRows={totalRows}
+          timeframeLabel={timeframe.label}
+          topBookedKit={topBookedKit}
+          onRowClick={handlers.onKitRowClick}
+        />
+      );
+
     case "asset-inventory":
       return (
         <AssetInventoryContent
@@ -239,6 +256,8 @@ function getEmptyStateTitle(reportId: string): string {
       return "No assets in custody";
     case "top-booked-assets":
       return "No booking activity";
+    case "top-booked-kits":
+      return "No kit booking activity";
     case "distribution":
       return "No assets";
     case "asset-inventory":
@@ -269,6 +288,8 @@ function getEmptyStateDescription(reportId: string): string {
       return "No team members currently have assets assigned to them. Assets appear here when custody is assigned.";
     case "top-booked-assets":
       return "No assets have been booked within the selected timeframe. Try selecting a longer period to see booking activity.";
+    case "top-booked-kits":
+      return "No kits have been booked within the selected timeframe. Try selecting a longer period to see booking activity.";
     case "distribution":
       return "Add assets to your inventory to see distribution breakdowns by category, location, and status.";
     case "asset-inventory":
