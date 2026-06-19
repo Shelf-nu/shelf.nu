@@ -32,3 +32,5 @@ web-build/
 
 expo-env.d.ts
 # @end expo-cli
+# Android Play service account key (secret — never commit)
+google-service-account*.json
