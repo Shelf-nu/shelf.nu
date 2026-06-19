@@ -94,7 +94,7 @@
     "lru-cache": "^11.3.3",
     "lucide-react": "^1.8.0",
     "luxon": "^3.7.2",
-    "nodemailer": "^8.0.9",
+    "nodemailer": "^9.0.1",
     "nprogress": "^0.2.0",
     "path-to-regexp": "^8.4.2",
     "pg-boss": "^9.0.3",
