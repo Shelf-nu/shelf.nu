@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -76,7 +76,8 @@ function ConditionalDropdown() {
   // `isFinished` flag isn't present on its undefined-status return shape, and a
   // direct compare matches how the rest of the booking UI checks status.
   const isFinished =
-    booking.status === "COMPLETE" || booking.status === "ARCHIVED";
+    booking.status === BookingStatus.COMPLETE ||
+    booking.status === BookingStatus.ARCHIVED;
 
   // Resolve the selection to enriched asset rows (kits excluded) with the SAME
   // resolver the dialogs use, so the dropdown's enable/disable state can never
@@ -112,7 +113,9 @@ function ConditionalDropdown() {
       )
     );
   const partialCheckinDisabled =
-    checkInEligibleCount === 0
+    selectedAssets.length === 0
+      ? { reason: "Select one or more assets to check in." }
+      : checkInEligibleCount === 0
       ? {
           reason: allSelectedAlreadyCheckedIn
             ? "All selected items are already checked in. Select items that are still checked out."
@@ -122,7 +125,9 @@ function ConditionalDropdown() {
 
   // Grey out check-out when every selected asset is already checked out.
   const partialCheckoutDisabled =
-    checkOutEligibleCount === 0
+    selectedAssets.length === 0
+      ? { reason: "Select one or more assets to check out." }
+      : checkOutEligibleCount === 0
       ? {
           reason:
             "All selected items are already checked out. Select items that are still booked.",

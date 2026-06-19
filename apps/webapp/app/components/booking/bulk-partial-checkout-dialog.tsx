@@ -22,7 +22,7 @@
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
@@ -147,19 +147,32 @@ export default function BulkPartialCheckoutDialog({
   // to manually "unselect all" before selecting the next batch.
   const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
 
-  // First, detect when we get a success response.
+  // Tracks whether the latest submission came from THIS dialog. Both bulk
+  // dialogs are always mounted and share useActionData, so without this guard
+  // any successful overview action (e.g. saving notification recipients) would
+  // close this dialog and clear the user's selection.
+  const submittedRef = useRef(false);
+
+  // First, detect a successful response, but only for a submission this dialog
+  // initiated (submittedRef is set by the form's onSubmit below).
   useEffect(() => {
+    if (!submittedRef.current) return;
     if (actionData && "success" in actionData && actionData.success) {
       setShouldClose(true);
+    } else if (actionData) {
+      // Our submission resolved without success (e.g. a validation error), so
+      // stop tracking; a later unrelated success must not trigger close/clear.
+      submittedRef.current = false;
     }
   }, [actionData]);
 
-  // Then, close the dialog when revalidation completes.
+  // Then, close the dialog and clear the selection once revalidation completes.
   useEffect(() => {
     if (shouldClose && !disabled) {
       setOpen(false);
       setShouldClose(false); // Reset for future uses
       clearSelectedBulkItems();
+      submittedRef.current = false;
     }
   }, [shouldClose, disabled, setOpen, clearSelectedBulkItems]);
 
@@ -194,6 +207,9 @@ export default function BulkPartialCheckoutDialog({
           className="px-6 pb-6"
           ref={setFormElement}
           id="bulk-partial-checkout-form"
+          onSubmit={() => {
+            submittedRef.current = true;
+          }}
         >
           <input type="hidden" name="returnJson" value="true" />
 
