@@ -7,7 +7,7 @@
  * via requireMobilePermission on every API call.
  */
 
-type PermissionEntity = "asset" | "booking" | "audit";
+type PermissionEntity = "asset" | "booking" | "audit" | "kit";
 type PermissionAction =
   | "read"
   | "create"
@@ -29,21 +29,25 @@ const ROLE_PERMISSIONS: Record<
     asset: ["read", "create", "update", "delete", "custody"],
     booking: ["read", "create", "update", "delete", "checkout", "checkin"],
     audit: ["read", "create", "update", "delete"],
+    kit: ["read", "create", "update", "delete", "custody"],
   },
   ADMIN: {
     asset: ["read", "create", "update", "delete", "custody"],
     booking: ["read", "create", "update", "delete", "checkout", "checkin"],
     audit: ["read", "create", "update", "delete"],
+    kit: ["read", "create", "update", "delete", "custody"],
   },
   SELF_SERVICE: {
     asset: ["read", "custody"],
     booking: ["read", "create", "update", "checkout", "checkin"],
     audit: ["read", "update"],
+    kit: ["read", "custody"],
   },
   BASE: {
     asset: ["read"],
     booking: ["read"],
     audit: ["read"],
+    kit: ["read"],
   },
 };
 

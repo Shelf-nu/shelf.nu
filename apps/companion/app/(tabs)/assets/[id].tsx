@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import {
   borderRadius,
   formatStatus,
   formatDate,
+  formatCurrency,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -34,6 +35,7 @@ import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
+import { InfoRow } from "@/components/shared/info-row";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
@@ -196,19 +198,6 @@ export default function AssetDetailScreen() {
     }
   };
 
-  // ── Helpers ─────────────────────────────────────────
-
-  const formatCurrency = (value: number, currency: string) => {
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency,
-      }).format(value);
-    } catch {
-      return `${currency} ${value.toFixed(2)}`;
-    }
-  };
-
   // ── Render ──────────────────────────────────────────
 
   if (isLoading) {
@@ -345,6 +334,12 @@ export default function AssetDetailScreen() {
                 icon="layers-outline"
                 label="Kit"
                 value={asset.kit.name}
+                // Kit detail lives in this same stack, so a plain push keeps
+                // "back" returning to this asset.
+                onPress={() =>
+                  router.push(`/(tabs)/assets/kits/${asset.kit!.id}`)
+                }
+                accessibilityLabel={`View kit ${asset.kit.name}`}
               />
             )}
             {asset.custody && (
@@ -546,32 +541,6 @@ export default function AssetDetailScreen() {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────
-
-const InfoRow = memo(function InfoRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-}) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <View style={styles.infoRow}>
-      <View style={styles.infoLabel}>
-        <Ionicons name={icon as any} size={16} color={colors.muted} />
-        <Text style={styles.infoLabelText}>{label}</Text>
-      </View>
-      <Text style={styles.infoValue} numberOfLines={2} selectable>
-        {value}
-      </Text>
-    </View>
-  );
-});
-
 // ── Styles ─────────────────────────────────────────────
 
 const useStyles = createStyles((colors, shadows) => ({
@@ -672,24 +641,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
     overflow: "hidden",
     ...shadows.sm,
-  },
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  infoLabel: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  infoLabelText: { fontSize: fontSize.base, color: colors.muted },
-  infoValue: {
-    fontSize: fontSize.base,
-    fontWeight: "600",
-    color: colors.foreground,
-    maxWidth: "55%",
-    textAlign: "right",
   },
 
   // Section containers (tags, QR)

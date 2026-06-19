@@ -1,0 +1,93 @@
+# Booking — check-in SKIPS a never-checked-out kit member (regression)
+#
+# Regression guard for the kit-expansion gap fixed alongside the rebase onto
+# main's progressive-checkout (#2625). A kit QR scanned during check-in must
+# SKIP members that aren't currently checked out — mirroring the single-asset
+# gate. Otherwise partialCheckinBooking's progressive-checkout guard
+# 400-rejects the WHOLE batch, failing even the legitimately-checked-out
+# assets scanned in the same action.
+#
+# Fixture (set up via DB before the run):
+#   "QA Scan Booking" ONGOING; the standalone asset CHECKED_OUT; the kit's
+#   only member AVAILABLE (never checked out); a PartialBookingCheckout row
+#   covering ONLY the standalone asset (arms the server guard so the member
+#   would be rejected if it were ever submitted).
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_ASSET_QR_ID
+#      SHELF_TEST_KIT_QR_ID
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+# ── Switch to the QA workspace ──
+- tapOn: "Settings"
+- assertVisible: "WORKSPACE"
+# Open the workspace picker via the switcher's stable a11y label
+# ("Current workspace: …", settings.tsx) — not a brittle screen coordinate.
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Open the booking + enter check-in scan mode ──
+- tapOn: "Bookings"
+- assertVisible: "Filter: All"
+- tapOn: "Filter: All"
+- scrollUntilVisible:
+    element: ".*QA Scan Booking.*"
+    direction: DOWN
+    timeout: 60000
+- tapOn: ".*QA Scan Booking.*"
+- assertVisible: "Scan assets to check in"
+- tapOn: "Scan assets to check in"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*QA Scan Booking.*"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-toggle"
+
+# ── Kit QR whose only member is AVAILABLE → must be SKIPPED (the fix) ──
+# Pre-fix this scan added the never-checked-out member to the batch; the fix
+# now surfaces "Not Checked Out" and adds nothing.
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*(Not Checked Out|Booking Still Loading).*"
+    timeout: 15000
+- runFlow:
+    when:
+      visible: ".*Booking Still Loading.*"
+    commands:
+      - tapOn:
+          id: "dev-scan-input"
+      - inputText: ${SHELF_TEST_KIT_QR_ID}
+      - pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*Not Checked Out.*"
+    timeout: 15000
+- takeScreenshot: regression-kit-member-skipped
+
+# ── A genuinely checked-out asset still works; batch count proves the kit
+#    member was NOT added (would read "2 assets" if the fix had failed) ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ASSET_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 asset to check in"
+    timeout: 15000
+
+# ── Submit succeeds (no progressive-checkout 400) ──
+- tapOn:
+    id: "batch-drawer-submit"
+- tapOn: "Check In"
+- extendedWaitUntil:
+    visible: ".*Checked In.*"
+    timeout: 20000
+- assertVisible: ".*checked in.*"
+- takeScreenshot: regression-submit-no-400
+- tapOn: "OK"

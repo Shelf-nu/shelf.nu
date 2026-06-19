@@ -192,11 +192,13 @@ describe("manage-assets route validation", () => {
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledTimes(2);
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        {}
+        {},
+        "ONGOING"
       );
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[1],
-        {}
+        {},
+        "ONGOING"
       );
     });
 
@@ -288,7 +290,8 @@ describe("manage-assets route validation", () => {
 
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        mockPartialCheckinDetails
+        mockPartialCheckinDetails,
+        "ONGOING"
       );
     });
 
@@ -543,7 +546,8 @@ describe("manage-assets route validation", () => {
       // Verify helper is called with correct parameters
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
-        mockPartialCheckinDetails
+        mockPartialCheckinDetails,
+        "ONGOING"
       );
     });
   });
@@ -575,14 +579,16 @@ describe("manage-assets route validation", () => {
         id: "booking123",
         organizationId: "org123",
         assetIds: ["asset3"], // only the new asset
+        userId: "user123",
       });
 
       // Verify note creation for new assets
       expect(noteService.createNotes).toHaveBeenCalledWith({
         content:
-          "**John Doe** added asset to booking **[Test Booking](/bookings/booking123)**.",
+          '{% link to="/settings/team/users/user123" text="John Doe" /%} added asset to {% link to="/bookings/booking123" text="Test Booking" /%}.',
         type: "UPDATE",
         userId: "user123",
+        organizationId: "org123",
         assetIds: ["asset3"], // only the new asset
       });
     });
@@ -611,6 +617,7 @@ describe("manage-assets route validation", () => {
       // Verify removeAssets is called
       expect(bookingService.removeAssets).toHaveBeenCalledWith({
         booking: { id: "booking123", assetIds: ["asset2"] },
+        assets: [], // db.asset.findMany returns [] in this test
         firstName: "John",
         lastName: "Doe",
         userId: "user123",

@@ -1,0 +1,35 @@
+# Assets — search by SAM / sequential id
+#
+# Mobile asset search was title-only; this verifies it now also matches
+# sequentialId (web parity for the SAM branch). When the workspace shows SAM
+# ids on every row, typing one into search must find the asset.
+#
+# Fixture: SAM-0001 = "Laerdal SimMan 3G Wireless Patient Simulator" in
+# GRANULAR WORKSPACE. Uses a lowercase term to also prove case-insensitivity.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_SAM_ID
+#      SHELF_TEST_SAM_TITLE (regex fragment of the resolved asset's title)
+appId: com.shelf.companion.carlos
+---
+- runFlow: ../../shared/login.yaml
+
+# ── Switch to the QA workspace ──
+- tapOn: "Settings"
+- assertVisible: "WORKSPACE"
+- tapOn:
+    point: 50%, 32%
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Assets tab → search by SAM id ──
+- tapOn: "Assets"
+- extendedWaitUntil:
+    visible: "Search assets"
+    timeout: 15000
+- tapOn: "Search assets"
+- inputText: ${SHELF_TEST_SAM_ID}
+# 400ms debounce + fetch — the SAM asset should surface
+- extendedWaitUntil:
+    visible: ".*${SHELF_TEST_SAM_TITLE}.*"
+    timeout: 20000
+- takeScreenshot: assets-search-by-sam

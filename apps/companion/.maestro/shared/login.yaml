@@ -23,23 +23,27 @@ appId: com.shelf.companion.carlos
 - assertVisible: "http://localhost:8081"
 - tapOn: "http://localhost:8081"
 
-# Dismiss Expo developer menu overlays if they appear
-# First launch after clearState shows a "Continue" welcome dialog
-# which opens the full dev tools bottom sheet. Dismiss both.
+# Wait for the JS bundle to load BEFORE dismissing overlays — on a freshly
+# cleared Metro the first bundle takes ~10s+, and tapping "Continue" before
+# the sheet exists is a no-op that leaves the sheet blocking the screen
+# later. First launch shows the dev-menu welcome sheet ("Continue");
+# subsequent launches go straight to the login screen ("Welcome back").
+- extendedWaitUntil:
+    visible: "Continue|Welcome back"
+    timeout: 120000
 - tapOn:
     text: "Continue"
     optional: true
-# Swipe down to dismiss the dev tools bottom sheet
+# Swipe down to dismiss the dev tools bottom sheet if it opened
 - swipe:
     direction: DOWN
     duration: 500
 
-# Wait for Metro to bundle the JS and render the login screen
-# After clearState + keychain reset, app always shows login screen
+# Login screen ready
 - extendedWaitUntil:
     visible:
       id: "email-input"
-    timeout: 120000
+    timeout: 60000
 
 # Enter email
 - tapOn:
@@ -56,6 +60,12 @@ appId: com.shelf.companion.carlos
 # Sign in (optional — login may already fire via onSubmitEditing)
 - tapOn:
     id: "sign-in-button"
+    optional: true
+
+# Dismiss the iOS "Save Password?" AutoFill prompt (appears on fresh
+# simulators after clearKeychain; blocks visibility assertions if left up)
+- tapOn:
+    text: "Not Now"
     optional: true
 
 # Wait for main app to load — tab bar text "Home" becomes visible
