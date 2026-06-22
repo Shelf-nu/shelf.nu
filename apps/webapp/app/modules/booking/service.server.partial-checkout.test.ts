@@ -347,8 +347,9 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(kitBooking);
 
-    // The in-tx kit-info read returns the scanned asset WITH its kit attached
-    // (and AVAILABLE / no conflicts so validation passes).
+    // why: the in-tx kit-info read must return the scanned asset WITH its kit
+    // attached (and AVAILABLE / no conflicts) so the note-builder sees a
+    // kit-member asset whose kit isn't fully checked out.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
       (args?: any) => {
         const ids = args?.where?.id?.in;
