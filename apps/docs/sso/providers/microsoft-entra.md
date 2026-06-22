@@ -120,12 +120,14 @@ In the meantime, you can continue with the next steps that will show you how to 
 
 ## Step 10: Create groups and assign users [#](#step-10-create-groups-and-assign-users)
 
-In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping.
-For each workspace you will have to create 3 groups, each one representing a different role in Shelf:
+In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has three roles you can map a group to:
 
 - Admin group
 - Self service group
 - Base user group
+
+> [!NOTE]
+> You only need to create a group for the **roles you actually use** — mapping a single group is enough for SSO to work. Create additional groups only if you want different users to get different roles.
 
 > [!NOTE]
 > A user should not be added to more than 1 group within the application as it may cause undesired behaviour.
@@ -156,11 +158,11 @@ Once confirmed you should end up with a setup similar to this:
 >
 > Keep in mind that the OWNER of the workspace in shelf, cannot be an SSO user. The workspace needs to be created by a normal user. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
 
-Once you have the groups ready, you need to add their IDs in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
+Once you have the groups ready, you need to add their **IDs** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go the the workspace settings and place the id of the ADMIN, BASE & SELF SERVICE groups. You can find the ID by clicking on each group in Entra and copying the _Object ID_
+Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
 
 > [!IMPORTANT]
-> Those fields are case sensitive. The name should be placed exactly as the group name is in Google workspace.
+> These fields are case sensitive. The Object ID must be entered exactly as it appears in Microsoft Entra.
 
 ![step-9](../../img/google-workspace-step-9.png)
