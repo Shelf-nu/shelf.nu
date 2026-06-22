@@ -2,6 +2,7 @@
 // It is important to import it as .js for this to work, even if the file is .ts
 import "./instrument.server.js";
 
+import type { Context } from "hono";
 import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
@@ -17,7 +18,7 @@ import {
   refreshSession,
   urlShortener,
 } from "./middleware";
-import { mobileIpRateLimit } from "./rate-limit";
+import { appLoaderRateLimit, mobileIpRateLimit } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { securityHeaders } from "./security-headers";
 import { authSessionKey, createSessionStorage } from "./session";
@@ -195,6 +196,29 @@ export default createHonoServer<ServerEnv>({
         ],
       })
     );
+
+    /**
+     * Guard single-fetch loader (`*.data`) revalidations against runaway
+     * client loops that can exhaust the DB connection pool. Keyed per
+     * (user, path) so normal navigation (varied paths) is unaffected.
+     * `/__*` (manifest) and SSE streams are not `.data`, so excluded.
+     *
+     * The limiter is instantiated ONCE here (not per request) so its
+     * in-memory store accumulates counts across requests — re-creating it in
+     * the closure would hand every request a fresh, empty store and the guard
+     * would never fire. We can't register it via `server.use(pattern, ...)`
+     * like the mobile limiter because the match is a `.data` *suffix*, not a
+     * path prefix, hence the manual matcher wrapper.
+     */
+    const appLoaderLimiter = appLoaderRateLimit();
+    server.use("*", async (c, next) => {
+      const p = c.req.path;
+      if (!p.endsWith(".data") || p.startsWith("/__")) return next();
+      // `appLoaderLimiter` is typed with hono's default `Env`; our server uses
+      // a custom `ServerEnv`. Cast to bridge the generic — the runtime context
+      // is the same object Hono passes to every middleware.
+      return appLoaderLimiter(c as unknown as Context, next);
+    });
   },
 });
 
