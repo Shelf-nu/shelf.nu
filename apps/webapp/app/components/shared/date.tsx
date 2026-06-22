@@ -1,5 +1,7 @@
 import { format } from "date-fns";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
+import { resolveDateFormat } from "~/utils/date-format";
 
 /**
  * Formats a date using locale-specific formatting without timezone conversion.
@@ -102,11 +104,24 @@ export const DateS = ({
   localeOnly?: boolean;
 }) => {
   const hints = useHints();
+  // The active workspace's date-format preference (undefined outside the
+  // authenticated layout, e.g. auth/onboarding pages → falls back to AUTO).
+  const currentOrganization = useCurrentOrganization();
   if (!date) {
     // eslint-disable-next-line no-console
     console.warn("DateS component received null date:", date);
     return null;
   }
+
+  // Resolve the org date-format preference. For AUTO this is a no-op (legacy
+  // Accept-Language behavior); for explicit formats it overrides the locale the
+  // Intl pipeline is keyed on (which reorders dates) and supplies zero-padded
+  // numeric defaults for plain date displays.
+  const { locale, numericDefaults } = resolveDateFormat(
+    currentOrganization?.dateFormat,
+    hints.locale
+  );
+  const hintsForFormat = locale === hints.locale ? hints : { ...hints, locale };
 
   // Handle locale-only formatting (no timezone conversion)
   if (localeOnly) {
@@ -136,20 +151,24 @@ export const DateS = ({
       ...options,
     };
   } else if (includeTime) {
-    // Show both date and time
+    // Show both date and time. For explicit formats, numericDefaults sets the
+    // date portion (locale fixes the order); caller options still win.
     timeOptions = {
+      ...numericDefaults,
       hour: "numeric",
       minute: "numeric",
       ...options,
     };
   } else {
-    // Show only date (default)
-    timeOptions = options || {};
+    // Show only date (default). numericDefaults is undefined for AUTO, so this
+    // reduces to the legacy `options || {}` behavior.
+    timeOptions = { ...numericDefaults, ...options };
   }
 
-  const formattedDate = getDateTimeFormatFromHints(hints, timeOptions).format(
-    new Date(d)
-  );
+  const formattedDate = getDateTimeFormatFromHints(
+    hintsForFormat,
+    timeOptions
+  ).format(new Date(d));
 
   return <span>{formattedDate}</span>;
 };

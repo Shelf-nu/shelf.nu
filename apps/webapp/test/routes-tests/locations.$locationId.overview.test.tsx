@@ -43,6 +43,12 @@ vi.mock("react-router", async () => {
   return {
     ...(actual as Record<string, unknown>),
     useLoaderData: vi.fn(),
+    // why: DateS now reads the workspace date-format pref via
+    // useCurrentOrganization → useRouteLoaderData. This component is rendered in
+    // isolation (no data router), so stub the layout loader lookup; returning
+    // undefined makes the date-format preference resolve to AUTO (legacy
+    // behavior), matching this test's existing client-hints stub.
+    useRouteLoaderData: vi.fn(() => undefined),
   };
 });
 

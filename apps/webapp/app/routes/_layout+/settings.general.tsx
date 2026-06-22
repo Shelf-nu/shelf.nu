@@ -234,8 +234,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
-          payload;
+        const {
+          name,
+          currency,
+          id,
+          qrIdDisplayPreference,
+          dateFormat,
+          showShelfBranding,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -289,6 +295,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId: authSession.userId,
           currency,
           qrIdDisplayPreference,
+          dateFormat,
           showShelfBranding: nextShowShelfBranding,
         });
 
@@ -456,6 +463,7 @@ export default function GeneralPage() {
         name={organization.name}
         currency={organization.currency}
         qrIdDisplayPreference={organization.qrIdDisplayPreference}
+        dateFormat={organization.dateFormat}
       />
 
       <Card className={tw("mb-0")}>
