@@ -66,6 +66,7 @@ export async function requireMobileAuth(request: Request) {
       profilePicture: true,
       onboarded: true,
       deletedAt: true,
+      lastMobileActiveAt: true,
     },
   });
 
@@ -78,8 +79,19 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Strip deletedAt from the returned object
-  const { deletedAt: _, ...safeUser } = user;
+  // Record companion-app usage for adoption metrics. requireMobileAuth is the
+  // single chokepoint every mobile API route passes through (QR scanner
+  // included), so recording here covers them all in one place. Debounced +
+  // fire-and-forget — never blocks or breaks the request (see
+  // mobile-usage.server.ts).
+  recordMobileActivity(user.id, user.lastMobileActiveAt);
+
+  // Strip internal-only fields from the returned object
+  const {
+    deletedAt: _deletedAt,
+    lastMobileActiveAt: _lastMobileActiveAt,
+    ...safeUser
+  } = user;
   return { user: safeUser, authUser };
 }
 
@@ -145,7 +157,7 @@ export async function requireOrganizationAccess(
 
   const membership = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId: orgId } },
-    select: { lastMobileActiveAt: true },
+    select: { id: true },
   });
 
   if (!membership) {
@@ -156,11 +168,6 @@ export async function requireOrganizationAccess(
       status: 403,
     });
   }
-
-  // Record companion-app usage for adoption metrics. Debounced + fire-and-forget
-  // (see mobile-usage.server.ts) so it never delays or breaks the request. This
-  // is the chokepoint nearly every org-scoped mobile route passes through.
-  recordMobileActivity(userId, orgId, membership.lastMobileActiveAt);
 
   return orgId;
 }
