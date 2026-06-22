@@ -209,8 +209,16 @@ export function shouldPromptEarlyCheckout(
   return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
 }
 
-/** Minimal asset shape needed to decide check-out eligibility. */
-type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
+/**
+ * Minimal asset shape needed to decide check-out eligibility. `type` drives
+ * the QT-vs-INDIVIDUAL branch in {@link isAssetCheckoutEligible}; legacy
+ * callers that omit it fall through to INDIVIDUAL semantics.
+ */
+type CheckoutEligibilityAsset = {
+  id: string;
+  status: AssetStatus;
+  type?: AssetType;
+};
 
 /**
  * Decide whether a booking asset is still eligible to be checked out right now.
@@ -223,25 +231,50 @@ type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
  *   again but DONE for this booking;
  * - in custody (must be released before it can be checked out).
  *
+ * QUANTITY_TRACKED assets are partial top-off aware: when a per-asset
+ * `remainingByAssetId` map is supplied, eligibility is "remaining > 0" (a QT
+ * asset with 2 of 5 units already out is still eligible for the other 3).
+ * Without the map the helper preserves the legacy binary gate so existing
+ * callers behave unchanged.
+ *
  * Shared by the scanner drawer's eligibility filter and its "remaining to check
  * out" denominator so the numerator and denominator always describe the SAME
  * set (the progress bar can reach 100%).
  *
- * @param asset - The asset (id + live status)
+ * @param asset - The asset (id + live status + optional type)
  * @param checkedOutIds - Set of asset ids already checked out for this booking
  * @param returnedIds - Set of asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map;
+ *   when present, QT assets are eligible iff `remaining > 0`
  * @returns `true` when the asset can still be scanned out
  */
 export function isAssetCheckoutEligible(
   asset: CheckoutEligibilityAsset,
   checkedOutIds: Set<string>,
-  returnedIds: Set<string>
+  returnedIds: Set<string>,
+  remainingByAssetId?: Record<string, number>
 ): boolean {
+  if (returnedIds.has(asset.id)) return false;
+  if (asset.status === AssetStatus.IN_CUSTODY) return false;
+  // QUANTITY_TRACKED: eligibility is per-unit when the loader supplies a
+  // value for the asset (top-off-aware path). The asset has remaining
+  // units exactly when remaining > 0. Status CHECKED_OUT for QT implies
+  // remaining === 0 (status flips when every slice is claimed), so the
+  // remaining gate is sufficient. When the map is absent OR the asset has
+  // no entry (legacy callsites, older tests), fall back to the binary
+  // gate so behaviour is unchanged.
+  if (asset.type === AssetType.QUANTITY_TRACKED) {
+    if (remainingByAssetId && asset.id in remainingByAssetId) {
+      return (remainingByAssetId[asset.id] ?? 0) > 0;
+    }
+    // Legacy / unmapped: preserve current behaviour (binary).
+    return (
+      !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
+    );
+  }
+  // INDIVIDUAL: unchanged binary gate.
   return (
-    !checkedOutIds.has(asset.id) &&
-    !returnedIds.has(asset.id) &&
-    asset.status !== AssetStatus.CHECKED_OUT &&
-    asset.status !== AssetStatus.IN_CUSTODY
+    !checkedOutIds.has(asset.id) && asset.status !== AssetStatus.CHECKED_OUT
   );
 }
 
@@ -251,20 +284,34 @@ export function isAssetCheckoutEligible(
  * individually) and uses {@link isAssetCheckoutEligible}, so it stays in lock
  * step with the scanner's eligibility filter.
  *
- * @param bookingAssets - All assets on the booking (id + live status)
+ * For QUANTITY_TRACKED assets the meaning is "unique assets with remaining
+ * units > 0" — a QT asset with any remaining quantity counts as 1 toward the
+ * denominator, never as its remaining-unit count. INDIVIDUAL assets still
+ * contribute 1. The scanner's progress bar stays asset-scoped, which matches
+ * the existing UI semantics.
+ *
+ * @param bookingAssets - All assets on the booking (id + live status + optional type)
  * @param checkedOutAssetIds - Asset ids already checked out (record or status)
  * @param checkedInAssetIds - Asset ids already returned via partial check-in
+ * @param remainingByAssetId - Optional QT-aware per-asset remaining-unit map
+ *   forwarded to {@link isAssetCheckoutEligible}
  * @returns Number of assets still eligible to be checked out
  */
 export function countRemainingCheckoutAssets(
   bookingAssets: CheckoutEligibilityAsset[],
   checkedOutAssetIds: string[],
-  checkedInAssetIds: string[]
+  checkedInAssetIds: string[],
+  remainingByAssetId?: Record<string, number>
 ): number {
   const checkedOutIds = new Set(checkedOutAssetIds);
   const returnedIds = new Set(checkedInAssetIds);
   return bookingAssets.filter((asset) =>
-    isAssetCheckoutEligible(asset, checkedOutIds, returnedIds)
+    isAssetCheckoutEligible(
+      asset,
+      checkedOutIds,
+      returnedIds,
+      remainingByAssetId
+    )
   ).length;
 }
 

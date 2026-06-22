@@ -281,6 +281,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       dispositionBreakdownByBooking[row.bookingId][row.assetId] = next;
     }
 
+    /**
+     * Per-booking → per-asset progressively-checked-out total. Sums
+     * `PartialBookingCheckout.quantities[i]` across every checkout
+     * session for the bookings on this page, bucketed by
+     * `(bookingId, assetIds[i])`. Feeds the sidebar's new amber
+     * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge: an asset with
+     * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an
+     * active booking is "partly out, no returns yet".
+     *
+     * Legacy fallback: pre-progressive-checkout rows have
+     * `quantities[].length !== assetIds[].length` (often empty). We
+     * count one unit per occurrence in that case, matching the
+     * service-layer read convention (`countCheckedOutUnitsForAsset` in
+     * `apps/webapp/app/modules/booking/service.server.ts`).
+     */
+    const checkoutSessionRows =
+      bookingIdsOnPage.length > 0
+        ? await db.partialBookingCheckout.findMany({
+            where: { bookingId: { in: bookingIdsOnPage } },
+            select: { bookingId: true, assetIds: true, quantities: true },
+          })
+        : [];
+    const checkedOutByBooking: Record<string, Record<string, number>> = {};
+    for (const session of checkoutSessionRows) {
+      const ids = session.assetIds ?? [];
+      const qtys = session.quantities ?? [];
+      const aligned = qtys.length === ids.length;
+      const bucket =
+        checkedOutByBooking[session.bookingId] ??
+        (checkedOutByBooking[session.bookingId] = {});
+      for (let i = 0; i < ids.length; i += 1) {
+        const assetId = ids[i];
+        const quantity = aligned ? qtys[i] ?? 1 : 1;
+        bucket[assetId] = (bucket[assetId] ?? 0) + quantity;
+      }
+    }
+
     const header: HeaderData = {
       title: "Bookings",
     };
@@ -303,6 +340,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hasActiveFilters,
         dispositionedByBooking,
         dispositionBreakdownByBooking,
+        checkedOutByBooking,
         ...teamMembersData,
         // For BASE/SELF_SERVICE users, provide dedicated form team members
         // For ADMIN users, reuse the filter team members
@@ -567,6 +605,13 @@ const ListBookingsContent = ({
     loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
   const dispositionBreakdownByAsset =
     loaderData?.dispositionBreakdownByBooking?.[item.id] ?? undefined;
+  /**
+   * Per-asset progressive-checkout totals for this booking. Drives the
+   * sidebar's new amber "partially checked out, no returns yet" badge
+   * + the `{checkedOut}/{booked}` qty display.
+   */
+  const checkedOutByAsset =
+    loaderData?.checkedOutByBooking?.[item.id] ?? undefined;
 
   return (
     <>
@@ -619,6 +664,7 @@ const ListBookingsContent = ({
           booking={item}
           dispositionedByAsset={dispositionedByAsset}
           dispositionBreakdownByAsset={dispositionBreakdownByAsset}
+          checkedOutByAsset={checkedOutByAsset}
         />
       </Td>
 

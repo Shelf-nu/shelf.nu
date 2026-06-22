@@ -21,7 +21,10 @@ import {
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
-import { AvailabilityLabel } from "./availability-label";
+import {
+  AvailabilityLabel,
+  InsufficientStockBadge,
+} from "./availability-label";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -63,7 +66,20 @@ export default function ListAssetContent({
   shouldShowCheckoutColumns,
 }: ListAssetContentProps) {
   const { category, tags } = item;
-  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  /**
+   * `availableUnitsByAsset` is the workspace-availability map shipped by
+   * the booking-overview loader (`bookings.$bookingId.overview.tsx`).
+   * Keyed by `assetId`, scalar = units free across the workspace pool
+   * (after subtracting operator custody + other-booking reservations +
+   * active checkouts elsewhere). Drives the `InsufficientStockBadge`
+   * branch below. `?? {}` keeps the older `bookings._index.tsx` and other
+   * callers that don't surface the map working — the lookup just returns
+   * `undefined` and the badge condition short-circuits.
+   */
+  const { booking, availableUnitsByAsset } = useLoaderData<{
+    booking: BookingWithCustodians;
+    availableUnitsByAsset?: Record<string, number>;
+  }>();
   const currentOrganization = useCurrentOrganization();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
 
@@ -81,9 +97,22 @@ export default function ListAssetContent({
   );
   const user = useUserData();
 
-  /** Weather the asset is checked out in a booking different than the current one */
-  const isCheckedOut = useMemo(
-    () =>
+  /**
+   * Whether the asset is checked out in a booking different than the
+   * current one. Drives the legacy amber "Checked out" badge in
+   * `AvailabilityLabel`.
+   *
+   * Short-circuits to `false` for QT assets: a fungible-units asset can
+   * be "checked out elsewhere" while still having free units available
+   * across the workspace pool, so the global CHECKED_OUT-elsewhere
+   * signal is meaningless for QT. The new `InsufficientStockBadge`
+   * (driven by `availableUnitsByAsset`) is the actionable replacement —
+   * it fires when the booked qty exceeds workspace headroom regardless
+   * of where the missing units happen to be.
+   */
+  const isCheckedOut = useMemo(() => {
+    if (isQuantityTracked(item)) return false;
+    return (
       (item.status === AssetStatus.CHECKED_OUT &&
         !item.bookingAssets.some((ba) => ba.booking.id === booking.id) &&
         // Only exclude assets from current booking if current booking is ONGOING/OVERDUE
@@ -93,16 +122,9 @@ export default function ListAssetContent({
           ) &&
           (booking.status === "ONGOING" || booking.status === "OVERDUE")
         )) ??
-      false,
-    [
-      item.status,
-      item.bookingAssets,
-      booking.id,
-      booking.bookingAssets,
-      item.id,
-      booking.status,
-    ]
-  );
+      false
+    );
+  }, [item, booking.id, booking.bookingAssets, booking.status]);
 
   const isPartOfKit = (item.assetKits ?? []).length > 0;
 
@@ -159,6 +181,20 @@ export default function ListAssetContent({
    */
   const qtyBooked = item.bookedQuantity ?? 0;
   const qtyDispositioned = item.dispositionedQuantity ?? 0;
+  /**
+   * Per-row units that have been progressively checked OUT via
+   * `PartialBookingCheckout`. Shipped by the overview loader keyed by
+   * `bookingAssetId`, so multi-row slices of the same asset are
+   * accounted independently. Drives the new "partially checked out, no
+   * returns yet" branches (badge + Qty cell display) below.
+   */
+  const qtyCheckedOut = item.checkedOutQuantity ?? 0;
+  /**
+   * How many units of this row are booked but NOT yet checked out.
+   * Surfaced in the pending-return tooltip so the operator can see
+   * what's still owed on the out-side before any return activity.
+   */
+  const qtyOutstandingCheckout = Math.max(0, qtyBooked - qtyCheckedOut);
   const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
   /**
    * Per-category disposition sums shipped by the overview loader so the
@@ -199,6 +235,72 @@ export default function ListAssetContent({
     qtyDispositioned > 0 &&
     qtyRemaining > 0 &&
     isActiveBooking;
+  /**
+   * Pending-return signal: this row has had SOME units progressively
+   * checked OUT via `PartialBookingCheckout` (`qtyCheckedOut > 0`) but
+   * NO disposition has been recorded yet (`qtyDispositioned === 0`) —
+   * i.e. nothing has been returned / consumed / lost / damaged.
+   *
+   * Distinct from `isQtyPartiallyCheckedIn`, which requires
+   * `qtyDispositioned > 0` (returns are underway). Mutually exclusive
+   * with the check-IN flags because they both require disposition to
+   * have started — so the 3-way ternary below resolves cleanly:
+   * fully-in → partial-in → pending-return → base.
+   *
+   * Resolved per-row (per `bookingAssetId`) like its check-IN
+   * counterparts, so a kit-driven slice and a standalone slice of the
+   * same asset are evaluated independently.
+   */
+  const isQtyPartiallyCheckedOut =
+    isQuantityTracked(item) &&
+    qtyBooked > 0 &&
+    qtyCheckedOut > 0 &&
+    // Upper guard: ONLY fires when SOME but not all booked units are out.
+    // When `qtyCheckedOut === qtyBooked` and nothing has been returned, the
+    // service-side post-batch flip sets `asset.status = CHECKED_OUT`, so the
+    // row falls through to `baseContextStatus` which renders the standard
+    // violet "Checked out" badge. Without this guard, the amber pending-
+    // return badge would shadow the fully-out state.
+    qtyCheckedOut < qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking;
+
+  /**
+   * Workspace-availability lookup for this row's asset. `undefined` when
+   * the loader doesn't ship the map (e.g. the legacy bookings index path
+   * uses this component too) — in which case the insufficient-stock
+   * check below short-circuits to `false` and the badge never renders.
+   */
+  const availableUnits = availableUnitsByAsset?.[item.id];
+
+  /**
+   * Per-row "insufficient stock" signal. Fires when this booking's row
+   * reserves more units than are available across the workspace pool
+   * (`availableUnits`), and the booking is still active enough to act on
+   * the signal. Gated on:
+   *
+   *  - `isQuantityTracked(item)` — INDIVIDUAL assets have their own
+   *    AvailabilityBadge paths and never get this badge.
+   *  - `availableUnits != null` — only fires when the loader actually
+   *    shipped a value (avoids false positives on routes that don't
+   *    surface workspace-availability).
+   *  - `qtyBooked > availableUnits` — strict inequality; at-capacity is
+   *    NOT a problem.
+   *  - `booking.status !== "COMPLETE" && booking.status !== "ARCHIVED"`
+   *    — once the booking is historical the stock signal is stale and
+   *    should not surface; nothing actionable remains.
+   *
+   * Each row evaluates independently: a multi-row asset can have
+   * multiple slices and each row's `bookedQuantity` is compared to the
+   * SAME per-asset global headroom, so multiple rows can each light up
+   * the badge.
+   */
+  const hasInsufficientStock =
+    isQuantityTracked(item) &&
+    availableUnits != null &&
+    qtyBooked > availableUnits &&
+    booking.status !== "COMPLETE" &&
+    booking.status !== "ARCHIVED";
 
   // Per-asset partial check-OUT record (if any). Presence of a record drives
   // the "Checked out on/by" cell content for this asset.
@@ -213,18 +315,29 @@ export default function ListAssetContent({
     !hasProgressiveCheckout || Boolean(partialCheckoutDetails[item.id]);
 
   /**
-   * Final status resolution priority:
-   *  1. Qty-tracked partial dispositioning (qty breakdown wins — it's the most
-   *     specific signal we have on an active booking).
-   *  2. The base status from `getBookingContextAssetStatus`, which already
-   *     reflects INDIVIDUAL asset progressive-checkout state via the
-   *     `partialCheckinDetails` map. `wasCheckedOut` (from main) is consumed
-   *     separately by the `ReturnedBadge` branch on finished bookings.
+   * Final status resolution priority (most specific signal wins):
+   *  1. Qty fully reconciled for this row → `PARTIALLY_CHECKED_IN`
+   *     (blue, "already checked in"). Disposition signals win — once
+   *     anything has been returned/consumed/lost/damaged the row reads
+   *     as in-progress on the check-IN side.
+   *  2. Qty partly reconciled (some disposition, more outstanding) →
+   *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
+   *  3. Qty progressively checked OUT with NO returns yet →
+   *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
+   *     required") — the out-side equivalent of (2). Only reached when
+   *     `qtyDispositioned === 0`, so it can never shadow (1)/(2).
+   *  4. The base status from `getBookingContextAssetStatus`, which
+   *     already reflects INDIVIDUAL asset progressive-checkout state
+   *     via the `partialCheckinDetails` map. `wasCheckedOut` (from
+   *     main) is consumed separately by the `ReturnedBadge` branch on
+   *     finished bookings.
    */
   const contextStatus = isQtyFullyCheckedIn
     ? "PARTIALLY_CHECKED_IN"
     : isQtyPartiallyCheckedIn
     ? "PARTIALLY_CHECKED_OUT_QTY"
+    : isQtyPartiallyCheckedOut
+    ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
     : baseContextStatus;
 
   const isPartiallyCheckedIn =
@@ -292,6 +405,15 @@ export default function ListAssetContent({
                     status={contextStatus}
                     availableToBook={item.availableToBook}
                     asset={item}
+                    // For QT rows the resolved `contextStatus` already encodes
+                    // the booking-context truth (AVAILABLE via
+                    // `getBookingContextAssetStatus` for DRAFT/RESERVED, or
+                    // our partial pseudo-statuses for in-flight reconciliation).
+                    // Suppress the global qty-aware breakdown override so the
+                    // badge renders that resolved status verbatim — the new
+                    // `InsufficientStockBadge` carries the workspace-pool
+                    // signal that the global breakdown used to carry here.
+                    suppressQtyAware={isQuantityTracked(item)}
                   />
                 )}
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
@@ -307,10 +429,18 @@ export default function ListAssetContent({
       </Td>
 
       {/* Qty column — Empty for INDIVIDUAL assets. For qty-tracked:
-          shows just the booked total until there's check-in activity.
-          Once units have been dispositioned we show progress as
-          `checked-in / booked` (counts UP, like a progress indicator),
-          with an explanatory tooltip and a success check when full. */}
+          shows just the booked total until there's check-OUT or
+          check-IN activity. Three progress modes (mutually exclusive,
+          disposition wins):
+            1. `qtyDispositioned > 0` — returns are underway. Shows
+               `dispositioned / booked` (gray, or emerald when full)
+               with the per-category breakdown tooltip.
+            2. `qtyCheckedOut > 0 && qtyDispositioned === 0` — units
+               are progressively checked OUT with nothing back yet.
+               Shows `checkedOut / booked` in amber-700 (matches the
+               new `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge)
+               with a simpler "Partially checked out" tooltip.
+            3. Otherwise — plain booked count, no progress display. */}
       <Td className={tw("text-center", isKitAsset ? "bg-gray-50/50" : "")}>
         {isQuantityTracked(item) && qtyBooked > 0 ? (
           qtyDispositioned > 0 ? (
@@ -395,20 +525,76 @@ export default function ListAssetContent({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          ) : qtyCheckedOut > 0 && qtyCheckedOut < qtyBooked ? (
+            // Progressive checkout in flight, no returns yet. Mirrors
+            // the disposition tooltip's structure but counts the
+            // OUT-side: `checkedOut / booked` in amber to match the
+            // `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge. No
+            // breakdown rows here (qtyDispositioned === 0 by branch
+            // guard, so returned/consumed/lost/damaged are all 0).
+            // Upper guard `qtyCheckedOut < qtyBooked` matches the badge:
+            // when ALL booked units are out (25/25), the asset status is
+            // already CHECKED_OUT and the row falls through to the plain
+            // booked-total display below — paired with the violet
+            // "Checked out" status badge above.
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex cursor-help items-center gap-1 tabular-nums text-amber-700">
+                    <span className="font-medium">{qtyCheckedOut}</span>
+                    <span className="text-gray-400">/ {qtyBooked}</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center" className="max-w-xs">
+                  <div className="flex flex-col gap-1 text-xs">
+                    <div className="font-semibold text-gray-900">
+                      Partially checked out
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-600">Checked out</span>
+                      <span className="tabular-nums text-amber-700">
+                        {qtyCheckedOut} / {qtyBooked}
+                      </span>
+                    </div>
+                    {qtyOutstandingCheckout > 0 ? (
+                      <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
+                        <span className="text-gray-600">
+                          Still to check out
+                        </span>
+                        <span className="font-medium tabular-nums text-gray-900">
+                          {qtyOutstandingCheckout}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <span className="tabular-nums">{qtyBooked}</span>
           )
         ) : null}
       </Td>
 
-      {/* If asset status is different than available, we need to show a label */}
+      {/* If asset status is different than available, we need to show a label.
+          Also surfaces the QT-only `InsufficientStockBadge` when the row's
+          booked qty exceeds workspace headroom — INDIVIDUAL assets stay on
+          the existing `AvailabilityLabel` paths and never reach the badge. */}
       <Td
         className={tw(
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
         {!isFinished ? (
-          <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
+          <div className="flex flex-wrap items-center gap-1">
+            <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
+            {hasInsufficientStock ? (
+              <InsufficientStockBadge
+                bookedQuantity={qtyBooked}
+                availableUnits={availableUnits ?? 0}
+              />
+            ) : null}
+          </div>
         ) : null}
       </Td>
       <Td

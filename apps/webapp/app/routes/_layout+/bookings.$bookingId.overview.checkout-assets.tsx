@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -14,10 +14,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckoutDrawer from "~/components/scanner/drawer/uses/partial-checkout-drawer";
+import { db } from "~/database/db.server";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   checkoutAssets,
+  computeBookingAssetRemainingToCheckOut,
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
@@ -149,6 +151,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // /16 instead of /14).
     const checkedInAssetIds = await getPartiallyCheckedInAssetIds(booking.id);
 
+    // Per-asset remaining-to-checkout for QUANTITY_TRACKED assets on this
+    // booking. Folds across all slices (kit + standalone) so the drawer can
+    // gate eligibility on `remaining > 0` instead of "appears in any prior
+    // PartialBookingCheckout record". Empty map when there are no qty-tracked
+    // assets — INDIVIDUAL flow is unchanged (those still reject on second scan
+    // via `checkedOutAssetIds`).
+    const qtyAssetIds = booking.bookingAssets
+      .filter((ba) => ba.asset?.type === AssetType.QUANTITY_TRACKED)
+      .map((ba) => ba.assetId);
+    const uniqueQtyAssetIds = [...new Set(qtyAssetIds)];
+    const remainingToCheckOutByAsset: Record<string, number> = {};
+    for (const assetId of uniqueQtyAssetIds) {
+      remainingToCheckOutByAsset[assetId] =
+        await computeBookingAssetRemainingToCheckOut(db, booking.id, assetId);
+    }
+
     const title = `Scan assets to check out | ${booking.name}`;
     const header: HeaderData = {
       title,
@@ -160,6 +178,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       checkedOutAssetIds,
       checkedInAssetIds,
+      remainingToCheckOutByAsset,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -200,6 +219,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
+    // Wave B: the scanner drawer can include a `checkouts` JSON field
+    // alongside the legacy `assetIds[]` for per-slice quantities on
+    // QUANTITY_TRACKED assets. The schema extension lives on
+    // `partialCheckoutAssetsSchema` (imported by `checkoutAssets`), so
+    // forwarding the FormData unchanged is sufficient.
     return await checkoutAssets({
       formData,
       request,

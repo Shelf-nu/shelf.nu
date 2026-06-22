@@ -405,6 +405,7 @@ export default function PartialCheckinDrawer({
     booking,
     partialCheckinProgress,
     partialCheckinDetails,
+    qtyRemainingByAssetId,
     qtyRemainingByBookingAssetId,
     expectedKits,
   } = useLoaderData<typeof loader>();
@@ -488,28 +489,54 @@ export default function PartialCheckinDrawer({
     partialCheckinProgress?.checkedInAssetIds || []
   );
 
-  // Only assets that were actually checked out can be checked in. This excludes
-  // still-Booked (not CHECKED_OUT) assets from the submit payload — they are
-  // surfaced to the user via a blocker instead (progressive checkout guard).
+  /**
+   * Unit-aware "is this asset checkable in?" predicate.
+   *
+   * INDIVIDUAL assets: classic binary gate — the asset must be
+   * CHECKED_OUT to be eligible (a still-Booked asset was never
+   * scanned out, so it can't be checked in).
+   *
+   * QUANTITY_TRACKED assets: gate on remaining units, NOT
+   * `asset.status`. A QT asset reached via progressive partial
+   * checkouts may sit at any unit-level state (partially-out,
+   * fully-out, even refreshed-to-zero by an earlier check-in). The
+   * authoritative signal is "are there units still outstanding to
+   * check back in?" — i.e. `qtyRemainingByAssetId[asset.id].remaining > 0`.
+   *
+   * Defensive fallback: when the loader didn't ship
+   * `qtyRemainingByAssetId` (legacy / pre-Wave-B tests), fall back
+   * to the binary gate so existing component tests keep passing.
+   *
+   * Accepts the narrowest shape both scanned-asset payloads
+   * (standalone `AssetFromQr` and kit-member `assetKits[*].asset`)
+   * are guaranteed to provide — `id` and `status`.
+   */
+  const isAssetCheckable = (a: {
+    id: string;
+    status: AssetStatus;
+  }): boolean => {
+    if (!bookingAssetIds.has(a.id) || checkedInAssetIds.has(a.id)) {
+      return false;
+    }
+    const qtyInfo = qtyRemainingByAssetId?.[a.id];
+    if (qtyInfo) {
+      return qtyInfo.remaining > 0;
+    }
+    return a.status === AssetStatus.CHECKED_OUT;
+  };
+
+  // Only assets that have units still outstanding (QT) or were
+  // actually checked out (INDIVIDUAL) can be checked in. This excludes
+  // still-Booked / fully-reconciled assets from the submit payload —
+  // they are surfaced to the user via a blocker instead (progressive
+  // checkout guard).
   const assetIdsForCheckin = Array.from(
     new Set([
-      ...assets
-        .filter(
-          (a) =>
-            bookingAssetIds.has(a.id) &&
-            !checkedInAssetIds.has(a.id) &&
-            a.status === AssetStatus.CHECKED_OUT
-        )
-        .map((a) => a.id),
+      ...assets.filter(isAssetCheckable).map((a) => a.id),
       ...kits.flatMap((k) =>
         k.assetKits
           .map((ak) => ak.asset)
-          .filter(
-            (a) =>
-              bookingAssetIds.has(a.id) &&
-              !checkedInAssetIds.has(a.id) &&
-              a.status === AssetStatus.CHECKED_OUT
-          )
+          .filter(isAssetCheckable)
           .map((a) => a.id)
       ),
     ])
@@ -658,6 +685,37 @@ export default function PartialCheckinDrawer({
     })
     .map(([qrId]) => qrId);
 
+  /**
+   * Unit-aware "never checked out" predicate (mirrors
+   * {@link isAssetCheckable} above, inverted).
+   *
+   * INDIVIDUAL: flag when `asset.status !== CHECKED_OUT` — never
+   * scanned out, so can't be checked in.
+   *
+   * QUANTITY_TRACKED: flag when `qtyRemainingByAssetId[id].remaining <= 0`
+   * AND no partial-checkin record exists. Crucially, do NOT consult
+   * `asset.status` for QT assets: a partially-out QT asset (e.g. 30
+   * of 50 units out) the user wants to top-off-check-in might still
+   * carry an AVAILABLE / partially-out aggregate status while having
+   * units outstanding, and the binary check would wrongly block it.
+   *
+   * Defensive fallback: when `qtyRemainingByAssetId` is absent
+   * (legacy / pre-Wave-B tests), fall back to the binary gate.
+   */
+  const isAssetNeverCheckedOut = (asset: {
+    id: string;
+    status: AssetStatus;
+  }): boolean => {
+    if (!bookingAssetIds.has(asset.id)) return false;
+    if (isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status))
+      return false;
+    const qtyInfo = qtyRemainingByAssetId?.[asset.id];
+    if (qtyInfo) {
+      return qtyInfo.remaining <= 0;
+    }
+    return asset.status !== AssetStatus.CHECKED_OUT;
+  };
+
   // Progressive checkout guard: an asset can only be checked IN if it was first
   // checked OUT. A still-Booked (not CHECKED_OUT) asset that is part of this
   // booking was never scanned out, so it cannot be checked in. We only flag
@@ -669,12 +727,7 @@ export default function PartialCheckinDrawer({
   const scannedBookingAssets = [
     ...assets,
     ...kits.flatMap((kit) => kit.assetKits.map((ak) => ak.asset)),
-  ].filter(
-    (asset) =>
-      bookingAssetIds.has(asset.id) &&
-      asset.status !== AssetStatus.CHECKED_OUT &&
-      !isAssetPartiallyCheckedIn(asset, partialCheckinDetails, booking.status)
-  );
+  ].filter(isAssetNeverCheckedOut);
   const neverCheckedOutAssetIds = [
     ...new Set(scannedBookingAssets.map((a) => a.id)),
   ];

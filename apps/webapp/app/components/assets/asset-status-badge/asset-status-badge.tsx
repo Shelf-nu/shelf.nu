@@ -45,12 +45,34 @@ import When from "../../when/when";
 export function AssetStatusBadge({
   id,
   status,
+  suppressQtyAware = false,
   availableToBook = true,
   asset,
 }: {
   id: string;
   status: ExtendedAssetStatus;
   availableToBook: boolean;
+  /**
+   * Booking-row escape hatch for the qty-aware treatment. When `true`
+   * AND the asset is `QUANTITY_TRACKED`, the badge:
+   *
+   *  1. Skips the lazy `/api/assets/:id/quantity-breakdown` fetch — no
+   *     per-row fan-out on booking surfaces that render many rows.
+   *  2. Renders the caller-supplied `status` via the plain
+   *     `assetStatusColorMap` + `userFriendlyAssetStatus` shell (no
+   *     "Partially X" relabeling, no hover-card breakdown).
+   *
+   * Booking rows have their own per-row signals (`InsufficientStockBadge`,
+   * the row-local "Checked out N/M" pill, the dedicated check-IN/out
+   * progress badges) that already convey the qty story for THIS booking;
+   * the global qty breakdown would only add noise + spurious "Partially
+   * X" relabels driven by other bookings' state. INDIVIDUAL assets are
+   * unaffected — this flag is a no-op for them.
+   *
+   * Defaults to `false` so every existing caller keeps the rich qty-aware
+   * behavior unchanged.
+   */
+  suppressQtyAware?: boolean;
   /**
    * When provided, the badge auto-detects quantity-tracked assets and
    * renders a quantity-aware status (e.g., "Partial custody") with a
@@ -62,6 +84,9 @@ export function AssetStatusBadge({
 }) {
   const inlineQuantityData = useMemo(() => getQuantityData(asset), [asset]);
 
+  // Whether the asset is actually QT (by schema type). Used to gate the
+  // qty-aware render branch AND the `ongoing-booking` fetch (the latter
+  // exists for INDIVIDUAL assets only).
   const isQtyTracked = asset ? isQuantityTracked(asset) : false;
 
   /**
@@ -73,7 +98,11 @@ export function AssetStatusBadge({
    * the Radix hover-card opens (~150ms later) the data is usually ready.
    */
   const [hasInteracted, setHasInteracted] = useState(false);
-  const needsLazyBreakdown = isQtyTracked && !inlineQuantityData;
+  // `suppressQtyAware` also disables the lazy fetch: when the caller has
+  // told us they don't want the qty-aware breakdown, paying the network
+  // cost would be wasted bandwidth (the data isn't rendered).
+  const needsLazyBreakdown =
+    isQtyTracked && !inlineQuantityData && !suppressQtyAware;
   const { data: lazyAsset } = useApiQuery<QuantityAwareAsset>({
     api: `/api/assets/${id}/quantity-breakdown`,
     enabled: needsLazyBreakdown && hasInteracted,
@@ -86,7 +115,12 @@ export function AssetStatusBadge({
 
   // Fetch the ongoing booking from API when asset is CHECKED_OUT.
   // Skip for quantity-tracked assets — they handle multi-booking
-  // display via the breakdown endpoint above.
+  // display via the breakdown endpoint above. The `!isQtyTracked` check
+  // also covers the `suppressQtyAware` case: on booking surfaces the row
+  // status frequently is `CHECKED_OUT` (current booking is the one
+  // checking it out), and triggering an `ongoing-booking` fan-out for
+  // every QT row would be wasted work — the booking row already shows
+  // the relevant context inline.
   const { data } = useApiQuery<Booking>({
     api: `/api/assets/${id}/ongoing-booking`,
     enabled: status === AssetStatus.CHECKED_OUT && !isQtyTracked,
@@ -122,15 +156,24 @@ export function AssetStatusBadge({
     const isBookingContextStatus =
       status === "PARTIALLY_CHECKED_IN" ||
       status === "PARTIALLY_CHECKED_IN_QTY" ||
-      status === "PARTIALLY_CHECKED_OUT_QTY";
+      status === "PARTIALLY_CHECKED_OUT_QTY" ||
+      status === "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN";
 
-    const { label, colors } =
-      !isBookingContextStatus && quantityData
-        ? getQuantityBadgeLabelAndColor(quantityData)
-        : {
-            label: userFriendlyAssetStatus(status),
-            colors: assetStatusColorMap(status),
-          };
+    // When the caller has opted out via `suppressQtyAware`, the
+    // caller-supplied `status` is authoritative — we never relabel based
+    // on the global qty breakdown. This is what keeps an AVAILABLE QT
+    // booking row reading as "Available" even though the global
+    // `bookingAssets` snapshot might otherwise infer "Partial custody"
+    // from other-booking/custody activity.
+    const useCallerStatus =
+      suppressQtyAware || isBookingContextStatus || !quantityData;
+
+    const { label, colors } = useCallerStatus
+      ? {
+          label: userFriendlyAssetStatus(status),
+          colors: assetStatusColorMap(status),
+        }
+      : getQuantityBadgeLabelAndColor(quantityData);
 
     return (
       <span
@@ -149,7 +192,12 @@ export function AssetStatusBadge({
               </Badge>
             </span>
           </HoverCardTrigger>
-          {quantityData && (
+          {/* Mirror the label decision: only mount the global qty
+              breakdown when the qty-aware label is the one being shown.
+              When `useCallerStatus` is true (booking-context status,
+              `suppressQtyAware`, or no data yet), the chip is plain and
+              the breakdown popover would be misleading — hide it. */}
+          {!useCallerStatus && (
             <HoverCardPortal>
               <HoverCardContent
                 side="bottom"

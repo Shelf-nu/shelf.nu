@@ -39,6 +39,7 @@ import {
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   archiveBooking,
+  attributeDispositionsByBookingAsset,
   cancelBooking,
   checkinAssets,
   attributeCategorizedDispositionsByBookingAsset,
@@ -354,6 +355,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ),
     ];
 
+    /**
+     * Hoisted set of QT asset IDs in this booking. Originally computed
+     * further down for the disposition pipeline; hoisted so the
+     * "insufficient stock" workspace-availability queries below can reuse
+     * the same list without re-walking `booking.bookingAssets` twice.
+     */
+    const qtyAssetIdsInBooking = booking.bookingAssets
+      .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
+      .map((ba) => ba.assetId);
+
     // Execute all necessary queries in parallel. Asset + kit enrichment now
     // covers ALL booking assets/kits (not just the current page) so the
     // clientLoader can re-shape from cache without a server round-trip.
@@ -404,7 +415,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         include: {
           category: true,
-          custody: true,
+          // Explicit select (was `custody: true`) so `kitCustodyId` is
+          // available downstream. The QT workspace-availability
+          // calculation must exclude kit-level custody rows from the
+          // "in custody" subtraction — only operator (asset-level) custody
+          // counts against global headroom; kit custody is internal
+          // earmarking and shouldn't reduce the available pool.
+          custody: { select: { id: true, quantity: true, kitCustodyId: true } },
           tags: TAG_WITH_COLOR_SELECT,
           // Pivot-aware kit relation — kits live on the `AssetKit` pivot
           // post-4a, so include each membership with its full kit + the
@@ -578,10 +595,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *   - show the fully-reconciled state once `dispositioned == booked`
      *
      * Only queries qty-tracked asset ids (empty query short-circuits).
+     *
+     * Note: `qtyAssetIdsInBooking` is hoisted above the parallel block so
+     * the workspace-availability groupBys can reuse the same list.
      */
-    const qtyAssetIdsInBooking = booking.bookingAssets
-      .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
-      .map((ba) => ba.assetId);
 
     /**
      * Per-row attribution. With Polish-6 multi-row slices, an asset
@@ -688,6 +705,198 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
+    /**
+     * Per-row progressive-checkout attribution (OUT-side mirror of the
+     * disposition attribution above). For each qty-tracked asset, sum the
+     * units that have been progressively checked out via
+     * `PartialBookingCheckout` rows, then attribute that scalar across the
+     * asset's BookingAsset slices using the same kit-driven-fills-first
+     * greedy attributor used on the check-IN side.
+     *
+     * `PartialBookingCheckout` has no per-row FK (no `bookingAssetId`
+     * column) — every checkout entry is therefore treated as legacy
+     * (`bookingAssetId: null`) by `attributeDispositionsByBookingAsset`,
+     * which routes the whole pool through the greedy fill. That's exactly
+     * the symmetry we want with the legacy-disposition pool on the
+     * check-IN side.
+     *
+     * Legacy fallback: pre-Wave-B `PartialBookingCheckout` rows have
+     * `quantities[].length !== assetIds[].length` (often empty) — in that
+     * case count one unit per occurrence per asset, mirroring the read
+     * convention in `service.server.ts` (`countCheckedOutUnitsForAsset`,
+     * around line 2862-2870).
+     *
+     * Drives the new `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge:
+     * rows with `checkedOutQuantity > 0 && dispositionedQuantity === 0`
+     * are progressively-checked-out-but-not-yet-returned. Rows whose
+     * disposition has started still flow through the existing
+     * `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway") badge.
+     */
+    const checkoutSessions =
+      qtyAssetIdsInBooking.length > 0
+        ? await db.partialBookingCheckout.findMany({
+            where: { bookingId: booking.id },
+            select: { assetIds: true, quantities: true },
+          })
+        : [];
+
+    // Map<assetId, Array<{ bookingAssetId: null, quantity }>> — every entry
+    // is "legacy" from the attributor's POV (no per-row FK on the model).
+    const checkoutLogsByAsset = new Map<
+      string,
+      Array<{ bookingAssetId: null; quantity: number }>
+    >();
+    for (const session of checkoutSessions) {
+      const ids = session.assetIds ?? [];
+      const qtys = session.quantities ?? [];
+      const aligned = qtys.length === ids.length;
+      for (let i = 0; i < ids.length; i += 1) {
+        const assetId = ids[i];
+        // Skip entries for assets that aren't qty-tracked in this booking —
+        // INDIVIDUAL assets share the same table but go through a different
+        // attribution path (asset-status based) and would just no-op below.
+        if (!bookingAssetRowsByAsset.has(assetId)) continue;
+        // Aligned (Wave-B+): quantities[i] is the exact slice. Legacy
+        // (pre-Wave-B): empty/mismatched quantities[] — count one unit per
+        // occurrence (see service.server.ts ~L2862-2870 for the canonical
+        // read pattern this mirrors).
+        const quantity = aligned ? qtys[i] ?? 1 : 1;
+        const arr = checkoutLogsByAsset.get(assetId) ?? [];
+        arr.push({ bookingAssetId: null, quantity });
+        checkoutLogsByAsset.set(assetId, arr);
+      }
+    }
+
+    // Initialize every qty-tracked row to 0 so downstream lookups never
+    // see `undefined` for a row that simply hasn't been checked out yet.
+    const checkedOutByBookingAsset = new Map<string, number>();
+    for (const [, rows] of bookingAssetRowsByAsset) {
+      for (const row of rows) checkedOutByBookingAsset.set(row.id, 0);
+    }
+    for (const [assetId, rows] of bookingAssetRowsByAsset) {
+      const attributed = attributeDispositionsByBookingAsset({
+        bookingAssetRows: rows,
+        consumptionLogs: checkoutLogsByAsset.get(assetId) ?? [],
+      });
+      for (const [bookingAssetId, qty] of attributed) {
+        checkedOutByBookingAsset.set(bookingAssetId, qty);
+      }
+    }
+
+    /**
+     * Per-asset remaining-to-checkout: folds the per-slice checked-out
+     * counters back into one total per qty-tracked asset on the booking.
+     * An asset is "fully out" only when this number reaches 0; while it's
+     * still positive there are units left to scan, even if at least one
+     * slice of the asset has already been (partially) checked out.
+     *
+     * Drives the bulk check-out dialog filter + scanner drawer eligibility
+     * so the client correctly distinguishes "partially out, more to go"
+     * from "fully out" for QT assets that span multiple slices (kit +
+     * standalone, or several kit slices).
+     */
+    const remainingToCheckOutByAsset: Record<string, number> = {};
+    for (const [assetId, rows] of bookingAssetRowsByAsset) {
+      const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
+      let totalCheckedOut = 0;
+      for (const row of rows) {
+        totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
+      remainingToCheckOutByAsset[assetId] = Math.max(
+        0,
+        totalBooked - totalCheckedOut
+      );
+    }
+
+    /**
+     * Workspace-level "available units" per QT asset on this booking.
+     *
+     * For each qty-tracked asset on this booking, computes the units that
+     * are NOT currently committed elsewhere in the workspace:
+     *
+     *   available = total
+     *             − (operator custody)
+     *             − (reserved in OTHER bookings, status = RESERVED)
+     *             − (checked out in OTHER bookings, status in ONGOING/OVERDUE)
+     *
+     * Used by the new "Insufficient stock" badge on the booking-overview
+     * asset row + assets sidebar: fires when `bookedQuantity` on a row
+     * exceeds `availableUnitsByAsset[assetId]`.
+     *
+     * Subtraction notes:
+     *  - Only ASSET-level custody (`kitCustodyId == null`) counts. Kit
+     *    custody rows are internal earmarking and must not reduce global
+     *    headroom (avoids double-counting kit-driven slices, mirrors the
+     *    availableHelper audit gotcha).
+     *  - This booking is EXCLUDED via `id: { not: bookingId }` — the
+     *    badge is about pressure from OTHER bookings on the shared pool;
+     *    the current booking's own reservation is what we're comparing
+     *    against.
+     *  - `assetKits` allocations are NOT subtracted. Pre-kit-checkout,
+     *    units inside a kit are still in the asset's available pool.
+     *
+     * The groupBys are scoped to this workspace's bookings via the
+     * relation filter (`booking: { organizationId, ... }`) to prevent
+     * cross-org leakage.
+     */
+    const [globalReservedRows, globalCheckedOutRows] =
+      qtyAssetIdsInBooking.length > 0
+        ? await Promise.all([
+            db.bookingAsset.groupBy({
+              by: ["assetId"],
+              where: {
+                assetId: { in: qtyAssetIdsInBooking },
+                booking: {
+                  organizationId,
+                  status: "RESERVED",
+                  id: { not: bookingId },
+                },
+              },
+              _sum: { quantity: true },
+            }),
+            db.bookingAsset.groupBy({
+              by: ["assetId"],
+              where: {
+                assetId: { in: qtyAssetIdsInBooking },
+                booking: {
+                  organizationId,
+                  status: { in: ["ONGOING", "OVERDUE"] },
+                  id: { not: bookingId },
+                },
+              },
+              _sum: { quantity: true },
+            }),
+          ])
+        : [[], []];
+
+    /**
+     * Map of `assetId → available units in the workspace pool`. Built
+     * after both rawAssets and the two groupBys land. Keys are restricted
+     * to QT assets that appear on this booking; INDIVIDUAL assets are
+     * omitted (they have their own AvailabilityBadge paths and never get
+     * the InsufficientStockBadge).
+     */
+    const availableUnitsByAsset: Record<string, number> = {};
+    for (const asset of rawAssets) {
+      if (asset.type !== "QUANTITY_TRACKED") continue;
+      const total = asset.quantity ?? 0;
+      // Operator (asset-level) custody only — kit-level custody is
+      // internal earmarking and must not reduce global headroom.
+      const inCustody = (asset.custody ?? [])
+        .filter((c) => c.kitCustodyId == null)
+        .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
+      const reserved =
+        globalReservedRows.find((r) => r.assetId === asset.id)?._sum
+          ?.quantity ?? 0;
+      const checkedOut =
+        globalCheckedOutRows.find((r) => r.assetId === asset.id)?._sum
+          ?.quantity ?? 0;
+      availableUnitsByAsset[asset.id] = Math.max(
+        0,
+        total - inCustody - reserved - checkedOut
+      );
+    }
+
     // Attach per-row qty disposition data onto the shaped view items so
     // the UI gets the Polish-6 / Phase 4 enrichment alongside main's
     // clientLoader-cache architecture.
@@ -704,6 +913,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           dispositionBreakdown:
             (bookingAssetId && breakdownByBookingAsset.get(bookingAssetId)) ||
             emptyBreakdown(),
+          // Per-row units already checked OUT via progressive checkout.
+          // 0 for non-qty rows and for rows with no PartialBookingCheckout
+          // entries yet. Drives the "partially checked out, no returns yet"
+          // badge + the `{checkedOut}/{booked}` Qty-column display.
+          checkedOutQuantity: bookingAssetId
+            ? checkedOutByBookingAsset.get(bookingAssetId) ?? 0
+            : 0,
         };
       }),
     }));
@@ -767,18 +983,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         );
 
     // Segmented lifecycle progress (Booked / Checked out / Returned) backing
-    // the new progress bar on the booking detail page. Reuses the pivot
-    // projection built at `enrichedAssetsForView` — each row already carries
-    // `id`, `kitId` (resolved through the slice's `assetKitId`), and `status`
-    // (selected by BOOKING_WITH_ASSETS_INCLUDE). "Checked out" is derived
-    // from asset `status`, "Returned" from the per-booking partial check-in
-    // records (`checkedInAssetIds`).
+    // the progress bar on the booking detail page. Reuses the pivot projection
+    // built at `enrichedAssetsForView` — each row already carries `id`,
+    // `kitId` (resolved through the slice's `assetKitId`), and `status`
+    // (selected by BOOKING_WITH_ASSETS_INCLUDE).
+    //
+    // INDIVIDUAL rows bucket by asset `status` + `checkedInAssetIds`
+    // (partial-checkin records). QT rows bucket by per-row qty counters
+    // (`bookedQuantity`, `checkedOutQuantity`, `dispositionedQuantity`)
+    // rather than asset status, because a partially-checked-out QT row's
+    // status can still be `AVAILABLE` while a portion of its booked units
+    // is physically out. The qty maps populated above
+    // (`checkedOutByBookingAsset`, `dispositionedByBookingAsset`) supply
+    // those per-row counters via the slice's `bookingAssetId`.
     const lifecycleProgress = calculateBookingLifecycleProgress({
-      bookingAssets: enrichedAssetsForView.map((a) => ({
-        id: a.id,
-        kitId: a.kitId,
-        status: a.status,
-      })),
+      bookingAssets: enrichedAssetsForView.map((a) => {
+        const isQty = a.type === "QUANTITY_TRACKED";
+        return {
+          id: a.id,
+          kitId: a.kitId,
+          status: a.status,
+          assetType: a.type,
+          bookedQuantity: a.bookedQuantity,
+          checkedOutQuantity: isQty
+            ? checkedOutByBookingAsset.get(a.bookingAssetId) ?? 0
+            : 0,
+          dispositionedQuantity: isQty
+            ? dispositionedByBookingAsset.get(a.bookingAssetId) ?? 0
+            : 0,
+        };
+      }),
       checkedInAssetIds,
       checkedOutAssetIds,
       bookingStatus: booking.status,
@@ -844,6 +1078,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // details (date/user) for the "Checked out on/by" columns.
         lifecycleProgress,
         checkedOutAssetIds,
+        remainingToCheckOutByAsset,
+        /**
+         * QT workspace-availability map (assetId → units free across the
+         * workspace, excluding this booking + kit-custody). Drives the
+         * "Insufficient stock" badge in `list-asset-content.tsx` and
+         * `booking-assets-sidebar.tsx`. Always serialised — empty `{}` when
+         * the booking has no QT assets — so consumers can rely on the key.
+         */
+        availableUnitsByAsset,
         partialCheckoutDetails,
         // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
         // so clientLoader can re-shape without a server round-trip on

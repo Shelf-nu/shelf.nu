@@ -150,10 +150,19 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Is currently checked out
+   * Is currently checked out.
+   *
+   * QUANTITY_TRACKED assets are exempted here as defense-in-depth:
+   * `list-asset-content.tsx` already passes `isCheckedOut={false}` for QT
+   * rows (because a QT asset can be "checked out" on this booking while
+   * still having free units elsewhere). But `AvailabilityLabel` is also
+   * mounted from other surfaces (asset pickers, drawers) where the
+   * upstream `isCheckedOut` value may still leak in for a QT asset.
+   * Belt-and-suspenders: skip the "Checked out" badge for QT regardless
+   * of caller — the dedicated `InsufficientStockBadge` + status badge
+   * already communicate the relevant state.
    */
-
-  if (isCheckedOut) {
+  if (isCheckedOut && !isQuantityTracked(asset)) {
     /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
      * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
      */
@@ -213,27 +222,57 @@ export function AvailabilityLabel({
   return null;
 }
 
+/**
+ * Visual variant for the shared `AvailabilityBadge` shell.
+ *
+ *  - `"warning"` (default) — the legacy amber treatment used by every
+ *    pre-existing badge (Unavailable, In custody, Already booked, …).
+ *  - `"error"` — red-tinted (BADGE_COLORS.red palette) for hard
+ *    blockers like the new `InsufficientStockBadge`, where the booking
+ *    cannot proceed at the booked quantity. Same shell + tooltip
+ *    layout, only the color stops differ.
+ */
+export type AvailabilityBadgeVariant = "warning" | "error";
+
 export function AvailabilityBadge({
   badgeText,
   tooltipTitle,
   tooltipContent,
   className,
+  variant = "warning",
 }: {
   badgeText: string;
   tooltipTitle: string;
   tooltipContent: string | ReactNode;
   className?: string;
+  /**
+   * Color treatment for the badge shell. Defaults to `"warning"` (amber)
+   * for backwards compatibility with the existing call sites.
+   */
+  variant?: AvailabilityBadgeVariant;
 }) {
+  // Variant → palette classes. Kept inline (rather than via `BADGE_COLORS`
+  // style props) so it composes with the rest of the shell's Tailwind
+  // utilities and so existing call sites that pass a custom `className`
+  // keep working. The hex values in `BADGE_COLORS.red` (#FFEBEE / #C62828)
+  // are sourced via the Tailwind `red-50` / `red-700` tokens, which match
+  // closely enough for this surface and keep us off hardcoded hex.
+  const variantClasses =
+    variant === "error"
+      ? "bg-red-50 border-red-200 text-red-700"
+      : "bg-warning-50 border-warning-200 text-warning-700";
+
   return (
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             className={tw(
-              "inline-block  bg-warning-50 px-[6px] py-[2px]",
-              "rounded-md border border-warning-200",
-              "text-xs text-warning-700",
+              "inline-block px-[6px] py-[2px]",
+              "rounded-md border",
+              "text-xs",
               "availability-badge",
+              variantClasses,
               className
             )}
           >
@@ -252,6 +291,41 @@ export function AvailabilityBadge({
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+/**
+ * "Insufficient stock" badge for QT booking rows where the booked
+ * quantity on this booking exceeds the units available across the
+ * workspace pool (after subtracting operator custody, other-booking
+ * reservations, and active checkouts elsewhere).
+ *
+ * Red-tinted (`variant="error"`) because — unlike the amber availability
+ * warnings — this is a hard blocker: the booking cannot be checked out
+ * at the booked quantity until the operator either reduces it or frees
+ * units elsewhere in the workspace.
+ *
+ * NEVER renders for INDIVIDUAL assets — they have their own
+ * "Already booked" / "Checked out" paths via `AvailabilityLabel`. Callers
+ * must gate on `isQuantityTracked` before mounting this component.
+ *
+ * @param bookedQuantity - units this booking reserves of the asset
+ * @param availableUnits - units free across the workspace right now
+ */
+export function InsufficientStockBadge({
+  bookedQuantity,
+  availableUnits,
+}: {
+  bookedQuantity: number;
+  availableUnits: number;
+}) {
+  return (
+    <AvailabilityBadge
+      variant="error"
+      badgeText="Insufficient stock"
+      tooltipTitle="Not enough units available"
+      tooltipContent={`This booking reserves ${bookedQuantity} units, but only ${availableUnits} are available across the workspace (after subtracting custody, other reservations, and active checkouts). Reduce the booked quantity or free up units before checking out.`}
+    />
   );
 }
 

@@ -38,12 +38,21 @@ export type KitWithStatus = {
  *   checked out" (violet) to emphasise that work is still outstanding.
  *   Booking rows use this in preference to `PARTIALLY_CHECKED_IN_QTY`
  *   so the user sees "still partly out" rather than "already partly in".
+ * - `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` — QUANTITY_TRACKED, this row
+ *   has had SOME units progressively checked out (`checkedOutQuantity > 0`)
+ *   but NO units returned/consumed/lost/damaged yet
+ *   (`dispositionedQuantity === 0`). Rendered as "Partially checked out"
+ *   (amber) to mirror the legacy `PARTIALLY_CHECKED_IN_QTY` "action
+ *   required" tone — the OUT-side equivalent. Distinct from
+ *   `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway") which fires
+ *   once disposition has started.
  */
 export type ExtendedAssetStatus =
   | AssetStatus
   | "PARTIALLY_CHECKED_IN"
   | "PARTIALLY_CHECKED_IN_QTY"
-  | "PARTIALLY_CHECKED_OUT_QTY";
+  | "PARTIALLY_CHECKED_OUT_QTY"
+  | "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN";
 
 /**
  * Kit status as surfaced in a booking context: the persisted {@link KitStatus}
@@ -242,6 +251,11 @@ export function getBookingContextKitStatus(
       return Boolean(partialCheckinDetails[asset.id]);
     });
 
+  // why: kit-level partial-checkout rollup is deferred — per-asset rows under
+  // the kit already surface the new state via list-asset-content; surfacing it
+  // at the kit header would require a separate `checkedOutByAsset` plumbing
+  // through getBookingContextKitStatus and a new ExtendedKitStatus member,
+  // neither of which is needed for the immediate UX gap.
   // Only show as PARTIALLY_CHECKED_IN for active bookings
   // For COMPLETE bookings, kits should show as AVAILABLE
   if (

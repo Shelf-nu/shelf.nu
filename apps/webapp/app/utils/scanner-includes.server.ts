@@ -20,6 +20,17 @@ export const CUSTODY_INCLUDE = {
   },
 };
 
+/**
+ * Scanner-facing Asset include.
+ *
+ * Uses Prisma `include` (no top-level `select`) so all Asset scalar
+ * columns ship by default. Scanner drawers — notably
+ * `partial-checkout-drawer`'s `isCheckoutEligibleAsset` filter and
+ * `AssetRow` — depend on `status` and `type` being present on every
+ * asset payload returned by `/api/get-scanned-item/$qrId` and
+ * `/api/get-scanned-item-by-barcode`. Do not narrow this to `select`
+ * without re-adding `status` and `type` explicitly.
+ */
 export const ASSET_INCLUDE = {
   // Asset placement lives on the `AssetLocation` pivot. Consumers read
   // the primary placement via `getPrimaryLocation`.
@@ -56,6 +67,10 @@ export const KIT_INCLUDE = {
         select: {
           id: true,
           status: true,
+          // `type` lets scanner callers branch INDIVIDUAL vs QUANTITY_TRACKED
+          // (e.g. partial-checkout eligibility — QT supports top-off via the
+          // remaining-units map, INDIVIDUAL is binary).
+          type: true,
           availableToBook: true,
           custody: true,
         },

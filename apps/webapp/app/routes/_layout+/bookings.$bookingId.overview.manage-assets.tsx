@@ -142,6 +142,17 @@ export type AssetWithBooking = Asset & {
     lost: number;
     damaged: number;
   } | null;
+  /**
+   * Units already checked out on this booking via PartialBookingCheckout —
+   * sum of quantities[] attributed to this BookingAsset row via
+   * kit-driven-first greedy fill (mirrors dispositionedQuantity but reads
+   * from PartialBookingCheckout, not ConsumptionLog). Used by the booking
+   * overview to render the "Partially checked out (pending return)" status
+   * and the checked-out/booked progress in the Qty column. 0 when no
+   * progressive checkout has happened (e.g. all-at-once checkout, or DRAFT
+   * booking). Only meaningful for QUANTITY_TRACKED assets.
+   */
+  checkedOutQuantity?: number | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

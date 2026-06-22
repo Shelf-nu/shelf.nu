@@ -124,6 +124,7 @@ import {
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type { ActivityEventInput } from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { createNotes } from "../note/service.server";
 
@@ -2807,16 +2808,194 @@ export async function computeBookingAssetSliceRemaining(
 }
 
 /**
+ * Remaining units of an asset that can still be checked OUT on this booking.
+ *
+ * `Σ(BookingAsset.quantity for this asset) − Σ(PartialBookingCheckout claims
+ * for this asset on this booking)`, floored at 0. Mirror of
+ * {@link computeBookingAssetRemaining} (the check-IN side) but reads
+ * {@link PartialBookingCheckout} instead of `ConsumptionLog`.
+ *
+ * Already-claimed count comes from the Wave-B `quantities[]` parallel array
+ * on each session row. Legacy rows (pre-Wave-B) wrote `quantities = []`; for
+ * those each occurrence of the asset in `assetIds[]` defaults to 1 unit
+ * (matching the implicit INDIVIDUAL semantics those rows carried). This
+ * keeps the read backward-compatible with the existing all-at-once and
+ * pre-Wave-B partial-checkout history without a backfill.
+ *
+ * @param tx - Prisma transaction client (or default `db`)
+ * @param bookingId - Booking the asset belongs to
+ * @param assetId - Asset to measure
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeBookingAssetRemainingToCheckOut(
+  tx: any,
+  bookingId: Booking["id"],
+  assetId: Asset["id"]
+): Promise<number> {
+  const [pivots, sessions] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId, assetId },
+      select: { quantity: true },
+    }),
+    tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true },
+    }),
+  ]);
+
+  const booked = (pivots as Array<{ quantity: number }>).reduce(
+    (sum, p) => sum + (p.quantity ?? 0),
+    0
+  );
+
+  let claimed = 0;
+  for (const session of sessions as Array<{
+    assetIds: string[];
+    quantities: number[];
+  }>) {
+    const ids = session.assetIds ?? [];
+    const qtys = session.quantities ?? [];
+    // Wave B: aligned arrays — sum quantities[i] when assetIds[i] matches.
+    // Legacy: quantities[] is empty (pre-Wave-B rows) — count one unit per
+    // occurrence so the historical all-at-once / pre-Wave-B partial paths
+    // remain readable without a backfill.
+    if (qtys.length === ids.length) {
+      for (let i = 0; i < ids.length; i += 1) {
+        if (ids[i] === assetId) claimed += qtys[i] ?? 0;
+      }
+    } else {
+      for (const id_ of ids) {
+        if (id_ === assetId) claimed += 1;
+      }
+    }
+  }
+
+  return Math.max(0, booked - claimed);
+}
+
+/**
+ * Per-slice remaining units that can still be checked OUT. Mirror of
+ * {@link computeBookingAssetSliceRemaining} (the check-IN side) on the OUT
+ * side: bounds one slice rather than summing every slice of the asset.
+ *
+ *   `slice.quantity − Σ(PartialBookingCheckout claims attributed to this slice)`
+ *
+ * Attribution mirrors what {@link computeBookingAssetRemainingToCheckOut} does
+ * across the asset, but scoped to a single `bookingAssetId`. Because
+ * `PartialBookingCheckout` has no per-row FK (no `bookingAssetId` column),
+ * the per-slice attribution uses the SAME greedy fill the loader uses
+ * (kit-driven slices first, standalone after) by calling
+ * {@link attributeDispositionsByBookingAsset} with the asset's slices + a
+ * single legacy log entry for the asset's total claim pool, then picking the
+ * entry for our `bookingAssetId`.
+ *
+ * For non-multi-slice assets (the common case: ONE BookingAsset per asset),
+ * the attribution trivially returns the whole pool into the one slice →
+ * equivalent to `computeBookingAssetRemainingToCheckOut`. For multi-slice
+ * assets (kit slice + standalone of the same asset on the same booking) the
+ * greedy fill gives the same per-slice cap the check-OUT path uses when
+ * deciding which slice a claim consumes from.
+ *
+ * Used by {@link getRemainingCheckoutPayload} so the booking-header "Check
+ * out remaining" action proposes per-slice remaining values that
+ * `partialCheckoutBooking` will accept (it caps each claim by the same
+ * per-slice math when it processes the batch).
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param bookingId - Booking the slice belongs to
+ * @param bookingAssetId - The BookingAsset row id to measure
+ * @returns Units still allowed to be progressively checked OUT for this slice
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeBookingAssetSliceRemainingToCheckOut(
+  tx: any,
+  bookingId: Booking["id"],
+  bookingAssetId: string
+): Promise<number> {
+  // Fetch this slice — we need its assetId so we can pool claims across every
+  // sibling slice of the same asset on this booking before attributing.
+  const slice = await tx.bookingAsset.findUnique({
+    where: { id: bookingAssetId },
+    select: { id: true, assetId: true, quantity: true, assetKitId: true },
+  });
+  if (!slice) return 0;
+
+  // Fetch ALL slices of this asset on this booking (kit + standalone, etc.) —
+  // the attributor needs the full slice set so the greedy fill order
+  // (kit-driven first, standalone after) matches the loader.
+  const [allSlices, sessions] = await Promise.all([
+    tx.bookingAsset.findMany({
+      where: { bookingId, assetId: slice.assetId },
+      select: { id: true, quantity: true, assetKitId: true },
+    }),
+    tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true },
+    }),
+  ]);
+
+  // Sum claims for this assetId across every PartialBookingCheckout session.
+  // Legacy fallback (`quantities.length !== assetIds.length`): each occurrence
+  // counts as one unit — mirror of `computeBookingAssetRemainingToCheckOut`
+  // so per-asset and per-slice agree on the pool size.
+  let totalClaimed = 0;
+  for (const session of sessions as Array<{
+    assetIds: string[];
+    quantities: number[];
+  }>) {
+    const ids = session.assetIds ?? [];
+    const qtys = session.quantities ?? [];
+    if (qtys.length === ids.length) {
+      for (let i = 0; i < ids.length; i += 1) {
+        if (ids[i] === slice.assetId) totalClaimed += qtys[i] ?? 0;
+      }
+    } else {
+      for (const id_ of ids) {
+        if (id_ === slice.assetId) totalClaimed += 1;
+      }
+    }
+  }
+
+  // Feed the pool into the shared attributor as a single legacy
+  // (`bookingAssetId === null`) entry so the kit-first / id-sort fill order
+  // is identical to what the disposition attributor uses on the check-IN
+  // side. The attributor returns the slice → attributed-claim map; we read
+  // back the entry for the slice we were asked about.
+  const claimLogs =
+    totalClaimed > 0
+      ? [{ bookingAssetId: null as string | null, quantity: totalClaimed }]
+      : [];
+  const attributed = attributeDispositionsByBookingAsset({
+    bookingAssetRows: allSlices,
+    consumptionLogs: claimLogs,
+  });
+  const claimedForThisSlice = attributed.get(bookingAssetId) ?? 0;
+
+  return Math.max(0, slice.quantity - claimedForThisSlice);
+}
+
+/**
  * Determines whether a booking has been fully checked in across all of
  * its assets.
  *
- * For `INDIVIDUAL` assets: each must appear in at least one
- * `PartialBookingCheckin.assetIds` row for this booking (existing
- * mechanism, unchanged).
+ * Progressive semantics (Wave B): when a booking has been through at
+ * least one progressive `PartialBookingCheckout`, assets/units that were
+ * NEVER checked out do not need to be reconciled. They were "left at the
+ * warehouse" and there is nothing to check in. Only the slices/units that
+ * actually went out the door gate the COMPLETE transition.
  *
- * For `QUANTITY_TRACKED` assets: each must have
- * `computeBookingAssetRemaining` equal to 0 — i.e. every booked unit has
- * been dispositioned (returned, consumed, lost, or damaged).
+ * Legacy (non-progressive) semantics: when there are NO PartialBookingCheckout
+ * rows for this booking (e.g. all-at-once flow), the function preserves the
+ * original behaviour byte-for-byte — every BookingAsset must be reconciled.
+ *
+ * For `INDIVIDUAL` assets: must appear in at least one
+ * `PartialBookingCheckin.assetIds` row — but only if it was ever checked out
+ * (recorded in a `PartialBookingCheckout` OR live `CHECKED_OUT`). Assets never
+ * checked out are skipped.
+ *
+ * For `QUANTITY_TRACKED` assets: `min(checkedOutUnits, slice.quantity) -
+ * checkedInUnits === 0` per slice. Uncheck-outed units cannot block COMPLETE
+ * because there is nothing to check in.
  *
  * Called by both `partialCheckinBooking` and `checkinBooking` to decide
  * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
@@ -2830,18 +3009,27 @@ export async function isBookingFullyCheckedIn(
   tx: any,
   bookingId: Booking["id"]
 ): Promise<boolean> {
-  const [bookingAssets, partialCheckins] = await Promise.all([
+  const [bookingAssets, partialCheckins, partialCheckouts] = await Promise.all([
     tx.bookingAsset.findMany({
       where: { bookingId },
       select: {
         assetId: true,
         quantity: true,
-        asset: { select: { id: true, type: true } },
+        // `status` is needed to detect assets checked out via the all-at-once
+        // flow (which writes no PartialBookingCheckout records but flips the
+        // asset to CHECKED_OUT). This mirrors the union-with-live-status
+        // fallback in `partialCheckoutBooking` so completion stays consistent
+        // whether checkout happened progressively or all-at-once.
+        asset: { select: { id: true, type: true, status: true } },
       },
     }),
     tx.partialBookingCheckin.findMany({
       where: { bookingId },
       select: { assetIds: true },
+    }),
+    tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true },
     }),
   ]);
 
@@ -2851,28 +3039,105 @@ export async function isBookingFullyCheckedIn(
   }
 
   const individuallyCheckedInIds = new Set<string>();
-  for (const row of partialCheckins) {
-    for (const id of row.assetIds as string[]) {
+  for (const row of partialCheckins as Array<{ assetIds: string[] }>) {
+    for (const id of row.assetIds) {
       individuallyCheckedInIds.add(id);
     }
   }
 
-  for (const ba of bookingAssets) {
+  // Aggregate per-asset checked-out units across every PartialBookingCheckout
+  // session for this booking. `quantities` is positional with `assetIds`:
+  // INDIVIDUAL rows record `1`, QUANTITY_TRACKED rows record the unit count.
+  // Legacy rows (pre-Wave-B) have an empty `quantities[]` — fall back to a
+  // count of 1 per assetId entry so they still register as "checked out"
+  // (matches their INDIVIDUAL-only origin where 1 unit per id was the only
+  // possibility).
+  const checkedOutAssetIds = new Set<string>();
+  const checkedOutUnitsByAsset = new Map<string, number>();
+  for (const row of partialCheckouts as Array<{
+    assetIds: string[];
+    quantities: number[];
+  }>) {
+    for (let i = 0; i < row.assetIds.length; i++) {
+      const id = row.assetIds[i];
+      const units = row.quantities[i] ?? 1;
+      checkedOutAssetIds.add(id);
+      checkedOutUnitsByAsset.set(
+        id,
+        (checkedOutUnitsByAsset.get(id) ?? 0) + units
+      );
+    }
+  }
+
+  // Detect whether ANY progressive checkout has occurred. If not, preserve the
+  // legacy "every BookingAsset must reconcile" semantics so all-at-once flows
+  // and pre-Wave-B bookings behave exactly as before.
+  const hasProgressiveCheckout = partialCheckouts.length > 0;
+
+  for (const ba of bookingAssets as Array<{
+    assetId: string;
+    quantity: number;
+    asset: { id: string; type: AssetType; status: AssetStatus } | null;
+  }>) {
     const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
 
     if (!isQtyTrackedAsset) {
-      // INDIVIDUAL: must be in a partial-checkin session.
+      // INDIVIDUAL. Under progressive semantics: an asset that was NEVER
+      // checked out (not in any PartialBookingCheckout AND not currently
+      // CHECKED_OUT) cannot — and need not — be checked in. Under legacy
+      // semantics (no PartialBookingCheckout rows at all), the asset must
+      // appear in a partial-checkin session, preserving previous behaviour.
+      const wasCheckedOut =
+        checkedOutAssetIds.has(ba.assetId) ||
+        ba.asset?.status === AssetStatus.CHECKED_OUT;
+
+      if (hasProgressiveCheckout && !wasCheckedOut) {
+        // Never went out → nothing to reconcile.
+        continue;
+      }
+
       if (!individuallyCheckedInIds.has(ba.assetId)) return false;
       continue;
     }
 
-    // QUANTITY_TRACKED: must have zero remaining.
-    const remaining = await computeBookingAssetRemaining(
-      tx,
-      bookingId,
-      ba.assetId
-    );
-    if (remaining > 0) return false;
+    // QUANTITY_TRACKED. Under legacy semantics, require zero remaining
+    // (booked − logged === 0). Under progressive semantics, the cap is
+    // `min(checkedOutUnits, slice.quantity)` — uncheck-outed units have no
+    // reconciliation obligation.
+    if (!hasProgressiveCheckout) {
+      const remaining = await computeBookingAssetRemaining(
+        tx,
+        bookingId,
+        ba.assetId
+      );
+      if (remaining > 0) return false;
+      continue;
+    }
+
+    const checkedOutUnits = checkedOutUnitsByAsset.get(ba.assetId) ?? 0;
+    if (checkedOutUnits === 0) {
+      // This asset was never checked out under the progressive flow — nothing
+      // to reconcile for this slice (or any other slice of the same asset).
+      continue;
+    }
+
+    // `computeBookingAssetRemaining` returns `booked − logged` clamped at 0.
+    // The "logged" half is what we actually care about (units already checked
+    // in); recover it via `booked - remaining` where `booked` sums every slice
+    // of the same asset. Cap by `checkedOutUnits` so units that never left the
+    // warehouse don't block COMPLETE.
+    const [bookedSum, remaining] = await Promise.all([
+      tx.bookingAsset.aggregate({
+        where: { bookingId, assetId: ba.assetId },
+        _sum: { quantity: true },
+      }),
+      computeBookingAssetRemaining(tx, bookingId, ba.assetId),
+    ]);
+    const booked =
+      (bookedSum as { _sum: { quantity: number | null } })._sum.quantity ?? 0;
+    const checkedInUnits = Math.max(0, booked - remaining);
+    const obligatedUnits = Math.min(checkedOutUnits, booked);
+    if (obligatedUnits - checkedInUnits > 0) return false;
   }
 
   return true;
@@ -3858,6 +4123,41 @@ function sumDisposition(d: CheckinDispositionInput): number {
 }
 
 /**
+ * Per-asset payload for a progressive checkout disposition. Mirror of the
+ * `CheckinDispositionInput` shape but unidirectional — checkout only takes
+ * units from the booking's pool; it does not have return/consumed/lost
+ * categories like the check-IN side.
+ *
+ * INDIVIDUAL assets always implicitly use quantity=1 and don't need an
+ * entry here — bare `assetIds[]` continues to work for the legacy
+ * callers + INDIVIDUAL-only bookings.
+ */
+export type CheckoutDispositionInput = {
+  assetId: string;
+  /** Per-slice attribution; mirror of Polish-7b semantics in check-IN. Optional for legacy / INDIVIDUAL. */
+  bookingAssetId?: string | null;
+  /** Units to claim from this asset's BookingAsset slice on this booking.
+   *  Required for QUANTITY_TRACKED; clamped to [1, remaining-to-check-out]. */
+  quantity: number;
+};
+
+/**
+ * Local summary type carried out of the partial-checkout tx into the post-tx
+ * note writers. Phase 4e parity: carries `type` + `unitOfMeasure` so
+ * `formatUnitCount` can render "checked out 10 boxes" instead of
+ * "checked out 10".
+ */
+export type CheckoutQtyDispositionSummary = {
+  assetId: string;
+  title: string;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  /** Quantity claimed by this scan. (Cumulative remaining on the booking is
+   *  derived elsewhere — this is per-batch.) */
+  quantity: number;
+};
+
+/**
  * Build a markdoc fragment naming each qty-tracked asset touched in
  * this session along with its per-category disposition. Used by the
  * booking-side activity note for both `partialCheckinBooking` and
@@ -3910,6 +4210,48 @@ function buildQtyPerAssetFragment(
     if (s.pendingAfter && s.pendingAfter > 0) {
       parts.push(`${fmt(s.pendingAfter)} pending`);
     }
+    if (parts.length === 0) continue;
+    const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
+    fragments.push(`${link} (${parts.join(", ")})`);
+  }
+  return fragments.join(", ");
+}
+
+/**
+ * Build a markdoc fragment naming each qty-tracked asset checked OUT in
+ * this session. Mirror of {@link buildQtyPerAssetFragment} but unidirectional —
+ * checkout only carries one count per asset (no return/consume/loss/damage
+ * fan-out).
+ *
+ * Produces something like:
+ *   `{% link to="/assets/<id>" text="Pens" /%} (10 checked out, 5 still booked)`
+ *
+ * Returns an empty string when no row has a positive count so callers can
+ * safely concatenate without extra guards.
+ */
+function buildQtyPerAssetCheckoutFragment(
+  summaries: Array<{
+    assetId: string;
+    title: string;
+    type: AssetType;
+    unitOfMeasure: string | null;
+    checkedOut: number;
+    remainingAfter: number;
+  }>
+): string {
+  const fragments: string[] = [];
+  for (const s of summaries) {
+    // `formatUnitCount` returns `null` for INDIVIDUAL; fall back to the bare
+    // integer so phrasing stays sensible if one ever sneaks in (in practice
+    // this loop only sees qty-tracked rows).
+    const fmt = (qty: number) =>
+      formatUnitCount({ type: s.type, unitOfMeasure: s.unitOfMeasure }, qty) ??
+      String(qty);
+
+    const parts: string[] = [];
+    if (s.checkedOut > 0) parts.push(`${fmt(s.checkedOut)} checked out`);
+    if (s.remainingAfter > 0)
+      parts.push(`${fmt(s.remainingAfter)} still booked`);
     if (parts.length === 0) continue;
     const link = wrapLinkForNote(`/assets/${s.assetId}`, s.title);
     fragments.push(`${link} (${parts.join(", ")})`);
@@ -4872,11 +5214,18 @@ export async function partialCheckoutBooking({
   id,
   organizationId,
   assetIds: rawAssetIds,
+  checkouts,
   userId,
   hints,
   intentChoice,
 }: Pick<Booking, "id" | "organizationId"> & {
-  assetIds: Asset["id"][];
+  /** Legacy payload — asset IDs only, no per-asset quantities. INDIVIDUAL rows
+   *  implicitly carry quantity = 1. */
+  assetIds?: Asset["id"][];
+  /** Wave-B per-asset quantity dispositions. May arrive together with
+   *  `assetIds` — INDIVIDUAL rows still flow through `assetIds` while
+   *  QUANTITY_TRACKED rows arrive here with explicit `quantity`. */
+  checkouts?: CheckoutDispositionInput[];
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
@@ -4885,7 +5234,46 @@ export async function partialCheckoutBooking({
     // Dedupe once up front so counts, the PartialBookingCheckout record, and the
     // per-asset events are idempotent — the mobile endpoint's body schema does
     // not enforce unique assetIds, so a client could submit duplicates.
-    const assetIds = [...new Set(rawAssetIds)];
+    const assetIds = rawAssetIds ? [...new Set(rawAssetIds)] : [];
+
+    /**
+     * Merge `checkouts` (qty-tracked, with explicit quantity) and `assetIds`
+     * (INDIVIDUAL / legacy, implicit qty = 1) into one unified disposition
+     * list. Mirror of the `partialCheckinBooking` dedup pattern — key on
+     * `(assetId, bookingAssetId)` so per-slice payloads survive (kit-driven
+     * + standalone of the same asset), and asset-id-only legacy entries
+     * collapse on `assetId::null`.
+     */
+    const dispositions: CheckoutDispositionInput[] = [];
+    const seenDispositionKeys = new Set<string>();
+    const assetIdsWithDisposition = new Set<string>();
+    for (const d of checkouts ?? []) {
+      const key = `${d.assetId}::${d.bookingAssetId ?? "null"}`;
+      if (seenDispositionKeys.has(key)) continue;
+      seenDispositionKeys.add(key);
+      dispositions.push(d);
+      assetIdsWithDisposition.add(d.assetId);
+    }
+    for (const assetId of assetIds) {
+      if (!assetIdsWithDisposition.has(assetId)) {
+        assetIdsWithDisposition.add(assetId);
+        // Legacy / INDIVIDUAL fallback: implicit quantity = 1, no slice tag.
+        dispositions.push({ assetId, quantity: 1 });
+      }
+    }
+
+    /** Flat, deduped asset-id list driven by all dispositions (legacy + Wave B). */
+    const effectiveAssetIds = [...new Set(dispositions.map((d) => d.assetId))];
+
+    if (dispositions.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: "No assets provided for check-out.",
+        shouldBeCaptured: false,
+      });
+    }
 
     const user = await getUserByID(userId, {
       select: {
@@ -4898,16 +5286,23 @@ export async function partialCheckoutBooking({
     // First, validate the booking exists and get its current assets via the
     // BookingAsset pivot. `status` is needed for the custody/CHECKED_OUT
     // guards below; `assetKits` carries kit membership in the pivot world.
+    // Wave B: `id` + `quantity` on the pivot row + `type`/`title`/`unitOfMeasure`
+    // on the asset feed the per-slice qty-tracked checkout loop below.
     const bookingFound = await db.booking
       .findUniqueOrThrow({
         where: { id, organizationId },
         include: {
           bookingAssets: {
             select: {
+              id: true,
+              quantity: true,
               asset: {
                 select: {
                   id: true,
                   status: true,
+                  type: true,
+                  title: true,
+                  unitOfMeasure: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -4953,12 +5348,17 @@ export async function partialCheckoutBooking({
     // location). The progressive-checkout flow treats assets as opaque IDs,
     // so collapse the pivot to a unique-by-asset list once here and use it
     // everywhere downstream.
+    // Wave B: also carries `type` / `unitOfMeasure` / `title` so the per-asset
+    // qty loop can render unit-aware notes and decide qty vs. INDIVIDUAL paths.
     const bookingAssetsDeduped = (() => {
       const map = new Map<
         string,
         {
           id: string;
           status: AssetStatus;
+          type: AssetType;
+          title: string;
+          unitOfMeasure: string | null;
           assetKits: { kitId: string }[];
         }
       >();
@@ -4970,6 +5370,11 @@ export async function partialCheckoutBooking({
       return [...map.values()];
     })();
 
+    /** Quick lookup: assetId → AssetType (used by qty/individual branching). */
+    const assetTypeById = new Map<string, AssetType>(
+      bookingAssetsDeduped.map((a) => [a.id, a.type])
+    );
+
     // Validate that all provided assetIds are actually in the booking BEFORE any
     // completion shortcut. The early-exit below delegates to the full checkout
     // when this batch covers all outstanding assets; without this guard a batch
@@ -4979,7 +5384,7 @@ export async function partialCheckoutBooking({
     // endpoint, which forwards raw assetIds with none of the web drawer's
     // client-side filtering.
     const bookingAssetIds = new Set(bookingAssetsDeduped.map((a) => a.id));
-    const invalidAssetIds = assetIds.filter(
+    const invalidAssetIds = effectiveAssetIds.filter(
       (assetId) => !bookingAssetIds.has(assetId)
     );
 
@@ -4992,6 +5397,23 @@ export async function partialCheckoutBooking({
           ", "
         )}`,
       });
+    }
+
+    // QUANTITY_TRACKED dispositions must carry a positive `quantity`. INDIVIDUAL
+    // rows always get implicit `quantity = 1` upstream, so this guard only fires
+    // on malformed qty payloads from a direct API caller.
+    for (const d of dispositions) {
+      const isQty = assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED;
+      if (isQty && (!d.quantity || d.quantity <= 0)) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message:
+            "Quantity-tracked assets must include a positive quantity to check out.",
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     // Assets already checked out for THIS booking. Source of truth is the
@@ -5012,12 +5434,41 @@ export async function partialCheckoutBooking({
         .filter((asset) => asset.status === AssetStatus.CHECKED_OUT)
         .map((asset) => asset.id),
     ]);
-    const providedAssetIds = new Set(assetIds);
+    const providedAssetIds = new Set(effectiveAssetIds);
 
     // Booking assets not yet checked out (by record OR live status) = still Booked.
     const outstandingAssetIds = bookingAssetsDeduped
       .map((asset) => asset.id)
       .filter((assetId) => !alreadyCheckedOutSet.has(assetId));
+
+    /**
+     * Wave B: when callers carry per-asset `quantity`, delegating to the full
+     * `checkoutBooking` is only correct when EVERY qty-tracked asset's full
+     * `remainingToCheckOut` is being claimed by this batch. If a partial
+     * quantity arrives, we must stay in the per-disposition path so the
+     * `PartialBookingCheckout.quantities[]` row records the exact slice and
+     * the check-IN side later reads the right `remaining` figure. The lookup
+     * runs OUTSIDE the tx for the gating decision (it re-checks inside the
+     * tx after the row lock, so no race risk).
+     */
+    let qtyClaimsCoverFullRemaining = true;
+    if (dispositions.some((d) => d.assetId)) {
+      for (const d of dispositions) {
+        if (assetTypeById.get(d.assetId) !== AssetType.QUANTITY_TRACKED) {
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop -- sequential reads are fine here; loop is bounded by qty-tracked asset count in this batch
+        const remainingForFull = await computeBookingAssetRemainingToCheckOut(
+          db,
+          id,
+          d.assetId
+        );
+        if (d.quantity < remainingForFull) {
+          qtyClaimsCoverFullRemaining = false;
+          break;
+        }
+      }
+    }
 
     // Delegate to the full checkout ONLY on the very first all-items scan of a
     // RESERVED booking (no prior partial-checkout records). `checkoutBooking`
@@ -5029,7 +5480,8 @@ export async function partialCheckoutBooking({
       bookingFound.status === BookingStatus.RESERVED &&
       recordedAssetIdSet.size === 0 &&
       bookingAssetsDeduped.length > 0 &&
-      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId));
+      outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId)) &&
+      qtyClaimsCoverFullRemaining;
 
     if (shouldDelegateToFullCheckout) {
       const fullyCheckedOut = await checkoutBooking({
@@ -5051,11 +5503,25 @@ export async function partialCheckoutBooking({
       // We record only the still-outstanding ids so re-scanned assets that were
       // already recorded in an earlier batch don't get duplicated.
       if (outstandingAssetIds.length > 0) {
+        // Mirror the main-path `sessionAssetIds`/`sessionQuantities` invariant:
+        // `assetIds[i]` and `quantities[i]` must be positionally aligned so
+        // downstream readers (computeBookingAssetRemainingToCheckOut, the
+        // completion gate in isBookingFullyCheckedIn) get correct per-slice
+        // figures. INDIVIDUAL ids without an explicit disposition carry the
+        // implicit quantity = 1.
+        const checkoutQtyByAssetId = new Map<string, number>();
+        for (const d of checkouts ?? []) {
+          checkoutQtyByAssetId.set(d.assetId, d.quantity);
+        }
+        const outstandingQuantities = outstandingAssetIds.map(
+          (assetId) => checkoutQtyByAssetId.get(assetId) ?? 1
+        );
         await db.partialBookingCheckout.create({
           data: {
             bookingId: id,
             checkedOutById: userId,
             assetIds: outstandingAssetIds,
+            quantities: outstandingQuantities,
             checkoutCount: outstandingAssetIds.length,
           },
         });
@@ -5092,8 +5558,11 @@ export async function partialCheckoutBooking({
       },
     });
 
+    // why: mirrors the proven `checkoutBooking` guard — QT assets can be in
+    // IN_CUSTODY status with only SOME units claimed; the per-slice cap inside
+    // the tx (below) is the authoritative availability check for QT.
     const inCustody = scannedAssetsWithConflicts.filter(
-      (a) => a.status === AssetStatus.IN_CUSTODY
+      (a) => !isQuantityTracked(a) && a.status === AssetStatus.IN_CUSTODY
     );
     if (inCustody.length > 0) {
       const names = inCustody
@@ -5137,8 +5606,14 @@ export async function partialCheckoutBooking({
     // Defensive: skip assets already checked out for this booking — by record
     // OR by live CHECKED_OUT status (idempotent re-scan, incl. all-at-once
     // checkouts that left no records).
-    const assetIdsToCheckOut = assetIds.filter(
-      (assetId) => !alreadyCheckedOutSet.has(assetId)
+    // NOTE: for QUANTITY_TRACKED assets "already checked out" is a per-asset
+    // boolean and intentionally lossy — partial qty already claimed shows up
+    // there only when the asset's status flipped to CHECKED_OUT (every unit
+    // claimed). The per-slice cap inside the tx is the precise gate.
+    const assetIdsToCheckOut = effectiveAssetIds.filter(
+      (assetId) =>
+        !alreadyCheckedOutSet.has(assetId) ||
+        assetTypeById.get(assetId) === AssetType.QUANTITY_TRACKED
     );
     if (assetIdsToCheckOut.length === 0) {
       throw new ShelfError({
@@ -5173,12 +5648,231 @@ export async function partialCheckoutBooking({
       }
     }
 
+    /**
+     * Per-asset qty-checkout summary populated INSIDE the tx and consumed by the
+     * post-tx note pipeline. Mirror of {@link QtyDispositionSummary} from the
+     * check-IN side but unidirectional — only `checkedOut` + `remainingAfter`.
+     * Phase 4e parity: carries `type` + `unitOfMeasure` so `formatUnitCount`
+     * can render "checked out 10 boxes" without an extra DB roundtrip.
+     */
+    type CheckoutQtySummary = {
+      assetId: string;
+      title: string;
+      type: AssetType;
+      unitOfMeasure: string | null;
+      checkedOut: number;
+      remainingAfter: number;
+    };
+
     const result = await db.$transaction(async (tx) => {
-      // Update the status of checked-out assets to CHECKED_OUT
-      await tx.asset.updateMany({
-        where: { id: { in: assetIdsToCheckOut }, organizationId },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
+      /**
+       * Wave B: per-disposition qty-tracked loop. Mirrors the partial-checkin
+       * row-lock pattern — lock → re-read remaining inside tx → enforce cap →
+       * (no ConsumptionLog write here; checkout records live on
+       * `PartialBookingCheckout` rows that we batch-create below).
+       *
+       * Critical invariant: subsequent iterations of THIS batch must see the
+       * claims made by earlier iterations. `PartialBookingCheckout` is written
+       * once at the end, so we accumulate per-asset / per-slice claims in
+       * memory and subtract them from each iteration's freshly-read remaining
+       * before enforcing the cap. Without this, two slices of the same asset
+       * (kit + standalone) would both see the same `committedRemaining` and
+       * over-claim.
+       */
+      const qtySummaries: CheckoutQtySummary[] = [];
+      const claimedByAssetThisBatch = new Map<string, number>();
+      const claimedBySliceThisBatch = new Map<string, number>();
+      /**
+       * Track which asset titles each disposition saw so the post-loop status
+       * flip can reuse them without re-reading the asset. Populated only for
+       * qty-tracked dispositions (the only path that goes through the lock).
+       */
+      const titleByAssetId = new Map<string, string>();
+      /** Track type+unitOfMeasure for `assetQtyMeta` of qty events post-loop. */
+      const qtyShapeByAssetId = new Map<
+        string,
+        { type: AssetType; unitOfMeasure: string | null }
+      >();
+
+      for (const disp of dispositions) {
+        if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
+          continue;
+        }
+
+        // Row lock the asset BEFORE any remaining-read — closes the race with a
+        // concurrent checkout session on the same asset.
+        const lockedAsset = await lockAssetForQuantityUpdate(tx, disp.assetId);
+        titleByAssetId.set(disp.assetId, lockedAsset.title);
+        qtyShapeByAssetId.set(disp.assetId, {
+          type: lockedAsset.type,
+          unitOfMeasure: lockedAsset.unitOfMeasure,
+        });
+
+        // Committed remaining = booking total − Σ(prior PBC sessions). Does NOT
+        // include this batch's prior iterations — that comes from the in-memory
+        // running map below.
+        const committedRemaining = await computeBookingAssetRemainingToCheckOut(
+          tx,
+          id,
+          disp.assetId
+        );
+
+        const claimedSoFarThisBatch =
+          claimedByAssetThisBatch.get(disp.assetId) ?? 0;
+        const assetCap = Math.max(
+          0,
+          committedRemaining - claimedSoFarThisBatch
+        );
+
+        /**
+         * Per-slice cap (Polish-7b parity): when the disposition targets a
+         * specific BookingAsset slice (kit-driven + standalone of the same
+         * asset both flow as separate dispositions), bound the claim by BOTH
+         * the slice's own remaining AND the asset-level remaining. The slice
+         * remaining ALSO subtracts the running batch claim for the same slice
+         * so a double-submit of the same slice can't over-claim. Legacy
+         * callers omit `bookingAssetId` → asset-level cap only.
+         */
+        let cap = assetCap;
+        if (disp.bookingAssetId) {
+          const sliceCommittedRemaining =
+            await computeBookingAssetSliceRemaining(
+              tx,
+              id,
+              disp.bookingAssetId
+            );
+          const claimedThisSliceSoFar =
+            claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0;
+          const sliceCap = Math.max(
+            0,
+            sliceCommittedRemaining - claimedThisSliceSoFar
+          );
+          cap = Math.min(cap, sliceCap);
+        }
+
+        const claimed = disp.quantity;
+        if (claimed > cap) {
+          // Render `cap` with the asset's unit of measure so qty-tracked rows
+          // say "Only 5 boxes left to check out for \"Cardboard Boxes\""
+          // instead of "Only 5 left". Including the asset title disambiguates
+          // multi-asset error reports and makes the message actionable on
+          // mobile (no row-level context). INDIVIDUAL would fall through, but
+          // this branch is only reachable for QUANTITY_TRACKED rows.
+          const capRendered =
+            formatUnitCount(
+              {
+                type: lockedAsset.type,
+                unitOfMeasure: lockedAsset.unitOfMeasure,
+              },
+              cap
+            ) ?? `${cap} units`;
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label,
+            message: `Only ${capRendered} left to check out for "${lockedAsset.title}"`,
+            shouldBeCaptured: false,
+          });
+        }
+
+        // Record the claim so the NEXT iteration sees the running total.
+        claimedByAssetThisBatch.set(
+          disp.assetId,
+          claimedSoFarThisBatch + claimed
+        );
+        if (disp.bookingAssetId) {
+          claimedBySliceThisBatch.set(
+            disp.bookingAssetId,
+            (claimedBySliceThisBatch.get(disp.bookingAssetId) ?? 0) + claimed
+          );
+        }
+
+        qtySummaries.push({
+          assetId: disp.assetId,
+          title: lockedAsset.title,
+          type: lockedAsset.type,
+          unitOfMeasure: lockedAsset.unitOfMeasure,
+          checkedOut: claimed,
+          // `remainingAfter` here is per-iteration: committedRemaining minus
+          // claims accumulated up to and including this iteration. Aggregated
+          // post-loop into the per-asset summary used by notes / events.
+          remainingAfter: Math.max(
+            0,
+            committedRemaining - claimedSoFarThisBatch - claimed
+          ),
+        });
+      }
+
+      /**
+       * INDIVIDUAL assets in this batch: always flip to CHECKED_OUT.
+       * QUANTITY_TRACKED assets: per-asset flip only when ALL booked units
+       * (sum of pivot quantities across all slices for this asset) have been
+       * claimed across ALL sessions (prior + this batch). The conflict +
+       * custody validation upstream already rejects ineligible assets.
+       */
+      const individualToFlip = assetIdsToCheckOut.filter(
+        (assetId) => assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED
+      );
+      if (individualToFlip.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: individualToFlip }, organizationId },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+      }
+
+      /**
+       * Per-asset QT status flip across ALL sessions. For each qty-tracked
+       * asset touched in this batch, compute `bookedTotal` (sum of all
+       * `BookingAsset.quantity` pivot rows for this asset on this booking)
+       * and compare against `priorCommittedClaims + thisBatchClaims`. Flip
+       * to CHECKED_OUT only when the asset is fully claimed across every
+       * session — a partial slice must leave the status alone (the pool is
+       * still partly available for the same or other bookings).
+       */
+      const qtyAssetsTouched = [...new Set(qtySummaries.map((s) => s.assetId))];
+      const bookedTotalByAsset = (() => {
+        const map = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          const prev = map.get(ba.asset.id) ?? 0;
+          map.set(ba.asset.id, prev + (ba.quantity ?? 0));
+        }
+        return map;
+      })();
+      // Collect the qty assets that this batch fully claimed across every
+      // session. We then issue ONE `updateMany` for the whole set rather than
+      // one write per asset — fewer round-trips + mirrors the INDIVIDUAL flip
+      // path above + lets the org-scope `where` clause be enforced on the
+      // batched query (defense-in-depth — the assetIds already came from
+      // qtySummaries which were validated against the org-scoped booking).
+      const qtyAssetsToFlip: string[] = [];
+      for (const assetId of qtyAssetsTouched) {
+        // Re-read committed remaining for THIS asset post-loop. Combined with
+        // this batch's running total, this is the "remaining after all
+        // sessions including this batch" figure — drives the flip decision.
+        const committedRemaining = await computeBookingAssetRemainingToCheckOut(
+          tx,
+          id,
+          assetId
+        );
+        const thisBatchClaim = claimedByAssetThisBatch.get(assetId) ?? 0;
+        const remainingAfterAllSessions = Math.max(
+          0,
+          committedRemaining - thisBatchClaim
+        );
+        const bookedTotal = bookedTotalByAsset.get(assetId) ?? 0;
+        // Flip only when every booked unit has been claimed. Guard against
+        // `bookedTotal === 0` (defensive: shouldn't happen for valid bookings)
+        // by requiring positive total before flipping.
+        if (bookedTotal > 0 && remainingAfterAllSessions === 0) {
+          qtyAssetsToFlip.push(assetId);
+        }
+      }
+      if (qtyAssetsToFlip.length > 0) {
+        await tx.asset.updateMany({
+          where: { id: { in: qtyAssetsToFlip }, organizationId },
+          data: { status: AssetStatus.CHECKED_OUT },
+        });
+      }
 
       // Only update kit status for kits that are completely checked out
       if (completeKitIds.length > 0) {
@@ -5188,47 +5882,119 @@ export async function partialCheckoutBooking({
         });
       }
 
-      // Create partial check-out record for tracking
-      await tx.partialBookingCheckout.create({
+      /**
+       * `PartialBookingCheckout` session row. `assetIds[i]` and `quantities[i]`
+       * are positionally aligned: every entry corresponds to one disposition
+       * (INDIVIDUAL or qty-tracked slice). Repeated `assetId` entries are
+       * legal — they record multiple slices of the same asset in one session.
+       */
+      const sessionAssetIds: string[] = [];
+      const sessionQuantities: number[] = [];
+      for (const disp of dispositions) {
+        if (!assetIdsToCheckOut.includes(disp.assetId)) continue;
+        sessionAssetIds.push(disp.assetId);
+        // INDIVIDUAL rows always count as 1 unit (the legacy implicit), even if
+        // an upstream caller set a different value by mistake. QUANTITY_TRACKED
+        // rows record their explicit per-slice quantity.
+        const qty =
+          assetTypeById.get(disp.assetId) === AssetType.QUANTITY_TRACKED
+            ? disp.quantity
+            : 1;
+        sessionQuantities.push(qty);
+      }
+
+      const createdSession = await tx.partialBookingCheckout.create({
         data: {
           bookingId: id,
           checkedOutById: userId,
-          assetIds: assetIdsToCheckOut,
-          checkoutCount: assetIdsToCheckOut.length,
+          assetIds: sessionAssetIds,
+          quantities: sessionQuantities,
+          // `checkoutCount` historically counted distinct assetIds, but the
+          // existing reports treat it as the array length — preserve that
+          // semantic (one entry per row, including repeated slices).
+          checkoutCount: sessionAssetIds.length,
         },
+        select: { id: true },
       });
 
-      // Create audit notes for each checked-out asset using createNotes
+      /**
+       * Aggregated per-asset summary used by the post-tx note pipeline.
+       * Multiple slices for the same asset (kit + standalone) fold into one
+       * entry: sum `checkedOut`, take the final `remainingAfter` (the running
+       * total after the asset's last iteration in this batch).
+       */
+      const aggregatedQtySummaries: CheckoutQtySummary[] = (() => {
+        const byAsset = new Map<string, CheckoutQtySummary>();
+        for (const s of qtySummaries) {
+          const prev = byAsset.get(s.assetId);
+          if (!prev) {
+            byAsset.set(s.assetId, { ...s });
+          } else {
+            prev.checkedOut += s.checkedOut;
+            prev.remainingAfter = s.remainingAfter;
+          }
+        }
+        return [...byAsset.values()];
+      })();
+
+      // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
+      // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
       const actor = wrapUserLinkForNote({
         id: userId,
         firstName: user?.firstName,
         lastName: user?.lastName,
       });
-      const noteContent = `${actor} checked out via partial check-out.`;
-      await createNotes(
-        {
-          content: noteContent,
-          type: "UPDATE",
-          userId,
-          assetIds: assetIdsToCheckOut,
-          organizationId,
-        },
-        tx
-      );
+      if (individualToFlip.length > 0) {
+        await createNotes(
+          {
+            content: `${actor} checked out via partial check-out.`,
+            type: "UPDATE",
+            userId,
+            assetIds: individualToFlip,
+            organizationId,
+          },
+          tx
+        );
+      }
 
-      // Activity events — one BOOKING_PARTIAL_CHECKOUT per asset, inside the tx.
-      await recordEvents(
-        assetIdsToCheckOut.map((assetId) => ({
-          organizationId,
-          actorUserId: userId,
-          action: "BOOKING_PARTIAL_CHECKOUT",
-          entityType: "BOOKING",
-          entityId: id,
-          bookingId: id,
-          assetId,
-        })),
-        tx
-      );
+      /**
+       * Activity events — one `BOOKING_PARTIAL_CHECKOUT` per disposition row.
+       * `meta.quantity` is set for QUANTITY_TRACKED rows (via `assetQtyMeta`,
+       * which returns `{}` for INDIVIDUAL). `meta.partialCheckoutSessionId`
+       * groups events from the same scan batch for the reports.
+       */
+      const eventInputs: ActivityEventInput[] = dispositions
+        .filter((d) => assetIdsToCheckOut.includes(d.assetId))
+        .map((d) => {
+          // Prefer the locked-asset shape captured in-loop (truth-source for
+          // qty rows); fall back to the deduped booking pivot snapshot for
+          // INDIVIDUAL rows so `assetQtyMeta` still returns `{}` cleanly.
+          const qtyShape =
+            qtyShapeByAssetId.get(d.assetId) ??
+            (() => {
+              const ba = bookingAssetsDeduped.find((a) => a.id === d.assetId);
+              return ba
+                ? { type: ba.type, unitOfMeasure: ba.unitOfMeasure }
+                : null;
+            })();
+          const qtyMeta = qtyShape ? assetQtyMeta(qtyShape, d.quantity) : {};
+          return {
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_PARTIAL_CHECKOUT",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            assetId: d.assetId,
+            meta: {
+              ...qtyMeta,
+              partialCheckoutSessionId: createdSession.id,
+            },
+          };
+        });
+      if (eventInputs.length > 0) {
+        await recordEvents(eventInputs, tx);
+      }
 
       // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
       let bookingStatusChanged = false;
@@ -5352,33 +6118,56 @@ export async function partialCheckoutBooking({
               : "Ongoing"
           })`
         : "";
+
+      /**
+       * Per-asset qty fragment for the booking-side note — names each
+       * qty-tracked asset touched in this session (linked) along with its
+       * `checkedOut` / `remainingAfter` counts. Mirror of the partial-checkin
+       * `qtyTail` pattern: empty string when nothing to say, so the existing
+       * `itemsDescription` concatenation stays clean for INDIVIDUAL-only
+       * batches. Reads from the aggregated summary so multi-slice claims of
+       * the same asset render as a single line.
+       */
+      const qtyPerAsset = buildQtyPerAssetCheckoutFragment(
+        aggregatedQtySummaries
+      );
+      const qtyTail = qtyPerAsset ? ` — qty: ${qtyPerAsset}` : "";
+
       await createSystemBookingNote(
         {
           bookingId: id,
           organizationId,
           content: `${wrapUserLinkForNote(
             user!
-          )} performed a partial check-out: ${itemsDescription}${statusNote}.`,
+          )} performed a partial check-out: ${itemsDescription}${qtyTail}${statusNote}.`,
         },
         tx
       );
 
-      // Remaining = booking assets not checked out after this batch — by record
-      // OR live status (so all-at-once checkouts aren't miscounted as Booked) —
-      // plus the assets just checked out. Dedupe by asset id since qty-tracked
-      // assets can have multiple BookingAsset pivot rows.
-      const checkedOutAfterThisBatch = new Set([
-        ...alreadyCheckedOutSet,
-        ...assetIdsToCheckOut,
-      ]);
+      /**
+       * Unit-level remaining count + completion. For each unique booking
+       * asset, compare `booked total` to `committed checked-out units (incl.
+       * THIS batch — the session row was written above so the read sees it)`.
+       * Asset counts as remaining when `booked - checkedOut > 0`.
+       *
+       * Replaces the legacy asset-id-set filter: a 5-of-50 QT slice no longer
+       * reports `isComplete: true` just because the asset id is in
+       * `checkedOutAfterThisBatch`.
+       */
       const uniqueBookingAssetIds = [
         ...new Set(
           updatedBookingForNote.bookingAssets.map((ba) => ba.asset.id)
         ),
       ];
-      const remainingAssetCount = uniqueBookingAssetIds.filter(
-        (assetId) => !checkedOutAfterThisBatch.has(assetId)
-      ).length;
+      let remainingAssetCount = 0;
+      for (const assetId of uniqueBookingAssetIds) {
+        const remaining = await computeBookingAssetRemainingToCheckOut(
+          tx,
+          id,
+          assetId
+        );
+        if (remaining > 0) remainingAssetCount += 1;
+      }
 
       return {
         booking: updatedBookingForNote,
@@ -5389,8 +6178,70 @@ export async function partialCheckoutBooking({
         // above, so report completion from the remaining count.
         isComplete: remainingAssetCount === 0,
         bookingStatusChanged,
+        // Pass the aggregated (per-asset) summary downstream so the post-tx
+        // per-asset note loop renders one note per asset rather than per
+        // slice.
+        qtySummaries: aggregatedQtySummaries,
+        individualAssetIds: individualToFlip,
       };
     });
+
+    /**
+     * Per-asset qty-tracked notes (post-tx, best-effort). Uses
+     * `wrapAssetWithCountForNote` so qty-tracked rows render as
+     * "You checked out 10 boxes of {asset} on {booking}". Wrapped in
+     * try/catch — a markdoc hiccup here must not roll back the already-
+     * committed checkout.
+     */
+    try {
+      const actorLink = wrapUserLinkForNote({
+        id: userId,
+        firstName: user?.firstName,
+        lastName: user?.lastName,
+      });
+      const bookingLink = wrapLinkForNote(
+        `/bookings/${result.booking.id}`,
+        result.booking.name
+      );
+
+      for (const summary of result.qtySummaries) {
+        const assetWithCount = wrapAssetWithCountForNote(
+          {
+            id: summary.assetId,
+            title: summary.title,
+            type: summary.type,
+            unitOfMeasure: summary.unitOfMeasure,
+          },
+          summary.checkedOut
+        );
+        const remainingFragment =
+          summary.remainingAfter > 0
+            ? ` (${
+                formatUnitCount(
+                  { type: summary.type, unitOfMeasure: summary.unitOfMeasure },
+                  summary.remainingAfter
+                ) ?? String(summary.remainingAfter)
+              } still booked)`
+            : "";
+
+        await createNotes({
+          content: `${actorLink} checked out ${assetWithCount} on ${bookingLink}${remainingFragment}.`,
+          type: "UPDATE",
+          userId,
+          assetIds: [summary.assetId],
+          organizationId,
+        });
+      }
+    } catch (noteError) {
+      Logger.error(
+        new ShelfError({
+          cause: noteError,
+          message: "Failed to write partial check-out activity notes",
+          label,
+          additionalData: { userId, bookingId: id },
+        })
+      );
+    }
 
     // The first scan moved the booking from RESERVED to ONGOING/OVERDUE. Cancel
     // the checkout-reminder job that reserveBooking queued (tracked in
@@ -5414,8 +6265,13 @@ export async function partialCheckoutBooking({
       }
     }
 
-    // Strip the internal flag from the returned payload.
-    const { bookingStatusChanged: _ignored, ...publicResult } = result;
+    // Strip internal-only fields from the returned payload.
+    const {
+      bookingStatusChanged: _ignored,
+      qtySummaries: _qty,
+      individualAssetIds: _individual,
+      ...publicResult
+    } = result;
     return publicResult;
   } catch (cause) {
     throw new ShelfError({
@@ -9703,7 +10559,7 @@ export async function checkoutAssets({
   userId: string;
   authSession: AuthSession;
 }) {
-  const { assetIds, checkoutIntentChoice, returnJson } = parseData(
+  const { assetIds, checkouts, checkoutIntentChoice, returnJson } = parseData(
     formData,
     partialCheckoutAssetsSchema.extend({
       checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
@@ -9713,12 +10569,32 @@ export async function checkoutAssets({
         .transform((val) => val === "true"),
     })
   );
+
+  /**
+   * At least one of `assetIds` (legacy) or `checkouts` (per-asset
+   * quantity-tracked dispositions) must be present. The drawer sends one of
+   * the two depending on whether the booking has qty-tracked assets in play.
+   */
+  if (
+    (!assetIds || assetIds.length === 0) &&
+    (!checkouts || checkouts.length === 0)
+  ) {
+    throw new ShelfError({
+      cause: null,
+      status: 400,
+      label,
+      message: "No assets provided for check-out.",
+      shouldBeCaptured: false,
+    });
+  }
+
   const hints = getClientHint(request);
 
   const result = await partialCheckoutBooking({
     id: bookingId,
     organizationId,
     assetIds,
+    checkouts,
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
@@ -9854,12 +10730,124 @@ export async function getRemainingCheckoutAssetIds({
 }
 
 /**
+ * Resolve the still-checkout-eligible payload for a booking, split across the
+ * two shapes {@link partialCheckoutBooking} accepts:
+ *
+ * - `assetIds[]` — INDIVIDUAL assets that are AVAILABLE (implicit qty=1).
+ * - `checkouts[]` — QUANTITY_TRACKED slices with a positive remaining-to-
+ *   check-out count, attributed per `BookingAsset` row so kit-driven and
+ *   standalone slices of the same asset top off independently (Polish-7b
+ *   per-slice attribution, mirror of the check-in side).
+ *
+ * Backs {@link checkoutRemainingAssets} so the booking-header "Check out
+ * remaining" action tops off partially-checked-out QT slices instead of
+ * falling back to the implicit qty=1 path.
+ *
+ * Per-slice loops over `computeBookingAssetSliceRemainingToCheckOut` are
+ * bounded by the booking's QT slice count (same N+1 shape as the
+ * checkout-assets loader).
+ *
+ * @param bookingId - Booking to inspect
+ * @param organizationId - Caller's active organization (org-scopes the lookup)
+ * @returns Split payload (`assetIds` + `checkouts`) for {@link partialCheckoutBooking}
+ * @throws {ShelfError} If the booking is not found in the organization
+ */
+export async function getRemainingCheckoutPayload({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: string;
+  organizationId: string;
+}): Promise<{ assetIds: string[]; checkouts: CheckoutDispositionInput[] }> {
+  const booking = await db.booking
+    .findUniqueOrThrow({
+      where: { id: bookingId, organizationId },
+      select: {
+        // Post-pivot: assets live behind the BookingAsset pivot. Project the
+        // narrow shape needed for the eligibility filter via the pivot — plus
+        // the pivot row id so QT slices can be attributed per `BookingAsset`.
+        bookingAssets: {
+          select: {
+            id: true,
+            asset: { select: { id: true, status: true, type: true } },
+          },
+        },
+        partialCheckins: { select: { assetIds: true } },
+      },
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        status: 404,
+        label,
+        message:
+          "Booking not found, are you sure it exists in current workspace?",
+        shouldBeCaptured: !isNotFoundError(cause),
+      });
+    });
+
+  // Assets returned via partial check-in are AVAILABLE again but must NOT be
+  // re-checked out, so exclude them explicitly.
+  const checkedInAssetIds = new Set(
+    booking.partialCheckins.flatMap((checkin) => checkin.assetIds)
+  );
+
+  const individualAssetIds: string[] = [];
+  const seenIndividual = new Set<string>();
+  const checkouts: CheckoutDispositionInput[] = [];
+
+  for (const ba of booking.bookingAssets) {
+    if (checkedInAssetIds.has(ba.asset.id)) continue;
+
+    if (ba.asset.type === AssetType.QUANTITY_TRACKED) {
+      // QT: enumerate each slice and ask the per-slice OUT-side remaining
+      // helper. A single asset can span multiple BookingAsset rows (e.g. kit
+      // slice + standalone slice); each slice tops off independently. The
+      // OUT-side helper subtracts already-claimed PartialBookingCheckout
+      // units from the slice cap — NOT the IN-side helper, which would
+      // return the full booked qty for a slice that has never been checked
+      // in and then trip `partialCheckoutBooking`'s per-asset cap.
+      // The asset's live `status` does NOT gate inclusion here — QT assets
+      // can be IN_CUSTODY with some units still outstanding on the booking.
+      const sliceRemaining = await computeBookingAssetSliceRemainingToCheckOut(
+        db,
+        bookingId,
+        ba.id
+      );
+      if (sliceRemaining > 0) {
+        checkouts.push({
+          assetId: ba.asset.id,
+          bookingAssetId: ba.id,
+          quantity: sliceRemaining,
+        });
+      }
+      continue;
+    }
+
+    // INDIVIDUAL: eligibility matches getRemainingCheckoutAssetIds — must be
+    // AVAILABLE (so neither already CHECKED_OUT nor IN_CUSTODY). Dedup since
+    // the pivot can carry the same asset across multiple rows.
+    if (ba.asset.status !== AssetStatus.AVAILABLE) continue;
+    if (seenIndividual.has(ba.asset.id)) continue;
+    seenIndividual.add(ba.asset.id);
+    individualAssetIds.push(ba.asset.id);
+  }
+
+  return { assetIds: individualAssetIds, checkouts };
+}
+
+/**
  * Action wrapper for "Check out remaining": check out every asset still in the
  * booking's "Booked" bucket in one go, without the client enumerating ids.
- * Mirrors {@link checkoutAssets} but resolves the eligible asset ids server-side
- * via {@link getRemainingCheckoutAssetIds} before delegating to
+ * Mirrors {@link checkoutAssets} but resolves the eligible payload server-side
+ * via {@link getRemainingCheckoutPayload} before delegating to
  * {@link partialCheckoutBooking}. Surfaced from the booking header dropdown for
  * ONGOING/OVERDUE bookings so users aren't forced to scan the rest one-by-one.
+ *
+ * QT slices that are partially checked out top off to their remaining count
+ * via `checkouts[]`; INDIVIDUAL assets flow through `assetIds[]` (implicit
+ * qty=1). Without the split payload, QT slices would silently fall back to
+ * qty=1 and "Check out remaining" would leave units behind.
  *
  * @param formData - Submitted form data (optional checkoutIntentChoice/returnJson)
  * @param request - Incoming request (for client hints)
@@ -9896,12 +10884,12 @@ export async function checkoutRemainingAssets({
     })
   );
 
-  const assetIds = await getRemainingCheckoutAssetIds({
+  const { assetIds, checkouts } = await getRemainingCheckoutPayload({
     bookingId,
     organizationId,
   });
 
-  if (assetIds.length === 0) {
+  if (assetIds.length === 0 && checkouts.length === 0) {
     throw new ShelfError({
       cause: null,
       status: 400,
@@ -9917,6 +10905,7 @@ export async function checkoutRemainingAssets({
     id: bookingId,
     organizationId,
     assetIds,
+    checkouts,
     userId,
     hints,
     intentChoice: checkoutIntentChoice,

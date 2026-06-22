@@ -39,6 +39,7 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
+import { InsufficientStockBadge } from "./availability-label";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -176,6 +177,36 @@ interface BookingAssetsSidebarProps {
    * When undefined, the tooltip falls back to the single-total layout.
    */
   dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
+  /**
+   * Optional map of `assetId → checkedOutQuantity` for this booking
+   * (sum of progressive PartialBookingCheckout slices across every row
+   * of that asset). Drives the new
+   * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "partially
+   * checked out, no returns yet") badge: an asset with
+   * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an active
+   * booking gets the amber badge, mirroring the per-row treatment on
+   * the booking overview. Aggregated at the asset level (not per-row)
+   * because the sidebar renders one row per asset.
+   *
+   * Multi-slice tie-break: if a multi-slice asset has one slice partly
+   * IN (any disposition) and another slice still fully OUT, the
+   * check-IN signal wins at this aggregate level — consistent with the
+   * existing `PARTIALLY_CHECKED_OUT_QTY` precedence in this component.
+   */
+  checkedOutByAsset?: Record<string, number>;
+  /**
+   * Optional map of `assetId → units available across the workspace pool`
+   * (after subtracting operator custody + other-booking reservations +
+   * active checkouts elsewhere). Drives the `InsufficientStockBadge`
+   * rendered alongside the status badge on QT rows whose `bookedQuantity`
+   * exceeds the per-asset workspace headroom.
+   *
+   * Optional so callers that don't ship the map (e.g. the bookings index
+   * sidebar trigger) keep working — the badge condition short-circuits
+   * when the lookup is `undefined`. INDIVIDUAL assets are never surfaced
+   * regardless (gated on `isQuantityTracked` at the render site).
+   */
+  availableUnitsByAsset?: Record<string, number>;
 }
 
 /**
@@ -262,11 +293,21 @@ function AssetTitleAndStatus({
   bookingStatus,
   dispositionedByAsset,
   dispositionBreakdownByAsset,
+  checkedOutByAsset,
+  availableUnitsByAsset,
 }: {
   asset: SidebarAsset;
   bookingStatus: BookingStatus;
   dispositionedByAsset?: Record<string, number>;
   dispositionBreakdownByAsset?: Record<string, DispositionBreakdown>;
+  checkedOutByAsset?: Record<string, number>;
+  /**
+   * Per-asset workspace-availability lookup. Drives the
+   * `InsufficientStockBadge` rendered alongside the status badge for QT
+   * rows whose `bookedQuantity` exceeds the per-asset workspace headroom.
+   * Optional — missing map short-circuits the badge condition.
+   */
+  availableUnitsByAsset?: Record<string, number>;
 }) {
   // Workspace pref + addon entitlement — resolveDisplayCode short-circuits to
   // QR when the org has lost the barcode add-on, so this read is always safe.
@@ -276,6 +317,10 @@ function AssetTitleAndStatus({
     : null;
   const qtyBooked = asset.bookedQuantity ?? 0;
   const qtyDispositioned = dispositionedByAsset?.[asset.id] ?? 0;
+  // Total units progressively checked OUT across every slice of this asset
+  // in this booking. Aggregated at the asset level because the sidebar
+  // collapses multi-slice assets into one row.
+  const qtyCheckedOut = checkedOutByAsset?.[asset.id] ?? 0;
   const qtyRemaining = Math.max(0, qtyBooked - qtyDispositioned);
   const qtyBreakdown: DispositionBreakdown | undefined =
     dispositionBreakdownByAsset?.[asset.id];
@@ -293,18 +338,67 @@ function AssetTitleAndStatus({
     qtyDispositioned > 0 &&
     qtyRemaining > 0 &&
     isActiveBooking;
+  /**
+   * Pending-return signal: units are progressively checked out but
+   * no disposition has been recorded yet. Mirrors the per-row branch
+   * in `list-asset-content.tsx` (`isQtyPartiallyCheckedOut`) but
+   * resolved at the asset level here because the sidebar aggregates
+   * slices. Suppressed once any disposition exists — at that point
+   * `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway") wins.
+   */
+  const isQtyPartiallyCheckedOut =
+    isQuantityTracked(asset) &&
+    qtyBooked > 0 &&
+    qtyCheckedOut > 0 &&
+    // Upper guard: ONLY when SOME but not all booked units are out — the
+    // service flips `asset.status = CHECKED_OUT` when all are out, so the
+    // row falls through to the base status (violet "Checked out") instead
+    // of being shadowed by the amber pending-return badge.
+    qtyCheckedOut < qtyBooked &&
+    qtyDispositioned === 0 &&
+    isActiveBooking;
 
   /**
-   * Sidebar mirrors the booking-row badge: fully reconciled rows show
-   * "Already checked in", partly reconciled rows show "Partially
-   * checked out" (still-out semantic). See `list-asset-content.tsx`
-   * for the same logic with extra docs.
+   * Sidebar mirrors the booking-row badge precedence:
+   *  1. Fully reconciled → `PARTIALLY_CHECKED_IN` ("Already checked in",
+   *     blue).
+   *  2. Partly reconciled (some disposition, more outstanding) →
+   *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
+   *  3. Progressively checked out, NO returns yet →
+   *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
+   *     required") — new branch for the sidebar.
+   *  4. Otherwise the asset's raw status.
+   *
+   * Order matters: the check-IN branches must win at the aggregate
+   * level so a multi-slice asset with mixed in/out slices reads
+   * "checked in" rather than "still out" (matches the existing
+   * behavior before this change).
    */
   const effectiveStatus = isQtyFullyCheckedIn
     ? "PARTIALLY_CHECKED_IN"
     : isQtyPartial
     ? "PARTIALLY_CHECKED_OUT_QTY"
+    : isQtyPartiallyCheckedOut
+    ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
     : asset.status;
+
+  /**
+   * Workspace-availability lookup for this row's asset (sidebar version).
+   * Mirrors the per-row computation in `list-asset-content.tsx` — fires
+   * the `InsufficientStockBadge` when the booked qty exceeds the global
+   * pool's headroom on this asset, INDIVIDUAL assets excluded.
+   *
+   * Suppressed for COMPLETE / ARCHIVED bookings — the stock signal is
+   * historical at that point and shouldn't surface as an actionable
+   * warning.
+   */
+  const availableUnits = availableUnitsByAsset?.[asset.id];
+  const hasInsufficientStock =
+    isQuantityTracked(asset) &&
+    availableUnits != null &&
+    qtyBooked > availableUnits &&
+    bookingStatus !== "COMPLETE" &&
+    bookingStatus !== "ARCHIVED";
 
   return (
     <div className="min-w-[180px]">
@@ -319,8 +413,14 @@ function AssetTitleAndStatus({
           {asset.title}
         </Button>
         {/* Quantity for qty-tracked assets:
-            - `N / M` with tooltip if there's been check-in activity
-            - plain `× N` otherwise */}
+            - `N / M` (disposition over booked) with tooltip when there's
+              been check-in activity (`qtyDispositioned > 0`).
+            - `N / M` (checkedOut over booked) when units are progressively
+              checked out but nothing returned yet — surfaces the
+              "partially out, no returns yet" progress without inventing
+              a third visual.
+            - plain `× N` otherwise (DRAFT/RESERVED rows, fully out + no
+              activity, etc.). */}
         {isQuantityTracked(asset) && qtyBooked > 0 ? (
           qtyDispositioned > 0 ? (
             <TooltipProvider delayDuration={150}>
@@ -412,6 +512,16 @@ function AssetTitleAndStatus({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          ) : qtyCheckedOut > 0 && qtyCheckedOut < qtyBooked ? (
+            // Progressive checkout in flight, no returns yet — show the
+            // out-side progress (`checkedOut / booked`) so the user can
+            // see how far along the row is. Distinct from the
+            // `qtyDispositioned > 0` branch above, which counts what's
+            // already back in.
+            <span className="ml-1.5 inline-flex items-center gap-1 text-xs tabular-nums text-gray-700">
+              <span className="font-medium">{qtyCheckedOut}</span>
+              <span className="text-gray-400">/ {qtyBooked}</span>
+            </span>
           ) : (
             <span className="ml-1.5 text-xs font-medium text-gray-500">
               &times; {qtyBooked}
@@ -426,6 +536,12 @@ function AssetTitleAndStatus({
           availableToBook={asset.availableToBook}
           asset={asset}
         />
+        {hasInsufficientStock ? (
+          <InsufficientStockBadge
+            bookedQuantity={qtyBooked}
+            availableUnits={availableUnits ?? 0}
+          />
+        ) : null}
         {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
         <ConsumptionTypeBadge consumptionType={asset.consumptionType ?? null} />
       </div>
@@ -544,6 +660,8 @@ export function BookingAssetsSidebar({
   trigger,
   dispositionedByAsset,
   dispositionBreakdownByAsset,
+  checkedOutByAsset,
+  availableUnitsByAsset,
 }: BookingAssetsSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
@@ -730,6 +848,10 @@ export function BookingAssetsSidebar({
                                         dispositionBreakdownByAsset={
                                           dispositionBreakdownByAsset
                                         }
+                                        checkedOutByAsset={checkedOutByAsset}
+                                        availableUnitsByAsset={
+                                          availableUnitsByAsset
+                                        }
                                       />
                                     </div>
                                   </div>
@@ -785,6 +907,8 @@ export function BookingAssetsSidebar({
                                 dispositionBreakdownByAsset={
                                   dispositionBreakdownByAsset
                                 }
+                                checkedOutByAsset={checkedOutByAsset}
+                                availableUnitsByAsset={availableUnitsByAsset}
                               />
                             </div>
                           </div>

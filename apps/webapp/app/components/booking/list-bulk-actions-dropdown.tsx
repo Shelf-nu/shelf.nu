@@ -51,6 +51,7 @@ function ConditionalDropdown() {
     booking,
     partialCheckinDetails = {},
     checkedOutAssetIds = [],
+    remainingToCheckOutByAsset = {},
   } = useLoaderData<BookingPageLoaderData>();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus
@@ -94,9 +95,15 @@ function ConditionalDropdown() {
       }
     : false;
 
-  // Disable the checkout menu item when EVERY selected asset is already checked
+  // Disable the checkout menu item when EVERY selected asset is FULLY checked
   // out (so there is nothing left to check out). Kits (undefined title) are
   // excluded — only the individual assets are validated.
+  //
+  // A QUANTITY_TRACKED asset that appears in `checkedOutAssetIds` (i.e. has a
+  // prior PartialBookingCheckout record) is NOT "fully checked out" when its
+  // `remainingToCheckOutByAsset[id]` is still positive — top-off via the
+  // dialog should remain available. Falls back to the binary check when the
+  // remaining map is absent (legacy loaders) or for INDIVIDUAL rows.
   const assetsToCheckOut = selectedItems.filter(
     (item) => item.title !== undefined
   );
@@ -105,11 +112,32 @@ function ConditionalDropdown() {
     assetsToCheckOut.length > 0 &&
     assetsToCheckOut.every((item) => {
       // Type assertion: ListItemData carries asset props via [x: string]: any
-      const asset = item as ListItemData & { status: string };
-      return (
-        asset.status === AssetStatus.CHECKED_OUT ||
-        checkedOutAssetIds.includes(asset.id)
-      );
+      const asset = item as ListItemData & {
+        status: string;
+        type?: string;
+      };
+      // QUANTITY_TRACKED: consult the per-booking remaining map FIRST and
+      // ignore `asset.status === CHECKED_OUT`. The asset's global status
+      // flag is a denormalisation that reflects whichever booking last
+      // flipped it (or didn't reset it on completion — known stale-flag
+      // hazard); it's meaningless cross-booking for QT. The only signal
+      // that matters for THIS booking is `remainingToCheckOutByAsset[id]`.
+      // When the loader didn't ship the map (legacy), fall back to the
+      // old binary check.
+      if (asset.type === "QUANTITY_TRACKED") {
+        const remaining = remainingToCheckOutByAsset[asset.id];
+        if (remaining === undefined) {
+          return (
+            asset.status === AssetStatus.CHECKED_OUT ||
+            checkedOutAssetIds.includes(asset.id)
+          );
+        }
+        return remaining <= 0;
+      }
+      // INDIVIDUAL: binary — CHECKED_OUT status or recorded in
+      // `checkedOutAssetIds` = fully out.
+      if (asset.status === AssetStatus.CHECKED_OUT) return true;
+      return checkedOutAssetIds.includes(asset.id);
     });
 
   const partialCheckoutDisabled = hasOnlyAlreadyCheckedOut

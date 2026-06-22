@@ -1800,6 +1800,85 @@ unmeasured carry-overs since the last local validate).
 `superpowers/PHASE-4C-SPLIT-MERGE-UX.md` before PR merge (per
 `feedback_plans_location` memory).
 
+#### Phase 4c — Lifecycle-progress bar (Wave B, 4-bucket asset-level model)
+
+Replaces the earlier Wave A unit-counting progress bar on the booking
+detail page. Wave A summed physical units (`Σ BookingAsset.quantity`)
+into Booked / CheckedOut / Returned slivers; that summed bar overflowed
+the kit / qty totals once kit-driven slices, multi-row qty splits, and
+mid-flight QT rows arrived together. **Wave B reverses the model**:
+every row (or kit-unit, in unit mode) contributes exactly **one** count
+to exactly **one** of four mutually-exclusive buckets — no per-unit
+splitting, no double-counting.
+
+**Computation** — `calculateBookingLifecycleProgress` in
+`apps/webapp/app/modules/booking/utils.server.ts` (one entry point for
+both the detail page and the sidebar). For each row, the **priority
+chain** (top wins) decides the bucket:
+
+1. **Returned** — INDIVIDUAL in `checkedInAssetIds`, OR QT
+   `dispositionedQuantity >= bookedQuantity` (every booked unit back as
+   returned / consumed / lost / damaged).
+2. **Fully out** ("checkedOut") — INDIVIDUAL `status === CHECKED_OUT`,
+   OR QT `checkedOutQuantity >= bookedQuantity AND
+dispositionedQuantity < bookedQuantity` (every unit out, none back
+   yet).
+3. **Partial** (NEW — QT-only; INDIVIDUAL can never land here) —
+   `0 < checkedOutQuantity < bookedQuantity` OR
+   `0 < dispositionedQuantity < bookedQuantity` (mid-flight).
+4. **Booked** — anything else (reserved, nothing out yet).
+
+**Output type** — `BookingLifecycleProgress` (same file). New / renamed
+fields documented with JSDoc:
+
+- `bookedCount`, `partialCount` (**NEW**), `checkedOutCount`,
+  `returnedCount` — the four mutually-exclusive bucket counts.
+- `totalUnits` — sum of the four; the **item** count (assets in asset
+  mode; standalone assets + distinct kits in unit mode). NOT a sum of
+  physical unit quantities, despite the name kept for back-compat.
+- `checkoutProgressCount = partialCount + checkedOutCount +
+returnedCount` — items that have left the Booked bucket.
+- `checkinProgressCount = returnedCount`.
+- Both `*Percentage` fields stay derived from the corresponding count /
+  `totalUnits`.
+- `hasPartialCheckouts` / `hasPartialCheckins` flags + `countMode:
+"assets" | "units"` for the UI.
+
+**COMPLETE / ARCHIVED collapse** — in the final branch the priority
+chain only emits Booked or Returned. Every asset that was **ever**
+checked out (`wasCheckedOut(id)` helper for INDIVIDUAL — present in
+`checkedOutAssetIds` or empty-array sentinel = "no records ⇒ all
+checked out"; QT `checkedOutQuantity > 0`) collapses to **Returned**;
+QT rows that were never out stay **Booked**. `partialCount` and
+`checkedOutCount` are 0 at COMPLETE/ARCHIVED by construction — no
+hard-coded 100% anywhere.
+
+**Unit-mode kit override** (`countKitsAsSingleUnit = true`) — kit rows
+collapse into one item per distinct `kitId`, then bucket as follows:
+
+- If **any** member is `partial` → the whole kit is **Partial**
+  (mid-flight QT member promotes the kit; users want to see the kit
+  isn't done yet, even if its peers are fully Returned).
+- Else if all members share a single label → that label collapses for
+  the kit-unit.
+- Else (members disagree across the remaining non-partial labels) →
+  **Booked** (defensive — disagreement means the kit isn't reliably in
+  any single later bucket).
+
+Standalone rows always bucket per-asset (no kit collapse to consider).
+
+**Consumed by** — `booking-lifecycle-progress.tsx` (segmented bar on
+the booking detail page; aria label spells out all four buckets) and
+the sidebar progress strip. Both read the same `BookingLifecycleProgress`
+object; the bar widths are `count / totalUnits * 100`.
+
+**Why the reversal:** the asset-level item model is closed-form
+(`Σ buckets ≡ totalUnits`), survives multi-slice / kit-driven /
+mid-flight QT rows without overflow, and stays semantically meaningful
+at COMPLETE/ARCHIVED (no "120% returned" artefact). The unit-sum model
+needed clamps in three places and still drifted under specific
+mid-flight + kit-driven combinations.
+
 #### Phase 4e — Quantity-aware notes + activity events (2026-05-31) — COMMITTED (`f07abe29d`)
 
 **Done in five chunks (C0–C4) on `feat-quantities`:**
