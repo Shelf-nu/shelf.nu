@@ -23,7 +23,7 @@ async function resolve(headers: Record<string, string>): Promise<string> {
 
 describe("getClientIp", () => {
   afterEach(() => {
-    // why: tests below mutate NODE_ENV via stubEnv; restore between cases.
+    // why: tests below mutate FLY_APP_NAME via stubEnv; restore between cases.
     vi.unstubAllEnvs();
   });
 
@@ -35,16 +35,18 @@ describe("getClientIp", () => {
     expect(ip).toBe("203.0.113.7");
   });
 
-  it("does NOT trust X-Forwarded-For in production (returns unknown)", async () => {
-    // why: production must never bucket on a spoofable client-supplied header.
-    vi.stubEnv("NODE_ENV", "production");
+  it("does NOT trust X-Forwarded-For when running on Fly (returns unknown)", async () => {
+    // why: on Fly a spoofable client-supplied header must never mint a bucket;
+    // FLY_APP_NAME is the runtime signal that we are on the Fly edge.
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
     const ip = await resolve({ "X-Forwarded-For": "9.9.9.9, 10.0.0.5" });
     expect(ip).toBe("unknown");
   });
 
-  it("falls back to the leftmost X-Forwarded-For outside production", async () => {
-    // why: local dev has no Fly edge, so the dev fallback must still resolve.
-    vi.stubEnv("NODE_ENV", "development");
+  it("falls back to the leftmost X-Forwarded-For when not on Fly (self-host/dev)", async () => {
+    // why: self-hosted-behind-proxy and local dev have no Fly edge, so the XFF
+    // fallback must still resolve. Empty FLY_APP_NAME = not on Fly.
+    vi.stubEnv("FLY_APP_NAME", "");
     const ip = await resolve({ "X-Forwarded-For": "9.9.9.9, 10.0.0.5" });
     expect(ip).toBe("9.9.9.9");
   });

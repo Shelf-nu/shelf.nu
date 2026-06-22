@@ -156,6 +156,35 @@ export default createHonoServer<ServerEnv>({
     );
 
     /**
+     * Guard single-fetch loader (`*.data`) revalidations against runaway client
+     * loops that can exhaust the DB connection pool. Keyed per (user, path) so
+     * normal navigation (varied paths) is unaffected; `/__*` (manifest) and SSE
+     * streams are not `.data`, so they are excluded.
+     *
+     * Registered BEFORE refreshSession()/protect() on purpose: protect() runs
+     * validateSession(), a Prisma query against `auth.refresh_tokens`, on every
+     * request. If the limiter ran after it, each over-limit request would still
+     * burn a DB connection before being rejected — defeating the guard, whose
+     * whole point is to keep a runaway loop off the DB hot path. Here it reads
+     * the user id straight from the parsed cookie session and 429s with zero DB
+     * work.
+     *
+     * The limiter is instantiated ONCE so its in-memory store accumulates counts
+     * across requests; a per-request instance would reset the count every time.
+     * A manual matcher (not `server.use(pattern, ...)`) is needed because the
+     * match is a `.data` *suffix*, not a path prefix.
+     */
+    const appLoaderLimiter = appLoaderRateLimit();
+    server.use("*", async (c, next) => {
+      const p = c.req.path;
+      if (!p.endsWith(".data") || p.startsWith("/__")) return next();
+      // `appLoaderLimiter` is typed with hono's default `Env`; our server uses a
+      // custom `ServerEnv`. Cast to bridge the generic — the runtime context is
+      // the same object Hono passes to every middleware.
+      return appLoaderLimiter(c as unknown as Context, next);
+    });
+
+    /**
      * Add refresh session middleware
      *
      */
@@ -196,29 +225,6 @@ export default createHonoServer<ServerEnv>({
         ],
       })
     );
-
-    /**
-     * Guard single-fetch loader (`*.data`) revalidations against runaway
-     * client loops that can exhaust the DB connection pool. Keyed per
-     * (user, path) so normal navigation (varied paths) is unaffected.
-     * `/__*` (manifest) and SSE streams are not `.data`, so excluded.
-     *
-     * The limiter is instantiated ONCE here (not per request) so its
-     * in-memory store accumulates counts across requests — re-creating it in
-     * the closure would hand every request a fresh, empty store and the guard
-     * would never fire. We can't register it via `server.use(pattern, ...)`
-     * like the mobile limiter because the match is a `.data` *suffix*, not a
-     * path prefix, hence the manual matcher wrapper.
-     */
-    const appLoaderLimiter = appLoaderRateLimit();
-    server.use("*", async (c, next) => {
-      const p = c.req.path;
-      if (!p.endsWith(".data") || p.startsWith("/__")) return next();
-      // `appLoaderLimiter` is typed with hono's default `Env`; our server uses
-      // a custom `ServerEnv`. Cast to bridge the generic — the runtime context
-      // is the same object Hono passes to every middleware.
-      return appLoaderLimiter(c as unknown as Context, next);
-    });
   },
 });
 
