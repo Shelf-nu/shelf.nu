@@ -165,4 +165,4 @@ Go to the workspace settings and place the **Object ID** of each group next to i
 > [!IMPORTANT]
 > These fields are case sensitive. The Object ID must be entered exactly as it appears in Microsoft Entra.
 
-![step-9](../../img/google-workspace-step-9.png)
+![Shelf workspace SSO group mapping](../../img/google-workspace-step-9.png)
