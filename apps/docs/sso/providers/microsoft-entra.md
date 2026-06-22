@@ -151,7 +151,7 @@ Once confirmed you should end up with a setup similar to this:
 
 ![Step 10.2](../../img/microsoft-entra-step-8-2.png)
 
-## Step 11: Map Microsoft Entra groups inside Shelf [#](#step-9-map-google-workspace-groups-inside-shelf)
+## Step 11: Map Microsoft Entra groups inside Shelf [#](#step-11-map-microsoft-entra-groups-inside-shelf)
 
 > [!NOTE]
 > You can only complete this step, once you have received confirmation from your contact person at Shelf that the setup has been completed.

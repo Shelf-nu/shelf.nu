@@ -76,7 +76,7 @@ In order to manage which users get access to which workspace and with what role,
 
 ### 8.1: Create your groups in Google Workspace [#](#81-create-your-groups-in-google-workspace)
 
-First step is to create the groups in the google workspace. Inside your admin panel, navigate to Directory > Groups > Create group
+First step is to create the groups in Google Workspace. Inside your admin panel, navigate to Directory > Groups > Create group
 
 ![step-8.1](../../img/google-workspace-step-8-1.png)
 

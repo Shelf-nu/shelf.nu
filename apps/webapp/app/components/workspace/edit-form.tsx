@@ -549,10 +549,13 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
             required, the rest can be left blank.
           </p>
           <p className="mt-2">
-            For <b>Google Workspace</b>, enter the group <b>name</b> (Google
-            returns names, not IDs). For <b>Microsoft Entra</b> and <b>Okta</b>,
-            enter the group <b>Object ID</b>. Values are case-sensitive and must
-            match your IdP exactly.
+            Enter the exact value your identity provider sends in the user's{" "}
+            <b>groups</b> claim. <b>Google Workspace</b> returns group{" "}
+            <b>names</b>. <b>Microsoft Entra</b> returns the group{" "}
+            <b>Object ID</b>. <b>Okta</b> and most other providers return the
+            group <b>name</b> (depending on how your groups attribute statement
+            is configured). Values are case-sensitive and must match your IdP
+            exactly.
           </p>
         </div>
 

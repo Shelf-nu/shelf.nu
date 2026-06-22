@@ -4,7 +4,7 @@ Shelf offers single sign-on (SSO) as a login option to provide additional accoun
 
 Shelf currently provides SAML SSO for Team and Enterprise plan customers. Please contact Sales to have this enabled for your organization.
 
-## Before you start: pre-requisites [#](#before-you-start-pre-requisites)
+## Before you start: prerequisites [#](#before-you-start-prerequisites)
 
 SSO changes how accounts on your domain are created and managed, so a few things must be in place **before** we activate the connection. Please read these carefully — most setup confusion comes from skipping them.
 
