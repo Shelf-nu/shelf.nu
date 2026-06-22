@@ -31,7 +31,9 @@ const ACTIVITY_DEBOUNCE_MS = 60 * 60 * 1000; // 1 hour
  * @param userId - the authenticated user (their own id, from the validated JWT)
  * @param lastMobileActiveAt - the user's current `lastMobileActiveAt`, passed in
  *   by the caller (which already selected it) so we debounce without an extra read
- * @returns void
+ * @returns void — the write is best-effort and non-blocking.
+ * @throws Never — any failure is caught internally and swallowed; best-effort
+ *   telemetry must not break the request it rides on.
  */
 export function recordMobileActivity(
   userId: string,
