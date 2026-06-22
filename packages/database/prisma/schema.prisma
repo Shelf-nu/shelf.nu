@@ -1585,6 +1585,11 @@ model PartialBookingCheckout {
 
   // Track which assets were checked out during this session
   assetIds      String[] // Array of asset IDs checked out
+  // Units checked out per entry in `assetIds` (positional alignment).
+  // INDIVIDUAL assets always record `1`. QUANTITY_TRACKED slices record the
+  // unit count submitted for the matching `bookingAssetId`. Empty default
+  // keeps legacy rows (written before Wave B) readable without a backfill.
+  quantities    Int[]    @default([])
   checkoutCount Int // Number of assets checked out (for quick reference)
 
   // Metadata
