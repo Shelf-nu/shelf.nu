@@ -12,16 +12,10 @@
  *
  * @see {@link file://./mobile-auth.server.ts} — `requireMobileAuth` calls `recordMobileActivity`
  */
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-
-/**
- * Minimum gap between activity writes for the same user. Mobile clients make
- * many requests per session; "active today" only needs coarse resolution, so we
- * skip redundant writes within this window to keep each request cheap.
- */
-const ACTIVITY_DEBOUNCE_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * Record that a user is using the mobile app, for adoption metrics. Debounced
@@ -40,7 +34,8 @@ export function recordMobileActivity(
   lastMobileActiveAt: Date | null
 ): void {
   const now = new Date();
-  const cutoff = new Date(now.getTime() - ACTIVITY_DEBOUNCE_MS);
+  // Debounce window sourced from app config (no hardcoded value here).
+  const cutoff = new Date(now.getTime() - config.mobileActivityDebounceMs);
 
   // Fast-path debounce: skip entirely if the (stale) read already shows recent
   // activity, so the common case issues no query at all.
