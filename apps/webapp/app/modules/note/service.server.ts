@@ -228,8 +228,14 @@ export async function getPaginatedAndFilterableAssetNotes({
   const { perPage } = cookie;
 
   try {
-    const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+    /**
+     * Normalize the page size once and use it for the query, the skip offset,
+     * and the returned metadata so `perPage`/`totalPages` always describe the
+     * page we actually fetched (200 is the established out-of-range fallback).
+     */
+    const safePerPage = perPage >= 1 && perPage <= 100 ? perPage : 200;
+    const skip = page > 1 ? (page - 1) * safePerPage : 0;
+    const take = safePerPage;
 
     /** Scope by the asset AND its organization (cross-tenant read guard) */
     const where: Prisma.NoteWhereInput = {
@@ -277,9 +283,16 @@ export async function getPaginatedAndFilterableAssetNotes({
       db.note.count({ where }),
     ]);
 
-    const totalPages = Math.ceil(totalItems / perPage);
+    const totalPages = Math.ceil(totalItems / safePerPage);
 
-    return { page, perPage, search, items: notes, totalItems, totalPages };
+    return {
+      page,
+      perPage: safePerPage,
+      search,
+      items: notes,
+      totalItems,
+      totalPages,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
