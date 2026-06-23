@@ -6459,8 +6459,9 @@ export async function updateBookingAssets({
               organizationId,
               // Only flip kits that actually received a newly-checked-out asset.
               // Prevents an over-broad kitIds list from clobbering the status of
-              // still-available kits already on the booking.
-              assets: { some: { id: { in: validAssetIds } } },
+              // still-available kits already on the booking. Asset-Kit membership
+              // is via the AssetKit pivot (no direct Kit.assets relation).
+              assetKits: { some: { assetId: { in: validAssetIds } } },
             },
             data: { status: KitStatus.CHECKED_OUT },
           });

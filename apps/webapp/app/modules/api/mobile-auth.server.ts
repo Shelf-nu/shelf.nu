@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetStatus, KitStatus, OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { ShelfError } from "~/utils/error";
@@ -252,15 +252,77 @@ export const MOBILE_ASSET_SELECT = {
  * endpoints (QR/barcode resolution). The per-asset statuses power the
  * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
  * web scanner drawers.
+ *
+ * NOTE: `Kit` no longer exposes a direct `assets` relation — it is now joined
+ * via the `AssetKit` pivot (`assetKits`). We still need to surface the
+ * per-asset status/availableToBook to the companion app in the legacy flat
+ * shape (`kit.assets: {id,status,availableToBook}[]` + `kit._count.assets`)
+ * so the existing mobile clients in the App Store don't break. Mobile
+ * endpoints fetch this select shape and then call
+ * `shapeMobileKitResponse` to flatten the pivot rows.
  */
 export const MOBILE_KIT_SELECT = {
   id: true,
   name: true,
   status: true,
   image: true,
-  _count: { select: { assets: true } },
+  _count: { select: { assetKits: true } },
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
   // blocker — both mirror the web scanner drawers.
-  assets: { select: { id: true, status: true, availableToBook: true } },
+  assetKits: {
+    select: {
+      asset: { select: { id: true, status: true, availableToBook: true } },
+    },
+  },
 } as const;
+
+/**
+ * Shape returned to mobile clients for a scanned kit. Preserves the legacy
+ * flat `assets` + `_count.assets` contract so the companion app continues
+ * to work unchanged after the `Kit.assets` → `Kit.assetKits` migration.
+ */
+export type MobileKitResponse = {
+  id: string;
+  name: string;
+  status: string;
+  image: string | null;
+  _count: { assets: number };
+  assets: Array<{
+    id: string;
+    status: string;
+    availableToBook: boolean;
+  }>;
+};
+
+/**
+ * Flattens a kit row fetched with `MOBILE_KIT_SELECT` (which uses the
+ * `assetKits` pivot) into the legacy `{ assets, _count: { assets } }` shape
+ * expected by the companion app's scanner. Returns `null` if the input is
+ * `null` so callers can pass through directly.
+ *
+ * @param kit Kit row selected via `MOBILE_KIT_SELECT`, or `null`
+ * @returns The legacy mobile response shape, or `null`
+ */
+export function shapeMobileKitResponse(
+  kit: {
+    id: string;
+    name: string;
+    status: string;
+    image: string | null;
+    _count: { assetKits: number };
+    assetKits: Array<{
+      asset: { id: string; status: string; availableToBook: boolean };
+    }>;
+  } | null
+): MobileKitResponse | null {
+  if (!kit) return null;
+  return {
+    id: kit.id,
+    name: kit.name,
+    status: kit.status,
+    image: kit.image,
+    _count: { assets: kit._count.assetKits },
+    assets: kit.assetKits.map((ak) => ak.asset),
+  };
+}

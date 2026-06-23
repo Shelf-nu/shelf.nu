@@ -104,10 +104,17 @@ export async function action({ request }: ActionFunctionArgs) {
     // `assetIds` to the booking (`kitIds` drives status flags and notes).
     // The web drawer does this expansion client-side; doing it here keeps
     // the mobile client thin and the expansion org-scoped.
+    //
+    // Asset-Kit membership lives on the `AssetKit` pivot (no direct
+    // `Asset.kitId` field on the feat-quantities branch). Filter assets by
+    // their pivot rows; org-scoping the Asset itself keeps the query tenant-safe.
     let expandedAssetIds = assetIds;
     if (kitIds.length > 0) {
       const kitAssets = await db.asset.findMany({
-        where: { kitId: { in: kitIds }, organizationId },
+        where: {
+          organizationId,
+          assetKits: { some: { kitId: { in: kitIds } } },
+        },
         select: { id: true },
       });
       expandedAssetIds = [

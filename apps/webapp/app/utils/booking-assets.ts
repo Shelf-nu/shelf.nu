@@ -5,6 +5,24 @@ import type { PartialCheckinDetailsType } from "~/modules/booking/service.server
  * Minimal asset shape these booking-context helpers need: an `id` and a raw
  * `status` string. The index signature lets callers pass richer asset objects
  * (e.g. Prisma rows) without widening every call site.
+ *
+ * Pivot-derived callers (post `BookingAsset` pivot introduction): when iterating
+ * a booking's `bookingAssets` relation, flatten each row to a denormalized
+ * object before passing it here, e.g.:
+ *
+ * ```ts
+ * const assetsList = booking.bookingAssets.map((ba) => ({
+ *   ...ba.asset,
+ *   bookingAssetId: ba.id,
+ *   bookedQuantity: ba.quantity,
+ *   kitId: ba.kitId ?? ba.asset.kitId ?? null,
+ *   kit: ba.kit ?? ba.asset.kit ?? null,
+ * }));
+ * ```
+ *
+ * The flattened entries satisfy `AssetWithStatus` via `id`/`status` and the
+ * pivot-only fields (`bookingAssetId`, `bookedQuantity`, etc.) ride along
+ * through the open index signature — no type widening required.
  */
 export type AssetWithStatus = {
   id: string;
@@ -173,21 +191,63 @@ export function isAssetCheckableIn(
 /**
  * Whether a selected asset is eligible to be CHECKED OUT for this booking.
  *
- * An asset can be checked out only when it is still booked — i.e. NOT already
- * checked out. "Already checked out" means its id is in the booking's
- * per-booking partial-checkout records OR its own status is CHECKED_OUT. This
- * mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
+ * Two flavours of eligibility, decided by the asset's tracking type:
  *
- * @param asset - The selected asset (needs `id` and `status`).
+ * - **INDIVIDUAL** (and the legacy fallback): binary. An asset can be checked
+ *   out only when it is still booked — i.e. NOT already checked out. "Already
+ *   checked out" means its id is in the booking's per-booking partial-checkout
+ *   records OR its own status is CHECKED_OUT.
+ * - **QUANTITY_TRACKED** with a `remainingByAssetId` map supplied: top-off
+ *   aware. The asset stays eligible as long as it still has units remaining
+ *   for THIS booking (`remaining > 0`), even if some units have already been
+ *   checked out (the "partially checked out, top up the rest" case). When the
+ *   map is omitted or doesn't contain this asset's id, falls back to the
+ *   binary check — legacy loaders that don't yet plumb the remaining map keep
+ *   their existing behaviour.
+ *
+ * Mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
+ * Keeping the QT branch HERE (in one helper) is deliberate: list-bulk-actions
+ * dropdown, the bulk partial-checkout dialog, and any future consumer all go
+ * through one source of truth — no duplicated `type === "QUANTITY_TRACKED"`
+ * checks scattered across call sites.
+ *
+ * NOTE: there is intentionally no QT branch on the check-IN side; check-in
+ * eligibility is fully driven by `partialCheckinDetails` (consumed by
+ * {@link isAssetCheckableIn} via {@link isAssetCheckedOutInBooking}), which
+ * already covers the QUANTITY_TRACKED semantics correctly.
+ *
+ * @param asset - The selected asset (needs `id` and `status`). May also carry
+ *   `type` so the QT branch can recognise it.
  * @param checkedOutAssetIds - Ids already checked out for this booking. A Set
  *   (not array) keeps membership O(1) across a large selection — matching the
  *   dialog's existing `checkedOutIdsSet`.
+ * @param options.remainingByAssetId - Optional map of `assetId -> remaining
+ *   units` for the current booking. When supplied for a QUANTITY_TRACKED
+ *   asset, eligibility becomes `remaining > 0` instead of the binary check —
+ *   so a partially-checked-out QT row stays eligible until every booked unit
+ *   has been dispositioned. When the map is undefined (legacy callers) or the
+ *   asset is missing from it, the binary fallback runs.
  * @returns `true` if the asset can be checked out.
  */
 export function isAssetCheckableOut(
   asset: AssetWithStatus,
-  checkedOutAssetIds: Set<string>
+  checkedOutAssetIds: Set<string>,
+  options?: { remainingByAssetId?: Record<string, number> }
 ): boolean {
+  // QUANTITY_TRACKED + caller supplied the remaining map for this asset:
+  // top-off eligibility — stay actionable while units remain for this booking.
+  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
+  if (
+    isQtyTracked &&
+    options?.remainingByAssetId &&
+    asset.id in options.remainingByAssetId
+  ) {
+    return (options.remainingByAssetId[asset.id] ?? 0) > 0;
+  }
+
+  // INDIVIDUAL (or QT without the map): binary fallback — preserves the
+  // pre-existing behaviour for every legacy loader that hasn't been updated
+  // to plumb the remaining map through yet.
   return !(
     checkedOutAssetIds.has(asset.id) || asset.status === AssetStatus.CHECKED_OUT
   );
