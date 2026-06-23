@@ -366,14 +366,52 @@ export const buildCustomFieldValue = (
         return { raw, valueBoolean: finalValue };
       }
       case "DATE": {
-        // Store raw date as entered by user
+        // Store raw date as entered by user.
         // But format valueDate as ISO string with UTC midnight to satisfy DB constraint
-        // while ensuring the date remains the same in all timezones
-        const dateOnly = raw as string; // YYYY-MM-DD
-        const [year, month, day] = dateOnly.split("-").map(Number);
+        // while ensuring the date remains the same in all timezones.
+        const dateOnly = (raw as string).trim(); // expected: YYYY-MM-DD
 
-        // Create date at UTC midnight to preserve the date across all timezones
+        // why: without a strict format guard, the positional split below silently
+        // mis-parses non-ISO input. e.g. "03-04-2026" → split → [3, 4, 2026] →
+        // Date.UTC(3, 3, 2026) rolls over to ~Oct 1908 — a VALID Date, so it is
+        // stored with no error while the UI keeps showing the raw string, poisoning
+        // the queryable valueDate (sort/filter/reports/reminders) invisibly.
+        // This mirrors the strict guard already used on the bulk-update import path
+        // (see compareCustomField's DATE case in ~/utils/import-update-diff).
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+        if (!match) {
+          throw new ShelfError({
+            cause: null,
+            title: "Invalid date format",
+            message: `Custom field '${def.name}' expects dates in YYYY-MM-DD format. The value we found is: '${dateOnly}'.`,
+            label: "Custom fields",
+            shouldBeCaptured: false,
+          });
+        }
+
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+
+        // Create date at UTC midnight to preserve the date across all timezones.
         const utcDate = new Date(Date.UTC(year, month - 1, day));
+
+        // why: new Date normalizes overflow (e.g. 2026-02-31 → 2026-03-03), so we
+        // must confirm the components round-trip — otherwise impossible calendar
+        // dates would be silently stored as a different (shifted) date.
+        if (
+          utcDate.getUTCFullYear() !== year ||
+          utcDate.getUTCMonth() !== month - 1 ||
+          utcDate.getUTCDate() !== day
+        ) {
+          throw new ShelfError({
+            cause: null,
+            title: "Invalid date",
+            message: `Custom field '${def.name}' received '${dateOnly}', which is not a real calendar date. Use the format YYYY-MM-DD.`,
+            label: "Custom fields",
+            shouldBeCaptured: false,
+          });
+        }
 
         return {
           raw: dateOnly,
