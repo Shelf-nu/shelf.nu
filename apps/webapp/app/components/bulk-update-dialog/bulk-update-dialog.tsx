@@ -1,7 +1,6 @@
 import { forwardRef, useCallback, useEffect } from "react";
 import type { ElementRef, ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { useLoaderData } from "react-router";
 
 import {
   bulkDialogAtom,
@@ -18,7 +17,6 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
-import type { ListItemData } from "../list/list-item";
 import { Button } from "../shared/button";
 import {
   HoverCard,
@@ -214,6 +212,15 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
   skipCloseOnSuccess?: boolean;
 
   /**
+   * When `true`, a successful mutation will NOT clear the bulk selection.
+   * Use only for flows that re-use the selection in an in-dialog success panel
+   * (e.g. the "Add more" path on add-to-existing-booking). Defaults to `false`
+   * so every bulk action clears the selection on success — the consistent
+   * behaviour across all index/list bulk actions.
+   */
+  keepSelectionOnSuccess?: boolean;
+
+  /**
    * Additional className to form
    */
   formClassName?: string;
@@ -234,12 +241,11 @@ const BulkUpdateDialogContent = forwardRef<
     actionUrl,
     arrayFieldId,
     skipCloseOnSuccess = false,
+    keepSelectionOnSuccess = false,
     formClassName = "",
   },
   ref
 ) {
-  const { items } = useLoaderData<{ items: ListItemData[] }>();
-
   const fetcher = useFetcherWithReset<any>();
   const disabled = isFormProcessing(fetcher.state);
 
@@ -261,42 +267,31 @@ const BulkUpdateDialogContent = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeBulkDialog, type]);
 
+  /**
+   * Runs once a bulk action succeeds. Clears the selection by default so the
+   * user does not have to manually "unselect all" before the next batch — the
+   * central behaviour that makes every index's bulk actions consistent.
+   *
+   * Opt out with `keepSelectionOnSuccess` for the rare flow that re-uses the
+   * selection in an in-dialog success panel (the dialog stays open via
+   * `skipCloseOnSuccess`).
+   */
   const handleBulkActionSuccess = useCallback(() => {
-    if (
-      type === "trash" ||
-      type === "archive" ||
-      type === "cancel" ||
-      type === "delete-audit"
-    ) {
+    if (!keepSelectionOnSuccess) {
       setSelectedItems([]);
-
-      if (!skipCloseOnSuccess) {
-        handleCloseDialog();
-      }
-
-      onSuccess && onSuccess();
-      return;
     }
-
-    /**
-     * On successful bulk action, the data becomes old as we are storing the whole object now.
-     * So we have to update the selectedItems data to new one
-     *  */
-    setSelectedItems((prev) =>
-      items.filter((item) => prev.some((i) => i.id === item.id))
-    );
 
     if (!skipCloseOnSuccess) {
       handleCloseDialog();
     }
+
     onSuccess && onSuccess();
   }, [
-    type,
+    keepSelectionOnSuccess,
     setSelectedItems,
     skipCloseOnSuccess,
     onSuccess,
     handleCloseDialog,
-    items,
   ]);
 
   useEffect(
