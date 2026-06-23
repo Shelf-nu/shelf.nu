@@ -68,6 +68,9 @@ export default function BulkAddToAuditDialog() {
       actionUrl="/api/audits/add-assets"
       arrayFieldId="assetIds"
       skipCloseOnSuccess={true}
+      // why: this dialog stays open showing a success panel; keeping the selection
+      // avoids a stale "(0)" count in the title and matches add-to-existing-booking.
+      keepSelectionOnSuccess={true}
     >
       {({ fetcherError, fetcherData, disabled, handleCloseDialog }) => {
         const isSuccess = fetcherData?.success;
