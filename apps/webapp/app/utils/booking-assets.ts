@@ -132,6 +132,134 @@ export function isAssetCheckedOutInBooking(
 }
 
 /**
+ * Minimal shape of a raw `selectedBulkItemsAtom` entry that the booking bulk
+ * helpers branch on. The atom holds a mix of paginated wrappers, kit entries,
+ * and asset rows; every field is optional because which ones are present
+ * depends on the entry kind, so an open index signature is the honest type.
+ */
+export type SelectedBookingItem = {
+  [key: string]: any;
+};
+
+/**
+ * Whether a selected asset is eligible to be CHECKED IN within this booking.
+ *
+ * An asset can be checked in only when it is effectively checked out for this
+ * booking — i.e. its booking-context status is CHECKED_OUT (not already
+ * partially checked in, and not AVAILABLE/never-checked-out). This is exactly
+ * the predicate the bulk check-in dialog uses to filter its submitted set, so
+ * the dropdown's enable/disable state can never disagree with the dialog.
+ *
+ * Intent-named delegate of {@link isAssetCheckedOutInBooking}, paired with
+ * {@link isAssetCheckableOut} for symmetric, self-documenting call sites.
+ *
+ * @param asset - The selected asset (needs `id` and `status`).
+ * @param partialCheckinDetails - Per-booking partial check-in records by id.
+ * @param bookingStatus - The parent booking's status.
+ * @returns `true` if the asset can be checked in.
+ */
+export function isAssetCheckableIn(
+  asset: AssetWithStatus,
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
+): boolean {
+  return isAssetCheckedOutInBooking(
+    asset,
+    partialCheckinDetails,
+    bookingStatus
+  );
+}
+
+/**
+ * Whether a selected asset is eligible to be CHECKED OUT for this booking.
+ *
+ * An asset can be checked out only when it is still booked — i.e. NOT already
+ * checked out. "Already checked out" means its id is in the booking's
+ * per-booking partial-checkout records OR its own status is CHECKED_OUT. This
+ * mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
+ *
+ * @param asset - The selected asset (needs `id` and `status`).
+ * @param checkedOutAssetIds - Ids already checked out for this booking. A Set
+ *   (not array) keeps membership O(1) across a large selection — matching the
+ *   dialog's existing `checkedOutIdsSet`.
+ * @returns `true` if the asset can be checked out.
+ */
+export function isAssetCheckableOut(
+  asset: AssetWithStatus,
+  checkedOutAssetIds: Set<string>
+): boolean {
+  return !(
+    checkedOutAssetIds.has(asset.id) || asset.status === AssetStatus.CHECKED_OUT
+  );
+}
+
+/**
+ * Normalizes the raw `selectedBulkItemsAtom` selection into a flat list of
+ * enriched asset objects (plus kit entries kept for grouping), so every
+ * consumer — the bulk-actions dropdown and both partial check-in/out dialogs —
+ * evaluates the SAME data.
+ *
+ * The selection can contain several entry shapes:
+ * - a pagination wrapper (`type: "asset"` with an `assets` array),
+ * - a kit entry (`type: "kit"`, carrying its `kit` sub-object),
+ * - a "traditional" kit (`name` + `_count`, no `title`),
+ * - a direct asset (`title`, no `_count`).
+ *
+ * Asset entries are merged with their booking-scoped record from
+ * `bookingAssets` so `status`/`kitId` are authoritative (the atom entry can be
+ * stale). Kit entries are returned flattened (`name`/`_count`) for rendering.
+ * This logic was previously duplicated verbatim in both dialogs; extracting it
+ * removes the drift that caused the bulk check-in bug.
+ *
+ * @param selectedItems - Raw entries from `selectedBulkItemsAtom`.
+ * @param bookingAssets - The booking's assets (`booking.assets`), used to
+ *   enrich asset entries by id.
+ * @returns The flattened, enriched list (assets + kit entries), UNFILTERED —
+ *   callers apply their own eligibility filter.
+ */
+export function flattenSelectedBookingItems(
+  selectedItems: SelectedBookingItem[],
+  bookingAssets: AssetWithStatus[]
+): SelectedBookingItem[] {
+  const bookingAssetsMap = new Map(
+    bookingAssets.map((asset) => [asset.id, asset])
+  );
+
+  return selectedItems.flatMap((item: any) => {
+    // Pagination wrapper objects (type "asset" with an assets array).
+    if (item.type === "asset" && item.assets) {
+      return item.assets.map((asset: any) => {
+        const bookingAsset = bookingAssetsMap.get(asset.id);
+        return bookingAsset ? { ...asset, ...bookingAsset } : asset;
+      });
+    }
+
+    // Kit entries (type "kit") — flatten name/_count for rendering.
+    if (item.type === "kit") {
+      return {
+        ...item,
+        name: item.kit?.name,
+        _count: item.kit?._count,
+      };
+    }
+
+    // Traditional kit shape (has name and _count, not title).
+    if (item.name && item._count) {
+      return item;
+    }
+
+    // Direct asset object (has title, not name) — enrich from booking record.
+    if (item.title) {
+      const bookingAsset = bookingAssetsMap.get(item.id);
+      return bookingAsset ? { ...item, ...bookingAsset } : item;
+    }
+
+    // Fallback for any other structure.
+    return item;
+  });
+}
+
+/**
  * Helper to check if asset is partially checked in within booking
  * Only returns true for ONGOING/OVERDUE bookings, false for COMPLETE bookings
  */

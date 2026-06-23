@@ -31,6 +31,7 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
+  createKitBookingNote: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -157,6 +158,9 @@ describe("manage-kits route validation", () => {
       name: "Test Booking",
       status: BookingStatus.ONGOING,
     });
+    vi.mocked(bookingService.createKitBookingNote).mockResolvedValue(
+      undefined as any
+    );
     vi.mocked(noteService.createNotes).mockResolvedValue({ count: 0 });
   });
 
@@ -218,8 +222,27 @@ describe("manage-kits route validation", () => {
       assertIsDataWithResponseInit(response);
       expect(response.init?.status).toBe(500);
 
-      // Both kits' AssetKits are brand new to the booking — both validated.
+      // Both kits adopt NEW kit-driven AssetKit slices: kit1 adds
+      // ak-kit1-asset1 + ak-kit1-asset3, kit2 adds ak-kit2-asset1 +
+      // ak-kit2-asset2. The booking's existing rows for asset1/asset2 are
+      // standalone (assetKitId = null), so none of these AssetKit IDs are
+      // already represented — both kits stay in newlyAddedKits and BOTH
+      // reach the validation helper (see route: filter is keyed on the
+      // AssetKit pivot id, not the asset id — a standalone slice does
+      // NOT block a kit-driven slice of the same asset).
       expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledTimes(2);
+      expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
+        mockKits[0],
+        {},
+        new Set(["asset1", "asset2"]),
+        "ONGOING"
+      );
+      expect(bookingAssets.isKitPartiallyCheckedIn).toHaveBeenCalledWith(
+        mockKits[1],
+        {},
+        new Set(["asset1", "asset2"]),
+        "ONGOING"
+      );
     });
 
     it("passes two kit slices for a shared asset belonging to two kits", async () => {
@@ -283,9 +306,12 @@ describe("manage-kits route validation", () => {
         })
       );
 
+      // The route derives `assetIds` from the newly-added kit slices —
+      // the shared asset's id is forwarded once (deduped) so the
+      // service-side asset-status flip downstream sees it.
       expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetIds: [], // kit-add contributes no standalone assets
+          assetIds: ["asset-shared"],
           kitSlices: [
             {
               assetId: "asset-shared",
@@ -430,7 +456,7 @@ describe("manage-kits route validation", () => {
         mockKits[0],
         mockPartialCheckinDetails,
         new Set(["asset1", "asset2"]),
-        BookingStatus.ONGOING
+        "ONGOING"
       );
     });
 
@@ -610,7 +636,100 @@ describe("manage-kits route validation", () => {
         mockKits[0],
         mockPartialCheckinDetails,
         new Set(["asset1", "asset2"]), // existing booking asset IDs
-        BookingStatus.ONGOING
+        "ONGOING"
+      );
+    });
+  });
+
+  describe("updateBookingAssets call scope", () => {
+    it("should forward only the newly-added kit id, not the full submitted selection", async () => {
+      // Booking already contains asset1 + asset2 as kit-driven slices for
+      // kit2 (the pre-existing kit). kit1 is newly added: it brings asset3
+      // which is not yet in the booking. Submitting kitIds: ["kit2", "kit1"]
+      // should only pass kit1's id to updateBookingAssets — otherwise
+      // re-submitting an already-added kit would re-flip its status.
+      // Note: the action filters by `assetKitId` (per-row discriminator),
+      // so the booking holds kit2's `assetKitId` values to mark them as
+      // already-present.
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        bookingAssets: [
+          {
+            asset: { id: "asset1" },
+            assetId: "asset1",
+            quantity: 1,
+            id: "ba1",
+            assetKitId: "ak-kit2-asset1",
+          },
+          {
+            asset: { id: "asset2" },
+            assetId: "asset2",
+            quantity: 1,
+            id: "ba2",
+            assetKitId: "ak-kit2-asset2",
+          },
+        ],
+      } as any);
+
+      const mockKits = [
+        {
+          id: "kit2",
+          name: "Kit 2",
+          status: KitStatus.AVAILABLE, // AVAILABLE so the checked-out guard is not tripped
+          assetKits: [
+            { id: "ak-kit2-asset1", quantity: 1, asset: { id: "asset1" } },
+            { id: "ak-kit2-asset2", quantity: 1, asset: { id: "asset2" } },
+          ],
+          organizationId: "org123",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: "kit1",
+          name: "Kit 1",
+          status: KitStatus.AVAILABLE, // AVAILABLE so the checked-out guard is not tripped
+          assetKits: [
+            { id: "ak-kit1-asset3", quantity: 1, asset: { id: "asset3" } },
+          ],
+          organizationId: "org123",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ] as any;
+
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit2", "kit1"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+
+      vi.mocked(db.kit.findMany).mockResolvedValue(mockKits);
+      vi.mocked(bookingAssets.isKitPartiallyCheckedIn).mockReturnValue(false);
+
+      await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      // updateBookingAssets must be called exactly once with ONLY kit1
+      // (not kit2). The route derives `assetIds` from the newly-added kit
+      // slices so the service-side asset-status flip sees them.
+      expect(bookingService.updateBookingAssets).toHaveBeenCalledTimes(1);
+      expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetIds: ["asset3"],
+          kitIds: ["kit1"], // ONLY the newly-added kit, not the pre-existing available kit2
+          kitSlices: [
+            {
+              assetId: "asset3",
+              assetKitId: "ak-kit1-asset3",
+              quantity: 1,
+            },
+          ],
+        })
       );
     });
   });

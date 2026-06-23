@@ -6454,7 +6454,14 @@ export async function updateBookingAssets({
          */
         if (kitIds && kitIds.length > 0) {
           await tx.kit.updateMany({
-            where: { id: { in: kitIds }, organizationId },
+            where: {
+              id: { in: kitIds },
+              organizationId,
+              // Only flip kits that actually received a newly-checked-out asset.
+              // Prevents an over-broad kitIds list from clobbering the status of
+              // still-available kits already on the booking.
+              assets: { some: { id: { in: validAssetIds } } },
+            },
             data: { status: KitStatus.CHECKED_OUT },
           });
         }

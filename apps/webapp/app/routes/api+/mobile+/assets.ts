@@ -48,9 +48,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const where: Record<string, unknown> = {
       organizationId,
+      // Match on title OR sequentialId (SAM id, e.g. "SAM-0001"). When the
+      // workspace display preference is SAM, every asset row shows its SAM id,
+      // so a user typing that number must be able to find it here. Mirrors the
+      // web search's sequentialId branch (modules/asset/service.server.ts) but
+      // intentionally NOT the heavy branches (custodian-name traversal,
+      // custom-fields JSON) — those are slow and low-value on mobile.
+      // `sequentialId` is indexed; a normal word term can't false-positive it.
       ...(search
         ? {
-            title: { contains: search, mode: "insensitive" as const },
+            OR: [
+              { title: { contains: search, mode: "insensitive" as const } },
+              {
+                sequentialId: {
+                  contains: search,
+                  mode: "insensitive" as const,
+                },
+              },
+            ],
           }
         : {}),
       ...(myCustody

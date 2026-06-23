@@ -493,31 +493,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    /** We only update the booking if there are NEW slices to add */
-    if (kitSlices.length > 0) {
+    // Only the kits actually being added now (those contributing a new
+    // asset) — NOT the full submitted selection. Passing the whole
+    // selection would flip still-available kits already on an ongoing
+    // booking to CHECKED_OUT. Hoisted so both `updateBookingAssets` and
+    // the qty-aware notes loop below share one source of truth.
+    const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
+
+    /** We only update the booking if there are NEW assets to add */
+    if (newAssetIds.length > 0) {
       /**
-       * Kit-add only contributes kit-driven rows — `assetIds` (the
-       * standalone bucket) is empty. `kitSlices` already excludes
-       * AssetKits already represented in the booking, so each spec is a
-       * genuinely new kit-driven row. Each carries its own slice
-       * quantity, so we don't need a separate `quantities` map.
+       * We extend main's "only new asset ids" guard with our slice-aware
+       * payload: `assetIds` carries the genuinely-new standalone-style
+       * asset ids (for FK validation + addedAssetIds reporting), while
+       * `kitSlices` carries the per-AssetKit rows that drive kit-driven
+       * inserts and per-row quantities for QUANTITY_TRACKED. `kitSlices`
+       * is already filtered against `existingAssetKitIds`, so it only
+       * contains genuinely new kit-driven rows.
        */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
-        assetIds: [], // Kit-add adds no standalone assets
-        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
+        assetIds: newAssetIds, // Only the newly added assets from kits
+        kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
         kitSlices,
       });
 
-      /** Kit-level summary note on the booking timeline (the popover-
-       * style note listing the kits added). Per-asset notes on each
-       * asset's own timeline are written below — Phase 4e wants both:
-       * the kit summary for the booking surface, and a per-asset note
-       * carrying the per-row unit count for the asset surface.
-       */
-      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,

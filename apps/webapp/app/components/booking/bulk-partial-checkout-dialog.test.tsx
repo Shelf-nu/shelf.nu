@@ -133,6 +133,13 @@ function makeLoaderData({
 }: {
   bookingAssets: Array<{
     id: string;
+    /**
+     * BookingAsset row quantity. Production always populates this; tests
+     * default it to 1 if omitted to match the loader's `ba.quantity ?? 1`
+     * projection (otherwise spreading an `undefined` overrides any
+     * `bookedQuantity` the caller put on the selection item).
+     */
+    quantity?: number;
     asset: {
       id: string;
       title: string;
@@ -198,6 +205,11 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
         bookingAssets: [
           {
             id: pencils.bookingAssetId,
+            // BookingAsset.quantity must match the booked qty the row
+            // declares — production always populates it; without it the
+            // loader-side projection defaults to 1 and the qty input's
+            // `max` would clamp to 1 instead of remainingToCheckOut.
+            quantity: pencils.bookedQuantity,
             asset: {
               id: pencils.id,
               title: pencils.title,

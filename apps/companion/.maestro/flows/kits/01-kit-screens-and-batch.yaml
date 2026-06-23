@@ -1,0 +1,165 @@
+appId: com.shelf.companion.carlos
+name: "Kits - Screens and kit batch scanning"
+tags:
+  - kits
+  - scanner
+  - high-impact
+
+---
+# Test: Kits surface (list + detail) and kit batch scanning end-to-end.
+# Covers: the Assets|Kits segmented switcher, kit list, kit detail with
+# contained assets, scanning a kit QR into Assign mode, kit custody assign
+# (cascades to contained assets), the "kit already in custody" blocker, and
+# release.
+#
+# Requires (in the test org):
+#   - a kit named "QA Blocker Test Kit" containing one asset
+#   - ${SHELF_TEST_KIT_QR_ID} = a QR linked to that kit
+
+- runFlow: ../../shared/login.yaml
+
+# Switch to the QA workspace (login lands on the default/personal org)
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: "WORKSPACE"
+    timeout: 8000
+- tapOn:
+    point: "50%,32%"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Kits list via the Assets|Kits segmented switcher ──
+- tapOn: "Assets"
+- extendedWaitUntil:
+    visible: "Search assets..."
+    timeout: 15000
+- tapOn: "Kits"
+# Row a11y label is "View kit <name>" — match with regex
+- extendedWaitUntil:
+    visible: ".*QA Blocker Test Kit.*"
+    timeout: 15000
+- takeScreenshot: kits-list
+
+# ── Kit detail ──
+- tapOn: ".*QA Blocker Test Kit.*"
+- extendedWaitUntil:
+    visible: ".*Nasco Life/form IV Training Arm.*"
+    timeout: 15000
+- takeScreenshot: kit-detail
+
+# ── Asset ↔ Kit cross-links ──
+# Contained-asset row → asset detail
+# why not "Asset Details": the header title flips to the asset name once
+# data loads; the Kit link row is the stable (and next-needed) anchor
+- tapOn: "View asset Nasco Life/form IV Training Arm (Left)"
+- extendedWaitUntil:
+    visible: "View kit QA Blocker Test Kit"
+    timeout: 15000
+# The asset's Kit info row links back to the kit detail screen
+- tapOn: "View kit QA Blocker Test Kit"
+- extendedWaitUntil:
+    visible: "Assets (1)"
+    timeout: 15000
+- takeScreenshot: asset-to-kit-link
+
+# ── Scanner: kit batch assign ──
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn: "Scanner action: Assign"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+# The dev-scan bar overlaps the first drawer row — close it before asserting
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- assertVisible: "QA Blocker Test Kit"
+- takeScreenshot: kit-in-batch-drawer
+
+# Resume if the inactivity timer paused the camera (its full-screen
+# overlay intercepts taps on everything, including the drawer)
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+
+# Assign to a team member (cascades custody to the kit's assets)
+# why point tap: the drawer submit button exposes no text to the a11y tree
+# (TouchableOpacity with accessibilityState swallows the child label)
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- waitForAnimationToEnd
+- tapOn: "Choose Custodian"
+
+- extendedWaitUntil:
+    visible: ".*Amanda Cole.*"
+    timeout: 15000
+- tapOn: ".*Amanda Cole.*"
+- tapOn: "Assign"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 20000
+- takeScreenshot: kit-assign-success
+- tapOn: "OK"
+
+# ── Blocker: scanning the now-in-custody kit in Assign mode ──
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: enter
+# The dev-scan bar overlaps the blocker row — close it before asserting
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- extendedWaitUntil:
+    visible: "1 kit is already in custody."
+    timeout: 15000
+- takeScreenshot: kit-in-custody-blocker
+
+# Clear the list before switching modes (avoids the Switch Action? confirm;
+# the blocker Remove has an ambiguous label vs the row's remove X)
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+- tapOn: "Clear all scanned items"
+
+# ── Release the kit (cleanup + release-path coverage) ──
+- tapOn: "Scanner action: Release"
+# The dev-scan bar may still be expanded from the previous injection
+- tapOn:
+    id: "dev-scan-toggle"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_KIT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+# Resume if the inactivity timer paused the camera (its full-screen
+# overlay intercepts taps on everything, including the drawer)
+- tapOn:
+    text: ".*amera paused.*"
+    optional: true
+- tapOn:
+    text: "Close dev scanner"
+    optional: true
+- waitForAnimationToEnd
+- tapOn: "Release All"
+
+- tapOn: "Release"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 20000
+- takeScreenshot: kit-release-success
+- tapOn: "OK"

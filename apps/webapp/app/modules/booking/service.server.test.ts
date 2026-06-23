@@ -1612,10 +1612,48 @@ describe("updateBookingAssets", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["kit-1", "kit-2"] },
+        organizationId: "org-1",
+        assetKits: { some: { assetId: { in: ["asset-1", "asset-2"] } } },
+      },
       data: { status: KitStatus.CHECKED_OUT },
     });
     expect(result).toEqual(mockBooking);
+  });
+
+  it("scopes the kit CHECKED_OUT flip to kits containing a newly-added asset, not arbitrary kitIds", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+    };
+    // @ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await updateBookingAssets({
+      ...mockUpdateBookingAssetsParams, // assetIds: ["asset-1","asset-2"], org-1
+      // caller over-supplies kit-2; only kits owning a newly-added asset must flip
+      kitIds: ["kit-1", "kit-2"],
+    });
+
+    // assets still flipped as before (unchanged behavior)
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+
+    // kit flip carries the relation-scope guard tying it to the newly-added assets
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["kit-1", "kit-2"] },
+        organizationId: "org-1",
+        assetKits: { some: { assetId: { in: ["asset-1", "asset-2"] } } },
+      },
+      data: { status: KitStatus.CHECKED_OUT },
+    });
   });
 
   it("should not update kit status when no kitIds provided", async () => {

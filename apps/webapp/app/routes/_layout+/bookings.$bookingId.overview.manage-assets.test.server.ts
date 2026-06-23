@@ -212,12 +212,12 @@ describe("manage-assets route validation", () => {
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
         {},
-        BookingStatus.ONGOING
+        "ONGOING"
       );
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[1],
         {},
-        BookingStatus.ONGOING
+        "ONGOING"
       );
     });
 
@@ -310,7 +310,7 @@ describe("manage-assets route validation", () => {
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
         mockPartialCheckinDetails,
-        BookingStatus.ONGOING
+        "ONGOING"
       );
     });
 
@@ -566,7 +566,7 @@ describe("manage-assets route validation", () => {
       expect(bookingAssets.isAssetPartiallyCheckedIn).toHaveBeenCalledWith(
         mockAssets[0],
         mockPartialCheckinDetails,
-        BookingStatus.ONGOING
+        "ONGOING"
       );
     });
   });
@@ -619,14 +619,14 @@ describe("manage-assets route validation", () => {
       // Verify per-asset note creation. The route now uses markdoc link
       // wrappers for both actor and booking so activity rendering stays
       // consistent with the rest of the feed.
+      // why: createNotes requires organizationId (cross-org asset guard).
       expect(noteService.createNotes).toHaveBeenCalledWith({
         content:
           '{% link to="/settings/team/users/user123" text="John Doe" /%} added asset to {% link to="/bookings/booking123" text="Test Booking" /%}.',
         type: "UPDATE",
         userId: "user123",
-        assetIds: ["asset3"], // only the new asset
-        // why: createNotes now requires organizationId (cross-org asset guard).
         organizationId: "org123",
+        assetIds: ["asset3"], // only the new asset
       });
     });
 
@@ -656,11 +656,11 @@ describe("manage-assets route validation", () => {
       // here because the test mocks `db.asset.findMany` to return []).
       expect(bookingService.removeAssets).toHaveBeenCalledWith({
         booking: { id: "booking123", assetIds: ["asset2"] },
+        assets: [], // db.asset.findMany returns [] in this test
         firstName: "John",
         lastName: "Doe",
         userId: "user123",
         organizationId: "org123",
-        assets: [],
       });
     });
 

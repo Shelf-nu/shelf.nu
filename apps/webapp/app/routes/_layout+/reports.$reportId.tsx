@@ -37,6 +37,7 @@ import {
   idleAssetsReport,
   custodySnapshotReport,
   topBookedAssetsReport,
+  topBookedKitsReport,
   assetDistributionReport,
   assetInventoryReport,
   monthlyBookingTrendsReport,
@@ -52,6 +53,7 @@ import type {
   ReportPayload,
   TimeframePreset,
   TopBookedAssetRow,
+  TopBookedKitRow,
 } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError } from "~/utils/error";
@@ -194,6 +196,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
       break;
 
+    case "top-booked-kits":
+      reportData = await topBookedKitsReport({
+        organizationId,
+        timeframe,
+        page: parseInt(url.searchParams.get("page") || "1", 10),
+        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+      });
+      break;
+
     case "distribution":
       reportData = await assetDistributionReport({
         organizationId,
@@ -291,11 +302,13 @@ export default function ReportPage() {
     pageSize,
     complianceData,
     topBookedAsset,
+    topBookedKit,
     distributionBreakdown,
     chartSeries,
   } = loaderData as typeof loaderData & {
     complianceData?: ComplianceData;
     topBookedAsset?: TopBookedAssetRow | null;
+    topBookedKit?: TopBookedKitRow | null;
     distributionBreakdown?: DistributionBreakdown;
     chartSeries?: ChartSeries[];
   };
@@ -335,6 +348,7 @@ export default function ReportPage() {
             timeframe={filters.timeframe}
             complianceData={complianceData}
             topBookedAsset={topBookedAsset}
+            topBookedKit={topBookedKit}
             distributionBreakdown={distributionBreakdown}
             chartSeries={chartSeries}
             handlers={handlers}

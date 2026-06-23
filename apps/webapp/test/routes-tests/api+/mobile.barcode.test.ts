@@ -37,6 +37,14 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
     category: { select: { name: true } },
     location: { select: { name: true } },
   },
+  MOBILE_KIT_SELECT: {
+    id: true,
+    name: true,
+    status: true,
+    image: true,
+    _count: { select: { assets: true } },
+    assets: { select: { id: true, status: true, availableToBook: true } },
+  },
 }));
 
 // why: external database — we don't want to hit the real database in tests

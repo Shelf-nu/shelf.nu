@@ -10,7 +10,13 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         lazy: true,
-        freezeOnBlur: true,
+        // freezeOnBlur is deliberately OFF: react-freeze's Suspender can
+        // wedge into an infinite suspense throw/ping/retry loop after a
+        // cross-tab navigate (scanner → booking detail via Alert OK),
+        // pegging the JS thread at ~125% CPU and starving every network
+        // callback. Root-caused live via Hermes debugger: the suspended
+        // fiber chain was Suspender < Freeze < DelayedFreeze < Screen
+        // (react-native-screens 4.16 + RN 0.81 new arch).
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedLight,
         tabBarStyle: {
