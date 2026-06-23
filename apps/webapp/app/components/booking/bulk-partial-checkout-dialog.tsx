@@ -22,18 +22,25 @@
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
-import { useEffect, useState } from "react";
-import { AssetStatus } from "@prisma/client";
-import { useAtomValue } from "jotai";
+import { useEffect, useRef, useState } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
-import { selectedBulkItemsAtom } from "~/atoms/list";
+import {
+  clearSelectedBulkItemsAtom,
+  selectedBulkItemsAtom,
+} from "~/atoms/list";
 import { useDisabled } from "~/hooks/use-disabled";
 import { shouldPromptEarlyCheckout } from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
+import type { AssetWithStatus } from "~/utils/booking-assets";
+import {
+  flattenSelectedBookingItems,
+  isAssetCheckableOut,
+} from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import { AssetImage } from "../assets/asset-image/component";
@@ -70,82 +77,32 @@ export default function BulkPartialCheckoutDialog({
   const { booking, checkedOutAssetIds } =
     useLoaderData<BookingPageLoaderData>();
 
-  let selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
-  // Create a map for quick asset lookup so we can enrich the selection with
-  // the booking-scoped asset record (which carries `status`, `kitId`, etc.).
-  const bookingAssetsMap = new Map(
-    booking.assets.map((asset) => [asset.id, asset])
-  );
-
-  // Set of asset ids already checked out for THIS booking (partial-checkout
-  // records). Asset `status === CHECKED_OUT` is checked separately below.
+  // Ids already checked out for THIS booking (partial-checkout records). Used
+  // by the shared `isAssetCheckableOut` predicate below.
   const checkedOutIdsSet = new Set(checkedOutAssetIds || []);
 
-  /**
-   * An asset is "already checked out" for this booking when it appears in the
-   * per-booking partial-checkout records OR its own status is CHECKED_OUT.
-   */
-  function isAssetAlreadyCheckedOut(asset: any): boolean {
-    return (
-      checkedOutIdsSet.has(asset.id) || asset.status === AssetStatus.CHECKED_OUT
-    );
-  }
-
-  // Enrich selection data with booking asset information and filter out assets
-  // that are already checked out (kits are kept regardless — they only group).
-  selectedItems = selectedItems
-    .flatMap((item: any) => {
-      // Handle pagination wrapper objects (has type: "asset" and assets array)
-      if (item.type === "asset" && item.assets) {
-        return item.assets.map((asset: any) => {
-          const bookingAsset = bookingAssetsMap.get(asset.id);
-          return bookingAsset ? { ...asset, ...bookingAsset } : asset;
-        });
-      }
-
-      // Handle kit objects (has type: "kit")
-      if (item.type === "kit") {
-        // Flatten kit properties to match rendering expectations
-        const flattenedKit = {
-          ...item,
-          name: item.kit?.name,
-          _count: item.kit?._count,
-        };
-        return flattenedKit;
-      }
-
-      // Handle kit objects with traditional structure (has name and _count, not title)
-      if (item.name && item._count) {
-        return item; // Return kit as-is, no need to filter by status
-      }
-
-      // Handle direct asset objects (has title, not name)
-      if (item.title) {
-        const bookingAsset = bookingAssetsMap.get(item.id);
-        return bookingAsset ? { ...item, ...bookingAsset } : item;
-      }
-
-      return item; // Fallback for any other structure
-    })
-    .filter((item) => {
-      // Keep kits regardless of status (both type structures)
-      if (item.type === "kit" || (item.name && item._count)) return true;
-      // Only keep assets that are still booked (not already checked out)
-      return !isAssetAlreadyCheckedOut(item);
-    });
+  // Flatten/enrich the selection via the SHARED resolver, then keep kits + the
+  // assets that are still booked (not already checked out).
+  const flattenedItems = flattenSelectedBookingItems(
+    rawSelectedItems,
+    booking.assets
+  );
+  const selectedItems = flattenedItems.filter((item) => {
+    if (item.type === "kit" || (item.name && item._count)) return true;
+    return isAssetCheckableOut(item as AssetWithStatus, checkedOutIdsSet);
+  });
 
   /** Use state instead of ref so the component re-renders once the form
    * mounts — this guarantees portalContainer is the real DOM node
    * when the user opens the early-checkout dialog. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
 
-  // Determine whether this is a FINAL checkout: the assets being checked out
-  // equal ALL still-Booked assets in the booking. Count still-Booked assets
-  // directly (asset-scoped) so the comparison is unaffected by the
-  // kits-as-single-unit setting that `lifecycleProgress` may apply.
-  const remainingBookedAssets = booking.assets.filter(
-    (asset) => !isAssetAlreadyCheckedOut(asset)
+  // Still-booked assets in the booking (asset-scoped) for final-checkout
+  // detection — unaffected by the kits-as-single-unit setting.
+  const remainingBookedAssets = booking.assets.filter((asset) =>
+    isAssetCheckableOut(asset, checkedOutIdsSet)
   );
 
   // Count only individual assets (exclude kit IDs), deduped, for final-checkout
@@ -186,23 +143,46 @@ export default function BulkPartialCheckoutDialog({
 
   const actionData = useActionData<BookingPageActionData>();
 
-  // First, detect when we get a success response.
+  // Clear the bulk selection once the action succeeds so the user does not need
+  // to manually "unselect all" before selecting the next batch.
+  const clearSelectedBulkItems = useSetAtom(clearSelectedBulkItemsAtom);
+
+  // Tracks whether the latest submission came from THIS dialog. Both bulk
+  // dialogs are always mounted and share useActionData, so without this guard
+  // any successful overview action (e.g. saving notification recipients) would
+  // close this dialog and clear the user's selection.
+  const submittedRef = useRef(false);
+
+  // First, detect a successful response, but only for a submission this dialog
+  // initiated (submittedRef is set by the form's onSubmit below).
   useEffect(() => {
+    if (!submittedRef.current) return;
     if (actionData && "success" in actionData && actionData.success) {
       setShouldClose(true);
+    } else if (actionData) {
+      // Our submission resolved without success (e.g. a validation error), so
+      // stop tracking; a later unrelated success must not trigger close/clear.
+      submittedRef.current = false;
     }
   }, [actionData]);
 
-  // Then, close the dialog when revalidation completes.
+  // Then, close the dialog and clear the selection once revalidation completes.
   useEffect(() => {
     if (shouldClose && !disabled) {
       setOpen(false);
       setShouldClose(false); // Reset for future uses
+      clearSelectedBulkItems();
+      submittedRef.current = false;
     }
-  }, [shouldClose, disabled, setOpen]);
+  }, [shouldClose, disabled, setOpen, clearSelectedBulkItems]);
 
   // No assets remain to check out — disable the submit affordance.
   const noAssetsToCheckOut = selectedAssetIds.length === 0;
+
+  // Assets dropped from the selection because they are already checked out.
+  const skippedCount =
+    new Set(flattenedItems.filter((i) => i.title && !i._count).map((i) => i.id))
+      .size - selectedAssetIds.length;
 
   return (
     <DialogPortal>
@@ -212,7 +192,7 @@ export default function BulkPartialCheckoutDialog({
         className={tw("bulk-tagging-dialog lg:w-[400px]")}
         title={
           <div className="w-full">
-            <div className={tw("mb-5")}>
+            <div className={tw("mb-2")}>
               <h4>Check out selected items</h4>
               <p>
                 The following items will be checked out and marked as Checked
@@ -227,6 +207,9 @@ export default function BulkPartialCheckoutDialog({
           className="px-6 pb-6"
           ref={setFormElement}
           id="bulk-partial-checkout-form"
+          onSubmit={() => {
+            submittedRef.current = true;
+          }}
         >
           <input type="hidden" name="returnJson" value="true" />
 
@@ -239,6 +222,14 @@ export default function BulkPartialCheckoutDialog({
               value={assetId}
             />
           ))}
+
+          {skippedCount > 0 && (
+            <p className="mb-3 rounded border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
+              {skippedCount} selected item{skippedCount === 1 ? "" : "s"}{" "}
+              {skippedCount === 1 ? "is" : "are"} already checked out and will
+              be skipped.
+            </p>
+          )}
 
           {/* List of items being checked out */}
           <div className="mb-4 max-h-48 overflow-y-auto rounded border bg-gray-50 p-3">
@@ -382,6 +373,7 @@ export default function BulkPartialCheckoutDialog({
                 disabled={disabled || noAssetsToCheckOut}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkout-form"
+                fullWidth
               />
             ) : (
               <Button

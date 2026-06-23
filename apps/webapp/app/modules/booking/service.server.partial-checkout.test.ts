@@ -3,6 +3,7 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   getRemainingCheckoutAssetIds,
@@ -323,6 +324,67 @@ describe("partialCheckoutBooking", () => {
         }),
       ],
       expect.anything()
+    );
+  });
+
+  it("names an individual kit asset in the activity-log note when only part of its kit is checked out", async () => {
+    expect.assertions(2);
+
+    // Booking holds a 2-asset kit (kit-1). Checking out only ONE of its assets
+    // means the kit is NOT a complete-kit line, so the note must still name the
+    // individual asset. Regression: this previously rendered an empty
+    // "performed a partial check-out: ." because a kit-member asset whose kit
+    // wasn't fully checked out fell through both the kit and standalone buckets.
+    const kitBooking = {
+      ...reservedBooking,
+      _count: { assets: 2 },
+      assets: [
+        { id: "asset-k1", kitId: "kit-1", status: AssetStatus.AVAILABLE },
+        { id: "asset-k2", kitId: "kit-1", status: AssetStatus.AVAILABLE },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(kitBooking);
+
+    // why: the in-tx kit-info read must return the scanned asset WITH its kit
+    // attached (and AVAILABLE / no conflicts) so the note-builder sees a
+    // kit-member asset whose kit isn't fully checked out.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids)
+            ? ids.map((id: string) => ({
+                id,
+                title: `Asset ${id}`,
+                status: AssetStatus.AVAILABLE,
+                bookings: [],
+                kit: { id: "kit-1", name: "Camera Kit" },
+              }))
+            : []
+        );
+      }
+    );
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-k1"],
+    });
+
+    // The individual asset is named (linked) in the note...
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("/assets/asset-k1"),
+      }),
+      expect.anything()
+    );
+    // ...and the note is never the empty "partial check-out: ." form.
+    const contents = (
+      createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.map((call) => call[0].content as string);
+    expect(contents.every((c) => !/partial check-out:\s*\./.test(c))).toBe(
+      true
     );
   });
 

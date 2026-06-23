@@ -65,23 +65,25 @@ In the meantime, you can continue with the next steps that will show you how to 
 
 ## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
 
-In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping.
-For each workspace you will have to create 3 groups, each one representing a different role in Shelf:
+In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has three roles you can map a group to:
 
 - Admin group
 - Self service group
 - Base user group
 
+> [!NOTE]
+> You only need to create a group for the **roles you actually use** — mapping a single group is enough for SSO to work. For example, if everyone on your team should have the same role, one group is all you need. Create additional groups only if you want different users to get different roles.
+
 ### 8.1: Create your groups in Google Workspace [#](#81-create-your-groups-in-google-workspace)
 
-First step is to create the groups in the google workspace. Inside your admin panel, navigate to Directory > Groups > Create group
+First step is to create the groups in Google Workspace. Inside your admin panel, navigate to Directory > Groups > Create group
 
 ![step-8.1](../../img/google-workspace-step-8-1.png)
 
-Add a name, email and make sure the group is labeled as security. Optionally fill in the other fields as well. Make sure to create 2 groups for each workspace, one for Admins and one for Self service users.
+Add a name, email and make sure the group is labeled as security. Optionally fill in the other fields as well. Create one group per Shelf role you want to use (you need at least one).
 
-> [!NOTE]
-> Due to how Google Workspaces works, it returns group names instead of IDs when the user tries to login. We recommend using lower cased group names without spaces, to avoid mismatch. This is not required, but can ensure a better integration.
+> [!IMPORTANT]
+> Due to how Google Workspace works, it returns group **names** (not IDs) when a user logs in. This means that in Shelf you will map your groups using their **names**, not an ID. We recommend using lower-cased group names without spaces to avoid any mismatch. This is not required, but ensures a smoother integration.
 
 ### 8.2: Assign members to each group [#](#82-assign-members-to-each-group)
 
@@ -107,12 +109,12 @@ Make sure to add all groups that you want to access Shelf. The **_App attribute_
 
 ## Step 9: Map Google workspace groups inside Shelf [#](#step-9-map-google-workspace-groups-inside-shelf)
 
-Once you have the groups ready, you need to add their names in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
+Once you have the groups ready, you need to add their **names** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go the the workspace settings and place the name of the ADMIN, BASE & SELF SERVICE groups.
+Go to the workspace settings and place the **name** of each group next to its matching role (Administrator, Self service, Base). You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
 
 > [!IMPORTANT]
-> Those fields are case sensitive. The name should be placed exactly as the group name is in Google workspace.
+> These fields are case sensitive. The name must be entered exactly as the group name appears in Google Workspace.
 
 ![step-9](../../img/google-workspace-step-9.png)
 

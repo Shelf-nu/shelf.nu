@@ -32,6 +32,7 @@ import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
+import { maybeAskForReview } from "@/lib/review-prompt";
 import { playScanSound } from "@/lib/scan-sound";
 import { clearAuditScanState } from "@/lib/audit-scan-persistence";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
@@ -646,7 +647,15 @@ function AuditScannerContent() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
     Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
-      { text: "OK", onPress: () => router.back() },
+      {
+        text: "OK",
+        onPress: () => {
+          router.back();
+          // Completing an audit is a clear "value delivered" moment — a good
+          // (throttled, OS-gated) time to ask a happy user for a review.
+          void maybeAskForReview();
+        },
+      },
     ]);
   }, [
     auditId,

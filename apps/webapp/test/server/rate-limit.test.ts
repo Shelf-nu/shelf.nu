@@ -22,10 +22,14 @@ function fire(app: Hono, ip: string, path = "/api/mobile/me") {
 describe("mobileIpRateLimit", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // why: these cases exercise the Fly-Client-IP path, which getClientIp only
+    // trusts when on Fly (FLY_APP_NAME set). Simulate the Fly runtime.
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("allows requests under the limit and blocks when exceeded", async () => {
@@ -68,6 +72,9 @@ describe("mobileIpRateLimit", () => {
   });
 
   it("falls back to x-forwarded-for when fly-client-ip is absent", async () => {
+    // why: XFF is only trusted off Fly; override the beforeEach Fly stub to
+    // simulate a self-hosted deployment behind a trusted proxy.
+    vi.stubEnv("FLY_APP_NAME", "");
     const app = new Hono();
     app.use("/api/mobile/*", mobileIpRateLimit());
     app.get("/api/mobile/me", (c) => c.json({ ok: true }));

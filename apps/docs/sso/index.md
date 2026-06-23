@@ -4,6 +4,34 @@ Shelf offers single sign-on (SSO) as a login option to provide additional accoun
 
 Shelf currently provides SAML SSO for Team and Enterprise plan customers. Please contact Sales to have this enabled for your organization.
 
+## Before you start: prerequisites [#](#before-you-start-prerequisites)
+
+SSO changes how accounts on your domain are created and managed, so a few things must be in place **before** we activate the connection. Please read these carefully — most setup confusion comes from skipping them.
+
+### 1. You need one non-SSO account to own the workspace [#](#1-non-sso-owner-account)
+
+Shelf SSO requires **one non-SSO user to be the owner of the workspace**. This account's only job is to own the workspace and configure the SSO settings (the group-to-role mapping). It is not used for daily work — owners typically sign in only when doing the initial setup or adjusting the configuration later.
+
+Most customers create a dedicated account for this purpose using an address such as `it@yourdomain.com` or `shelf_admin@yourdomain.com`.
+
+> [!IMPORTANT]
+> This account **must be created before SSO is activated**. Once your domain is configured as an SSO domain, no more non-SSO accounts can be created with that domain. If you don't have this owner account ready beforehand, you will be locked out of administrative changes.
+
+### 2. Decide what happens to any existing workspace [#](#2-existing-workspace)
+
+If you already have a workspace that was used for testing or trials (for example one created with a few standard accounts), decide whether you want to **keep it together with all the assets inside it**, or start fresh. Let your Shelf contact know so the right workspace is connected to SSO.
+
+### 3. Existing standard accounts on the domain must be removed [#](#3-existing-standard-accounts)
+
+Any existing **standard (non-SSO) accounts** that use the SSO domain — for example `jane@yourdomain.com` and `joe@yourdomain.com` — must be removed so that new accounts can be created through SSO login. Once an email is linked to a standard account it cannot log in via SSO, and once the domain is an SSO domain no new standard accounts can be created on it. Share the list of these accounts with your Shelf contact, who will take care of removing them at the right point in the setup.
+
+### 4. Plan your group-to-role mapping [#](#4-plan-group-mapping)
+
+Shelf decides which role a user gets by matching the groups they belong to in your identity provider. You map those groups to Shelf roles (Administrator, Self service, Base) in the workspace settings.
+
+> [!NOTE]
+> You only need to map the **roles you actually use** — a single group mapping is enough for SSO to work. You do not need to create a group for every role. See your provider guide below for whether to use group **names** or group **IDs**.
+
 ## Setup and limitations [#](#setup-and-limitations)
 
 Shelf supports most identity providers that support the SAML 2.0 SSO protocol. We've prepared these guides for commonly used identity providers to help you get started. If you use a different provider, our support stands ready to help you out.

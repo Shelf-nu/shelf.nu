@@ -54,6 +54,8 @@ type CheckoutDialogProps = {
    * RESERVED, so prompting here would be a confusing no-op.
    */
   suppressEarlyCheckoutPrompt?: boolean;
+  /** Render the trigger button full-width to match a sibling full-width button. */
+  fullWidth?: boolean;
 };
 
 export default function CheckoutDialog({
@@ -65,6 +67,7 @@ export default function CheckoutDialog({
   label = "Check Out",
   variant = "default",
   suppressEarlyCheckoutPrompt = false,
+  fullWidth = false,
 }: CheckoutDialogProps) {
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
@@ -97,7 +100,7 @@ export default function CheckoutDialog({
         value={intent}
         form={formId}
         variant={isDropdown ? "link" : "primary"}
-        width={isDropdown ? "full" : undefined}
+        width={isDropdown || fullWidth ? "full" : undefined}
       >
         {triggerContent}
       </Button>
@@ -113,7 +116,7 @@ export default function CheckoutDialog({
           size={isDropdown ? undefined : "sm"}
           type="button"
           variant={isDropdown ? "link" : "primary"}
-          width={isDropdown ? "full" : undefined}
+          width={isDropdown || fullWidth ? "full" : undefined}
         >
           {triggerContent}
         </Button>
