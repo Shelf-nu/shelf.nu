@@ -2376,7 +2376,12 @@ export async function partialCheckinBooking({
         ) {
           completeKits.push({ id: asset.kit.id, name: asset.kit.name });
           processedKitIds.add(asset.kit.id);
-        } else if (!asset.kit) {
+        } else if (!asset.kit || !completeKitIds.includes(asset.kit.id)) {
+          // Asset belongs to a kit that is only partially being checked
+          // in/out: the kit isn't a complete-kit line, so name the individual
+          // asset (the same way standalone assets are shown) instead of
+          // dropping it. Without this, a batch made up entirely of such
+          // assets produced an empty note (e.g. "partial check-out: .").
           standaloneAssets.push({ id: asset.id, title: asset.title });
         }
       }
@@ -2917,7 +2922,12 @@ export async function partialCheckoutBooking({
         ) {
           completeKits.push({ id: asset.kit.id, name: asset.kit.name });
           processedKitIds.add(asset.kit.id);
-        } else if (!asset.kit) {
+        } else if (!asset.kit || !completeKitIds.includes(asset.kit.id)) {
+          // Asset belongs to a kit that is only partially being checked
+          // in/out: the kit isn't a complete-kit line, so name the individual
+          // asset (the same way standalone assets are shown) instead of
+          // dropping it. Without this, a batch made up entirely of such
+          // assets produced an empty note (e.g. "partial check-out: .").
           standaloneAssets.push({ id: asset.id, title: asset.title });
         }
       }
