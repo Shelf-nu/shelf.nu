@@ -61,6 +61,13 @@ model User {
   // Used to flag if the user is soft deleted
   deletedAt DateTime?
 
+  // Last time this user used the mobile companion app (any workspace). Powers
+  // companion-app adoption metrics from our own DB — no external analytics.
+  // Recorded debounced + fire-and-forget by requireMobileAuth, the chokepoint
+  // every mobile API route passes through. Account-level adoption = orgs with a
+  // recently-active member (join via UserOrganization). Null until first use.
+  lastMobileActiveAt DateTime?
+
   // Relationships
   assets              Asset[]
   categories          Category[]
@@ -127,6 +134,8 @@ model User {
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])
+  // Index for mobile-adoption "active since <date>" range scans
+  @@index([lastMobileActiveAt])
 }
 
 model UserContact {
