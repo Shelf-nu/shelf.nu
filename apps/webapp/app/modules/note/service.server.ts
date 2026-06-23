@@ -22,7 +22,10 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   wrapKitsWithDataForNote,
   wrapLinkForNote,
@@ -33,6 +36,16 @@ import {
   assertAssetsBelongToOrg,
   type OrgValidationTxClient,
 } from "~/utils/org-validation.server";
+
+/**
+ * Maps the user-facing `noteType` filter value (rendered by the shared
+ * `StatusFilter`) to the {@link NoteType} stored on a note. Any other value —
+ * including the "ALL" sentinel or an absent param — means "no type filter".
+ */
+const NOTE_TYPE_FILTER_MAP: Record<string, Note["type"]> = {
+  Comments: "COMMENT",
+  Updates: "UPDATE",
+};
 
 const label = "Note";
 
@@ -173,6 +186,99 @@ export async function deleteNote({
       cause,
       message: "Something went wrong while deleting the note",
       additionalData: { id, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Loads a single asset's notes (its activity log) with pagination, free-text
+ * search, and a note-type filter — so the activity tab reuses the same list
+ * mechanics (`<Filters>`, `<StatusFilter>`, `<Pagination>`) as the rest of the
+ * app instead of rendering every note unbounded.
+ *
+ * Reads the standard list query params from the request:
+ * - `page` / `per_page` — pagination ({@link getParamsValues} + {@link updateCookieWithPerPage})
+ * - `s` — free-text search, matched against note content and the author's name
+ * - `noteType` — "Comments" (human `COMMENT` notes) or "Updates" (system
+ *   `UPDATE` notes); any other value (incl. absent / "ALL") returns both.
+ *
+ * `organizationId` is required and scopes the query via `asset.organizationId`,
+ * so a note can never be read across tenants even if a foreign `assetId` is
+ * supplied (see `.claude/rules/org-scope-user-supplied-ids.md`).
+ *
+ * @returns Pagination metadata plus the page of notes (`items`), newest first.
+ * @throws {ShelfError} If the database query fails.
+ */
+export async function getPaginatedAndFilterableAssetNotes({
+  assetId,
+  organizationId,
+  request,
+}: {
+  assetId: Asset["id"];
+  organizationId: string;
+  request: Request;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+
+  const typeFilter = NOTE_TYPE_FILTER_MAP[searchParams.get("noteType") ?? ""];
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    /** Scope by the asset AND its organization (cross-tenant read guard) */
+    const where: Prisma.NoteWhereInput = {
+      assetId,
+      asset: { organizationId },
+    };
+
+    if (typeFilter) {
+      where.type = typeFilter;
+    }
+
+    if (search) {
+      /** Match the search term against the note body or the author's name */
+      where.OR = [
+        { content: { contains: search, mode: "insensitive" } },
+        {
+          user: {
+            OR: [
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    const [notes, totalItems] = await Promise.all([
+      db.note.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+        include: {
+          user: {
+            select: { firstName: true, lastName: true, displayName: true },
+          },
+        },
+      }),
+      db.note.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return { page, perPage, search, items: notes, totalItems, totalPages };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the asset's notes",
+      additionalData: { assetId, organizationId },
       label,
     });
   }

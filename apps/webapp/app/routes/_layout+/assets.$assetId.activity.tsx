@@ -7,6 +7,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableAssetNotes } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -33,32 +34,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
+    /**
+     * Fetch the asset itself (also enforces org/permission scoping) for the
+     * page header and the "Export activity CSV" link. Notes are fetched
+     * separately below so the activity log can be paginated, searched, and
+     * filtered like every other list in the app.
+     */
     const asset = await getAsset({
       id,
       organizationId,
       userOrganizations,
       request,
-      include: {
-        notes: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                displayName: true,
-              },
-            },
-          },
-        },
-      },
     });
+
+    const { page, perPage, search, items, totalItems, totalPages } =
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: id,
+        organizationId,
+        request,
+      });
 
     const header: HeaderData = {
       title: `${asset.title}'s activity`,
     };
 
-    return payload({ asset, header });
+    const modelName = {
+      singular: "note",
+      plural: "notes",
+    };
+
+    return payload({
+      asset,
+      header,
+      items,
+      totalItems,
+      page,
+      perPage,
+      search,
+      totalPages,
+      modelName,
+      searchFieldLabel: "Search notes",
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

@@ -1,5 +1,10 @@
 import { useFetcher, useLoaderData } from "react-router";
+import { StatusFilter } from "~/components/booking/status-filter";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
+import { Pagination } from "~/components/list/pagination";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";
 import { isFormProcessing } from "~/utils/form";
@@ -8,13 +13,39 @@ import { NewNote } from "./new";
 import type { NoteWithUser } from "./note";
 import { Note } from "./note";
 
+/**
+ * User-facing options for the note-type filter. The `StatusFilter` prepends an
+ * "ALL" option automatically; these values are mapped back to the `NoteType`
+ * enum server-side in `getPaginatedAndFilterableAssetNotes`.
+ * - Comments: human-authored notes (`COMMENT`)
+ * - Updates: system activity entries (`UPDATE`)
+ */
+const NOTE_TYPE_FILTER_ITEMS = {
+  Comments: "Comments",
+  Updates: "Updates",
+} as const;
+
+/**
+ * The asset activity log.
+ *
+ * Reuses the shared list toolbar (`Filters` + `StatusFilter` + `Pagination`)
+ * so the activity stream can be searched, filtered by type, and paginated like
+ * every other list in the app. Notes are rendered as cards (not table rows),
+ * so this composes the toolbar primitives directly rather than via `<List>`.
+ */
 export const Notes = () => {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, items, totalItems, search } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
 
-  const hasNotes = asset?.notes && asset?.notes.length > 0;
+  const notes = items as NoteWithUser[];
+
+  /** Whether a search term or note-type filter is currently narrowing the list */
+  const noteTypeFilter = searchParams.get("noteType");
+  const hasActiveFilters =
+    !!search || (!!noteTypeFilter && noteTypeFilter !== "ALL");
 
   /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
   const fetcher = useFetcher({ key: "add-note" });
@@ -26,9 +57,16 @@ export const Notes = () => {
     }
   }
 
-  // Create optimistic note data that matches the NoteWithUser shape
+  /**
+   * A new note is always a COMMENT, so only show the optimistic placeholder
+   * when the current filter would include comments (i.e. not the "Updates"
+   * filter) — otherwise it would briefly appear in a view that excludes it.
+   */
+  const filterIncludesComments = noteTypeFilter !== "Updates";
   const optimisticNote: NoteWithUser | null =
-    isFormProcessing(fetcher.state) && onSubmissionContent
+    filterIncludesComments &&
+    isFormProcessing(fetcher.state) &&
+    onSubmissionContent
       ? {
           id: "optimistic-note", // Temporary ID for optimistic UI
           content: onSubmissionContent,
@@ -43,41 +81,67 @@ export const Notes = () => {
         }
       : null;
 
+  const hasResults = notes.length > 0 || !!optimisticNote;
+
   return (
-    <div className="relative">
-      {hasNotes ? (
-        <Button
-          to={`/assets/${asset.id}/activity.csv`}
-          variant="secondary"
-          className={
-            "absolute right-0 top-[-58px] hidden px-2 py-1 text-sm md:inline-flex"
-          }
-          download
-          reloadDocument
-        >
-          Export activity CSV
-        </Button>
-      ) : null}
+    <ListContentWrapper>
+      <Filters
+        slots={{
+          "left-of-search": (
+            <StatusFilter
+              name="noteType"
+              statusItems={NOTE_TYPE_FILTER_ITEMS}
+            />
+          ),
+        }}
+      >
+        {totalItems > 0 ? (
+          <Button
+            to={`/assets/${asset.id}/activity.csv`}
+            variant="secondary"
+            className="mt-2 w-full px-3.5 py-2 text-sm md:mt-0 md:w-max"
+            download
+            reloadDocument
+          >
+            Export activity CSV
+          </Button>
+        ) : null}
+      </Filters>
+
       <NewNote fetcher={fetcher} />
-      {hasNotes ? (
-        <ul className="notes-list mt-8 w-full">
-          {/* Render optimistic note using the same Note component */}
-          {optimisticNote && (
-            <Note
-              key={optimisticNote.id}
-              note={optimisticNote}
-              actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
-            />
-          )}
-          {/* Render all existing notes */}
-          {(asset.notes as NoteWithUser[]).map((note) => (
-            <Note
-              key={note.id}
-              note={note}
-              actionsDropdown={<ActionsDropdown noteId={note.id} />}
-            />
-          ))}
-        </ul>
+
+      {hasResults ? (
+        <>
+          <ul className="notes-list mt-8 w-full">
+            {/* Render optimistic note using the same Note component */}
+            {optimisticNote && (
+              <Note
+                key={optimisticNote.id}
+                note={optimisticNote}
+                actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
+              />
+            )}
+            {/* Render the current page of notes */}
+            {notes.map((note) => (
+              <Note
+                key={note.id}
+                note={note}
+                actionsDropdown={<ActionsDropdown noteId={note.id} />}
+              />
+            ))}
+          </ul>
+          <Pagination />
+        </>
+      ) : hasActiveFilters ? (
+        <div className="flex h-[300px] items-center justify-center">
+          <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">
+            <h4>No matching activity</h4>
+            <p>
+              No notes match your current search or filter. <br />
+              Try adjusting them to see more.
+            </p>
+          </div>
+        </div>
       ) : (
         <div className="flex h-[500px] items-center  justify-center">
           <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">
@@ -94,6 +158,6 @@ export const Notes = () => {
           </div>
         </div>
       )}
-    </div>
+    </ListContentWrapper>
   );
 };
