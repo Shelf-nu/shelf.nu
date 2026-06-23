@@ -1093,6 +1093,7 @@ describe("note service", () => {
             OR: [
               { firstName: { contains: "lens", mode: "insensitive" } },
               { lastName: { contains: "lens", mode: "insensitive" } },
+              { displayName: { contains: "lens", mode: "insensitive" } },
             ],
           },
         },

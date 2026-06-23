@@ -35,24 +35,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Fetch the asset itself (also enforces org/permission scoping) for the
-     * page header and the "Export activity CSV" link. Notes are fetched
-     * separately below so the activity log can be paginated, searched, and
-     * filtered like every other list in the app.
+     * Fetch the asset (which also enforces org/permission scoping) for the page
+     * header and the "Export activity CSV" link, and the notes page in
+     * parallel. Notes are fetched separately — and paginated/searched/filtered —
+     * so the activity log behaves like every other list in the app. Both are
+     * independently org-scoped, so they can run concurrently.
      */
-    const asset = await getAsset({
-      id,
-      organizationId,
-      userOrganizations,
-      request,
-    });
-
-    const { page, perPage, search, items, totalItems, totalPages } =
-      await getPaginatedAndFilterableAssetNotes({
-        assetId: id,
-        organizationId,
-        request,
-      });
+    const [asset, { page, perPage, search, items, totalItems, totalPages }] =
+      await Promise.all([
+        getAsset({
+          id,
+          organizationId,
+          userOrganizations,
+          request,
+        }),
+        getPaginatedAndFilterableAssetNotes({
+          assetId: id,
+          organizationId,
+          request,
+        }),
+      ]);
 
     const header: HeaderData = {
       title: `${asset.title}'s activity`,

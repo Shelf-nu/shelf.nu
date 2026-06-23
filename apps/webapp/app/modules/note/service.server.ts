@@ -242,7 +242,12 @@ export async function getPaginatedAndFilterableAssetNotes({
     }
 
     if (search) {
-      /** Match the search term against the note body or the author's name */
+      /**
+       * Match the search term against the note body or the author's name.
+       * `displayName` is included because the note card shows it (via
+       * `resolveUserDisplayName`) for SSO users, so a search for the visible
+       * author name must match it too.
+       */
       where.OR = [
         { content: { contains: search, mode: "insensitive" } },
         {
@@ -250,6 +255,7 @@ export async function getPaginatedAndFilterableAssetNotes({
             OR: [
               { firstName: { contains: search, mode: "insensitive" } },
               { lastName: { contains: search, mode: "insensitive" } },
+              { displayName: { contains: search, mode: "insensitive" } },
             ],
           },
         },
