@@ -1348,6 +1348,12 @@ const CustomForm = ({
             }
             portalContainer={formElement || undefined}
             formId="partial-checkout-form"
+            // CheckoutDialog's trigger defaults to `grow` (designed for the
+            // full-width booking-header bar). Inside this drawer footer the
+            // sibling Cancel is `w-auto`, so the default grow makes the
+            // trigger stretch to fill the row. Match the non-early-checkout
+            // branch's `w-auto` for visual parity.
+            triggerClassName="w-auto"
           />
         ) : (
           <Button
