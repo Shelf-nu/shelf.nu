@@ -72,6 +72,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
+import { computeCheckedOutForAsset } from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
@@ -203,8 +204,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /**
      * Compute quantity availability for QUANTITY_TRACKED assets.
      * Sums custody records AND booking reservations to determine how many
-     * units are currently available. Booking reservations are split into
-     * "reserved" (RESERVED status) and "checked out" (ONGOING/OVERDUE).
+     * units are currently available. Booking reservations split into two
+     * disjoint buckets so the sidebar surfaces both at a glance:
+     *
+     *   - `reserved` — units committed to bookings but NOT yet physically
+     *     gone. Combines RESERVED-booking quantities (future bookings)
+     *     with the ONGOING/OVERDUE "booked but not yet checked out"
+     *     remainder. Subtracts from `available` (booking-aware) but not
+     *     from `custodyAvailable` (physical-only).
+     *   - `checkedOut` — units actively off the shelf via an ONGOING /
+     *     OVERDUE booking, computed via the shared OUT-flow primitive.
+     *     Subtracts from both `available` and `custodyAvailable`.
      */
     let quantityData: {
       total: number;
@@ -232,7 +242,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * orthogonal-MAX formula in `getLocationPickerMeta`).
        */
       inLocations: number;
+      /**
+       * Units committed to bookings but NOT yet physically off the shelf.
+       * Covers RESERVED bookings (future) + the ONGOING/OVERDUE
+       * booked-but-not-yet-checked-out remainder. Disjoint from
+       * `checkedOut` — every booked unit appears in exactly one bucket.
+       */
       reserved: number;
+      /**
+       * Units actively off the shelf via ONGOING/OVERDUE bookings,
+       * computed via the shared OUT-flow primitive
+       * (`computeCheckedOutForAsset`).
+       */
       checkedOut: number;
       /**
        * Booking-aware availability: how many units can be reserved for a
@@ -252,26 +273,62 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } | null = null;
 
     if (isQuantityTracked(asset)) {
-      const [reservedSum, checkedOutSum] = await Promise.all([
+      // "Reserved (bookings)" on the overview card surfaces every unit
+      // that is committed to a booking but NOT yet physically off the
+      // shelf — so users instantly see the chunk that's neither truly
+      // free nor already gone. That single bucket has two contributors:
+      //
+      //   1. RESERVED bookings — no progressive-checkout component, the
+      //      naive `Σ BookingAsset.quantity` is the whole earmarked count.
+      //   2. ONGOING / OVERDUE bookings — the booked total MINUS what's
+      //      already been scanned out via PartialBookingCheckout. The
+      //      OUT-side primitive (`computeCheckedOutForAsset`) gives us
+      //      the truly-out count; subtracting it from the active-booking
+      //      booked total yields the booked-but-not-yet-out remainder.
+      //
+      // "Checked out (bookings)" is computed via the shared helper so
+      // the overview sidebar stays in lock-step with the OUT-flow's
+      // per-slice math.
+      const [reservedSum, ongoingBookedSum, checkedOut] = await Promise.all([
         db.bookingAsset.aggregate({
           where: {
             assetId: asset.id,
-            booking: { status: "RESERVED" },
+            booking: { status: "RESERVED", organizationId },
           },
           _sum: { quantity: true },
         }),
+        // Active-booking booked total — sum of every `BookingAsset.quantity`
+        // slice on an ONGOING/OVERDUE booking. The not-yet-out remainder
+        // is this minus `checkedOut`.
         db.bookingAsset.aggregate({
           where: {
             assetId: asset.id,
-            booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+            booking: {
+              status: { in: ["ONGOING", "OVERDUE"] },
+              organizationId,
+            },
           },
           _sum: { quantity: true },
         }),
+        // Org-scope: pass the caller's organizationId so the helper can
+        // never accidentally surface checked-out counts from another
+        // workspace if a cross-org asset id were ever supplied.
+        computeCheckedOutForAsset(db, asset.id, organizationId),
       ]);
 
       const total = asset.quantity ?? 0;
-      const reserved = reservedSum._sum?.quantity ?? 0;
-      const checkedOut = checkedOutSum._sum?.quantity ?? 0;
+      // Floor at 0 defensively — pathological data (PartialBookingCheckout
+      // claims exceeding the booked total) could otherwise produce a
+      // negative remainder.
+      const ongoingBookedNotYetOut = Math.max(
+        0,
+        (ongoingBookedSum._sum?.quantity ?? 0) - checkedOut
+      );
+      // Combine RESERVED bookings + the ONGOING-not-yet-out remainder
+      // so the "Reserved (bookings)" row reflects every unit committed
+      // to a booking but still physically present.
+      const reserved =
+        (reservedSum._sum?.quantity ?? 0) + ongoingBookedNotYetOut;
       // Sum each kit's slice — the asset's pool earmarked for kit use.
       const inKits = (asset.assetKits ?? []).reduce(
         (sum: number, ak) => sum + (ak.quantity ?? 0),

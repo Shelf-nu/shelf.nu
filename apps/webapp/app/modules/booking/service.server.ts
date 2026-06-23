@@ -389,29 +389,147 @@ export async function scheduleNextBookingJob({
   }
 }
 
-async function updateBookingAssetStates(
-  booking: Booking & {
-    bookingAssets: { asset: Pick<Asset, "id"> }[];
-  },
-  status: AssetStatus
-) {
+/**
+ * Per-asset terminal-status reconciliation when an asset is **exiting** a
+ * booking (cancel / remove-from-booking / delete-booking).
+ *
+ * The naive `updateMany({ status: AVAILABLE })` previously used in
+ * {@link cancelBooking}, {@link removeAssets} and {@link deleteBooking} was
+ * unsafe in multi-tenant inventory: an asset can simultaneously sit on a
+ * different ongoing booking, OR be held by a custody record, OR both. Flipping
+ * it to `AVAILABLE` from the source booking's exit silently stripped those
+ * other commitments — the asset showed free on /assets even though another
+ * booking still had it checked out, or a team member still had custody. Bugs
+ * #96 and #99 both trace back to this leak.
+ *
+ * This helper mirrors the safe per-asset reconciliation already used inside
+ * {@link checkinBooking} (see L3791-L3815): for the given asset, query — under
+ * the SAME `tx` snapshot as the booking mutation — every OTHER booking the
+ * asset is currently `ONGOING`/`OVERDUE` on, and every `Custody` row that
+ * holds it. The correct terminal status is then:
+ *
+ *   - **`CHECKED_OUT`** — another `ONGOING`/`OVERDUE` booking still references
+ *     the asset. Leave it checked out for that booking. (We do NOT downgrade
+ *     to `IN_CUSTODY` here even if a custody row also exists — `CHECKED_OUT`
+ *     is the stronger "asset is off-premises for a booking" signal, and the
+ *     custody record is preserved independently.)
+ *   - **`IN_CUSTODY`** — no other active booking, but a `Custody` row exists.
+ *     The asset is held by a team member outside of any booking.
+ *   - **`AVAILABLE`** — no other active booking, no custody. Safe to release
+ *     back onto the shelf.
+ *
+ * `excludeBookingId` is REQUIRED so the source booking's own
+ * about-to-be-removed `BookingAsset` rows (cancel / remove / delete) do not
+ * count themselves as "another active booking" and pin the asset to
+ * `CHECKED_OUT` forever. Callers should invoke this BEFORE deleting the source
+ * booking's pivot rows so the `bookingId: { not: excludeBookingId }` filter
+ * does the work — OR (equivalently) call it AFTER the deletes, in which case
+ * the filter is redundant but harmless.
+ *
+ * Use this helper on every IN-flow exit path (cancel / remove / delete). The
+ * RESERVED → ONGOING OUT-flow uses its own targeted `tx.asset.updateMany`
+ * inline because every asset is unambiguously transitioning to `CHECKED_OUT`
+ * there and no per-asset reconciliation is needed.
+ *
+ * @param tx - Active Prisma transaction client. Must be the same tx that
+ *             writes the booking-status change / pivot deletions so the read
+ *             and the status flip commit atomically.
+ * @param args.assetIds - Assets exiting the booking. Each is reconciled
+ *             independently; ordering does not matter.
+ * @param args.excludeBookingId - The source booking's id. Excluded from the
+ *             "other active bookings" count so the source booking's own
+ *             rows do not block release.
+ * @param args.organizationId - Active org. Used to org-scope the asset write
+ *             (defence-in-depth against cross-org IDOR — see
+ *             `~/utils/org-validation.server`).
+ * @returns A `Map<assetId, AssetStatus>` of the status each asset was flipped
+ *          to. Useful for callers that need to emit per-asset activity events
+ *          or build a summary note. Assets whose computed status equals their
+ *          current status are still included (the write is a no-op `update`).
+ * @throws {ShelfError} If any underlying Prisma call fails.
+ *
+ * @see {@link checkinBooking} for the existing safe pattern this generalises
+ *      (apps/webapp/app/modules/booking/service.server.ts, L3791-L3815).
+ * @see {@link cancelBooking}, {@link removeAssets}, {@link deleteBooking} for
+ *      the call sites that should adopt this helper.
+ */
+async function reconcileAssetStatusForBookingExit({
+  tx,
+  assetIds,
+  excludeBookingId,
+  organizationId,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+  assetIds: Asset["id"][];
+  excludeBookingId: Booking["id"];
+  organizationId: Organization["id"];
+}): Promise<Map<Asset["id"], AssetStatus>> {
+  // De-dupe up front: an asset can appear on the booking through both a kit
+  // and a standalone slice, but each asset needs exactly one reconciliation.
+  const uniqueAssetIds = [...new Set(assetIds)];
+  const resolvedStatuses = new Map<Asset["id"], AssetStatus>();
+
+  if (uniqueAssetIds.length === 0) return resolvedStatuses;
+
   try {
-    return await db.asset.updateMany({
-      where: {
-        status: { not: status },
-        id: {
-          in: [...new Set(booking.bookingAssets.map((ba) => ba.asset.id))],
-        },
-        // Scope to the booking's org so we never mutate assets in another org
-        organizationId: booking.organizationId,
-      },
-      data: { status },
-    });
+    for (const assetId of uniqueAssetIds) {
+      // Run both queries in parallel — each is a single indexed count, and
+      // they are independent. Scoped to the active tx snapshot so a
+      // concurrent booking write cannot race the decision.
+      const [otherActiveBookings, custodyCount] = await Promise.all([
+        tx.bookingAsset.count({
+          where: {
+            assetId,
+            // Exclude the source booking's own rows so we don't self-pin.
+            bookingId: { not: excludeBookingId },
+            booking: {
+              status: {
+                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+              },
+            },
+          },
+        }),
+        tx.custody.count({ where: { assetId } }),
+      ]);
+
+      // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY
+      // beats AVAILABLE. See JSDoc above for the rationale on not
+      // downgrading to IN_CUSTODY when both a booking and a custody coexist.
+      let nextStatus: AssetStatus;
+      if (otherActiveBookings > 0) {
+        nextStatus = AssetStatus.CHECKED_OUT;
+      } else if (custodyCount > 0) {
+        nextStatus = AssetStatus.IN_CUSTODY;
+      } else {
+        nextStatus = AssetStatus.AVAILABLE;
+      }
+
+      // Use `updateMany` so we can compound `id` + `organizationId` in the
+      // where clause without depending on a `@@unique` constraint. Org-scope
+      // is defence-in-depth: even though `assetId` originated from a booking
+      // already loaded org-scoped by every caller, this filter makes the
+      // IDOR impossible to (re)introduce by a future refactor. The lint rule
+      // for `require-org-scope-on-id-queries` is exactly what this satisfies.
+      await tx.asset.updateMany({
+        where: { id: assetId, organizationId },
+        data: { status: nextStatus },
+      });
+
+      resolvedStatuses.set(assetId, nextStatus);
+    }
+
+    return resolvedStatuses;
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while updating the booking asset states.",
-      additionalData: { booking, status },
+      message:
+        "Something went wrong while reconciling asset statuses after a booking exit.",
+      additionalData: {
+        assetIds: uniqueAssetIds,
+        excludeBookingId,
+        organizationId,
+      },
       label,
     });
   }
@@ -2822,6 +2940,21 @@ export async function computeBookingAssetSliceRemaining(
  * keeps the read backward-compatible with the existing all-at-once and
  * pre-Wave-B partial-checkout history without a backfill.
  *
+ * Legacy-ONGOING fallback (bug #96 follow-up): an ONGOING/OVERDUE booking
+ * with ZERO {@link PartialBookingCheckout} rows can only exist if it was
+ * checked out via the legacy all-at-once flow (the new partial flow writes
+ * a session row on every batch, so an ONGOING booking born from it always
+ * has ≥1 row). In that legacy state, EVERY booked unit is physically off
+ * the shelf — the per-asset `AssetStatus.CHECKED_OUT` flip the all-at-once
+ * path performs is the equivalent signal — so `remaining` is 0, not
+ * `booked`. Without this fallback, {@link computeCheckedOutForAsset}
+ * (which reads `booked − remaining` as the checked-out portion) would
+ * compute `booked − booked = 0` for legacy ONGOING bookings and the asset
+ * overview "checked out" tile would silently drop them. RESERVED bookings
+ * never trip the fallback (no units out yet). The fetch is a single
+ * indexed-PK read against `Booking.status`, idempotent and safe to call
+ * from inside or outside a transaction.
+ *
  * @param tx - Prisma transaction client (or default `db`)
  * @param bookingId - Booking the asset belongs to
  * @param assetId - Asset to measure
@@ -2832,7 +2965,7 @@ export async function computeBookingAssetRemainingToCheckOut(
   bookingId: Booking["id"],
   assetId: Asset["id"]
 ): Promise<number> {
-  const [pivots, sessions] = await Promise.all([
+  const [pivots, sessions, booking] = await Promise.all([
     tx.bookingAsset.findMany({
       where: { bookingId, assetId },
       select: { quantity: true },
@@ -2841,6 +2974,15 @@ export async function computeBookingAssetRemainingToCheckOut(
       where: { bookingId },
       select: { assetIds: true, quantities: true },
     }),
+    // Cheap PK read — needed only so the legacy-ONGOING fallback below can
+    // distinguish "checked out via all-at-once (no PBC rows by design)"
+    // from "RESERVED, not yet touched" — both look identical from the
+    // sessions/pivots side but mean opposite things for "remaining".
+    tx.booking.findUnique({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pure read helper called from already-org-scoped contexts (the bookingId was resolved by callers via an org-scoped findUniqueOrThrow). Only reads non-sensitive `status` metadata. Mirrors the sibling helpers computeBookingAssetRemaining / computeBookingAssetSliceRemaining which take the same un-scoped (tx, bookingId, assetId) signature.
+      where: { id: bookingId },
+      select: { status: true },
+    }),
   ]);
 
   const booked = (pivots as Array<{ quantity: number }>).reduce(
@@ -2848,11 +2990,26 @@ export async function computeBookingAssetRemainingToCheckOut(
     0
   );
 
-  let claimed = 0;
-  for (const session of sessions as Array<{
+  // Legacy-ONGOING fallback — see JSDoc above. Guarded on `booked > 0` so a
+  // booking that doesn't actually hold this asset (pivots empty) short-circuits
+  // through the normal `Math.max(0, 0 - 0) = 0` rather than synthesizing a
+  // misleading "fully checked out" for an asset that was never on it.
+  const sessionsArr = sessions as Array<{
     assetIds: string[];
     quantities: number[];
-  }>) {
+  }>;
+  const bookingStatus = (booking as { status: BookingStatus } | null)?.status;
+  if (
+    booked > 0 &&
+    sessionsArr.length === 0 &&
+    (bookingStatus === BookingStatus.ONGOING ||
+      bookingStatus === BookingStatus.OVERDUE)
+  ) {
+    return 0;
+  }
+
+  let claimed = 0;
+  for (const session of sessionsArr) {
     const ids = session.assetIds ?? [];
     const qtys = session.quantities ?? [];
     // Wave B: aligned arrays — sum quantities[i] when assetIds[i] matches.
@@ -2871,6 +3028,114 @@ export async function computeBookingAssetRemainingToCheckOut(
   }
 
   return Math.max(0, booked - claimed);
+}
+
+/**
+ * TRUE checked-out unit count for an asset, summed across every
+ * ONGOING / OVERDUE booking the asset is on in the given organization.
+ *
+ * For each active booking that holds slices of this asset:
+ *
+ *   `checkedOutOnBooking = Σ(BookingAsset.quantity for this asset)
+ *                          − computeBookingAssetRemainingToCheckOut(...)`
+ *
+ * — i.e. "what's booked minus what's still on the shelf for this booking"
+ * — and the per-booking values are summed (floored at 0) to give the
+ * organization-wide checked-out total for the asset.
+ *
+ * This is the single source of truth for the "checked out" tile in the
+ * asset overview sidebar (bug #96) AND for the equivalent field returned
+ * by the public quantity API endpoint — both surfaces previously summed
+ * `BookingAsset.quantity` naively, which over-counted whenever a booking
+ * was ONGOING but had only been partially scanned out (the un-scanned
+ * slices were still on the shelf yet shown as checked out).
+ *
+ * Attribution of {@link PartialBookingCheckout} claims to this asset is
+ * delegated to {@link computeBookingAssetRemainingToCheckOut} — the SAME
+ * helper the OUT-flow uses to decide "how many more units can still be
+ * scanned out". Reusing that primitive (rather than re-implementing the
+ * Wave-B aligned-array / legacy-fallback math here) guarantees the
+ * overview-side and the OUT-side agree byte-for-byte on what
+ * "checked out" means, and means any future fix to the attribution
+ * logic lands in one place.
+ *
+ * Booking statuses are scoped to `ONGOING` + `OVERDUE` because those are
+ * the only states where the asset can be physically off-premises under
+ * this booking. RESERVED bookings have not been scanned out yet, and
+ * COMPLETE/ARCHIVED bookings have already been returned — neither
+ * contributes to "currently checked out". This matches the scope of the
+ * naive aggregate the helper is replacing (see
+ * `apps/webapp/app/routes/_layout+/assets.$assetId.overview.tsx`).
+ *
+ * Org-scoped: the BookingAsset query joins through `booking.organizationId`
+ * so a caller can never accidentally surface checked-out counts from
+ * another workspace.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param assetId - Asset whose true checked-out count we want
+ * @param organizationId - Caller's organization — required to scope the
+ *                        active-booking lookup and prevent cross-org leaks
+ * @returns Non-negative integer — units of `assetId` currently
+ *          considered checked out across all active bookings in this org
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeCheckedOutForAsset(
+  tx: any,
+  assetId: Asset["id"],
+  organizationId: string
+): Promise<number> {
+  // Pull every BookingAsset slice for this asset on an active booking
+  // in this organization. We need the booking id so we can reuse the
+  // per-booking "remaining" primitive that powers the OUT flow — that
+  // primitive is the authoritative attribution source for Wave-B
+  // partial checkouts and any future evolution of the claim shape.
+  const pivots = (await tx.bookingAsset.findMany({
+    where: {
+      assetId,
+      booking: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId,
+      },
+    },
+    select: { quantity: true, bookingId: true },
+  })) as Array<{ quantity: number; bookingId: string }>;
+
+  if (pivots.length === 0) return 0;
+
+  // Sum booked units per booking — an asset can have multiple slices on
+  // one booking (kit-driven + standalone of the same asset), and the
+  // OUT-side primitive is asset-on-booking, not slice-on-booking, so we
+  // need the per-booking total to derive its checked-out portion.
+  const bookedByBooking = new Map<string, number>();
+  for (const p of pivots) {
+    bookedByBooking.set(
+      p.bookingId,
+      (bookedByBooking.get(p.bookingId) ?? 0) + (p.quantity ?? 0)
+    );
+  }
+
+  // For each booking the asset is on, ask the OUT-side primitive how
+  // many units are still un-scanned. The complement (booked − remaining)
+  // is the slice that's actually off the shelf for this booking. Run
+  // the per-booking lookups in parallel — bookings are independent.
+  const perBookingCheckedOut = await Promise.all(
+    Array.from(bookedByBooking.entries()).map(
+      async ([bookingId, bookedOnBooking]) => {
+        const remainingOnBooking = await computeBookingAssetRemainingToCheckOut(
+          tx,
+          bookingId,
+          assetId
+        );
+        // Floor at 0 defensively — `remaining` is itself floored at 0,
+        // but pathological data (e.g. a manual DB edit that pushed
+        // PartialBookingCheckout claims above the booked total) could
+        // otherwise drive the per-booking subtraction negative.
+        return Math.max(0, bookedOnBooking - remainingOnBooking);
+      }
+    )
+  );
+
+  return perBookingCheckedOut.reduce((sum, n) => sum + n, 0);
 }
 
 /**
@@ -3673,8 +3938,17 @@ export async function checkinBooking({
             data: { status: AssetStatus.AVAILABLE },
           });
 
-          // QUANTITY_TRACKED assets: only reset to AVAILABLE if they have
-          // no other active bookings (ONGOING/OVERDUE) and no custody records
+          // QUANTITY_TRACKED assets need terminal-status reconciliation
+          // rather than a binary AVAILABLE flip: an asset can simultaneously
+          // sit on another ONGOING/OVERDUE booking or be held by a Custody
+          // row, and stamping AVAILABLE silently strips those signals
+          // (bug #99 follow-up a). `reconcileAssetStatusForBookingExit`
+          // queries — under the same `tx` snapshot as the booking write —
+          // the other active bookings and custody rows per asset, then
+          // picks the strongest remaining commitment
+          // (CHECKED_OUT > IN_CUSTODY > AVAILABLE). `excludeBookingId` is
+          // the booking being checked in so its own rows do not self-pin
+          // the asset to CHECKED_OUT.
           const qtyAssetIds = bookingFoundAssets
             .filter(
               (a) =>
@@ -3683,30 +3957,12 @@ export async function checkinBooking({
             .map((a) => a.id);
 
           if (qtyAssetIds.length > 0) {
-            for (const assetId of qtyAssetIds) {
-              const [otherBookings, custodyCount] = await Promise.all([
-                tx.bookingAsset.count({
-                  where: {
-                    assetId,
-                    bookingId: { not: id },
-                    booking: {
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                }),
-                tx.custody.count({ where: { assetId } }),
-              ]);
-
-              if (otherBookings === 0 && custodyCount === 0) {
-                await tx.asset.update({
-                  // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` comes from `bookingFoundAssets` loaded org-scoped via findUniqueOrThrow({where:{id,organizationId}}) at the top of checkinBooking
-                  where: { id: assetId },
-                  data: { status: AssetStatus.AVAILABLE },
-                });
-              }
-            }
+            await reconcileAssetStatusForBookingExit({
+              tx,
+              assetIds: qtyAssetIds,
+              excludeBookingId: id,
+              organizationId,
+            });
           }
         }
         /* If there are any kits associated with the booking, then update their status */
@@ -6785,14 +7041,32 @@ export async function cancelBooking({
     const hasKits = kitIds.length > 0;
 
     const booking = await db.$transaction(async (tx) => {
-      /** If booking is ONGOING or OVERDUE, we have to make the assets available */
+      /**
+       * If booking is ONGOING or OVERDUE, the cancelled booking's assets
+       * are exiting an active commitment and need terminal-status
+       * reconciliation. The historical blanket flip to AVAILABLE was unsafe:
+       * an asset can simultaneously sit on another ONGOING/OVERDUE booking
+       * or be held by a Custody row, and stamping AVAILABLE silently
+       * stripped those signals (bug #99).
+       *
+       * `reconcileAssetStatusForBookingExit` queries — under the same `tx`
+       * snapshot as the booking write — the other active bookings and
+       * custody rows per asset, then picks the strongest remaining
+       * commitment (CHECKED_OUT > IN_CUSTODY > AVAILABLE). `excludeBookingId`
+       * is set to the cancelled booking so its own about-to-be-orphaned
+       * `BookingAsset` rows don't self-pin the asset to CHECKED_OUT. Kits
+       * keep the existing blanket flip — kit status is a coarser indicator
+       * and is out of scope for this bug.
+       *
+       * RESERVED cancellations are unchanged: nothing was checked out so
+       * no reconciliation is needed.
+       */
       if (bookingFound.status !== BookingStatus.RESERVED) {
-        await tx.asset.updateMany({
-          where: {
-            id: { in: cancelAssets.map((a) => a.id) },
-            organizationId,
-          },
-          data: { status: AssetStatus.AVAILABLE },
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: cancelAssets.map((a) => a.id),
+          excludeBookingId: bookingFound.id,
+          organizationId,
         });
 
         /** If there are any kits, then update their status as well */
@@ -7749,7 +8023,26 @@ export async function removeAssets({
       }
     >();
 
+    // Lifted out of the tx so post-commit consumers (note rendering, the
+    // kit blanket flip gate) can read the source booking's status / name
+    // without an extra round-trip. Written inside the tx, read after.
+    let sourceBookingStatus: BookingStatus | null = null;
+    let sourceBookingName = "";
+
     await db.$transaction(async (tx) => {
+      // Read the source booking's status under the SAME tx snapshot used by
+      // `bookingAsset.deleteMany` below. Doing it inside the tx removes the
+      // observable window where the source booking's pivot rows are gone
+      // but the per-asset status flip hasn't fired yet — concurrent reads
+      // would have seen stale `Asset.status` values (bug #99).
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: scoped by id + organizationId; org membership is enforced upstream via the caller's permission gate.
+      const sourceBooking = await tx.booking.findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { status: true, name: true },
+      });
+      sourceBookingStatus = sourceBooking.status;
+      sourceBookingName = sourceBooking.name;
+
       const removedAssets = await tx.asset.findMany({
         where: { id: { in: assetIds }, organizationId },
         select: {
@@ -7857,38 +8150,74 @@ export async function removeAssets({
           },
         });
       }
+
+      /** When removing an asset from an ONGOING/OVERDUE booking we need to
+       * reconcile each asset's terminal status — NOT blanket-flip to
+       * AVAILABLE.
+       *
+       * The blanket flip was unsafe: an asset can simultaneously sit on a
+       * different ONGOING/OVERDUE booking OR be held by a Custody row, and
+       * stamping AVAILABLE silently stripped those signals (bug #99). The
+       * source booking's slice has already been deleted above in this same
+       * tx, so `excludeBookingId` is informational (the rows are gone
+       * anyway) but kept for symmetry with the other exit paths.
+       *
+       * RESERVED/DRAFT removals are unchanged: the asset was never out, so
+       * there is nothing to reconcile.
+       *
+       * Running inside the same tx as `bookingAsset.deleteMany` ensures the
+       * pivot deletion and the per-asset status flip commit atomically — no
+       * observable window where the source booking's slice is gone but the
+       * asset still reports a stale CHECKED_OUT (or, in the inverse, where
+       * a parallel flip has stamped AVAILABLE over another booking's
+       * legitimate CHECKED_OUT).
+       *
+       * See https://github.com/Shelf-nu/shelf.nu/issues/703#issuecomment-1944315975
+       * for the original "don't reset assets on draft remove" guard that
+       * this preserves.
+       */
+      if (
+        sourceBookingStatus === BookingStatus.ONGOING ||
+        sourceBookingStatus === BookingStatus.OVERDUE
+      ) {
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds,
+          excludeBookingId: id,
+          organizationId,
+        });
+      }
     });
 
-    const b = await db.booking.findUniqueOrThrow({
-      where: { id, organizationId },
-      select: {
-        id: true,
-        name: true,
-        status: true,
-      },
-    });
-    /** When removing an asset from a booking we need to make sure to set their status back to available
-     * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
-     * So we need to set it back to AVAILABLE
-     * We only do that if the booking we removed it from is ongoing or overdue.
-     * Reason is that the user can add an asset to a draft booking and remove it and that will reset its status back to available, which shouldnt happen
-     * https://github.com/Shelf-nu/shelf.nu/issues/703#issuecomment-1944315975
-     *
-     * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
-     * the updateMany will not find the assets in the booking anymore and wont update them
-     *
-     * If there was some kit removed from the booking, then we have to update the status of that kit to available
-     */
+    // Surface the booking row to post-tx consumers — note rendering needs
+    // `name`, the kit blanket-flip gate needs `status`. Both were captured
+    // inside the tx above; the `findUniqueOrThrow` would have thrown if the
+    // booking didn't exist, so we know these are populated by the time we
+    // reach this line.
+    if (sourceBookingStatus === null) {
+      // Defensive: should be impossible — the tx above does
+      // `findUniqueOrThrow`. Surfaces a clear error rather than a vague
+      // null deref if a future refactor breaks the invariant.
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Internal error: source booking status was not captured during asset removal.",
+        additionalData: { bookingId: id, organizationId },
+        label,
+      });
+    }
+    const b = {
+      id,
+      name: sourceBookingName,
+      status: sourceBookingStatus,
+    };
     if (
       b.status === BookingStatus.ONGOING ||
       b.status === BookingStatus.OVERDUE
     ) {
-      await db.asset.updateMany({
-        where: { id: { in: assetIds }, organizationId },
-        data: { status: AssetStatus.AVAILABLE },
-      });
-
       if (kitIds.length > 0) {
+        // Kit status keeps the blanket flip — kit status is a coarser
+        // indicator and out of scope for the per-asset #99 fix.
         await db.kit.updateMany({
           where: { id: { in: kitIds }, organizationId },
           data: { status: KitStatus.AVAILABLE },
@@ -8039,6 +8368,49 @@ export async function removeAssets({
   }
 }
 
+/**
+ * Permanently deletes a booking and reconciles the status of any assets that
+ * were checked out on it.
+ *
+ * Atomicity invariant (bug #99 follow-up):
+ * The user-visible state change — `Booking.delete` (which cascades to
+ * `BookingAsset` rows) AND the per-asset status reconciliation — runs inside
+ * a single `db.$transaction`. Without this, a concurrent reader could observe
+ * an intermediate state where the booking row is gone but its assets are
+ * still stamped `CHECKED_OUT` (or, inversely, where a parallel writer flips
+ * an asset before reconciliation runs and we silently overwrite a fresh
+ * commitment).
+ *
+ * Order inside the tx is deliberate: `activeAssetIds` are captured BEFORE
+ * the tx body runs because the cascade removes the `BookingAsset` pivot
+ * rows; the reconciliation helper still needs the list to scope its
+ * per-asset count + updateMany queries. Then `booking.delete` runs, then
+ * `reconcileAssetStatusForBookingExit` reads the post-delete world to decide
+ * each asset's terminal status (CHECKED_OUT if another active booking still
+ * holds it, IN_CUSTODY if a custody row holds it, else AVAILABLE).
+ *
+ * Out of the tx on purpose:
+ *  - Email notifications (`getBookingNotificationRecipients`,
+ *    `sendBookingEmailToAllRecipients`) — network calls; would hold the tx
+ *    open across SMTP latency and cannot be rolled back anyway.
+ *  - Kit blanket flip (`updateBookingKitStates`) — coarser indicator and
+ *    intentionally out of scope for the bug #99 atomicity fix; the singular
+ *    cancel path treats kits the same way.
+ *  - `cancelScheduler` — touches the external scheduler; cannot participate
+ *    in a Postgres tx.
+ *
+ * The reconcile helper is safe to call with the outer `tx` — it accepts a tx
+ * parameter and runs all its queries through it (no nested transaction). This
+ * is the same pattern `cancelBooking` and `removeAssets` already use.
+ *
+ * @param booking - Org-scoped booking identifier
+ * @param hints - Client hints used to format email subject lines and times
+ * @param userId - Optional editor user id, used to skip notifying the actor
+ * @returns The deleted booking row (with the includes needed for email
+ *          rendering and the post-tx caller).
+ * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps
+ *          any underlying Prisma/email failure.
+ */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
@@ -8088,17 +8460,50 @@ export async function deleteBooking(
     const uniqueKitIds = new Set(assetKitIds);
     const hasKits = uniqueKitIds.size > 0;
 
-    const b = await db.booking.delete({
-      where: { id, organizationId },
-      include: {
-        ...BOOKING_COMMON_INCLUDE,
-        ...BOOKING_INCLUDE_FOR_EMAIL,
-        bookingAssets: {
-          include: {
-            asset: { select: { id: true } },
+    // Capture the active asset IDs BEFORE entering the tx: `Booking.delete`
+    // cascades and wipes the `BookingAsset` rows, so once the delete commits
+    // there is no way to recover the list. The reconcile helper needs them
+    // to scope its per-asset count + updateMany queries.
+    const activeAssetIds =
+      activeBooking?.bookingAssets.map((ba) => ba.asset.id) ?? [];
+
+    /**
+     * Single transaction wraps the booking delete and (when applicable) the
+     * per-asset reconciliation. See the function-level JSDoc for the full
+     * atomicity rationale.
+     */
+    const b = await db.$transaction(async (tx) => {
+      const deleted = await tx.booking.delete({
+        where: { id, organizationId },
+        include: {
+          ...BOOKING_COMMON_INCLUDE,
+          ...BOOKING_INCLUDE_FOR_EMAIL,
+          bookingAssets: {
+            include: {
+              asset: { select: { id: true } },
+            },
           },
         },
-      },
+      });
+
+      /** Assets that were checked out on an ONGOING/OVERDUE booking need
+       * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
+       * The cascade above has already removed this booking's
+       * `BookingAsset` rows, so each asset's correct status is the
+       * strongest commitment it still has elsewhere — another active
+       * booking (CHECKED_OUT), a custody row (IN_CUSTODY), or nothing
+       * (AVAILABLE). See bug #99.
+       */
+      if (activeBooking) {
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: activeAssetIds,
+          excludeBookingId: activeBooking.id,
+          organizationId,
+        });
+      }
+
+      return deleted;
     });
 
     // Resolve notification recipients and send personalized emails
@@ -8138,19 +8543,18 @@ export async function deleteBooking(
       });
     }
 
-    /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
-    if (activeBooking) {
-      await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
-
-      // If booking has some kits, then make them available too
-      if (hasKits) {
-        await updateBookingKitStates({
-          kitIds: [...uniqueKitIds],
-          status: KitStatus.AVAILABLE,
-          organizationId,
-        });
-      }
+    // Kit blanket flip — out of the tx on purpose. Kit status is a coarser
+    // indicator than asset status; the singular cancel path treats it the
+    // same way and the bug #99 atomicity fix is intentionally scoped to
+    // assets.
+    if (activeBooking && hasKits) {
+      await updateBookingKitStates({
+        kitIds: [...uniqueKitIds],
+        status: KitStatus.AVAILABLE,
+        organizationId,
+      });
     }
+
     await cancelScheduler(
       currentBooking ?? {
         id: b.id,

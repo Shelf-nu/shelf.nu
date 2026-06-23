@@ -73,9 +73,25 @@ export interface QuantityOverviewCardProps {
    * simultaneously without double-counting.
    */
   inLocationsQuantity?: number;
-  /** Quantity reserved in upcoming bookings (RESERVED status) */
+  /**
+   * Units committed to bookings but NOT yet physically off the shelf.
+   *
+   * Covers two contributors:
+   *  - RESERVED bookings (future bookings — naive `Σ BookingAsset.quantity`)
+   *  - ONGOING/OVERDUE bookings minus the already-checked-out portion
+   *    (i.e. the booked-but-not-yet-scanned-out remainder)
+   *
+   * Surfaced on the "Reserved (bookings)" row so users see every unit
+   * spoken for by a booking that hasn't physically left yet, alongside
+   * the separate "Checked out (bookings)" row for what's actually gone.
+   */
   reservedQuantity?: number;
-  /** Quantity checked out via active bookings (ONGOING/OVERDUE status) */
+  /**
+   * Units actively off the shelf via ONGOING/OVERDUE bookings — computed
+   * via `computeCheckedOutForAsset` so this stays in lock-step with the
+   * OUT-flow's per-slice math. Disjoint from `reservedQuantity`: every
+   * booked unit appears in exactly one of the two rows.
+   */
   checkedOutQuantity?: number;
   /** Whether the user has permission to adjust quantity */
   canUpdate?: boolean;

@@ -59,6 +59,17 @@ vitest.mock("~/database/db.server", () => {
         ),
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
+        // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING
+        // fallback (bug #96 follow-up) reads `booking.status` via a cheap
+        // findUnique. Default to RESERVED so the fallback short-circuits and
+        // tests fall through to the existing aligned/legacy attribution math
+        // — tests that deliberately model an ONGOING/OVERDUE booking with
+        // pre-existing PBC sessions override this per-test (or seed the
+        // session via __seedPbcSessions, which keeps `sessions.length > 0`
+        // so the fallback doesn't trip either way).
+        findUnique: vitest
+          .fn()
+          .mockResolvedValue({ status: BookingStatus.RESERVED }),
         update: vitest.fn().mockResolvedValue({}),
       },
       asset: {

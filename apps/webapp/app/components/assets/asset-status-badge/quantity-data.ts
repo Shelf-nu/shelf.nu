@@ -62,6 +62,24 @@ export interface QuantityAwareAsset {
  * Computes quantity breakdown from an asset's custody and booking records.
  * Returns null for non-quantity-tracked assets or when there is no custody
  * or booking data to display.
+ *
+ * IMPORTANT — `bookingAssets[].quantity` contract for ONGOING/OVERDUE rows:
+ * For booking rows whose status is ONGOING or OVERDUE, the `quantity` on
+ * each `BookingAssetRecord` MUST be the SERVER-COMPUTED effective claimed
+ * count for this asset on that booking — i.e. the booked quantity AFTER
+ * subtracting any `PartialBookingCheckout` claims attributed to the asset
+ * (Wave-B aligned-array attribution with legacy fallback). It is NOT the
+ * raw `BookingAsset.quantity` snapshot from the pivot table.
+ *
+ * Loaders / the lazy-fetch quantity-breakdown API endpoint are responsible
+ * for performing this subtraction before feeding rows into this helper —
+ * the canonical reducer is `computeCheckedOutForAsset` in
+ * `~/modules/booking/service.server`, which is the single source of truth
+ * shared by the OUT-side (`computeBookingAssetRemainingToCheckOut`) and
+ * the overview-side. Without that pre-computation, the badge over-reports
+ * units as checked-out (the regression tracked as #96).
+ *
+ * RESERVED rows are unaffected — they carry the raw booked quantity.
  */
 export function getQuantityData(asset?: QuantityAwareAsset | null) {
   if (!asset || !isQuantityTracked(asset)) return null;
@@ -85,6 +103,14 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
     .filter((ba) => ba.booking?.status === "RESERVED")
     .reduce((sum, ba) => sum + (ba.quantity ?? 0), 0);
 
+  // `ba.quantity` for ONGOING/OVERDUE rows is the SERVER-COMPUTED effective
+  // claimed count — booked quantity minus PartialBookingCheckout claims
+  // attributed to this asset (see `computeCheckedOutForAsset` in
+  // `~/modules/booking/service.server`). This helper trusts that contract
+  // and simply sums. If a future loader feeds in a raw `BookingAsset[]`
+  // snapshot from the pivot table without that subtraction, the badge will
+  // over-report checked-out units (regression tracked as #96) — perform
+  // the subtraction at the data source, not here, so this helper stays pure.
   const checkedOut = bookingAssets
     .filter(
       (ba) =>

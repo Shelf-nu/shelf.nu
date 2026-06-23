@@ -2542,3 +2542,56 @@ session end.
   one-shot UPDATE was vacuously verified locally (0 KitCustody on
   dev DB). Path B in `TESTING-KIT-CUSTODY-CORRECTNESS.md` covers
   staging/prod-snapshot validation of the 628 prod KitCustody rows.
+
+### Bug #99 — Booking-exit asset status reconciliation (fixed)
+
+**Symptom (qty-tracked + INDIVIDUAL alike):** cancelling a booking,
+removing assets from a booking, or deleting an active booking blanket-
+flipped every affected asset to `AVAILABLE`. If those assets were also
+on another `ONGOING`/`OVERDUE` booking, or held by a `Custody` row, the
+other commitment was silently stripped — `/assets` showed the asset free
+while another booking still had it checked out, or while a team member
+still held custody. `checkinBooking` already handled this safely with
+per-asset reconciliation; the cancel/remove/delete paths did not.
+
+**Fix:** shared helper `reconcileAssetStatusForBookingExit` (private,
+near `updateBookingAssetStates` at L483 in
+`apps/webapp/app/modules/booking/service.server.ts`). For each exiting
+assetId it counts:
+
+- `BookingAsset` rows on OTHER `ONGOING`/`OVERDUE` bookings
+  (`excludeBookingId` filters out the source booking's own rows);
+- `Custody` rows holding the asset.
+
+Picks the strongest commitment: `CHECKED_OUT` > `IN_CUSTODY` >
+`AVAILABLE`. Runs inside the caller's `tx` so the count + the flip
+commit atomically with the booking-state write — no observable window
+where a parallel reader sees stale state.
+
+Wired into:
+
+- `cancelBooking` (replaces blanket `tx.asset.updateMany` at the old
+  ONGOING/OVERDUE branch);
+- `removeAssets` (now reads `sourceBookingStatus` inside the same tx
+  as `bookingAsset.deleteMany`, then dispatches the helper —
+  eliminates the read-modify-write race the previous two-step pattern
+  had);
+- `deleteBooking` (replaces `updateBookingAssetStates`; that helper is
+  now dead code and was removed in this fix).
+
+**`Asset.status` semantics:** unchanged. It remains the COARSE "any
+units out anywhere" indicator for qty-tracked assets — per-unit
+breakdowns continue to be derived from `BookingAsset` + `Custody` +
+`PartialBookingCheckout` by consumers (overview card, status badge,
+list-asset-content, booking-assets-sidebar). The semantic change is
+purely that the flag is now KEPT IN SYNC across all lifecycle paths the
+way checkinBooking already did.
+
+**Tests:** 9 new tests in `service.server.test.ts` under three
+`describe("… reconciles asset status per asset (bug #99)")` blocks
+(cancelBooking, deleteBooking, removeAssets). Each block covers
+CHECKED_OUT-keep, IN_CUSTODY-flip, AVAILABLE-flip scenarios with
+explicit per-asset `bookingAsset.count` + `custody.count` mock returns
+— mirrors the existing checkinBooking test style at L2845/2949/3032 and
+satisfies the audit's "binary status assertion regression trap"
+requirement.

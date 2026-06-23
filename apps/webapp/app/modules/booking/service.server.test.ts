@@ -3411,6 +3411,188 @@ describe("cancelBooking", () => {
       })
     ).rejects.toThrow(ShelfError);
   });
+
+  // why: bug #99 — historically cancelBooking blanket-flipped every asset on
+  // the booking to AVAILABLE, silently stripping commitments the asset still
+  // had elsewhere (another active booking, custody record). The reconciliation
+  // helper now reads BookingAsset/Custody counts per asset and picks the
+  // strongest remaining terminal status. These tests model the
+  // other-booking-count + custody-count returns explicitly per asset so the
+  // "binary status assertion regression trap" (any new caller silently
+  // collapsing back to updateMany) trips loudly.
+  describe("cancelBooking reconciles asset status per asset (bug #99)", () => {
+    /**
+     * Wires `tx.bookingAsset.count` + `tx.custody.count` mocks so each call
+     * site sees a per-asset count based on the supplied maps. Mirrors how the
+     * helper at L483 dispatches a count query per assetId — without this,
+     * `mockResolvedValue` would return the same scalar to every assetId and
+     * we couldn't model the multi-asset scenarios the bug requires.
+     *
+     * @param otherActiveBookingsByAssetId - assetId → count of OTHER ongoing /
+     *   overdue BookingAsset rows (the source booking's own rows are excluded
+     *   by `excludeBookingId` inside the helper, so this is purely "elsewhere").
+     * @param custodyByAssetId - assetId → count of Custody rows for the asset.
+     */
+    function mockReconciliationCounts(
+      otherActiveBookingsByAssetId: Record<string, number>,
+      custodyByAssetId: Record<string, number>
+    ) {
+      (
+        db.bookingAsset.count as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
+        const assetId = args?.where?.assetId ?? "";
+        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+      });
+      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { assetId?: string } }) => {
+          const assetId = args?.where?.assetId ?? "";
+          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+        }
+      );
+    }
+
+    it("keeps asset CHECKED_OUT when another ongoing booking still holds it", async () => {
+      // Scenario: Asset-1 is on this ONGOING booking AND on another ONGOING
+      // booking. Cancelling this booking must not free the asset — the other
+      // booking still has it checked out.
+      expect.assertions(2);
+
+      const mockBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 3,
+            id: "ba-cancel-1",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.CANCELLED,
+      });
+
+      // Asset-1: 1 other ongoing booking, 0 custody → CHECKED_OUT.
+      mockReconciliationCounts({ "asset-1": 1 }, { "asset-1": 0 });
+
+      await cancelBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      });
+
+      // Per-asset terminal write keeps CHECKED_OUT. NOT the blanket
+      // `updateMany({status: AVAILABLE})` of the old code path.
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+      // Defence: no blanket flip to AVAILABLE on the asset list.
+      expect(db.asset.updateMany).not.toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    it("flips asset to IN_CUSTODY when held by a custody record (no other bookings)", async () => {
+      // Scenario: Asset-1 was on this ONGOING booking and ALSO assigned to an
+      // operator's custody. Cancelling must not strip the custody signal —
+      // the team member still holds the asset.
+      expect.assertions(2);
+
+      const mockBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-cancel-2",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.CANCELLED,
+      });
+
+      // Asset-1: no other bookings, but 1 custody row → IN_CUSTODY.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 1 });
+
+      await cancelBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+      expect(db.asset.updateMany).not.toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    it("flips asset to AVAILABLE when no other bookings and no custody (regression coverage)", async () => {
+      // Regression scenario: Asset-1 is only on this booking and not in
+      // anyone's custody. Cancelling correctly releases it — proves the
+      // reconciliation path still hits the AVAILABLE branch when nothing
+      // else holds the asset (i.e. we didn't over-correct for #99 and pin
+      // every cancelled asset to CHECKED_OUT).
+      expect.assertions(1);
+
+      const mockBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-cancel-3",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.CANCELLED,
+      });
+
+      // Asset-1: no other bookings, no custody → AVAILABLE.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 0 });
+
+      await cancelBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+  });
 });
 
 describe("deleteBooking", () => {
@@ -3433,6 +3615,169 @@ describe("deleteBooking", () => {
     );
 
     expect(db.booking.findUnique).toHaveBeenCalled();
+  });
+
+  // why: bug #99 — deleting an ONGOING/OVERDUE booking previously routed
+  // through `updateBookingAssetStates`, which is the same blanket
+  // `updateMany({status: AVAILABLE})` the cancel path used. Same leak: an
+  // asset on another active booking, or held in custody, got silently freed.
+  // These tests assert per-asset reconciliation on the delete path.
+  describe("deleteBooking reconciles asset status per asset (bug #99)", () => {
+    /** See cancelBooking equivalent above — same per-asset count-mock shim. */
+    function mockReconciliationCounts(
+      otherActiveBookingsByAssetId: Record<string, number>,
+      custodyByAssetId: Record<string, number>
+    ) {
+      (
+        db.bookingAsset.count as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
+        const assetId = args?.where?.assetId ?? "";
+        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+      });
+      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { assetId?: string } }) => {
+          const assetId = args?.where?.assetId ?? "";
+          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+        }
+      );
+    }
+
+    it("keeps asset CHECKED_OUT when another ongoing booking still holds it", async () => {
+      expect.assertions(2);
+
+      const activeBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.ONGOING,
+        activeSchedulerReference: null,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-delete-1",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(activeBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.delete.mockResolvedValue({
+        ...activeBooking,
+        _count: { bookingAssets: 1 },
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+      });
+
+      // Asset-1: another ONGOING booking still references it → CHECKED_OUT.
+      mockReconciliationCounts({ "asset-1": 1 }, { "asset-1": 0 });
+
+      await deleteBooking(
+        { id: "booking-1", organizationId: "org-1" },
+        mockClientHints,
+        "user-1"
+      );
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+      // Defence: NOT the old blanket flip-to-AVAILABLE on the asset list.
+      expect(db.asset.updateMany).not.toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: { in: ["asset-1"] } }),
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    it("flips asset to IN_CUSTODY when held by a custody record (no other bookings)", async () => {
+      expect.assertions(1);
+
+      const activeBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.OVERDUE,
+        activeSchedulerReference: null,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-delete-2",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(activeBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.delete.mockResolvedValue({
+        ...activeBooking,
+        _count: { bookingAssets: 1 },
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+      });
+
+      // Asset-1: no other bookings, 1 custody row → IN_CUSTODY.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 1 });
+
+      await deleteBooking(
+        { id: "booking-1", organizationId: "org-1" },
+        mockClientHints,
+        "user-1"
+      );
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+    });
+
+    it("flips asset to AVAILABLE when no other bookings and no custody (regression coverage)", async () => {
+      expect.assertions(1);
+
+      const activeBooking = {
+        ...mockBookingData,
+        id: "booking-1",
+        status: BookingStatus.ONGOING,
+        activeSchedulerReference: null,
+        bookingAssets: [
+          {
+            asset: { id: "asset-1", assetKits: [] },
+            assetId: "asset-1",
+            quantity: 1,
+            id: "ba-delete-3",
+          },
+        ],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(activeBooking);
+      //@ts-expect-error missing vitest type
+      db.booking.delete.mockResolvedValue({
+        ...activeBooking,
+        _count: { bookingAssets: 1 },
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+      });
+
+      // Asset-1: no other bookings, no custody → AVAILABLE.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 0 });
+
+      await deleteBooking(
+        { id: "booking-1", organizationId: "org-1" },
+        mockClientHints,
+        "user-1"
+      );
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
   });
 });
 
@@ -4384,13 +4729,150 @@ describe("removeAssets", () => {
         assetId: { in: ["asset-1", "asset-2"] },
       },
     });
+    // The booking-status read now happens INSIDE the deleteMany tx so the
+    // status-flip decision and the pivot deletion commit atomically (bug
+    // #99). Only `status` + `name` are selected — `id` is already known
+    // from the call arg and was previously selected for the return shape.
     expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith({
       where: { id: "booking-1", organizationId: "org-1" },
       select: {
-        id: true,
-        name: true,
         status: true,
+        name: true,
       },
+    });
+  });
+
+  // why: bug #99 — removeAssets on an ONGOING/OVERDUE booking used to
+  // blanket-flip every removed asset to AVAILABLE, even when another active
+  // booking still held it or it was in custody. The reconciliation helper now
+  // makes the terminal status per-asset; these tests model the per-asset
+  // count returns so a future refactor regressing back to updateMany trips
+  // the "binary status assertion regression trap" loudly.
+  describe("removeAssets reconciles asset status per asset (bug #99)", () => {
+    /** See cancelBooking equivalent above — same per-asset count-mock shim. */
+    function mockReconciliationCounts(
+      otherActiveBookingsByAssetId: Record<string, number>,
+      custodyByAssetId: Record<string, number>
+    ) {
+      (
+        db.bookingAsset.count as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
+        const assetId = args?.where?.assetId ?? "";
+        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+      });
+      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { assetId?: string } }) => {
+          const assetId = args?.where?.assetId ?? "";
+          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+        }
+      );
+    }
+
+    it("keeps asset CHECKED_OUT when another ongoing booking still holds it", async () => {
+      expect.assertions(2);
+
+      const mockBooking = {
+        id: "booking-1",
+        assetIds: ["asset-1"],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBooking,
+        name: "Test Booking",
+        status: BookingStatus.ONGOING,
+      });
+
+      // Asset-1 still on another ONGOING booking → CHECKED_OUT.
+      mockReconciliationCounts({ "asset-1": 1 }, { "asset-1": 0 });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+      // Defence: NOT the old blanket flip-to-AVAILABLE.
+      expect(db.asset.updateMany).not.toHaveBeenCalledWith({
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+    });
+
+    it("flips asset to IN_CUSTODY when held by a custody record (no other bookings)", async () => {
+      expect.assertions(1);
+
+      const mockBooking = {
+        id: "booking-1",
+        assetIds: ["asset-1"],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBooking,
+        name: "Test Booking",
+        status: BookingStatus.OVERDUE,
+      });
+
+      // Asset-1: no other bookings, 1 custody → IN_CUSTODY.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 1 });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+    });
+
+    it("flips asset to AVAILABLE when no other bookings and no custody (regression coverage)", async () => {
+      expect.assertions(1);
+
+      const mockBooking = {
+        id: "booking-1",
+        assetIds: ["asset-1"],
+      };
+
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBooking,
+        name: "Test Booking",
+        status: BookingStatus.ONGOING,
+      });
+
+      // Asset-1: no other bookings, no custody → AVAILABLE.
+      mockReconciliationCounts({ "asset-1": 0 }, { "asset-1": 0 });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: "asset-1", organizationId: "org-1" },
+        data: { status: AssetStatus.AVAILABLE },
+      });
     });
   });
 });
