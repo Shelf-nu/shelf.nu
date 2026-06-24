@@ -10518,8 +10518,13 @@ export async function computeBookingKitDrift({
     // accessor at the schema level (TS recursion limit, see schema
     // comment on `BookingAsset.assetKitId`), so we can't `include` it.
     const kitDrivenSlices = await db.bookingAsset.findMany({
+      // Org-scope at the source: a foreign-org `bookingId` will not match
+      // any rows, so no slice data (incl. asset titles) is loaded into
+      // memory before the downstream `assertKitsBelongToOrg` check fires.
+      // Defence-in-depth per .claude/rules/org-scope-user-supplied-ids.md.
       where: {
         bookingId,
+        booking: { organizationId },
         assetKitId: { not: null },
       },
       select: {
