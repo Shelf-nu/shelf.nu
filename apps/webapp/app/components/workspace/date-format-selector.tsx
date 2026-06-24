@@ -80,6 +80,18 @@ type DateFormatSelectorProps = {
   name?: string;
 };
 
+/**
+ * Workspace date-format dropdown with a live preview of today's date.
+ *
+ * Renders a Radix Popover of the four {@link DateFormat} options; the chosen
+ * value is submitted via a hidden input so it rides the surrounding workspace
+ * edit form. Selection state is local (lazy-initialized from `defaultValue`).
+ *
+ * @param props.className - Optional class applied to the trigger button
+ * @param props.defaultValue - The workspace's current date-format preference
+ * @param props.name - Name of the hidden input the value is submitted under
+ * @returns The date-format selector control
+ */
 export default function DateFormatSelector({
   className,
   defaultValue,

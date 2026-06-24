@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NUMERIC_DATE_OPTIONS,
   dateFormatToLocale,
+  mergeDateDisplayOptions,
   resolveDateFormat,
 } from "./date-format";
 
@@ -62,5 +63,77 @@ describe("end-to-end ordering via Intl", () => {
 
   it("renders year-first for YYYY_MM_DD", () => {
     expect(fmt(dateFormatToLocale("YYYY_MM_DD")!)).toBe("2026-04-03");
+  });
+});
+
+/**
+ * Regression guard (PR #2654 review, Codex P1): combining numeric defaults with
+ * the dateStyle/timeStyle shortcuts makes Intl.DateTimeFormat throw. Many call
+ * sites pass those shortcuts, so for an explicit (non-AUTO) format the merger
+ * must drop the numeric defaults rather than crash the page.
+ */
+describe("mergeDateDisplayOptions", () => {
+  const explicit = NUMERIC_DATE_OPTIONS; // simulates a non-AUTO format
+
+  it("does NOT add granular date fields when caller uses dateStyle/timeStyle", () => {
+    const merged = mergeDateDisplayOptions({
+      callerOptions: { dateStyle: "short", timeStyle: "short" },
+      numericDefaults: explicit,
+      includeTime: false,
+      onlyTime: false,
+    });
+
+    expect(merged).toEqual({ dateStyle: "short", timeStyle: "short" });
+    // The actual crash repro: feeding the merged options to Intl must not throw.
+    expect(() =>
+      new Intl.DateTimeFormat("en-GB", { ...merged, timeZone: "UTC" }).format(
+        new Date(Date.UTC(2026, 3, 3))
+      )
+    ).not.toThrow();
+  });
+
+  it("applies numeric defaults for explicit format when no style shortcut", () => {
+    const merged = mergeDateDisplayOptions({
+      callerOptions: undefined,
+      numericDefaults: explicit,
+      includeTime: false,
+      onlyTime: false,
+    });
+
+    expect(merged).toEqual(NUMERIC_DATE_OPTIONS);
+  });
+
+  it("reduces to legacy behavior for AUTO (no numeric defaults)", () => {
+    expect(
+      mergeDateDisplayOptions({
+        callerOptions: { month: "short" },
+        numericDefaults: undefined,
+        includeTime: false,
+        onlyTime: false,
+      })
+    ).toEqual({ month: "short" });
+  });
+
+  it("adds hour/minute for includeTime but skips date defaults under a style shortcut", () => {
+    const merged = mergeDateDisplayOptions({
+      callerOptions: { timeStyle: "short" },
+      numericDefaults: explicit,
+      includeTime: true,
+      onlyTime: false,
+    });
+
+    expect(merged).not.toHaveProperty("day");
+    expect(merged).not.toHaveProperty("month");
+  });
+
+  it("returns only time fields for onlyTime", () => {
+    expect(
+      mergeDateDisplayOptions({
+        callerOptions: undefined,
+        numericDefaults: explicit,
+        includeTime: false,
+        onlyTime: true,
+      })
+    ).toEqual({ timeStyle: "short" });
   });
 });

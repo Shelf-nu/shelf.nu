@@ -91,3 +91,57 @@ export function resolveDateFormat(
     numericDefaults: mapped !== null ? NUMERIC_DATE_OPTIONS : undefined,
   };
 }
+
+/**
+ * Builds the final `Intl.DateTimeFormatOptions` for a DateS render, folding in
+ * the resolved numeric defaults for explicit formats.
+ *
+ * CRITICAL: `Intl.DateTimeFormat` throws a TypeError when the `dateStyle` /
+ * `timeStyle` shortcuts are combined with granular component fields
+ * (`year`/`month`/`day`/`hour`/…). Many call sites pass `dateStyle`/`timeStyle`
+ * (e.g. the audits index, asset columns), so the numeric defaults must be
+ * skipped whenever the caller opts into a style shortcut — otherwise those
+ * pages crash for any workspace on a non-AUTO date format.
+ *
+ * @param params.callerOptions - Options passed to the DateS component (if any)
+ * @param params.numericDefaults - Resolved numeric defaults, or undefined (AUTO)
+ * @param params.includeTime - Whether the date should include a time portion
+ * @param params.onlyTime - Whether to render only the time
+ * @returns Options safe to pass to getDateTimeFormatFromHints / Intl
+ */
+export function mergeDateDisplayOptions({
+  callerOptions,
+  numericDefaults,
+  includeTime,
+  onlyTime,
+}: {
+  callerOptions?: Intl.DateTimeFormatOptions;
+  numericDefaults: Intl.DateTimeFormatOptions | undefined;
+  includeTime: boolean;
+  onlyTime: boolean;
+}): Intl.DateTimeFormatOptions {
+  if (onlyTime) {
+    // Time-only: never inject date fields. timeStyle here is intentional.
+    return { timeStyle: "short", ...callerOptions };
+  }
+
+  // Skip the granular numeric defaults when the caller uses a style shortcut,
+  // to avoid the Intl granular-vs-style TypeError. The resolved locale (applied
+  // by the caller via hints) still fixes the day/month/year ORDER, so a
+  // dateStyle:"short" under e.g. en-GB still renders day-first.
+  const hasStyleShortcut = Boolean(
+    callerOptions?.dateStyle || callerOptions?.timeStyle
+  );
+  const dateDefaults = hasStyleShortcut ? undefined : numericDefaults;
+
+  if (includeTime) {
+    return {
+      ...dateDefaults,
+      hour: "numeric",
+      minute: "numeric",
+      ...callerOptions,
+    };
+  }
+
+  return { ...dateDefaults, ...callerOptions };
+}

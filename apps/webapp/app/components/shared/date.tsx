@@ -1,7 +1,10 @@
 import { format } from "date-fns";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
-import { resolveDateFormat } from "~/utils/date-format";
+import {
+  mergeDateDisplayOptions,
+  resolveDateFormat,
+} from "~/utils/date-format";
 
 /**
  * Formats a date using locale-specific formatting without timezone conversion.
@@ -140,30 +143,17 @@ export const DateS = ({
     d = new Date(date);
   }
 
-  // Determine formatting options based on flags
-  let timeOptions: Intl.DateTimeFormatOptions;
-
-  if (onlyTime) {
-    // Only show time (no date)
-    // Use timeStyle to prevent default date options from being added
-    timeOptions = {
-      timeStyle: "short",
-      ...options,
-    };
-  } else if (includeTime) {
-    // Show both date and time. For explicit formats, numericDefaults sets the
-    // date portion (locale fixes the order); caller options still win.
-    timeOptions = {
-      ...numericDefaults,
-      hour: "numeric",
-      minute: "numeric",
-      ...options,
-    };
-  } else {
-    // Show only date (default). numericDefaults is undefined for AUTO, so this
-    // reduces to the legacy `options || {}` behavior.
-    timeOptions = { ...numericDefaults, ...options };
-  }
+  // Build the Intl options, folding in the explicit-format numeric defaults.
+  // mergeDateDisplayOptions skips those defaults when the caller uses a
+  // dateStyle/timeStyle shortcut (Intl throws if they're combined with granular
+  // fields); the resolved locale still fixes the day/month/year order. For AUTO
+  // numericDefaults is undefined, so this reduces to the legacy behavior.
+  const timeOptions = mergeDateDisplayOptions({
+    callerOptions: options,
+    numericDefaults,
+    includeTime,
+    onlyTime,
+  });
 
   const formattedDate = getDateTimeFormatFromHints(
     hintsForFormat,
