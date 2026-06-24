@@ -26,6 +26,8 @@ export const config: Config = {
   showHowDidYouFindUs: SHOW_HOW_DID_YOU_FIND_US || false,
   collectBusinessIntel:
     COLLECT_BUSINESS_INTEL || SHOW_HOW_DID_YOU_FIND_US || false,
+  // Debounce window for recording mobile companion-app activity (1 hour).
+  mobileActivityDebounceMs: 60 * 60 * 1000,
   geocoding: {
     userAgent: GEOCODING_USER_AGENT || "Self-hosted Asset Management System",
   },

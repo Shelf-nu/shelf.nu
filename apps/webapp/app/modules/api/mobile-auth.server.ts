@@ -8,6 +8,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
+import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -65,6 +66,7 @@ export async function requireMobileAuth(request: Request) {
       profilePicture: true,
       onboarded: true,
       deletedAt: true,
+      lastMobileActiveAt: true,
     },
   });
 
@@ -77,8 +79,19 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Strip deletedAt from the returned object
-  const { deletedAt: _, ...safeUser } = user;
+  // Record companion-app usage for adoption metrics. requireMobileAuth is the
+  // single chokepoint every mobile API route passes through (QR scanner
+  // included), so recording here covers them all in one place. Debounced +
+  // fire-and-forget — never blocks or breaks the request (see
+  // mobile-usage.server.ts).
+  recordMobileActivity(user.id, user.lastMobileActiveAt);
+
+  // Strip internal-only fields from the returned object
+  const {
+    deletedAt: _deletedAt,
+    lastMobileActiveAt: _lastMobileActiveAt,
+    ...safeUser
+  } = user;
   return { user: safeUser, authUser };
 }
 

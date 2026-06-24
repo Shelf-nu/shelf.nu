@@ -60,6 +60,9 @@ export default function AddAssetsToExistingBookingDialog() {
       actionUrl="/api/assets/add-to-booking"
       className="lg:w-[600px]"
       skipCloseOnSuccess
+      // why: the success panel's "Add more" button re-uses the same selection to
+      // add the assets to another booking, so the selection must survive success.
+      keepSelectionOnSuccess
     >
       {({
         disabled,

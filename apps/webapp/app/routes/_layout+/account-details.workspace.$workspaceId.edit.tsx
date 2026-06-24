@@ -393,13 +393,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const { selfServiceGroupId, adminGroupId, baseUserGroupId } =
           parsedData;
 
+        /**
+         * Group mappings are optional per-role (only one is required overall),
+         * so normalize blank/whitespace-only inputs to `null`. Storing `null`
+         * instead of an empty string keeps the auth-side role resolver and the
+         * "is this group mapped" checks unambiguous.
+         */
+        const normalizeGroupId = (value: string | undefined) => {
+          const trimmed = value?.trim();
+          return trimmed ? trimmed : null;
+        };
+
         await updateOrganization({
           id,
           userId: authSession.userId,
           ssoDetails: {
-            selfServiceGroupId: selfServiceGroupId as string,
-            adminGroupId: adminGroupId as string,
-            baseUserGroupId: baseUserGroupId as string,
+            selfServiceGroupId: normalizeGroupId(selfServiceGroupId),
+            adminGroupId: normalizeGroupId(adminGroupId),
+            baseUserGroupId: normalizeGroupId(baseUserGroupId),
           },
         });
 

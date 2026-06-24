@@ -15,6 +15,8 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
@@ -466,19 +468,48 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
   ) : null;
 };
 
+/**
+ * Schema for the workspace SSO settings form.
+ *
+ * Group mappings are intentionally individually optional: a workspace only
+ * needs to map the roles it actually uses. The auth-side role resolver
+ * (`getRoleFromGroupId`) and SSO user provisioning evaluate each mapped group
+ * independently, so a single mapping is enough for SSO to work.
+ *
+ * When SSO is enabled we still require **at least one** group to be mapped —
+ * otherwise the configuration is a no-op that silently grants no access. That
+ * cross-field rule is enforced via `superRefine` and surfaced on the first
+ * (Administrator) field.
+ *
+ * @param sso - Whether SSO is enabled for the workspace. When false, all group
+ *   fields are optional and the "at least one" rule is skipped.
+ */
 export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
-  z.object({
-    id: z.string(),
-    selfServiceGroupId: sso
-      ? z.string().min(1, "Self service group id is required")
-      : z.string().optional(),
-    baseUserGroupId: sso
-      ? z.string().min(1, "Base user group id is required")
-      : z.string().optional(),
-    adminGroupId: sso
-      ? z.string().min(1, "Administrator group id is required")
-      : z.string().optional(),
-  });
+  z
+    .object({
+      id: z.string(),
+      selfServiceGroupId: z.string().optional(),
+      baseUserGroupId: z.string().optional(),
+      adminGroupId: z.string().optional(),
+    })
+    .superRefine((data, ctx) => {
+      if (!sso) return;
+
+      const hasAtLeastOneGroup = [
+        data.adminGroupId,
+        data.selfServiceGroupId,
+        data.baseUserGroupId,
+      ].some((value) => value != null && value.trim().length > 0);
+
+      if (!hasAtLeastOneGroup) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Map at least one group to a role. Only the roles you use need a group.",
+          path: ["adminGroupId"],
+        });
+      }
+    });
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
@@ -487,6 +518,15 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = useDisabled(fetcher);
+
+  /**
+   * Server-side validation errors, surfaced as a fallback in case client-side
+   * validation is bypassed. The SSO form submits via a fetcher, so we read the
+   * error off `fetcher.data` rather than `useActionData`.
+   */
+  const validationErrors = getValidationErrors<typeof schema>(
+    (fetcher.data as DataOrErrorResponse | undefined)?.error
+  );
 
   return isOwner && organization.enabledSso && organization.ssoDetails ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
@@ -498,6 +538,26 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
           </p>
         </div>
         <input type="hidden" value={organization.id} name="id" />
+
+        {/* Group identifiers differ per identity provider, and the field
+            stores whatever the IdP returns in the user's `groups` attribute.
+            Spell out the convention so owners don't paste the wrong value. */}
+        <div className="rounded border border-gray-200 bg-gray-50 p-3 text-[14px] text-gray-600">
+          <p>
+            Map your identity provider's groups to Shelf roles below. You only
+            need to map the roles you use — <b>at least one</b> mapping is
+            required, the rest can be left blank.
+          </p>
+          <p className="mt-2">
+            Enter the exact value your identity provider sends in the user's{" "}
+            <b>groups</b> claim. <b>Google Workspace</b> returns group{" "}
+            <b>names</b>. <b>Microsoft Entra</b> returns the group{" "}
+            <b>Object ID</b>. <b>Okta</b> and most other providers return the
+            group <b>name</b> (depending on how your groups attribute statement
+            is configured). Values are case-sensitive and must match your IdP
+            exactly.
+          </p>
+        </div>
 
         <FormRow
           rowLabel={"SSO Domain"}
@@ -518,69 +578,72 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
         </FormRow>
 
         <FormRow
-          rowLabel={`Administrator role group id`}
+          rowLabel={`Administrator role group`}
           subHeading={
             <div>
-              Place the Id of the group that should be mapped to the{" "}
+              The group identifier that should be mapped to the{" "}
               <b>Administrator</b> role.
             </div>
           }
           className="border-b-0 pb-[10px]"
-          required
         >
           <Input
-            label={"Administrator role group id"}
+            label={"Administrator role group"}
             hideLabel
             className="w-full"
             name={zo.fields.adminGroupId()}
-            error={zo.errors.adminGroupId()?.message}
+            error={
+              validationErrors?.adminGroupId?.message ||
+              zo.errors.adminGroupId()?.message
+            }
             defaultValue={organization.ssoDetails.adminGroupId || undefined}
-            required
           />
         </FormRow>
 
         <FormRow
-          rowLabel={`Self service role group id`}
+          rowLabel={`Self service role group`}
           subHeading={
             <div>
-              Place the Id of the group that should be mapped to the{" "}
+              The group identifier that should be mapped to the{" "}
               <b>Self service</b> role.
             </div>
           }
           className="border-b-0 pb-[10px]"
-          required
         >
           <Input
-            label={"Self service role group id"}
+            label={"Self service role group"}
             hideLabel
             name={zo.fields.selfServiceGroupId()}
-            error={zo.errors.selfServiceGroupId()?.message}
+            error={
+              validationErrors?.selfServiceGroupId?.message ||
+              zo.errors.selfServiceGroupId()?.message
+            }
             defaultValue={
               organization.ssoDetails.selfServiceGroupId || undefined
             }
             className="w-full"
-            required
           />
         </FormRow>
         <FormRow
-          rowLabel={`Base user role group id`}
+          rowLabel={`Base user role group`}
           subHeading={
             <div>
-              Place the Id of the group that should be mapped to the <b>Base</b>{" "}
+              The group identifier that should be mapped to the <b>Base</b>{" "}
               role.
             </div>
           }
           className="border-b-0 pb-[10px]"
-          required
         >
           <Input
-            label={"Base user role group id"}
+            label={"Base user role group"}
             hideLabel
             name={zo.fields.baseUserGroupId()}
-            error={zo.errors.baseUserGroupId()?.message}
+            error={
+              validationErrors?.baseUserGroupId?.message ||
+              zo.errors.baseUserGroupId()?.message
+            }
             defaultValue={organization.ssoDetails.baseUserGroupId || undefined}
             className="w-full"
-            required
           />
         </FormRow>
         <div className="text-right">
