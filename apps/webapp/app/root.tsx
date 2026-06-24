@@ -34,7 +34,6 @@ import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { payload } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
-import { PwaManagerProvider } from "./utils/pwa-manager";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 
 export interface RootData {
@@ -103,6 +102,15 @@ export function Layout({ children }: { children: ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
+        {/* why: iOS Smart App Banner must be rendered here in <head>, not via a
+            route `meta` export. React Router renders the leaf route's meta
+            (not a merge of root + leaf), and 150+ routes export their own
+            meta, so a root-level descriptor would be dropped on the pages
+            users actually visit. Placed in the shared document <head> it is
+            present site-wide. Mobile Safari renders a native banner linking to
+            the Shelf Companion App Store listing (id6765639874), or "Open" if
+            installed. Apple-hosted, zero-maintenance, no CLS, no cookie. */}
+        <meta name="apple-itunes-app" content="app-id=6765639874" />
         <ClientHintCheck nonce={nonce} />
         <style data-fullcalendar />
         <Meta />
@@ -165,11 +173,9 @@ function App() {
       icon="tool"
     />
   ) : (
-    <PwaManagerProvider>
-      <AnimationProvider>
-        <Outlet />
-      </AnimationProvider>
-    </PwaManagerProvider>
+    <AnimationProvider>
+      <Outlet />
+    </AnimationProvider>
   );
 }
 

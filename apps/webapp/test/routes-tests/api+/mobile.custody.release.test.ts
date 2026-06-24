@@ -30,6 +30,7 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn(),
   requireOrganizationAccess: vitest.fn(),
   requireMobilePermission: vitest.fn(),
+  getMobileUserContext: vitest.fn(),
 }));
 
 // why: PR #2533 reads the current custody record before calling
@@ -77,10 +78,12 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
+import { OrganizationRoles } from "@prisma/client";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -125,6 +128,13 @@ describe("POST /api/mobile/custody/release", () => {
 
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
+    // Caller's role is read to enforce the SELF_SERVICE self-restriction inside
+    // releaseCustody. ADMIN here so the release is permitted.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: OrganizationRoles.ADMIN,
+      canUseBarcodes: false,
+    });
+
     (releaseCustody as any).mockResolvedValue({
       id: "asset-1",
       title: "Test Laptop",
@@ -159,6 +169,8 @@ describe("POST /api/mobile/custody/release", () => {
     expect(releaseCustody).toHaveBeenCalledWith({
       assetId: "asset-1",
       organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
       activityEvent: {
         actorUserId: "user-1",
         teamMemberId: "team-member-1",

@@ -5,6 +5,21 @@ import {
   wrapLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
+/**
+ * Sort options exposed by the locations index <SortBy> dropdown.
+ * Keys are valid sort fields; "assets" sorts by related-asset count.
+ * Order here is the display order; "createdAt" is the default.
+ *
+ * Lives in this client-safe module (not service.server.ts) so the route's
+ * client component can import it without pulling server-only code into the
+ * browser bundle. The service imports it from here for its sort-field guard.
+ */
+export const LOCATION_SORTING_OPTIONS = {
+  createdAt: "Date created",
+  name: "Name",
+  assets: "Number of assets",
+} as const;
+
 /** Helper to safely display a value, showing a dash if empty */
 export function safeDisplay(value?: string | null) {
   return value?.trim() || "—";

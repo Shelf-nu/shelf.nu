@@ -16,7 +16,6 @@ import {
   useFetchers,
   useLoaderData,
 } from "react-router";
-import { ClientOnly } from "remix-utils/client-only";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
@@ -27,7 +26,6 @@ import {
   CommandPaletteButton,
   CommandPaletteRoot,
 } from "~/components/layout/command-palette";
-import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
@@ -56,7 +54,6 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import styles from "~/styles/layout/index.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
-  installPwaPromptCookie,
   expireHostOnlyUserPrefsCookie,
   initializePerPageCookieOnLayout,
   setCookie,
@@ -65,6 +62,7 @@ import {
 import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
+import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -81,6 +79,15 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export type LayoutLoaderResponse = typeof loader;
 
+/**
+ * The app-shell loader (user, org, subscription) does not depend on a page's
+ * client-side view params (search/sort/page). Skip re-running it for same-path
+ * client-view-only navigations so pages that filter client-side (e.g. the
+ * booking overview) never trigger a shell refetch. Mutations and real
+ * navigations still revalidate.
+ */
+export const shouldRevalidate = skipRevalidationOnClientViewChange;
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -92,7 +99,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // It can throw when a user has no org membership, and the onboarding
     // guard (user.onboarded check) must run first to redirect non-onboarded
     // users before org resolution is attempted.
-    const [user, userPrefsCookie, pwaPromptCookie] = await Promise.all([
+    const [user, userPrefsCookie] = await Promise.all([
       getUserByID(userId, {
         select: {
           id: true,
@@ -123,9 +130,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         } satisfies Prisma.UserSelect,
       }),
       initializePerPageCookieOnLayout(request),
-      installPwaPromptCookie
-        .parse(request.headers.get("Cookie"))
-        .then((c) => (c ?? {}) as { hidden?: boolean }),
     ]);
 
     let subscription = null;
@@ -214,7 +218,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         hideNoticeCard: userPrefsCookie.hideNoticeCard,
         minimizedSidebar: userPrefsCookie.minimizedSidebar,
         scannerCameraId: userPrefsCookie.scannerCameraId as string | undefined,
-        hideInstallPwaPrompt: pwaPromptCookie.hidden,
         isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         canUseAudits: canUseAudits(currentOrganization),
@@ -303,13 +306,6 @@ export default function App() {
     feedbackModalOpenAtom
   );
 
-  const renderInstallPwaPromptOnMobile = () =>
-    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
-    window.matchMedia("(max-width: 640px)").matches &&
-    !window.matchMedia("(display-mode: standalone)").matches ? (
-      <InstallPwaPromptModal />
-    ) : null;
-
   return (
     <CommandPaletteRoot>
       <SidebarProvider defaultOpen={!minimizedSidebar}>
@@ -353,9 +349,6 @@ export default function App() {
             </>
           )}
           <Toaster />
-          <ClientOnly fallback={null}>
-            {renderInstallPwaPromptOnMobile}
-          </ClientOnly>
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (

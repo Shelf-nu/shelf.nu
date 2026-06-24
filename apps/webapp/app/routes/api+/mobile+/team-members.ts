@@ -1,6 +1,8 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -9,13 +11,20 @@ import { makeShelfError } from "~/utils/error";
 /**
  * GET /api/mobile/team-members?orgId=xxx
  *
- * Returns all non-deleted team members for the organization.
+ * Returns non-deleted team members for the organization.
  * Used by the mobile app's custody assignment picker.
+ *
+ * SELF_SERVICE callers only receive their own team member record — they may
+ * only assign custody to themselves (enforced again in the custody services),
+ * and the web scanner loader applies the same filter (`filterByUserId`), so
+ * the full roster is never exposed to them on either platform.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    const { role } = await getMobileUserContext(user.id, organizationId);
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const url = new URL(request.url);
     const search = url.searchParams.get("search") || "";
@@ -24,6 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: {
         organizationId,
         deletedAt: null,
+        ...(isSelfService ? { userId: user.id } : {}),
         ...(search
           ? { name: { contains: search, mode: "insensitive" as const } }
           : {}),

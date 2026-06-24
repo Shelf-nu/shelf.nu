@@ -14,13 +14,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import {
-  fontSize,
-  spacing,
-  borderRadius,
-  formatDateTime,
-  hitSlop,
-} from "@/lib/constants";
+import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import { formatDue } from "@/lib/audit-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -37,25 +32,6 @@ const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "Completed", value: "COMPLETED" },
   { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
 ];
-
-// why: due-today threshold in ms. Anything strictly past `now` is overdue
-// (red); anything within the next 24h is due-today (amber). Beyond that the
-// card stays neutral. Mirrors the urgency tiers we surface in the webapp's
-// audit dashboard so a user toggling between web + companion sees the same
-// signal.
-const DUE_SOON_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-
-/** Urgency tier for the deadline pill on an audit card. */
-type DueUrgency = "overdue" | "dueSoon" | "neutral";
-
-function getDueUrgency(dueDate: string | null, isActive: boolean): DueUrgency {
-  if (!isActive || !dueDate) return "neutral";
-  const due = new Date(dueDate).getTime();
-  const now = Date.now();
-  if (due < now) return "overdue";
-  if (due - now <= DUE_SOON_THRESHOLD_MS) return "dueSoon";
-  return "neutral";
-}
 
 export default function AuditsListScreen() {
   return (
@@ -81,26 +57,41 @@ function AuditsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
-  // why: default the "Assigned to me" toggle ON so a field worker who
-  // opens the tab immediately sees their own work first — the original
-  // complaint was that an admin assigned to 1 audit out of 50 had to
-  // scroll past everything else.
-  //
   // BASE/SELF_SERVICE roles are server-side-scoped to their own
   // assignments regardless of the flag; showing them an "All audits"
   // toggle would be a lie (the chip flips visually, the result set
   // never widens). For those roles we hide the toggle entirely and
   // force `assignedToMe` to true. See `canWidenScope` below.
   const canWidenScope = userCanSeeOrgWideAudits(currentOrg?.roles);
-  const [assignedToMe, setAssignedToMe] = useState(true);
-  // Defensive: if the user's role changes mid-session to one that
-  // can't widen scope, snap the toggle back to true so the visible
-  // state matches what the server will actually return.
+  // why: default to the FULL workspace list (not "assigned to me"). The
+  // original dead-end was an admin assigned to 0–1 audits out of many
+  // landing on an empty "nothing assigned to you" screen — when in fact
+  // there were active, unassigned audits anyone could pick up. The list
+  // is server-sorted by due date (most urgent first) and every card now
+  // states its ownership ("Unassigned · anyone can scan" / "Assigned to
+  // you" / "N assigned"), so the urgency-first flat list is legible
+  // without forcing a scope filter. Admins can still narrow to their own
+  // work with the toggle below. BASE/SELF_SERVICE are server-scoped to
+  // their assignments regardless, and the effect below keeps their
+  // (hidden) toggle pinned to true so visible state matches the server.
+  const [assignedToMe, setAssignedToMe] = useState(false);
+  // Snap the toggle to "assigned to me" only once roles are KNOWN and the
+  // role genuinely can't widen scope (BASE/SELF_SERVICE), so the hidden
+  // toggle matches the server's forced scoping — and also catches a
+  // mid-session role downgrade.
+  //
+  // why gate on `rolesKnown`: on a cold mount `currentOrg?.roles` is briefly
+  // undefined, so `canWidenScope` is transiently false. Without this guard
+  // the effect would immediately flip an ADMIN/OWNER onto the assigned-only
+  // (often empty) list, and nothing flips it back once the real role arrives
+  // — re-creating the exact dead-end this screen's full-workspace default is
+  // meant to remove. (Codex review, PR #2583.)
+  const rolesKnown = Array.isArray(currentOrg?.roles);
   useEffect(() => {
-    if (!canWidenScope && !assignedToMe) {
+    if (rolesKnown && !canWidenScope && !assignedToMe) {
       setAssignedToMe(true);
     }
-  }, [canWidenScope, assignedToMe]);
+  }, [rolesKnown, canWidenScope, assignedToMe]);
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   // why: the list re-fires on every status/scope toggle. Without
@@ -282,17 +273,23 @@ function AuditsListContent() {
           : 0;
       const progressPercent = Math.round(progress * 100);
 
-      const dueUrgency = getDueUrgency(item.dueDate, isActive);
-      const isOverdue = dueUrgency === "overdue";
-      const isDueSoon = dueUrgency === "dueSoon";
-      // Marker is only useful when the user is looking at the unfiltered
-      // org list — if "Assigned to me" is on, every row is already theirs.
-      const showAssignedMarker = !assignedToMe && item.isAssignedToMe;
-      const dueColor = isOverdue
-        ? colors.error
-        : isDueSoon
-        ? colors.warning
-        : colors.mutedLight;
+      const due = formatDue(item.dueDate, isActive);
+      const dueColor =
+        due.tier === "overdue"
+          ? colors.error
+          : due.tier === "soon"
+          ? colors.warning
+          : colors.mutedLight;
+      // Ownership drives the card's "who can scan this" line. An audit
+      // with zero assignees is open for anyone to pick up (the case the
+      // user flagged as invisible); otherwise it's either theirs or
+      // someone else's.
+      const ownership: "open" | "mine" | "others" =
+        item.assigneeCount === 0
+          ? "open"
+          : item.isAssignedToMe
+          ? "mine"
+          : "others";
       // why: the urgency tier (red/amber) and "You" marker are visual-only
       // signals — without surfacing them through the accessibility label,
       // VoiceOver / TalkBack users miss two important pieces of context
@@ -302,8 +299,16 @@ function AuditsListContent() {
         `Audit: ${item.name}`,
         item.status,
         `${item.foundAssetCount} of ${item.expectedAssetCount} found`,
-        isOverdue ? "overdue" : isDueSoon ? "due soon" : null,
-        showAssignedMarker ? "assigned to you" : null,
+        due.tier === "overdue"
+          ? "overdue"
+          : due.tier === "soon"
+          ? "due soon"
+          : null,
+        ownership === "open"
+          ? "unassigned, anyone can scan"
+          : ownership === "mine"
+          ? "assigned to you"
+          : null,
       ]
         .filter(Boolean)
         .join(", ");
@@ -324,15 +329,6 @@ function AuditsListContent() {
               <Text style={styles.auditName} numberOfLines={1}>
                 {item.name}
               </Text>
-              {showAssignedMarker ? (
-                <View
-                  style={styles.assignedMarker}
-                  accessibilityLabel="Assigned to you"
-                >
-                  <Ionicons name="person" size={10} color={colors.primary} />
-                  <Text style={styles.assignedMarkerText}>You</Text>
-                </View>
-              ) : null}
             </View>
             <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
               <View
@@ -375,24 +371,25 @@ function AuditsListContent() {
           </View>
 
           <View style={styles.auditMeta}>
-            {item.dueDate && (
+            {due.label && (
               <View style={styles.metaRow}>
-                <Ionicons name="time-outline" size={13} color={dueColor} />
+                <Ionicons
+                  name={
+                    due.tier === "none" ? "calendar-outline" : "time-outline"
+                  }
+                  size={13}
+                  color={dueColor}
+                />
                 <Text
                   style={[
                     styles.metaText,
-                    (isOverdue || isDueSoon) && {
+                    (due.tier === "overdue" || due.tier === "soon") && {
                       color: dueColor,
                       fontWeight: "500",
                     },
                   ]}
                 >
-                  {isOverdue
-                    ? "Overdue · "
-                    : isDueSoon
-                    ? "Due soon · "
-                    : "Due "}
-                  {formatDateTime(item.dueDate)}
+                  {due.label}
                 </Text>
               </View>
             )}
@@ -409,19 +406,42 @@ function AuditsListContent() {
               </Text>
             </View>
 
-            {item.assigneeCount > 0 && (
-              <View style={styles.metaRow}>
-                <Ionicons
-                  name="people-outline"
-                  size={13}
-                  color={colors.mutedLight}
-                />
-                <Text style={styles.metaText}>
-                  {item.assigneeCount}{" "}
-                  {item.assigneeCount === 1 ? "assignee" : "assignees"}
-                </Text>
-              </View>
-            )}
+            <View style={styles.metaRow}>
+              <Ionicons
+                name={
+                  ownership === "open"
+                    ? "scan-circle-outline"
+                    : "people-outline"
+                }
+                size={13}
+                color={
+                  ownership === "open" ? colors.primary : colors.mutedLight
+                }
+              />
+              <Text
+                style={[
+                  styles.metaText,
+                  ownership === "open" && {
+                    // why: `primaryText` (deeper orange), not `primary` —
+                    // brand orange is too light for body text on white
+                    // (3.1:1). The icon above keeps the brighter `primary`
+                    // (icons only need 3:1).
+                    color: colors.primaryText,
+                    fontWeight: "500",
+                  },
+                ]}
+              >
+                {ownership === "open"
+                  ? "Unassigned · anyone can scan"
+                  : ownership === "mine"
+                  ? item.assigneeCount === 1
+                    ? "Assigned to you"
+                    : `You + ${item.assigneeCount - 1} other${
+                        item.assigneeCount - 1 === 1 ? "" : "s"
+                      }`
+                  : `${item.assigneeCount} assigned`}
+              </Text>
+            </View>
           </View>
 
           {isActive && (
@@ -431,13 +451,23 @@ function AuditsListContent() {
                 size={14}
                 color={colors.iconDefault}
               />
-              <Text style={styles.actionHintText}>Tap to scan</Text>
+              {/*
+                why: the card opens the audit detail (where the scan button
+                lives), it does not start the scanner directly — so "Tap to
+                scan" overpromised. Mirror the detail screen's own CTA wording
+                so the hint names the action you're heading into.
+              */}
+              <Text style={styles.actionHintText}>
+                {item.status === "PENDING"
+                  ? "Start scanning"
+                  : "Continue scanning"}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
       );
     },
-    [router, colors, auditStatusBadge, styles, assignedToMe]
+    [router, colors, auditStatusBadge, styles]
   );
 
   if (orgLoading) {
@@ -770,24 +800,6 @@ const useStyles = createStyles((colors) => ({
     fontWeight: "600",
     color: colors.foreground,
   },
-  // "You" marker shown on cards when the global toggle is off but the
-  // current user is among the assignees — saves a scroll past unrelated
-  // audits in admin/owner views.
-  assignedMarker: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: borderRadius.pill,
-    backgroundColor: colors.primaryBg,
-  },
-  assignedMarkerText: {
-    fontSize: fontSize.xs,
-    fontWeight: "600",
-    color: colors.primary,
-  },
-
   // Status badge
   statusBadge: {
     flexDirection: "row",

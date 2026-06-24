@@ -34,7 +34,11 @@ export async function resolveRemindersActions({
     case "edit-reminder": {
       const { redirectTo, ...payload } = parseData(
         formData,
-        setReminderSchema.extend({ id: z.string() })
+        setReminderSchema.extend({ id: z.string() }),
+        // Expected user-input validation (e.g. "Please select a date in the
+        // future") — a 400, not a server error. The create path already opts
+        // out; mirror it here (was noise: SHELF-WEBAPP-1ME).
+        { shouldBeCaptured: false }
       );
 
       const hints = getHints(request);

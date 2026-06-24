@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { reportAuditDurabilityEvent } from "./sentry";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -7,6 +8,8 @@ type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /** True when this scan exhausted its sync retries and is awaiting re-sync. */
+  syncFailed?: boolean;
 };
 
 type ScanQueueEntry = {
@@ -22,6 +25,12 @@ export type PersistedScanState = {
   savedAt: string;
   scannedItems: ScannedItem[];
   pendingQueue: ScanQueueEntry[];
+  /**
+   * Scans that exhausted their retries and must NOT be silently dropped.
+   * Persisted so they survive app kills and are re-queued on resume.
+   * Optional for backward-compat with sessions saved before this field existed.
+   */
+  failedQueue?: ScanQueueEntry[];
 };
 
 // ── Storage key ──────────────────────────────────────────
@@ -38,8 +47,9 @@ const storageKey = (auditId: string) => `${KEY_PREFIX}${auditId}`;
 export async function saveAuditScanState(
   auditId: string,
   scannedItems: ScannedItem[],
-  pendingQueue: ScanQueueEntry[]
-): Promise<void> {
+  pendingQueue: ScanQueueEntry[],
+  failedQueue: ScanQueueEntry[] = []
+): Promise<boolean> {
   try {
     const state: PersistedScanState = {
       version: 1,
@@ -47,10 +57,23 @@ export async function saveAuditScanState(
       savedAt: new Date().toISOString(),
       scannedItems,
       pendingQueue,
+      failedQueue,
     };
     await AsyncStorage.setItem(storageKey(auditId), JSON.stringify(state));
+    return true;
   } catch (e) {
-    if (__DEV__) console.warn("[AuditPersistence] save failed:", e);
+    // why: log ALWAYS, not just in __DEV__. A swallowed setItem rejection
+    // (e.g. device storage full during a long offline audit) is exactly how a
+    // saw-as-Found scan is silently lost. Returning false lets callers that
+    // care surface it; Sentry captures it in prod so we see it without waiting
+    // for a user to notice missing audit data.
+    console.warn("[AuditPersistence] save failed:", e);
+    reportAuditDurabilityEvent(
+      "scan_persist_failed",
+      { auditId, error: String(e) },
+      "error"
+    );
+    return false;
   }
 }
 
@@ -96,19 +119,32 @@ export function createDebouncedSaver(auditId: string, delayMs = 2000) {
 
   return {
     /** Schedule a debounced save. */
-    save(scannedItems: ScannedItem[], pendingQueue: ScanQueueEntry[]) {
+    save(
+      scannedItems: ScannedItem[],
+      pendingQueue: ScanQueueEntry[],
+      failedQueue: ScanQueueEntry[] = []
+    ) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        saveAuditScanState(auditId, scannedItems, pendingQueue);
+        saveAuditScanState(auditId, scannedItems, pendingQueue, failedQueue);
         timer = null;
       }, delayMs);
     },
 
     /** Flush immediately (e.g., before unmount). Returns a promise. */
-    flush(scannedItems: ScannedItem[], pendingQueue: ScanQueueEntry[]) {
+    flush(
+      scannedItems: ScannedItem[],
+      pendingQueue: ScanQueueEntry[],
+      failedQueue: ScanQueueEntry[] = []
+    ) {
       if (timer) clearTimeout(timer);
       timer = null;
-      return saveAuditScanState(auditId, scannedItems, pendingQueue);
+      return saveAuditScanState(
+        auditId,
+        scannedItems,
+        pendingQueue,
+        failedQueue
+      );
     },
 
     /** Cancel any pending write without saving. */

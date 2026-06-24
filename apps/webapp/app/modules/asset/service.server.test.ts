@@ -1,3 +1,4 @@
+import { OrganizationRoles, type AssetIndexSettings } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
@@ -10,9 +11,13 @@ import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   bulkAssignAssetTags,
+  bulkAssignCustody,
   bulkDeleteAssets,
+  bulkReleaseCustody,
   bulkUpdateAssetCategory,
+  createAsset,
   getActiveCustomFieldsForAsset,
+  getAssets,
   parseAssetValuation,
   refreshExpiredAssetImages,
   relinkAssetQrCode,
@@ -30,6 +35,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findUnique: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
+      count: vitest.fn().mockResolvedValue(0),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -45,6 +51,20 @@ vitest.mock("~/database/db.server", () => ({
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
+    },
+    teamMember: {
+      findFirst: vitest.fn().mockResolvedValue(null),
+    },
+    assetCustomFieldValue: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
+    customField: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
+    user: {
+      findFirst: vitest
+        .fn()
+        .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
     },
   },
 }));
@@ -136,6 +156,12 @@ vitest.mock("~/modules/note/service.server", () => ({
 // why: control custom-field lookup so we can assert org+category scoping
 vitest.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vitest.fn(),
+}));
+
+// why: createAsset generates a sequential id via a DB-backed counter; stub it
+// so the create-path test reaches the org-scope guard without DB plumbing.
+vitest.mock("./sequential-id.server", () => ({
+  getNextSequentialId: vitest.fn().mockResolvedValue("TST-0001"),
 }));
 
 describe("relinkAssetQrCode (asset)", () => {
@@ -504,6 +530,129 @@ describe("updateAsset cross-org guards", () => {
       select: { id: true },
     });
   });
+
+  it("rejects a customFieldId from a different organization", async () => {
+    expect.assertions(2);
+    // No existing values for this asset; the form references a foreign-org
+    // custom field whose org-scoped lookup returns nothing → guard throws.
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await expect(
+      updateAsset({
+        id: "asset-1",
+        userId: "user-1",
+        organizationId: "org-A",
+        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+});
+
+describe("createAsset cross-org guards", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("rejects a customFieldId from a different organization", async () => {
+    expect.assertions(2);
+    // Foreign-org custom field → org-scoped lookup returns nothing → the guard
+    // (run inside the create transaction) rejects before the asset is written.
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    expect(db.customField.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cf-from-org-B"] }, organizationId: "org-A" },
+      select: { id: true },
+    });
+  });
+});
+
+describe("updateAsset custom-field writes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Asset 1",
+      category: null,
+      valuation: null,
+    });
+  });
+
+  // Regression for Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF: persisting custom
+  // field values must not use a nested `upsert`, which makes Prisma issue a
+  // SELECT-then-write per field (N+1). New values become a single `create`,
+  // existing ones an `updateMany` keyed by the value-row id we already loaded
+  // (`updateMany` so a concurrently-deleted row matches zero rows instead of
+  // throwing P2025 and aborting the whole save).
+  it("creates new custom-field values and updates existing ones without a nested upsert", async () => {
+    expect.assertions(4);
+
+    // One value already exists for cf-existing; cf-new has none yet.
+    (
+      db.assetCustomFieldValue.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "val-1",
+        customFieldId: "cf-existing",
+        value: { raw: "old" },
+        customField: { id: "cf-existing", name: "Existing", type: "TEXT" },
+      },
+    ]);
+    (db.customField.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [
+        { id: "cf-existing", name: "Existing", type: "TEXT" },
+        { id: "cf-new", name: "New", type: "TEXT" },
+      ]
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      customFieldsValues: [
+        { id: "cf-existing", value: { raw: "updated" } },
+        { id: "cf-new", value: { raw: "fresh" } },
+      ],
+    } as any);
+
+    const updateArg = (db.asset.update as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0];
+    const { customFields } = updateArg.data;
+
+    // No nested upsert — that was the N+1 source.
+    expect(customFields.upsert).toBeUndefined();
+    // New value → single create.
+    expect(customFields.create).toEqual([
+      { value: { raw: "fresh" }, customFieldId: "cf-new" },
+    ]);
+    // Existing value → updateMany (no-throw on a concurrently-deleted row),
+    // keyed by the value-row id we already loaded.
+    expect(customFields.updateMany).toEqual([
+      { where: { id: "val-1" }, data: { value: { raw: "updated" } } },
+    ]);
+    // Existence info is read in a single query, not once per field.
+    expect(db.assetCustomFieldValue.findMany).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("parseAssetValuation", () => {
@@ -794,6 +943,34 @@ describe("bulkAssignAssetTags", () => {
       })
     ).rejects.toThrow(ShelfError);
   });
+
+  // Regression: the per-asset `update` loop runs inside the interactive tx, so
+  // large selections must not abort with P2028 (Sentry SHELF-WEBAPP-1MH).
+  it("raises the interactive transaction timeout to 15s", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.tag.findMany.mockResolvedValue([{ id: "tag-new" }]);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", tags: [] }]);
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      tags: [{ id: "tag-new", name: "New" }],
+    });
+
+    await bulkAssignAssetTags({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      tagsIds: ["tag-new"],
+      remove: false,
+      // @ts-expect-error settings not relevant for this test
+      settings: {},
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
+  });
 });
 
 describe("bulkDeleteAssets", () => {
@@ -851,5 +1028,182 @@ describe("bulkDeleteAssets", () => {
     });
 
     expect(recordEvents).not.toHaveBeenCalled();
+  });
+
+  // Regression: a bulk delete cascades across every asset relation, so large
+  // selections must not abort with P2028 (Sentry SHELF-WEBAPP-1MJ).
+  it("raises the interactive transaction timeout to 15s", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", mainImage: null }]);
+
+    await bulkDeleteAssets({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      // @ts-expect-error settings not relevant
+      settings: {},
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
+  });
+});
+
+describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
+  // Settings are unused before the guard throws (asset-id resolution is mocked).
+  const fakeSettings = {} as unknown as AssetIndexSettings;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks a SELF_SERVICE user from assigning custody to someone else", async () => {
+    // why: the custodian resolves to a DIFFERENT user than the caller.
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      { name: "Other Person", user: { id: "other-user" } }
+    );
+
+    await expect(
+      bulkAssignCustody({
+        userId: "me",
+        role: OrganizationRoles.SELF_SERVICE,
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: fakeSettings,
+      })
+    ).rejects.toThrow("Self user can only assign custody to themselves only");
+
+    // The mutation must never run.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks a SELF_SERVICE user from releasing someone else's custody", async () => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        custody: { id: "c1", custodian: { userId: "other-user" } },
+      },
+    ]);
+
+    await expect(
+      bulkReleaseCustody({
+        userId: "me",
+        role: OrganizationRoles.SELF_SERVICE,
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        settings: fakeSettings,
+      })
+    ).rejects.toThrow(
+      "Self service user can only release custody of assets assigned to their user"
+    );
+  });
+});
+
+describe("getAssets search fallback", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+  const countMock = vi.mocked(db.asset.count);
+
+  /** Minimal required params for a simple-index search call. */
+  const baseParams = {
+    organizationId: "org-1",
+    page: 1,
+    perPage: 8,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+
+  /** The title branch only exists in the full search clause, never the narrow one. */
+  const titleClause = {
+    title: { contains: "103468", mode: "insensitive" },
+  };
+
+  beforeEach(() => {
+    findManyMock.mockReset();
+    countMock.mockReset();
+  });
+
+  it("runs only the narrow indexed clause when an ID-shaped query matches", async () => {
+    // why: first (and only) fetch returns a row, so no fallback is needed.
+    findManyMock.mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock.mockResolvedValueOnce(1 as never);
+
+    const result = await getAssets({ ...baseParams, search: "103468" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    // Narrow clause: sequentialId / barcode / qr only — no title branch.
+    expect(JSON.stringify(where.OR)).not.toContain("title");
+    expect(where.OR).toContainEqual({
+      sequentialId: { contains: "103468", mode: "insensitive" },
+    });
+    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("falls back to the full search when the narrow clause matches nothing", async () => {
+    // why: narrow query finds 0 rows; the number is embedded in a title, so the
+    // fallback re-query with the full clause must surface it.
+    findManyMock
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock
+      .mockResolvedValueOnce(0 as never)
+      .mockResolvedValueOnce(1 as never);
+
+    const result = await getAssets({ ...baseParams, search: "103468" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(2);
+    // The narrow-first behaviour is asserted by the single-query test above;
+    // getAssets mutates and reuses one `where` object across both fetches, so
+    // we can only reliably inspect its final (post-fallback) state here.
+    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
+    expect(secondWhere.OR[0]).toEqual({
+      OR: expect.arrayContaining([titleClause]),
+    });
+    expect(result).toEqual({ assets: [{ id: "a1" }], totalAssets: 1 });
+  });
+
+  it("does not run the fast path for free-text searches", async () => {
+    // why: "armchair" is not ID-shaped, so the full clause is used directly and
+    // there is never a second query even when zero rows match.
+    findManyMock.mockResolvedValueOnce([] as never);
+    countMock.mockResolvedValueOnce(0 as never);
+
+    await getAssets({ ...baseParams, search: "armchair" });
+
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = (findManyMock.mock.calls[0][0] as any).where;
+    expect(JSON.stringify(where.OR)).toContain("title");
+  });
+
+  it("preserves appended filter clauses when falling back", async () => {
+    // why: the fallback must keep filter OR clauses (here: team-member custody)
+    // appended after the search, or it would return assets outside the filter.
+    findManyMock
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "a1" }] as never);
+    countMock
+      .mockResolvedValueOnce(0 as never)
+      .mockResolvedValueOnce(1 as never);
+
+    await getAssets({
+      ...baseParams,
+      search: "103468",
+      teamMemberIds: ["tm-1"],
+    });
+
+    const secondWhere = (findManyMock.mock.calls[1][0] as any).where;
+    // Full search clause swapped in...
+    expect(secondWhere.OR[0]).toEqual({
+      OR: expect.arrayContaining([titleClause]),
+    });
+    // ...and the team-member filter clause survived the fallback.
+    expect(secondWhere.OR).toContainEqual({
+      custody: { teamMemberId: { in: ["tm-1"] } },
+    });
   });
 });

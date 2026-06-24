@@ -177,6 +177,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         isAdminOrOwner,
       }),
       {
+        // Expected user-input validation (e.g. "Start date must be at least N
+        // hours from now") — a 400, not a server error. Don't capture to
+        // Sentry (was noise: SHELF-WEBAPP-1KZ).
+        shouldBeCaptured: false,
         additionalData: { userId, organizationId },
       }
     );

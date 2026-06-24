@@ -8,6 +8,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
 import { canUseAudits, canUseBarcodes } from "~/utils/subscription.server";
+import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
  * Validates a Supabase JWT from the Authorization header and returns the
@@ -65,6 +66,7 @@ export async function requireMobileAuth(request: Request) {
       profilePicture: true,
       onboarded: true,
       deletedAt: true,
+      lastMobileActiveAt: true,
     },
   });
 
@@ -77,8 +79,19 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Strip deletedAt from the returned object
-  const { deletedAt: _, ...safeUser } = user;
+  // Record companion-app usage for adoption metrics. requireMobileAuth is the
+  // single chokepoint every mobile API route passes through (QR scanner
+  // included), so recording here covers them all in one place. Debounced +
+  // fire-and-forget — never blocks or breaks the request (see
+  // mobile-usage.server.ts).
+  recordMobileActivity(user.id, user.lastMobileActiveAt);
+
+  // Strip internal-only fields from the returned object
+  const {
+    deletedAt: _deletedAt,
+    lastMobileActiveAt: _lastMobileActiveAt,
+    ...safeUser
+  } = user;
   return { user: safeUser, authUser };
 }
 
@@ -238,6 +251,29 @@ export const MOBILE_ASSET_SELECT = {
   title: true,
   status: true,
   mainImage: true,
+  // why: kitId powers the scanner's "part of a kit" batch blocker — assets
+  // inside a kit must be (un)assigned via the kit, mirroring the web drawers.
+  kitId: true,
+  // why: powers the scan-to-booking "not available to book" blocker.
+  availableToBook: true,
   category: { select: { name: true } },
   location: { select: { name: true } },
+} as const;
+
+/**
+ * Shared Prisma select shape for kit data returned by mobile scanner
+ * endpoints (QR/barcode resolution). The per-asset statuses power the
+ * scanner's kit batch blockers ("kit has assets in custody"), mirroring the
+ * web scanner drawers.
+ */
+export const MOBILE_KIT_SELECT = {
+  id: true,
+  name: true,
+  status: true,
+  image: true,
+  _count: { select: { assets: true } },
+  // why: per-asset status powers the "kit has assets in custody" blocker;
+  // availableToBook powers the scan-to-booking "kit has unavailable assets"
+  // blocker — both mirror the web scanner drawers.
+  assets: { select: { id: true, status: true, availableToBook: true } },
 } as const;

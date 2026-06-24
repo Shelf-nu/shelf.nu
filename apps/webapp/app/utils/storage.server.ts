@@ -26,6 +26,8 @@ import {
   type CachedImage,
 } from "./import.image-cache.server";
 import { Logger } from "./logger";
+import { BlockedAddressError, safeFetch } from "./ssrf.server";
+import type { SafeFetchResult } from "./ssrf.server";
 
 const label: ErrorLabel = "File storage";
 
@@ -623,54 +625,33 @@ export async function uploadImageFromUrl(
       }
     }
 
-    // If not in cache, download the image with retry logic
-    let response: Response | null = null;
-    let fetchError: Error | null = null;
+    // If not in cache, download the image with retry logic.
+    // `safeFetch` enforces SSRF protection (blocks private/reserved/metadata
+    // addresses on every redirect hop) and a streaming size cap, so the raw
+    // destination URL can come straight from untrusted CSV input. See
+    // GHSA-xgrm-8w6v-mvjg and `./ssrf.server.ts`.
+    let fetchResult: SafeFetchResult | null = null;
 
     // Try to fetch the image up to 2 times
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        response = await fetch(imageUrl);
-
-        if (response.ok) {
-          fetchError = null;
-          break; // Success, exit retry loop
-        } else {
-          fetchError = new Error(
-            `HTTP ${response.status}: ${response.statusText}`
-          );
-          if (attempt === 2) {
-            // Last attempt failed, log and return null
-            Logger.error(
-              new ShelfError({
-                cause: fetchError,
-                message: "Failed to fetch image from URL after 2 attempts",
-                additionalData: {
-                  imageUrl,
-                  status: response.status,
-                  attempts: 2,
-                },
-                label,
-                shouldBeCaptured: false,
-              })
-            );
-            return null;
-          }
-          // Wait a moment before retrying
-          await delay(1000);
-        }
+        fetchResult = await safeFetch(imageUrl, {
+          maxBytes: ASSET_MAX_IMAGE_UPLOAD_SIZE,
+        });
+        break; // Success, exit retry loop
       } catch (cause) {
-        fetchError = cause as Error;
-        if (attempt === 2) {
-          // Last attempt failed, log and return null
+        // A blocked address is deterministic — retrying would just be blocked
+        // again, so bail out immediately rather than waiting and re-fetching.
+        const isBlocked = cause instanceof BlockedAddressError;
+
+        if (isBlocked || attempt === 2) {
           Logger.error(
             new ShelfError({
-              cause: fetchError,
-              message: "Failed to fetch image from URL after 2 attempts",
-              additionalData: {
-                imageUrl,
-                attempts: 2,
-              },
+              cause,
+              message: isBlocked
+                ? "Refused to fetch image from a private or reserved address"
+                : "Failed to fetch image from URL after 2 attempts",
+              additionalData: { imageUrl, attempts: attempt },
               label,
               shouldBeCaptured: false,
             })
@@ -683,7 +664,7 @@ export async function uploadImageFromUrl(
     }
 
     // This should not happen due to the early returns above, but TypeScript needs the check
-    if (!response) {
+    if (!fetchResult) {
       Logger.error(
         new ShelfError({
           cause: null,
@@ -696,11 +677,10 @@ export async function uploadImageFromUrl(
       return null;
     }
 
-    actualContentType = response.headers.get("content-type") || contentType;
+    actualContentType = fetchResult.contentType || contentType;
 
-    // Get the response as a buffer to validate the actual content
-    const imageBlob = await response.blob();
-    buffer = Buffer.from(await imageBlob.arrayBuffer());
+    // The body was already read (and size-capped) by `safeFetch`.
+    buffer = fetchResult.buffer;
 
     // For URLs that don't return proper image content-type headers (like Sortly),
     // detect the image format from the actual file content using magic bytes
@@ -719,18 +699,6 @@ export async function uploadImageFromUrl(
     // Use detected format if HTTP header doesn't provide proper image content-type
     if (detectedImageType && !actualContentType?.startsWith("image/")) {
       actualContentType = detectedImageType;
-    }
-
-    if (imageBlob.size > ASSET_MAX_IMAGE_UPLOAD_SIZE) {
-      throw new ShelfError({
-        cause: null,
-        message: `Image file size exceeds maximum allowed size of ${
-          ASSET_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-        }MB`,
-        additionalData: { imageUrl, size: imageBlob.size },
-        label,
-        shouldBeCaptured: false,
-      });
     }
 
     const file = await cropImage(

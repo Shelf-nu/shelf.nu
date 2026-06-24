@@ -146,6 +146,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
+    // A self-service user can only take custody for themselves. If they have
+    // no team-member profile in this workspace there is nothing to assign, so
+    // short-circuit instead of rendering a dead-end modal whose POST would then
+    // fail validation. Normally unreachable (a self-service user has their own
+    // member row), but guards the empty-teamMembers anomaly behind the
+    // SHELF-WEBAPP-1MM crash class.
+    if (role === OrganizationRoles.SELF_SERVICE && teamMembers.length === 0) {
+      sendNotification({
+        title: "Cannot take custody",
+        message:
+          "You don't have a team member profile in this workspace, so custody can't be assigned to you. Please contact your workspace admin.",
+        icon: { name: "x", variant: "error" },
+        senderId: userId,
+      });
+      return redirect(`/kits/${kitId}`);
+    }
+
     const totalTeamMembers = await db.teamMember.count({ where });
 
     return payload({
@@ -362,7 +379,7 @@ export default function GiveKitCustody() {
             showSearch={!isSelfService}
             disabled={disabled || isSelfService}
             defaultValue={
-              isSelfService
+              isSelfService && teamMembers?.length > 0
                 ? JSON.stringify({
                     id: teamMembers[0].id,
                     name: resolveTeamMemberName(teamMembers[0]),

@@ -154,6 +154,9 @@ function getExcludedPresets(reportId: string): TimeframePreset[] {
     // Top Booked Assets: Booking duration metrics need longer timeframes
     // "Today" would show incomplete/meaningless duration averages
     case "top-booked-assets":
+    // Top Booked Kits: same rationale as Top Booked Assets
+    // falls through
+    case "top-booked-kits":
     // Monthly Booking Trends: By definition needs multi-month data
     // falls through
     case "monthly-booking-trends":

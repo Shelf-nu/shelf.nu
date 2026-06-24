@@ -16,6 +16,7 @@ import {
   overdueItemsReport,
   idleAssetsReport,
   topBookedAssetsReport,
+  topBookedKitsReport,
   assetInventoryReport,
   assetUtilizationReport,
   assetActivityReport,
@@ -30,6 +31,7 @@ import type {
   OverdueItemRow,
   IdleAssetRow,
   TopBookedAssetRow,
+  TopBookedKitRow,
   AssetInventoryRow,
   AssetUtilizationRow,
   AssetActivityRow,
@@ -166,6 +168,19 @@ export const loader = async ({
         });
         csvString = generateTopBookedAssetsCsv(
           reportData.rows as TopBookedAssetRow[]
+        );
+        break;
+      }
+
+      case "top-booked-kits": {
+        const reportData = await topBookedKitsReport({
+          organizationId,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateTopBookedKitsCsv(
+          reportData.rows as TopBookedKitRow[]
         );
         break;
       }
@@ -376,10 +391,19 @@ function formatReturnStatus(
  * Escape a field for CSV format.
  */
 function escapeCsvField(field: string): string {
-  if (field.includes(",") || field.includes('"') || field.includes("\n")) {
-    return `"${field.replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
+  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
+  // values with a single quote so the cell is treated as literal text. Applied
+  // here in the shared helper so every report export is protected.
+  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  if (
+    safeField.includes(",") ||
+    safeField.includes('"') ||
+    safeField.includes("\n")
+  ) {
+    return `"${safeField.replace(/"/g, '""')}"`;
   }
-  return field;
+  return safeField;
 }
 
 /**
@@ -465,6 +489,37 @@ function generateTopBookedAssetsCsv(rows: TopBookedAssetRow[]): string {
     escapeCsvField(row.assetName),
     row.category || "",
     row.location || "",
+    row.bookingCount.toString(),
+    row.totalDaysBooked.toString(),
+    row.bookingCount > 0
+      ? (row.totalDaysBooked / row.bookingCount).toFixed(1)
+      : "0",
+  ]);
+
+  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+}
+
+/**
+ * Generate CSV for Top Booked Kits report.
+ */
+function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
+  const headers = [
+    "Rank",
+    "Kit ID",
+    "Kit Name",
+    "Category",
+    "Location",
+    "Booking Count",
+    "Total Days Booked",
+    "Avg Days per Booking",
+  ];
+
+  const csvRows = rows.map((row, index) => [
+    (index + 1).toString(),
+    escapeCsvField(row.kitId),
+    escapeCsvField(row.kitName),
+    escapeCsvField(row.category || ""),
+    escapeCsvField(row.location || ""),
     row.bookingCount.toString(),
     row.totalDaysBooked.toString(),
     row.bookingCount > 0

@@ -20,12 +20,14 @@ import {
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import invariant from "tiny-invariant";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
+import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -49,7 +51,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
-import { oneDayFromNow } from "~/utils/one-week-from-now";
+import { oneDayFromNow, threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertCategoryBelongsToOrg,
   assertLocationBelongsToOrg,
@@ -170,7 +172,10 @@ export async function createKit({
         barcodes: {
           create: barcodesToAdd.map(({ type, value }) => ({
             type,
-            value: value.toUpperCase(),
+            // Normalize per type (ExternalQR keeps its case, others uppercase)
+            // so stored kit barcodes match what filters/lookups expect — same
+            // rule the asset create path uses via `normalizeBarcodeValue`.
+            value: normalizeBarcodeValue(type, value),
             organizationId,
           })),
         },
@@ -374,6 +379,91 @@ export async function updateKitImage({
       label,
     });
   }
+}
+
+/**
+ * Re-signs expired Supabase signed image URLs for a set of kits, in place.
+ *
+ * Kit thumbnails are served via short-lived Supabase signed URLs. When a URL
+ * has expired, the `KitImage` component would otherwise fire a client-side
+ * refresh fetcher on mount — and on a multi-row report table that means one
+ * fetcher per expired row (a refresh storm). This mirrors
+ * `refreshExpiredAssetImages`: we re-sign server-side in the loader so rows
+ * carry fresh URLs and the client fetcher stays dormant.
+ *
+ * Kits are simpler than assets — a single `image` field, no separate
+ * thumbnail. Failures are logged and skipped (the row keeps its stale URL and
+ * the client `KitImage` fallback still covers genuinely broken images), so a
+ * storage hiccup never fails the report.
+ *
+ * @param kits - Kits carrying `id`, `organizationId`, `image`, `imageExpiration`
+ * @returns The same array with fresh `image`/`imageExpiration` for any that were expired
+ */
+export async function refreshExpiredKitImages<
+  T extends {
+    id: string;
+    organizationId: string;
+    image: string | null;
+    imageExpiration: Date | null;
+  },
+>(kits: T[]): Promise<T[]> {
+  const now = new Date();
+  const expiredKits = kits.filter(
+    (k) => k.image && k.imageExpiration && new Date(k.imageExpiration) < now
+  );
+
+  if (expiredKits.length === 0) return kits;
+
+  /** Batch size keeps Supabase signed-URL calls bounded. */
+  const BATCH_SIZE = 10;
+
+  const refreshKit = async (kit: (typeof expiredKits)[number]) => {
+    try {
+      const imagePath = extractStoragePath(kit.image!, "kits");
+      if (!imagePath) return null;
+
+      const newImageUrl = await createSignedUrl({
+        filename: imagePath,
+        bucketName: "kits",
+      });
+
+      // 72h expiration reduces how often the loader has to re-sign.
+      const newExpiration = threeDaysFromNow();
+
+      await db.kit.update({
+        where: { id: kit.id, organizationId: kit.organizationId },
+        data: { image: newImageUrl, imageExpiration: newExpiration },
+      });
+
+      return { id: kit.id, image: newImageUrl, imageExpiration: newExpiration };
+    } catch {
+      // Kit deleted, or file removed from storage between query and update —
+      // expected, not a bug. Log and skip; the row keeps its stale URL.
+      Logger.info(
+        `Failed to refresh image for kit ${kit.id}, proceeding with stale URL`
+      );
+      return null;
+    }
+  };
+
+  const refreshed = new Map<string, { image: string; imageExpiration: Date }>();
+  for (let i = 0; i < expiredKits.length; i += BATCH_SIZE) {
+    const batch = expiredKits.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(batch.map(refreshKit));
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        refreshed.set(result.value.id, {
+          image: result.value.image,
+          imageExpiration: result.value.imageExpiration,
+        });
+      }
+    }
+  }
+
+  return kits.map((k) => {
+    const fresh = refreshed.get(k.id);
+    return fresh ? { ...k, ...fresh } : k;
+  });
 }
 
 export async function getPaginatedAndFilterableKits<

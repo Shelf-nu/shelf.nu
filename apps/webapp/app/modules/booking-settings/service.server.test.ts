@@ -57,6 +57,7 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        countKitsAsSingleUnit: false,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
@@ -71,6 +72,7 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -121,6 +123,7 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        countKitsAsSingleUnit: false,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         organizationId: mockOrganizationId,
@@ -135,6 +138,7 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -216,6 +220,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -265,6 +270,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -284,6 +290,54 @@ describe("updateBookingSettings", () => {
         },
       },
     });
+    expect(result).toEqual(updatedSettings);
+  });
+
+  it("should update countKitsAsSingleUnit to true", async () => {
+    expect.assertions(2);
+    const updatedSettings = {
+      ...mockBookingSettingsData,
+      countKitsAsSingleUnit: true,
+    };
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+
+    const result = await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      countKitsAsSingleUnit: true,
+    });
+
+    // Assert only the mutating intent (where + data) — the select shape is an
+    // implementation detail covered elsewhere.
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: mockOrganizationId },
+        data: { countKitsAsSingleUnit: true },
+      })
+    );
+    expect(result).toEqual(updatedSettings);
+  });
+
+  it("should update countKitsAsSingleUnit to false", async () => {
+    expect.assertions(2);
+    const updatedSettings = {
+      ...mockBookingSettingsData,
+      countKitsAsSingleUnit: false,
+    };
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+
+    const result = await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      countKitsAsSingleUnit: false,
+    });
+
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: mockOrganizationId },
+        data: { countKitsAsSingleUnit: false },
+      })
+    );
     expect(result).toEqual(updatedSettings);
   });
 
@@ -314,6 +368,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -363,6 +418,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -420,6 +476,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -471,6 +528,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -525,6 +583,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -574,6 +633,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -696,6 +756,7 @@ describe("updateBookingSettings", () => {
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {

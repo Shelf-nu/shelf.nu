@@ -19,7 +19,6 @@ type AuthState = {
     password: string
   ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ error: string | null }>;
 };
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -62,13 +61,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
-  const resetPassword = useCallback(async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "shelf://reset-password",
-    });
-    return { error: error?.message ?? null };
-  }, []);
-
   const value = useMemo(
     () => ({
       session,
@@ -76,9 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       signIn,
       signOut,
-      resetPassword,
     }),
-    [session, isLoading, signIn, signOut, resetPassword]
+    [session, isLoading, signIn, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

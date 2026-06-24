@@ -171,6 +171,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           expectedAssetCount: true,
           foundAssetCount: true,
           dueDate: true,
+          // why: surface ownership on the dashboard's audit cards the same
+          // way the audits list does — `assigneeCount` distinguishes
+          // "Unassigned · anyone can scan" (0) from an owned audit, and
+          // `assignments.userId` lets the client mark the caller's own work
+          // ("Assigned to you"). Mirrors `apps/webapp/app/routes/api+/mobile+/audits.ts`.
+          _count: { select: { assignments: true } },
+          assignments: { select: { userId: true } },
         },
         orderBy: { createdAt: "desc" },
         take: 5,
@@ -225,6 +232,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         expectedAssetCount: a.expectedAssetCount,
         foundAssetCount: a.foundAssetCount,
         dueDate: a.dueDate?.toISOString() ?? null,
+        assigneeCount: a._count?.assignments ?? 0,
+        // `userId` here is the assignee on each AuditAssignment; compare to
+        // the caller (user.id) to flag the caller's own audits.
+        isAssignedToMe:
+          a.assignments?.some((assn) => assn.userId === user.id) ?? false,
       })),
     });
   } catch (cause) {

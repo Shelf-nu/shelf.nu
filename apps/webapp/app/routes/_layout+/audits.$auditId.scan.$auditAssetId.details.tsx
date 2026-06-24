@@ -213,6 +213,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { auditAssetId },
           label: "Audit",
           status: 400,
+          // Expected user-input validation — a 400, not a server error.
+          // Don't capture to Sentry (was noise: SHELF-WEBAPP-1KS).
+          shouldBeCaptured: false,
         });
       }
 
