@@ -78,6 +78,7 @@ import {
 import {
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
+  assertKitsBelongToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
@@ -10443,7 +10444,256 @@ export async function loadBookingsData({
 }
 
 /**
+ * Per-asset summary for an entry appearing under "added" / "removed" in a
+ * kit's drift snapshot. Carries enough to render the drift modal without a
+ * second loader round-trip.
+ */
+export type BookingKitDriftAsset = {
+  assetId: string;
+  title: string;
+  type: AssetType;
+  /**
+   * AssetKit.quantity for "added" entries (so the modal can show
+   * "× 50" for a QT addition). For "removed" entries the corresponding
+   * AssetKit row is gone, so callers should not rely on a quantity there
+   * — we set it to the source BookingAsset.quantity for parity.
+   */
+  quantity: number;
+};
+
+/**
+ * Per-kit "membership drift" between the kit's CURRENT contents and the
+ * snapshot the source booking carries. `added` = kit members not in the
+ * snapshot; `removed` = snapshot members no longer in the kit.
+ */
+export type BookingKitDrift = {
+  kitId: string;
+  kitName: string;
+  added: BookingKitDriftAsset[];
+  removed: BookingKitDriftAsset[];
+};
+
+/**
+ * Compute per-kit membership drift for a booking, comparing the booking's
+ * kit-driven `BookingAsset` snapshot against each kit's CURRENT `AssetKit`
+ * rows.
  *
+ * **Why this exists.** `BookingAsset` rows are a snapshot taken at the moment
+ * a kit was added to a booking. If a kit's contents change later (e.g. a QT
+ * asset is added to the kit after the booking was created), a duplicate that
+ * naively copies the snapshot will inherit a stale member list. This helper
+ * tells the duplicate-confirmation modal exactly what will differ so the user
+ * acknowledges the change explicitly before confirming.
+ *
+ * Returns one entry per kit that actually drifted (added or removed non-empty);
+ * kits with no drift are omitted. Returns `[]` when the booking has no
+ * kit-driven slices at all.
+ *
+ * Org-scope: validates that every kit referenced by the booking belongs to
+ * `organizationId` before issuing the AssetKit lookup. This is defence-in-
+ * depth — `getBooking` already org-scopes the source booking — but follows
+ * the project rule that any ID derived from request input is org-checked
+ * before being read.
+ *
+ * **Caller:** `duplicateBooking` (to emit per-kit drift in
+ * `BOOKING_CREATED.meta`, future-extension), and the duplicate route loader
+ * (`bookings.$bookingId.overview.duplicate.tsx`) to render the modal.
+ *
+ * @param args.bookingId - The source booking to inspect
+ * @param args.organizationId - The caller's organization id (for org-scope)
+ * @returns Array of per-kit drift entries; empty when no drift.
+ * @throws {ShelfError} If a referenced kit is missing or in another org.
+ */
+export async function computeBookingKitDrift({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: Booking["id"];
+  organizationId: Organization["id"];
+}): Promise<BookingKitDrift[]> {
+  try {
+    // Fetch only what we need: kit-driven slices for the booking. The
+    // `AssetKit` link is resolved via a second query below — Prisma's
+    // `BookingAsset` model deliberately omits the `assetKit` relation
+    // accessor at the schema level (TS recursion limit, see schema
+    // comment on `BookingAsset.assetKitId`), so we can't `include` it.
+    const kitDrivenSlices = await db.bookingAsset.findMany({
+      where: {
+        bookingId,
+        assetKitId: { not: null },
+      },
+      select: {
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        asset: {
+          select: {
+            id: true,
+            title: true,
+            type: true,
+          },
+        },
+      },
+    });
+
+    if (kitDrivenSlices.length === 0) return [];
+
+    // Resolve `assetKitId -> kitId` via a separate AssetKit lookup.
+    const assetKitIds = kitDrivenSlices
+      .map((s) => s.assetKitId)
+      .filter((id): id is string => id !== null);
+    const assetKitRows = await db.assetKit.findMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetKitIds were fetched above from BookingAsset rows scoped to bookingId; the booking itself is org-validated by the caller (computeBookingKitDrift is called from the duplicate route loader after requirePermission, and from duplicateBooking after getBooking). Pure read.
+      where: { id: { in: assetKitIds } },
+      select: { id: true, kitId: true },
+    });
+    const kitIdByAssetKitId = new Map(
+      assetKitRows.map((ak) => [ak.id, ak.kitId])
+    );
+
+    // Group source slices by the kit they came from (resolved via AssetKit.kitId).
+    // A kit-driven slice with no matching AssetKit row (e.g. the AssetKit was
+    // deleted) is excluded from the drift snapshot — there's nothing meaningful
+    // to compare against, and the duplicate's kit-driven copy will also skip it
+    // (see `duplicateBooking`).
+    const sliceByKitId = new Map<
+      string,
+      Array<{
+        assetId: string;
+        quantity: number;
+        title: string;
+        type: AssetType;
+      }>
+    >();
+    for (const slice of kitDrivenSlices) {
+      const kitId = slice.assetKitId
+        ? kitIdByAssetKitId.get(slice.assetKitId)
+        : undefined;
+      if (!kitId) continue; // AssetKit row gone — handled in duplicate path.
+      const bucket = sliceByKitId.get(kitId) ?? [];
+      bucket.push({
+        assetId: slice.assetId,
+        quantity: slice.quantity,
+        title: slice.asset.title,
+        type: slice.asset.type,
+      });
+      sliceByKitId.set(kitId, bucket);
+    }
+
+    const kitIds = [...sliceByKitId.keys()];
+    if (kitIds.length === 0) return [];
+
+    // Defence-in-depth: every kit id we're about to query must belong to the
+    // caller's org. `getBooking` already scoped the source booking, but the
+    // AssetKit.kitId came out of joined rows so we re-validate.
+    await assertKitsBelongToOrg({ kitIds, organizationId });
+
+    // Pull each referenced kit's CURRENT membership + name in one round trip.
+    const kits = await db.kit.findMany({
+      where: { id: { in: kitIds }, organizationId },
+      select: {
+        id: true,
+        name: true,
+        assetKits: {
+          select: {
+            assetId: true,
+            quantity: true,
+            asset: {
+              select: { id: true, title: true, type: true },
+            },
+          },
+        },
+      },
+    });
+
+    const kitsById = new Map(kits.map((k) => [k.id, k]));
+
+    const drifts: BookingKitDrift[] = [];
+
+    for (const kitId of kitIds) {
+      const kit = kitsById.get(kitId);
+      const snapshotForKit = sliceByKitId.get(kitId) ?? [];
+      const snapshotAssetIds = new Set(snapshotForKit.map((s) => s.assetId));
+
+      // Kit was deleted entirely since source was created. Treat its entire
+      // snapshot as "removed" so the modal still surfaces the change.
+      if (!kit) {
+        drifts.push({
+          kitId,
+          kitName: "Deleted kit",
+          added: [],
+          removed: snapshotForKit.map((s) => ({
+            assetId: s.assetId,
+            title: s.title,
+            type: s.type,
+            quantity: s.quantity,
+          })),
+        });
+        continue;
+      }
+
+      const currentAssetIds = new Set(kit.assetKits.map((ak) => ak.assetId));
+
+      const added: BookingKitDriftAsset[] = kit.assetKits
+        .filter((ak) => !snapshotAssetIds.has(ak.assetId))
+        .map((ak) => ({
+          assetId: ak.assetId,
+          title: ak.asset.title,
+          type: ak.asset.type,
+          quantity: ak.quantity,
+        }));
+
+      const removed: BookingKitDriftAsset[] = snapshotForKit
+        .filter((s) => !currentAssetIds.has(s.assetId))
+        .map((s) => ({
+          assetId: s.assetId,
+          title: s.title,
+          type: s.type,
+          quantity: s.quantity,
+        }));
+
+      if (added.length === 0 && removed.length === 0) continue;
+
+      drifts.push({
+        kitId,
+        kitName: kit.name,
+        added,
+        removed,
+      });
+    }
+
+    return drifts;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while computing booking kit drift.",
+      label,
+      additionalData: { bookingId, organizationId },
+    });
+  }
+}
+
+/**
+ * Duplicate a booking, copying its asset selection, tags, custodian and
+ * notification recipients into a fresh DRAFT booking owned by `userId`.
+ *
+ * **Kit re-resolution.** Kit-driven `BookingAsset` rows are NOT copied
+ * verbatim from the source. Instead, the duplicate's kit-driven slices are
+ * rebuilt from each referenced kit's CURRENT `AssetKit` rows so the
+ * duplicate reflects the kit's current contents (not a stale snapshot).
+ * Standalone slices (`assetKitId IS NULL`) ARE copied verbatim, including
+ * per-row `quantity`. The duplicate-confirmation modal surfaces the
+ * resulting drift via {@link computeBookingKitDrift} so the user
+ * acknowledges the change before confirming.
+ *
+ * @param args.bookingId - The source booking
+ * @param args.organizationId - The caller's organization
+ * @param args.userId - The user creating the duplicate (becomes the creator)
+ * @param args.request - Used for client hints (timezone for `from`/`to`)
+ * @returns The newly created booking row
+ * @throws {ShelfError} If anything in the transaction fails
  */
 export async function duplicateBooking({
   bookingId,
@@ -10467,6 +10717,85 @@ export async function duplicateBooking({
     });
     const hints = getHints(request);
 
+    // Split the source's snapshot into standalone and kit-driven buckets.
+    // Standalone slices are copied verbatim. Kit-driven slices are
+    // re-resolved against the kit's CURRENT AssetKit rows below so the
+    // duplicate reflects the kit's current contents.
+    const standaloneSourceSlices = bookingToDuplicate.bookingAssets.filter(
+      (ba) => ba.assetKitId == null
+    );
+    const kitSourceSlices = bookingToDuplicate.bookingAssets.filter(
+      (ba) => ba.assetKitId != null
+    );
+
+    // Distinct kit ids referenced by the source. Resolved from
+    // `asset.assetKits.find(ak => ak.id === ba.assetKitId)?.kitId` because
+    // `ba.assetKitId` is an `AssetKit` row id, not the kit id itself. A slice
+    // whose AssetKit row has been deleted since (no matching entry) is
+    // dropped from the duplicate — same shape as `computeBookingKitDrift`.
+    const distinctKitIds = new Set<string>();
+    for (const slice of kitSourceSlices) {
+      const kitId = slice.asset.assetKits.find(
+        (ak) => ak.id === slice.assetKitId
+      )?.kitId;
+      if (kitId) distinctKitIds.add(kitId);
+    }
+
+    // Resolve the kits' current membership BEFORE the tx — read-only, no need
+    // to keep inside the write transaction (matches the kit-add path which
+    // also resolves slices ahead of the write).
+    const kitIdsList = [...distinctKitIds];
+    let kitDrivenCreateRows: Array<{
+      assetId: string;
+      quantity: number;
+      assetKitId: string;
+      asset: { type: AssetType; unitOfMeasure: string | null };
+    }> = [];
+
+    if (kitIdsList.length > 0) {
+      await assertKitsBelongToOrg({
+        kitIds: kitIdsList,
+        organizationId,
+      });
+
+      const currentKitAssets = await db.assetKit.findMany({
+        where: { kitId: { in: kitIdsList } },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          asset: {
+            select: { type: true, unitOfMeasure: true },
+          },
+        },
+      });
+
+      kitDrivenCreateRows = currentKitAssets.map((ak) => ({
+        assetId: ak.assetId,
+        quantity: ak.quantity,
+        assetKitId: ak.id,
+        asset: ak.asset,
+      }));
+    }
+
+    // The final create payload: standalone (verbatim) + kit-driven (current).
+    // Each kit-driven row carries a non-null `assetKitId`, so even an asset
+    // present as both a standalone slice AND a kit-driven slice stays
+    // distinct on the `(bookingId, assetId) WHERE assetKitId IS NULL`
+    // partial unique (the standalone is the only NULL row for that asset).
+    const createSlices = [
+      ...standaloneSourceSlices.map((ba) => ({
+        assetId: ba.assetId,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId,
+      })),
+      ...kitDrivenCreateRows.map((row) => ({
+        assetId: row.assetId,
+        quantity: row.quantity,
+        assetKitId: row.assetKitId,
+      })),
+    ];
+
     /**
      * Wrap creation + activity events in a transaction so the events
      * commit atomically with the booking row (matches `createBooking`).
@@ -10474,10 +10803,6 @@ export async function duplicateBooking({
      * needs to copy across more fields (per-asset quantities, tags,
      * notification recipients), so we mirror the emission pattern here.
      */
-    const duplicatedAssetIds = bookingToDuplicate.bookingAssets.map(
-      (ba: { assetId: string }) => ba.assetId
-    ) as string[];
-
     const newBooking = await db.$transaction(async (tx) => {
       const created = await tx.booking.create({
         data: {
@@ -10504,30 +10829,24 @@ export async function duplicateBooking({
           custodianUserId: bookingToDuplicate.custodianUserId,
           bookingAssets: {
             /**
-             * Preserve per-asset booked quantity when duplicating. Without
-             * this the pivot row falls back to the schema default of 1,
-             * which silently drops reservation sizes for QUANTITY_TRACKED
-             * assets.
+             * Standalone slices (`assetKitId IS NULL`) are copied verbatim
+             * so per-row `quantity` is preserved for QUANTITY_TRACKED
+             * assets. Kit-driven slices are rebuilt from each referenced
+             * kit's CURRENT `AssetKit` rows so the duplicate reflects the
+             * kit's current contents, not the snapshot the source carried.
              *
-             * Also preserve `assetKitId` (the kit-source discriminator).
              * Polish-6 allows multiple BookingAsset rows per asset (one
-             * standalone + N kit-driven). Dropping `assetKitId` would make
-             * every duplicated row standalone, so an asset with both a
-             * standalone and a kit-driven slice collapses to two
-             * `assetKitId IS NULL` rows for the same asset — a P2002 on the
-             * `BookingAsset_manual_unique (bookingId, assetId)` partial
-             * unique. Copying it keeps each slice distinct.
+             * standalone + N kit-driven). Each kit-driven row carries a
+             * non-null `assetKitId`, so an asset present as both a
+             * standalone slice AND a kit-driven slice stays distinct on
+             * the `BookingAsset_manual_unique (bookingId, assetId) WHERE
+             * assetKitId IS NULL` partial unique.
              *
-             * Note: we copy the intent verbatim — the duplicate starts in
-             * DRAFT and availability is re-validated at checkout, so an
-             * over-reservation here is surfaced to the user at the right
-             * time instead of being silently truncated now.
+             * The duplicate starts in DRAFT and availability is re-validated
+             * at checkout, so an over-reservation here is surfaced to the
+             * user at the right time instead of being silently truncated.
              */
-            create: bookingToDuplicate.bookingAssets.map((ba) => ({
-              assetId: ba.assetId,
-              quantity: ba.quantity,
-              assetKitId: ba.assetKitId,
-            })),
+            create: createSlices,
           },
           tags: {
             connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
@@ -10548,7 +10867,8 @@ export async function duplicateBooking({
       /**
        * Lifecycle event for the duplicated booking. Mirrors `createBooking`
        * so reports treat the duplicate as a fresh draft just like any
-       * other newly created booking.
+       * other newly created booking. `assetCount` uses the NEW slice count
+       * (which may differ from the source by the kit-drift delta).
        */
       await recordEvent(
         {
@@ -10559,28 +10879,47 @@ export async function duplicateBooking({
           entityId: created.id,
           bookingId: created.id,
           meta: {
-            assetCount: duplicatedAssetIds.length,
+            assetCount: createSlices.length,
             duplicatedFromBookingId: bookingToDuplicate.id,
           },
         },
         tx
       );
 
-      // One BOOKING_ASSETS_ADDED event per copied BookingAsset row.
+      // One BOOKING_ASSETS_ADDED event per newly-created BookingAsset row.
       // Per-row `meta.quantity` (qty-tracked only) sourced from the
-      // duplicated row's own quantity — multi-row qty-tracked yields
-      // one event per slice, each carrying that slice's count.
-      if (duplicatedAssetIds.length > 0) {
+      // duplicated row's own quantity — multi-row qty-tracked yields one
+      // event per slice, each carrying that slice's count. We iterate the
+      // same create payload (standalone source rows + kit-driven current
+      // rows) so the events reflect what was actually inserted.
+      if (createSlices.length > 0) {
+        const eventRows: Array<{
+          assetId: string;
+          quantity: number;
+          asset: { type: AssetType; unitOfMeasure: string | null };
+        }> = [
+          ...standaloneSourceSlices.map((ba) => ({
+            assetId: ba.assetId,
+            quantity: ba.quantity,
+            asset: ba.asset,
+          })),
+          ...kitDrivenCreateRows.map((row) => ({
+            assetId: row.assetId,
+            quantity: row.quantity,
+            asset: row.asset,
+          })),
+        ];
+
         await recordEvents(
-          bookingToDuplicate.bookingAssets.map((ba) => ({
+          eventRows.map((row) => ({
             organizationId,
             actorUserId: userId,
             action: "BOOKING_ASSETS_ADDED" as const,
             entityType: "BOOKING" as const,
             entityId: created.id,
             bookingId: created.id,
-            assetId: ba.assetId,
-            meta: assetQtyMeta(ba.asset, ba.quantity),
+            assetId: row.assetId,
+            meta: assetQtyMeta(row.asset, row.quantity),
           })),
           tx
         );

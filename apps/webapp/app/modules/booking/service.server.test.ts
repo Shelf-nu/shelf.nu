@@ -126,6 +126,16 @@ vitest.mock("~/database/db.server", () => ({
     },
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: assertKitsBelongToOrg (kit cross-org guard) calls
+      // db.kit.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
+      // Echo the requested ids so the guard passes for happy-path tests;
+      // tests asserting kit re-resolution (duplicateBooking) override per-case.
+      findMany: vitest.fn().mockImplementation((args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }),
     },
     partialBookingCheckin: {
       create: vitest.fn().mockResolvedValue({}),
@@ -3913,21 +3923,35 @@ describe("duplicateBooking", () => {
     // (assetKitId "ak-x"). If duplicateBooking dropped `assetKitId`, both
     // copied rows would be standalone for the same (bookingId, assetId),
     // tripping the `BookingAsset_manual_unique` partial unique. The fix
-    // copies `assetKitId` verbatim so each slice stays distinct.
+    // emits one standalone copy (assetKitId NULL) plus one kit-driven
+    // slice re-resolved from the kit's CURRENT AssetKit row so each row
+    // stays distinct on the partial-unique pair.
     expect.assertions(2);
 
     const originalBooking = {
       ...mockBookingData,
       bookingAssets: [
         {
-          asset: { id: "asset-shared" },
+          asset: {
+            id: "asset-shared",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [],
+          },
           assetId: "asset-shared",
           quantity: 5,
           assetKitId: null,
           id: "ba-standalone",
         },
         {
-          asset: { id: "asset-shared" },
+          asset: {
+            id: "asset-shared",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            // The source's kit-driven slice points at AssetKit "ak-x";
+            // re-resolution needs this `assetKits` entry to find the kit id.
+            assetKits: [{ id: "ak-x", kitId: "kit-1" }],
+          },
           assetId: "asset-shared",
           quantity: 3,
           assetKitId: "ak-x",
@@ -3947,6 +3971,24 @@ describe("duplicateBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.create.mockResolvedValue(duplicatedBooking);
 
+    // Kit "kit-1" currently still contains asset-shared via AssetKit "ak-x",
+    // qty 3 — same as the source snapshot, so the duplicate's kit-driven
+    // slice mirrors what the source carried (no drift).
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockImplementationOnce((args?: any) => {
+      if (args?.where?.kitId?.in) {
+        return Promise.resolve([
+          {
+            id: "ak-x",
+            assetId: "asset-shared",
+            quantity: 3,
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
     await duplicateBooking({
       bookingId: "booking-1",
       organizationId: "org-1",
@@ -3955,7 +3997,7 @@ describe("duplicateBooking", () => {
     });
 
     // Both slices are recreated, each carrying its own assetKitId — the
-    // standalone keeps NULL, the kit-driven keeps "ak-x".
+    // standalone keeps NULL, the kit-driven keeps "ak-x" (re-resolved).
     expect(db.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -3979,6 +4021,167 @@ describe("duplicateBooking", () => {
     }>;
     const distinctKitIds = new Set(createdSlices.map((s) => s.assetKitId));
     expect(distinctKitIds.size).toBe(2);
+  });
+
+  it("re-resolves kit contents from current AssetKit rows (drift includes new QT addition)", async () => {
+    // Drift repro: the source booking carries a kit with 3 INDIVIDUAL
+    // members. After source creation, a 4th QT asset (qty 5) is added to
+    // the kit. duplicateBooking must rebuild the kit-driven slices from
+    // the kit's CURRENT contents — so the duplicate includes the new QT
+    // member at its current qty — while standalone slices are copied
+    // verbatim. The lifecycle event's `assetCount` reflects the NEW
+    // count (1 standalone + 4 kit-driven = 5), not the source count (4).
+    expect.assertions(4);
+
+    const originalBooking = {
+      ...mockBookingData,
+      bookingAssets: [
+        // One standalone — copied verbatim, unchanged.
+        {
+          asset: {
+            id: "asset-standalone",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+          assetId: "asset-standalone",
+          quantity: 1,
+          assetKitId: null,
+          id: "ba-standalone",
+        },
+        // Three kit-driven slices from the SAME kit (`kit-1`), one per
+        // INDIVIDUAL member. The source snapshot pre-dates the QT addition.
+        {
+          asset: {
+            id: "kit-asset-a",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ id: "ak-a", kitId: "kit-1" }],
+          },
+          assetId: "kit-asset-a",
+          quantity: 1,
+          assetKitId: "ak-a",
+          id: "ba-k-a",
+        },
+        {
+          asset: {
+            id: "kit-asset-b",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ id: "ak-b", kitId: "kit-1" }],
+          },
+          assetId: "kit-asset-b",
+          quantity: 1,
+          assetKitId: "ak-b",
+          id: "ba-k-b",
+        },
+        {
+          asset: {
+            id: "kit-asset-c",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ id: "ak-c", kitId: "kit-1" }],
+          },
+          assetId: "kit-asset-c",
+          quantity: 1,
+          assetKitId: "ak-c",
+          id: "ba-k-c",
+        },
+      ],
+      tags: [],
+    };
+    const duplicatedBooking = {
+      ...originalBooking,
+      id: "booking-2",
+      name: "Test Booking (Copy)",
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue(originalBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue(duplicatedBooking);
+
+    // Kit "kit-1"'s CURRENT membership has FOUR rows — the original three
+    // INDIVIDUAL members plus a newly-added QT asset at qty 5.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockImplementationOnce((args?: any) => {
+      if (args?.where?.kitId?.in) {
+        return Promise.resolve([
+          {
+            id: "ak-a",
+            assetId: "kit-asset-a",
+            quantity: 1,
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+          {
+            id: "ak-b",
+            assetId: "kit-asset-b",
+            quantity: 1,
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+          {
+            id: "ak-c",
+            assetId: "kit-asset-c",
+            quantity: 1,
+            asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
+          },
+          {
+            id: "ak-qt",
+            assetId: "qt-gloves",
+            quantity: 5,
+            asset: {
+              type: AssetType.QUANTITY_TRACKED,
+              unitOfMeasure: "pairs",
+            },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("https://example.com"),
+    });
+
+    const createArg = (
+      db.booking.create as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    const createdSlices = createArg?.data?.bookingAssets?.create as Array<{
+      assetId: string;
+      quantity: number;
+      assetKitId: string | null;
+    }>;
+
+    // 1 standalone + 4 kit-driven (incl. the new QT) = 5 total slices.
+    expect(createdSlices).toHaveLength(5);
+
+    // Standalone slice copied verbatim (quantity preserved, assetKitId NULL).
+    expect(createdSlices).toEqual(
+      expect.arrayContaining([
+        { assetId: "asset-standalone", quantity: 1, assetKitId: null },
+      ])
+    );
+
+    // Kit-driven slice for the newly-added QT carries AssetKit.quantity (5),
+    // NOT a default of 1 — proves we read from AssetKit, not the source.
+    expect(createdSlices).toEqual(
+      expect.arrayContaining([
+        { assetId: "qt-gloves", quantity: 5, assetKitId: "ak-qt" },
+      ])
+    );
+
+    // BOOKING_CREATED lifecycle event reflects the NEW slice count (5),
+    // not the source's pre-drift count (4).
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_CREATED",
+        meta: expect.objectContaining({ assetCount: 5 }),
+      }),
+      expect.anything()
+    );
   });
 });
 
