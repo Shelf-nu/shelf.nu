@@ -1,12 +1,22 @@
-import { createContext, useContext, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AssetStatus, AssetType } from "@prisma/client";
 import type { Booking } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useLoaderData } from "react-router";
 import { z } from "zod";
+import type { BookingExpectedAsset } from "~/atoms/qr-scanner";
 import {
+  bookingExpectedAssetsAtom,
   clearScannedItemsAtom,
+  quickCheckoutQtyAssetAtom,
+  QUICK_CHECKOUT_QR_PREFIX,
   removeScannedItemAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
@@ -38,6 +48,17 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { PendingItemsList, SectionHeader } from "./pending-items-list";
+
+/** Narrowed alias used when classifying expected qty-tracked slices below. */
+type QtyExpectedAsset = Extract<
+  BookingExpectedAsset,
+  { kind: "QUANTITY_TRACKED" }
+>;
+type IndividualExpectedAsset = Extract<
+  BookingExpectedAsset,
+  { kind: "INDIVIDUAL" }
+>;
 
 /**
  * Shape of a single per-slice checkout payload submitted by the drawer.
@@ -310,6 +331,17 @@ export default function PartialCheckoutDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
+  // Read the seeded expected-asset list — populated by the checkout
+  // route's `useBookingCheckinSessionInitialization` call. The atom is
+  // shared across check-in and check-out (routes are never mounted at
+  // the same time) so the same renderer can power both directions.
+  const expectedAssets = useAtomValue(bookingExpectedAssetsAtom);
+
+  // Dispatcher for inserting a synthetic "Check out without scanning"
+  // entry into `scannedItemsAtom`. Wired to the pending-list's
+  // `onQuickAction` below.
+  const quickCheckoutQtyAsset = useSetAtom(quickCheckoutQtyAssetAtom);
+
   // Per-slice qty state — keyed by `bookingAssetId`, NOT `asset.id`, so a
   // single qty asset booked under multiple slices (kit-driven +
   // standalone) is reconciled independently. Each value defaults at
@@ -464,34 +496,102 @@ export default function PartialCheckoutDrawer({
   // out by intersecting (a) scanned-asset / scanned-kit membership with
   // (b) the per-slice qty map. A slice contributes when at least one of
   // its memberships is currently scanned.
-  const scannedAssetIds = useMemo(
-    () => new Set(assets.map((a) => a.id)),
-    [assets]
-  );
-  const scannedKitAssetIds = useMemo(() => {
-    const s = new Set<string>();
-    for (const k of kits) for (const ak of k.assetKits) s.add(ak.asset.id);
-    return s;
-  }, [kits]);
-
-  const activeQtySliceIds = useMemo(() => {
-    const out: string[] = [];
-    for (const ba of booking.bookingAssets) {
-      if (!qtyByBookingAssetId[ba.id]) continue;
-      if (
-        scannedAssetIds.has(ba.asset.id) ||
-        scannedKitAssetIds.has(ba.asset.id)
-      ) {
-        out.push(ba.id);
+  /**
+   * Set of asset ids represented by the current scanned-items map.
+   * Drives the pending-bucket filter at the `buckets` memo below
+   * (`scannedAssetIds.has(asset.id)` excludes INDIVIDUAL entries that
+   * have already been scanned this session — directly OR as members of
+   * a scanned kit).
+   *
+   * Kit scans contribute every member asset's id, mirroring the
+   * check-in drawer's behaviour (see
+   * `partial-checkin-drawer.tsx:1060-1097`). Without the kit-member
+   * contribution, scanning a kit leaves its INDIVIDUAL members in the
+   * pending bucket and they double-render under the kit's name there
+   * even though the kit already appears in "Checked out this session".
+   *
+   * Synthetic `qty-checkout:<bookingAssetId>` keys are intentionally
+   * NOT contributed here — those track per-slice quick-checkout
+   * activation via `activeQtySliceIds` (qty slices, not individual
+   * asset ids). Errored items are skipped — they don't represent a
+   * successful scan of any asset.
+   */
+  const scannedAssetIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [qrId, item] of Object.entries(items)) {
+      if (!item || item.error) continue;
+      // Synthetic quick-checkout keys represent per-slice qty
+      // activation, not a physical INDIVIDUAL scan — they're tracked
+      // separately via `activeQtySliceIds`. Skip them here so they
+      // don't pollute the INDIVIDUAL-pending filter.
+      if (qrId.startsWith(QUICK_CHECKOUT_QR_PREFIX)) continue;
+      if (item.type === "asset") {
+        const id = (item.data as { id?: string } | null | undefined)?.id;
+        if (id) ids.add(id);
+        continue;
+      }
+      if (item.type === "kit" && item.data) {
+        // Kit payload exposes its members via `assetKits[].asset.id`
+        // (see `KIT_INCLUDE` in `~/utils/scanner-includes.server.ts`).
+        const assetKits = (
+          item.data as { assetKits?: Array<{ asset?: { id?: string } }> }
+        ).assetKits;
+        for (const ak of assetKits ?? []) {
+          if (ak?.asset?.id) ids.add(ak.asset.id);
+        }
       }
     }
-    return out;
-  }, [
-    booking.bookingAssets,
-    qtyByBookingAssetId,
-    scannedAssetIds,
-    scannedKitAssetIds,
-  ]);
+    return ids;
+  }, [items]);
+
+  // Polish-7b: resolve activation per-SLICE, not per-asset. An asset can
+  // appear on multiple BookingAsset rows (kit-driven + standalone), and
+  // dedup'ing by `asset.id` here would activate every sibling slice when
+  // only one was scanned — the second slice's pending row would
+  // disappear from the DOM, breaking independent quick-checkout. Mirror
+  // of check-in's `bookingAssetIdForScannedItem`:
+  //   - Synthetic quick-checkout key (`qty-checkout:<bookingAssetId>`)
+  //     resolves to that exact slice.
+  //   - Real qty-tracked scans carry `data.bookingAssetId` (set when the
+  //     scanner attributes the scan to a slice) — use it directly.
+  //   - Kit scans activate every kit-driven qty slice on this booking
+  //     whose own `kitId` matches the scanned kit, matched against the
+  //     loader's `expectedAssets` (the authoritative slice ↔ kit link).
+  //   - Real INDIVIDUAL or qty scans without `bookingAssetId` are
+  //     irrelevant to qty-slice activation (no input to render).
+  const activeQtySliceIds = useMemo(() => {
+    const out = new Set<string>();
+    const activate = (bookingAssetId: string | undefined) => {
+      if (!bookingAssetId) return;
+      if (!qtyByBookingAssetId[bookingAssetId]) return;
+      out.add(bookingAssetId);
+    };
+
+    for (const [qrId, item] of Object.entries(items)) {
+      if (!item || item.error) continue;
+      if (item.type === "asset") {
+        if (qrId.startsWith(QUICK_CHECKOUT_QR_PREFIX)) {
+          activate(qrId.slice(QUICK_CHECKOUT_QR_PREFIX.length));
+          continue;
+        }
+        const baId = (
+          item.data as { bookingAssetId?: string | null } | null | undefined
+        )?.bookingAssetId;
+        if (baId) activate(baId);
+        continue;
+      }
+      if (item.type === "kit" && item.data) {
+        const kitId = (item.data as { id?: string }).id;
+        if (!kitId) continue;
+        for (const a of expectedAssets) {
+          if (a.kind === "QUANTITY_TRACKED" && a.kitId === kitId) {
+            activate(a.bookingAssetId);
+          }
+        }
+      }
+    }
+    return [...out];
+  }, [items, qtyByBookingAssetId, expectedAssets]);
 
   // Serialize the active qty slices into the `checkouts` JSON payload
   // submitted alongside `assetIds[]`. Empty / 0 quantities are skipped
@@ -781,26 +881,182 @@ export default function PartialCheckoutDrawer({
     },
   });
 
-  // Render item row
-  const renderItemRow = (qrId: string, item: any) => (
-    <GenericItemRow
-      key={qrId}
-      qrId={qrId}
-      item={item}
-      onRemove={removeItem}
-      renderLoading={(qrId, error) => (
-        <DefaultLoadingState qrId={qrId} error={error} />
-      )}
-      renderItem={(data) => {
-        if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetFromQr} />;
-        } else if (item?.type === "kit") {
-          return <KitRow kit={data as KitFromQr} />;
-        }
-        return null;
-      }}
-    />
+  /**
+   * Stable kitId → kit meta map for the pending-list renderer. Derived
+   * from the loader's `expectedKits` payload (seeded into the shared
+   * atom alongside `expectedAssets`).
+   *
+   * The atom holds `expectedAssets` directly but not the kit summaries;
+   * we rebuild the map from each expected entry's `kitId` + `kitName`
+   * here so the pending-list keeps its current `kitMetaById` API. Image
+   * data isn't carried on `BookingExpectedAsset`, so kit thumbnails
+   * fall back to `null` — matches the check-in drawer's behaviour for
+   * entries whose loader-supplied kit lacks an image.
+   */
+  const kitMetaById = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; mainImage: string | null }
+    >();
+    for (const asset of expectedAssets) {
+      if (!asset.kitId) continue;
+      if (map.has(asset.kitId)) continue;
+      map.set(asset.kitId, {
+        id: asset.kitId,
+        name: asset.kitName ?? "",
+        mainImage: null,
+      });
+    }
+    return map;
+  }, [expectedAssets]);
+
+  /**
+   * Bucket expected assets into pending vs scanned-this-session.
+   *
+   * Mirrors the check-in drawer's bucketing (`partial-checkin-drawer
+   * .tsx:1119–1244`) but collapsed to checkout's single-quantity
+   * disposition shape:
+   *
+   *  - A qty slice is `scannedWithPending` when the scanned
+   *    `checkoutDispositions[baId].quantity` is LESS than the slice's
+   *    `qtyByBookingAssetId[baId].remaining` (operator is only
+   *    checking out part of what's available — slice stays partial).
+   *  - Otherwise the slice is `scannedComplete` (fully claimed for
+   *    this session — equal-to-remaining counts as complete).
+   *  - Pending qty = qty slices whose `bookingAssetId` is NOT in
+   *    `activeQtySliceIds`.
+   *  - Pending individual = INDIVIDUAL expected entries whose asset id
+   *    is NOT in `scannedAssetIds` AND NOT in `checkedOutAssetIds`
+   *    (already-checked-out individuals are terminal for this booking
+   *    direction — they don't need to be surfaced as pending).
+   *  - `alreadyReconciled` qty slices (`remaining === 0`) are dropped
+   *    from the pending bucket — they have nothing left to claim and
+   *    the checkout drawer doesn't have a dedicated "already done"
+   *    section yet (deliberate scope deferral; see plan).
+   */
+  const buckets = useMemo(() => {
+    const activeSliceIdSet = new Set(activeQtySliceIds);
+    const pendingIndividuals: IndividualExpectedAsset[] = [];
+    const pendingQtyTracked: QtyExpectedAsset[] = [];
+
+    for (const asset of expectedAssets) {
+      if (asset.kind === "INDIVIDUAL") {
+        // Skip individuals already scanned this session.
+        if (scannedAssetIds.has(asset.id)) continue;
+        // Skip individuals already checked out on a prior session —
+        // they're terminal for this direction. (`alreadyCheckedIn` on
+        // the union carries "already reconciled in this direction" for
+        // the checkout loader — semantics flipped at the source.)
+        if (asset.alreadyCheckedIn) continue;
+        if (alreadyCheckedOut.has(asset.id)) continue;
+        pendingIndividuals.push(asset);
+        continue;
+      }
+
+      // QUANTITY_TRACKED: a slice activated by a scan this session
+      // (real scan OR synthetic quick-checkout) renders in the
+      // scanned-this-session bucket above and must NOT appear pending.
+      if (activeSliceIdSet.has(asset.bookingAssetId)) continue;
+      if (asset.remaining === 0) continue;
+      pendingQtyTracked.push(asset);
+    }
+
+    return { pendingIndividuals, pendingQtyTracked };
+  }, [expectedAssets, scannedAssetIds, activeQtySliceIds, alreadyCheckedOut]);
+
+  const pendingCount =
+    buckets.pendingIndividuals.length + buckets.pendingQtyTracked.length;
+
+  /**
+   * Stable callback for the row's onRemove — keeps the extracted
+   * scanned-row component's prop identity stable across renders so
+   * React can reconcile it in place.
+   */
+  const onRemoveScanned = removeItem;
+
+  /**
+   * Invoked when the operator clicks "Check out without scanning" on a
+   * pending qty row. Dispatches the synthetic-scan atom; the new
+   * entry lands under `qty-checkout:<bookingAssetId>` and the drawer
+   * reclassifies it into the scanned-this-session bucket on the next
+   * render.
+   */
+  const handleQuickCheckout = useCallback(
+    (asset: QtyExpectedAsset) => {
+      quickCheckoutQtyAsset(asset);
+    },
+    [quickCheckoutQtyAsset]
   );
+
+  /**
+   * Unified renderer: drive both buckets in a single pass. Scanned
+   * rows render through `GenericItemRow` (existing behaviour);
+   * pending rows go through the shared `PendingItemsList` under
+   * `mode="checkout"`.
+   *
+   * Render order (top → bottom):
+   *  1. Active section header (when ≥1 scanned this session).
+   *  2. Scanned rows (asset + kit, in iteration order of `items`).
+   *  3. PendingItemsList header + grouped pending rows.
+   */
+  const customRenderAllItems = useCallback((): ReactNode => {
+    const scannedQrIdsInOrder = Object.keys(items);
+    const scannedCount = scannedQrIdsInOrder.length;
+
+    return (
+      <>
+        {scannedCount > 0 ? (
+          <SectionHeader
+            label={`Checked out this session (${scannedCount})`}
+            tone="active"
+          />
+        ) : null}
+
+        {scannedQrIdsInOrder.map((qrId) => {
+          const item = items[qrId];
+          return (
+            <GenericItemRow
+              key={qrId}
+              qrId={qrId}
+              item={item}
+              onRemove={onRemoveScanned}
+              renderLoading={(pendingQrId, error) => (
+                <DefaultLoadingState qrId={pendingQrId} error={error} />
+              )}
+              renderItem={(data) => {
+                if (item?.type === "asset") {
+                  return <AssetRow asset={data as AssetFromQr} />;
+                } else if (item?.type === "kit") {
+                  return <KitRow kit={data as KitFromQr} />;
+                }
+                return null;
+              }}
+            />
+          );
+        })}
+
+        {/* Pending section (Polish-7b — grouped by each entry's OWN
+            `kitId`). Renderer lives in `pending-items-list.tsx`; we
+            wire `mode="checkout"` so the copy + key prefixes match the
+            checkout direction. */}
+        <PendingItemsList
+          mode="checkout"
+          pendingIndividuals={buckets.pendingIndividuals}
+          pendingQtyTracked={buckets.pendingQtyTracked}
+          kitMetaById={kitMetaById}
+          onQuickAction={handleQuickCheckout}
+          pendingCount={pendingCount}
+        />
+      </>
+    );
+  }, [
+    buckets,
+    handleQuickCheckout,
+    items,
+    kitMetaById,
+    onRemoveScanned,
+    pendingCount,
+  ]);
 
   const contextValue: CheckoutDispositionContextValue = {
     dispositions: checkoutDispositions,
@@ -846,7 +1102,11 @@ export default function PartialCheckoutDrawer({
           </div>
         }
         isLoading={isLoading}
-        renderItem={renderItemRow}
+        customRenderAllItems={customRenderAllItems}
+        // Render body even when nothing has been scanned yet — pending
+        // rows still need to be visible so the operator knows what's
+        // still owed on the booking.
+        renderWhenEmpty
         Blockers={Blockers}
         defaultExpanded={defaultExpanded}
         className={tw(
@@ -916,6 +1176,23 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         kitAssetsInBooking.length === 1 && kitAssetsInBooking[0].id === asset.id
       );
     })();
+
+  // An active synthetic entry (via quick-checkout) lives under a key
+  // prefixed by `qty-checkout:` + the slice's `bookingAssetId`. The
+  // synthetic-entry payload also carries `data.bookingAssetId` so we
+  // can read the slice id straight off the scanned-item shape (set by
+  // `quickCheckoutQtyAssetAtom`). Used below to pick between the
+  // default checkout badges and the indigo "Checked out without
+  // scan" marker. Mirrors check-in's `isQuickCheckin` probe.
+  const scannedBookingAssetId =
+    asset.type === AssetType.QUANTITY_TRACKED
+      ? (asset as unknown as { bookingAssetId?: string | null })
+          .bookingAssetId ?? null
+      : null;
+  const isQuickCheckout = Boolean(
+    scannedBookingAssetId &&
+      items[`${QUICK_CHECKOUT_QR_PREFIX}${scannedBookingAssetId}`]
+  );
 
   // Use custom configurations for partial check-out context
   const availabilityConfigs = [
@@ -987,6 +1264,28 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         : "This asset belongs to a kit. Checking out this asset individually will not affect the kit status or other kit assets.",
       priority: 60, // Lower priority than blocking issues
       className: "bg-blue-50 border-blue-200 text-blue-700", // Informational blue
+    },
+    // Positive marker for rows added via the "Check out without
+    // scanning" affordance on a pending qty row. Mirrors check-in's
+    // "Checked in without scan" indigo badge — only fires when the
+    // row has a synthetic-key entry under `qty-checkout:` AND no
+    // higher-priority warning (redundant / fully checked out / in
+    // custody / not in booking) suppresses it. The presence of this
+    // badge differentiates quick-checkout rows from real scans at a
+    // glance, beyond the presence/absence of the qty input.
+    {
+      condition:
+        isInBooking &&
+        !isRedundant &&
+        !isAlreadyCheckedOut &&
+        !isInCustody &&
+        isQuickCheckout,
+      badgeText: "Checked out without scan",
+      tooltipTitle: "Marked out without scanning",
+      tooltipContent:
+        "This quantity-tracked asset was added via the Check out without scanning button — no QR scan required.",
+      priority: 50,
+      className: "bg-indigo-50 border-indigo-200 text-indigo-700",
     },
   ];
 
