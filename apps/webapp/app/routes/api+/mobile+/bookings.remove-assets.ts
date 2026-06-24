@@ -96,10 +96,16 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    // BASE is as restricted as SELF_SERVICE for managing booking assets: both
+    // may only touch their OWN bookings, and only while DRAFT (enforced by
+    // canUserManageBookingAssets). Keying only on SELF_SERVICE let a BASE user
+    // with `booking:update` edit anyone's non-draft booking via this endpoint.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
 
-    // Self-service users may only modify their own bookings.
-    if (isSelfService && booking.custodianUserId !== user.id) {
+    // Self-service / BASE users may only modify their own bookings.
+    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -109,7 +115,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!canUserManageBookingAssets(booking, isSelfService)) {
+    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -145,16 +151,25 @@ export async function action({ request }: ActionFunctionArgs) {
       kitAssetIds = kitAssets.map((asset) => asset.id);
     }
 
-    const allAssetIds = [...new Set([...assetIds, ...kitAssetIds])];
+    const candidateAssetIds = [...new Set([...assetIds, ...kitAssetIds])];
 
-    // Asset titles power the human-readable removal system note.
+    // Only disconnect assets ACTUALLY attached to THIS booking. A caller can
+    // supply any org asset id; removing one that isn't on the booking would
+    // inflate removedCount and write a misleading "removed" note. The
+    // `bookings: { some }` filter scopes both the disconnect set and the
+    // note titles to real members.
     const assets = await db.asset.findMany({
-      where: { id: { in: allAssetIds }, organizationId },
+      where: {
+        id: { in: candidateAssetIds },
+        organizationId,
+        bookings: { some: { id: bookingId } },
+      },
       select: { id: true, title: true },
     });
+    const attachedAssetIds = assets.map((asset) => asset.id);
 
     const updated = await removeAssets({
-      booking: { id: bookingId, assetIds: allAssetIds },
+      booking: { id: bookingId, assetIds: attachedAssetIds },
       kitIds,
       kits,
       firstName: user.firstName ?? "",
@@ -170,7 +185,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: updated.name,
         status: updated.status,
       },
-      removedCount: allAssetIds.length,
+      removedCount: attachedAssetIds.length,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -10,7 +11,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { duplicateBooking } from "~/modules/booking/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -86,6 +87,23 @@ export async function action({ request }: ActionFunctionArgs) {
       role,
       action: "duplicate",
     });
+
+    // duplicateBooking clones the SOURCE custodian, so the creator-or-custodian
+    // guard above isn't enough for restricted roles: a caller who is only the
+    // creator would mint a new draft assigned to someone else's custody. Require
+    // them to be the custodian so the clone is owned by themselves.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
+    if (isSelfServiceOrBase && source.custodianUserId !== user.id) {
+      throw new ShelfError({
+        cause: null,
+        message: "You can only duplicate bookings assigned to you.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const newBooking = await duplicateBooking({
       bookingId,

@@ -16,7 +16,10 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
-import { consumeBookingDirty } from "@/lib/booking-refresh";
+import {
+  consumeBookingDirty,
+  markBookingsListDirty,
+} from "@/lib/booking-refresh";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingDetail, type BookingAsset } from "@/lib/api";
@@ -155,6 +158,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
               { text: "OK", onPress: () => fetchBooking() },
             ]);
@@ -186,6 +191,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             Alert.alert("Complete", `"${booking.name}" is now complete.`, [
               {
                 text: "OK",
@@ -227,6 +234,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             const msg = data?.isComplete
               ? `All assets checked in. "${booking.name}" is now complete.`
               : `${data?.checkedInCount ?? count} checked in, ${
@@ -272,6 +281,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             const msg = data?.isComplete
               ? `All assets are now checked out for "${booking.name}".`
               : `${data?.checkedOutCount ?? count} checked out, ${
@@ -315,6 +326,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             Alert.alert("Reserved", `"${booking.name}" is now reserved.`, [
               { text: "OK", onPress: () => fetchBooking() },
             ]);
@@ -350,6 +363,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             setSelectedAssetIds(new Set());
             setSelectMode(null);
             fetchBooking();
@@ -385,6 +400,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             fetchBooking();
           },
         },
@@ -413,6 +430,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             fetchBooking();
           },
         },
@@ -442,6 +461,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             // The booking no longer exists — leave the detail screen.
             router.back();
           },
@@ -471,6 +492,8 @@ export default function BookingDetailScreen() {
               return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Mutation changed this booking — force the list to refetch.
+            markBookingsListDirty();
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
           },

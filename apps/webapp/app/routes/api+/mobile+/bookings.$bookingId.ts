@@ -6,6 +6,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   getMobileUserContext,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { getPartiallyCheckedInAssetIds } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -26,6 +27,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    // Bookings are a TEAM-tier (premium) feature — gate the detail read like the
+    // mutation/check-in routes so a PERSONAL workspace can't fetch booking
+    // details, assets, tags and action flags via mobile.
+    await assertMobileCanUseBookings(organizationId);
 
     // Self-service / base users may only read their OWN bookings. Scope the
     // lookup by custodian like the list endpoint (bookings.ts) does, so a
@@ -144,29 +150,37 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isBaseOrSelfService =
       role === OrganizationRoles.BASE ||
       role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm] = await Promise.all([
-      hasPermission({
-        userId: user.id,
-        organizationId,
-        roles: [role],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.cancel,
-      }),
-      hasPermission({
-        userId: user.id,
-        organizationId,
-        roles: [role],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.archive,
-      }),
-      hasPermission({
-        userId: user.id,
-        organizationId,
-        roles: [role],
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      }),
-    ]);
+    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
+      await Promise.all([
+        hasPermission({
+          userId: user.id,
+          organizationId,
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.cancel,
+        }),
+        hasPermission({
+          userId: user.id,
+          organizationId,
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.archive,
+        }),
+        hasPermission({
+          userId: user.id,
+          organizationId,
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.create,
+        }),
+        hasPermission({
+          userId: user.id,
+          organizationId,
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.delete,
+        }),
+      ]);
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
@@ -180,12 +194,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).
       canDuplicate: canCreatePerm,
-      // Delete: admin/owner any status; self-service/base only on DRAFT
-      // (mirrors the web client gate; the server endpoint enforces ownership
-      // + the same BASE-only-DRAFT rule).
+      // Delete: requires the delete permission AND (admin/owner any status |
+      // self-service/base only on DRAFT). Mirrors the web client gate; the
+      // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
       canDelete:
-        (isBaseOrSelfService && booking.status === "DRAFT") ||
-        !isBaseOrSelfService,
+        ((isBaseOrSelfService && booking.status === "DRAFT") ||
+          !isBaseOrSelfService) &&
+        canDeletePerm,
     };
 
     return data({

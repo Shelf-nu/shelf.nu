@@ -96,6 +96,10 @@ export default function CreateBookingScreen() {
     d.setHours(17, 0, 0, 0);
     return d;
   });
+  // Capture the initial default window (refs init once) so a date-only change
+  // still counts as an unsaved edit in the discard guard below.
+  const initialFromRef = useRef(from?.getTime() ?? null);
+  const initialToRef = useRef(to?.getTime() ?? null);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -121,12 +125,13 @@ export default function CreateBookingScreen() {
   // ── Unsaved-changes guard ───────────────────────
   const didSubmitRef = useRef(false);
   const navigation = useNavigation();
-  // Dates default to a future window, so they don't count as "unsaved changes".
   const hasUnsavedChanges =
     name.trim().length > 0 ||
     description.trim().length > 0 ||
     !!custodian ||
-    selectedTagIds.size > 0;
+    selectedTagIds.size > 0 ||
+    (from ? from.getTime() : null) !== initialFromRef.current ||
+    (to ? to.getTime() : null) !== initialToRef.current;
 
   useEffect(() => {
     if (!hasUnsavedChanges || didSubmitRef.current) return;

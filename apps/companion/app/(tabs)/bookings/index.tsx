@@ -34,6 +34,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { consumeBookingsListDirty } from "@/lib/booking-refresh";
 
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
@@ -180,7 +181,12 @@ function BookingsListContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
+      // A lifecycle mutation on the detail screen (reserve/cancel/archive/
+      // delete/duplicate) marks the list dirty — bypass the freshness gate so
+      // we don't show stale rows on return.
+      const mustRefresh = consumeBookingsListDirty();
       if (
+        !mustRefresh &&
         hasFetchedBookings.current &&
         Date.now() - lastFetchedAt.current < 60_000
       )

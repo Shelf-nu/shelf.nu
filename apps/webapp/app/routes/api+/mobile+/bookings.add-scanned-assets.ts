@@ -91,10 +91,16 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    // BASE is as restricted as SELF_SERVICE for managing booking assets (own
+    // bookings only, DRAFT only via canUserManageBookingAssets). Keying only on
+    // SELF_SERVICE let a BASE user with `booking:update` add assets to anyone's
+    // non-draft booking via this endpoint.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
 
-    // Self-service users may only modify their own bookings (mirrors remove-assets).
-    if (isSelfService && booking.custodianUserId !== user.id) {
+    // Self-service / BASE users may only modify their own bookings.
+    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -104,7 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!canUserManageBookingAssets(booking, isSelfService)) {
+    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",

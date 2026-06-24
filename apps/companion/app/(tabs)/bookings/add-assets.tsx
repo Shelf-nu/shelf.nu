@@ -15,7 +15,7 @@
  * @see {@link file://./[id].tsx} the booking detail that launches this.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -74,8 +74,12 @@ export default function AddBookingAssetsScreen() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  // Monotonic id so a slow earlier fetch (e.g. an old search/mode) can't
+  // overwrite the newest results with stale availability.
+  const requestIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!currentOrg || !from || !to) return;
+    const reqId = ++requestIdRef.current;
     setIsLoading(true);
     setError(null);
     if (mode === "assets") {
@@ -87,6 +91,7 @@ export default function AddBookingAssetsScreen() {
         unhideBookingId: bookingId,
         search: debouncedSearch || undefined,
       });
+      if (reqId !== requestIdRef.current) return; // superseded by a newer load
       if (err) setError(err);
       else if (data) setAssets(data.assets);
     } else {
@@ -98,10 +103,11 @@ export default function AddBookingAssetsScreen() {
         currentBookingId: bookingId,
         search: debouncedSearch || undefined,
       });
+      if (reqId !== requestIdRef.current) return; // superseded by a newer load
       if (err) setError(err);
       else if (data) setKits(data.kits);
     }
-    setIsLoading(false);
+    if (reqId === requestIdRef.current) setIsLoading(false);
   }, [currentOrg, from, to, mode, debouncedSearch, bookingId]);
 
   useEffect(() => {

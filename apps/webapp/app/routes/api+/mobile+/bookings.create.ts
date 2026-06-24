@@ -181,12 +181,27 @@ export async function action({ request }: ActionFunctionArgs) {
       throw cause;
     }
 
-    const from = DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
+    // BookingFormSchema validates the dates with the broader `coerceLocalDate`,
+    // so a value can pass validation yet not match DATE_TIME_FORMAT here and
+    // become an Invalid Date. Guard explicitly before handing dates to the
+    // service (otherwise `Invalid Date` would silently flow into createBooking).
+    const fromDt = DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
       zone: body.timeZone,
-    }).toJSDate();
-    const to = DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
+    });
+    const toDt = DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
       zone: body.timeZone,
-    }).toJSDate();
+    });
+    if (!fromDt.isValid || !toDt.isValid) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid booking start or end date.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+    const from = fromDt.toJSDate();
+    const to = toDt.toJSDate();
 
     const booking = await createBooking({
       booking: {

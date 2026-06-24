@@ -94,6 +94,19 @@ export default function EditBookingScreen() {
 
   const [tags, setTags] = useState<BookingTag[]>([]);
 
+  // Snapshot of the loaded booking — drives the "real change" discard guard so
+  // backing out without editing doesn't prompt (declared before the load
+  // effect that populates it).
+  const didSubmitRef = useRef(false);
+  const initialRef = useRef<{
+    name: string;
+    description: string;
+    custodianId: string | null;
+    from: number;
+    to: number;
+    tagIds: string;
+  } | null>(null);
+
   // ── Load booking + tags ─────────────────────────
   useEffect(() => {
     if (!id || !currentOrg) return;
@@ -121,6 +134,16 @@ export default function EditBookingScreen() {
       setTo(new Date(b.to));
       setSelectedTagIds(new Set(b.tags.map((t) => t.id)));
       setIsDraft(b.status === "DRAFT");
+      // Snapshot the loaded values so the discard guard only fires on a REAL
+      // change (and never on the load-error path).
+      initialRef.current = {
+        name: b.name,
+        description: b.description ?? "",
+        custodianId: b.custodianTeamMember?.id ?? null,
+        from: new Date(b.from).getTime(),
+        to: new Date(b.to).getTime(),
+        tagIds: [...b.tags.map((t) => t.id)].sort().join(","),
+      };
       if (tagsRes.data?.tags) setTags(tagsRes.data.tags);
       setIsLoading(false);
     });
@@ -129,13 +152,25 @@ export default function EditBookingScreen() {
     };
   }, [id, currentOrg]);
 
-  // ── Unsaved-changes guard (only after load) ─────
-  const didSubmitRef = useRef(false);
+  // ── Unsaved-changes guard (only after a REAL edit) ─────
   const navigation = useNavigation();
+
+  // Compare the current form against the loaded snapshot so the discard prompt
+  // only appears when something actually changed (and never on load-error).
+  const snap = initialRef.current;
+  const hasUnsavedChanges = snap
+    ? name !== snap.name ||
+      description !== snap.description ||
+      (custodian?.id ?? null) !== snap.custodianId ||
+      (from ? from.getTime() : null) !== snap.from ||
+      (to ? to.getTime() : null) !== snap.to ||
+      [...selectedTagIds].sort().join(",") !== snap.tagIds
+    : false;
+
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !hasUnsavedChanges) return;
     const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      if (didSubmitRef.current) return;
+      if (didSubmitRef.current || !hasUnsavedChanges) return;
       e.preventDefault();
       Alert.alert("Discard changes?", "Your edits won't be saved.", [
         { text: "Keep Editing", style: "cancel" },
@@ -147,7 +182,7 @@ export default function EditBookingScreen() {
       ]);
     });
     return unsubscribe;
-  }, [navigation, isLoading]);
+  }, [navigation, isLoading, hasUnsavedChanges]);
 
   // ── Date pickers ────────────────────────────────
   const onFromChange = useCallback(

@@ -2,6 +2,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -34,6 +35,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+
+    // Bookings are a TEAM-tier (premium) feature — gate this booking-availability
+    // read like the mutation routes so PERSONAL workspaces can't query it.
+    await assertMobileCanUseBookings(organizationId);
 
     // The web booking-asset picker (manage-assets) does NOT scope by
     // self-service custody — any bookable asset is selectable, and the

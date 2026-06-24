@@ -24,11 +24,13 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * twin of the web "archive" intent. Wraps the shared `archiveBooking` service,
  * which enforces the COMPLETE-only status guard and cancels any scheduler.
  *
- * PARITY: `archive` maps to `PermissionAction.update` (web intent2ActionMap).
- * The web archive route relies on the page loader's read-filter for ownership,
- * which a direct mobile POST bypasses — so we add the shared
- * `validateBookingOwnership` guard (no-op for admin/owner; creator-or-custodian
- * for self-service/base). Mobile must never be more permissive than web.
+ * PARITY: gate on `PermissionAction.archive` (the web ActionsDropdown shows the
+ * archive action via `userHasPermission(archive)`). BASE has `booking:update`
+ * but NOT `booking:archive`, so the looser `update` gate would let a BASE user
+ * archive via the API even though the UI/permission map deny it. We also add the
+ * shared `validateBookingOwnership` guard (no-op for admin/owner; creator-or-
+ * custodian for self-service) since the web relies on the page loader's read-
+ * filter that a direct POST bypasses. Mobile must never be more permissive.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -52,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       entity: PermissionEntity.booking,
-      action: PermissionAction.update,
+      action: PermissionAction.archive,
     });
 
     await assertMobileCanUseBookings(organizationId);

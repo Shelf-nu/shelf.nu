@@ -27,12 +27,14 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * (for ONGOING/OVERDUE), cancels the scheduler, sends the cancellation emails
  * and records the BOOKING_CANCELLED event.
  *
- * PARITY: `cancel` maps to `PermissionAction.update` (web intent2ActionMap).
- * The web cancel route has no explicit ownership check — it relies on the page
- * loader's read-filter, which a direct mobile POST bypasses — so we add the
- * shared `validateBookingOwnership` guard here (no-op for admin/owner; enforces
- * creator-or-custodian for self-service/base). Mobile must never be more
- * permissive than web.
+ * PARITY: gate on `PermissionAction.cancel` (the web ActionsDropdown shows the
+ * cancel action via `userHasPermission(cancel)`, so a direct mobile POST must
+ * require the same — BASE has `booking:update` but NOT `booking:cancel`, so the
+ * looser `update` gate would let a BASE user cancel via the API even though the
+ * UI/permission map deny it). We also add the shared `validateBookingOwnership`
+ * guard (no-op for admin/owner; creator-or-custodian for self-service) since the
+ * web relies on the page loader's read-filter that a direct POST bypasses.
+ * Mobile must never be more permissive than web.
  *
  * Body: { bookingId: string, cancellationReason?: string (<=500) }
  * Query: ?orgId=...
@@ -59,7 +61,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       entity: PermissionEntity.booking,
-      action: PermissionAction.update,
+      action: PermissionAction.cancel,
     });
 
     await assertMobileCanUseBookings(organizationId);

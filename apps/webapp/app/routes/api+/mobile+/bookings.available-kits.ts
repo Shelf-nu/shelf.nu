@@ -2,6 +2,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -33,6 +34,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
+    // Bookings are a TEAM-tier (premium) feature — gate this booking-kit read
+    // like the mutation routes so PERSONAL workspaces can't query it.
+    await assertMobileCanUseBookings(organizationId);
+
     // The kit conflict filter only runs when `currentBookingId` is passed — the
     // service gates it on `if (currentBookingId && hideUnavailable)`. Without it,
     // kits already booked in an overlapping window appear available (silent
@@ -43,6 +48,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const { kits, page, perPage, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
+        // why: the service only drops empty kits (no assets) from `kits` when
+        // `extraInclude.assets` is set — without it an empty kit passes the
+        // `assets.every` availability check and a user could "add" a kit that
+        // attaches zero assets (while totalKits already excludes it).
+        extraInclude: { assets: { select: { id: true } } },
         request,
         organizationId,
         currentBookingId,
