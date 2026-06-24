@@ -16,7 +16,12 @@
  * Tests mount the drawer inside a scoped jotai `Provider` with a
  * `createStore()` instance so each case starts from a clean atom tree.
  *
+ * Pending-list renderers (kit groups, loose qty/individual rows) live
+ * in `pending-items-list.tsx` — these tests still exercise them via
+ * the drawer's rendered output.
+ *
  * @see {@link file://./partial-checkin-drawer.tsx}
+ * @see {@link file://./pending-items-list.tsx}
  */
 
 import type { ReactNode } from "react";
