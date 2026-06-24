@@ -5620,6 +5620,74 @@ export async function addScannedAssetsToBooking({
 }) {
   try {
     /**
+     * Conflict guard (mirrors the reserve/checkout guards): reject the add when
+     * any scanned asset — including a scanned kit's member assets — is already
+     * RESERVED, or CHECKED OUT, for a *different* booking whose window OVERLAPS
+     * this booking's window. Without this, the scanner can attach (and on an
+     * ONGOING booking immediately force-check-out, bypassing the checkout guard)
+     * an asset that is committed elsewhere, silently double-booking it. The rule
+     * is "reserved/checked-out AND date-overlapping", not "any reservation"; the
+     * booking's stored from/to is the conflict window.
+     */
+    if (assetIds.length > 0 || kitIds.length > 0) {
+      const conflictBooking = await db.booking.findFirst({
+        where: { id: bookingId, organizationId },
+        select: { from: true, to: true },
+      });
+
+      if (conflictBooking?.from && conflictBooking?.to) {
+        const kitAssetIds =
+          kitIds.length > 0
+            ? (
+                await db.asset.findMany({
+                  where: { kitId: { in: kitIds }, organizationId },
+                  select: { id: true },
+                })
+              ).map((a) => a.id)
+            : [];
+        const candidateIds = [...new Set([...assetIds, ...kitAssetIds])];
+
+        const candidates = await db.asset.findMany({
+          where: { id: { in: candidateIds }, organizationId },
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            bookings: createBookingConflictConditions({
+              currentBookingId: bookingId,
+              fromDate: conflictBooking.from,
+              toDate: conflictBooking.to,
+            }),
+          },
+        });
+
+        const conflicted = candidates.filter((asset) =>
+          hasAssetBookingConflicts(asset, bookingId)
+        );
+
+        if (conflicted.length > 0) {
+          const conflictedNames = conflicted
+            .slice(0, 3)
+            .map((asset) => asset.title)
+            .join(", ");
+          const additionalCount =
+            conflicted.length > 3 ? conflicted.length - 3 : 0;
+          const additionalText =
+            additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+          throw new ShelfError({
+            cause: null,
+            label,
+            title: "Booking conflict",
+            message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+    }
+
+    /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets.
      */
