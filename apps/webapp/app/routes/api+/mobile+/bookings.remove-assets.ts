@@ -9,7 +9,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
+import { removeAssets } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -20,19 +20,27 @@ import {
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
- * POST /api/mobile/bookings/add-scanned-assets
+ * POST /api/mobile/bookings/remove-assets
  *
- * Adds scanned assets and/or kits to a booking — the mobile twin of the web
- * scanner's add-to-booking flow. Wraps the same `addScannedAssetsToBooking`
- * service (kit expansion, status sync, notes, events stay identical).
+ * Removes assets and/or kits from a booking — the mobile twin of the web
+ * booking manage-assets "remove" path. Wraps the shared `removeAssets` service
+ * so the `BOOKING_ASSETS_REMOVED` events, removal notes and the asset-status
+ * reset (back to AVAILABLE for ONGOING/OVERDUE bookings) stay identical to web.
+ * Kits are expanded to their contained assets (org-scoped), mirroring the kit
+ * handling in `add-scanned-assets`.
  *
- * Status/role gating mirrors the web (`canUserManageBookingAssets`):
- * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
- * only modify their own DRAFT bookings.
+ * Adding assets/kits is handled by the existing `add-scanned-assets` endpoint;
+ * this endpoint is the removal counterpart for the picker-based edit flow.
+ *
+ * Status/role gating mirrors `add-scanned-assets` via `canUserManageBookingAssets`
+ * (COMPLETE / ARCHIVED / CANCELLED reject; SELF_SERVICE only their own DRAFT),
+ * plus an explicit own-booking guard for self-service users.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ * Query: ?orgId=...
  *
- * @see {@link file://../../_layout+/bookings.$bookingId.overview.scan-assets.tsx} web twin
+ * @see {@link file://./bookings.add-scanned-assets.ts} the add counterpart
+ * @see {@link file://../../_layout+/bookings.$bookingId.overview.manage-assets.tsx} web twin
  */
 
 const BodySchema = z
@@ -42,7 +50,7 @@ const BodySchema = z
     kitIds: z.array(z.string().min(1)).optional().default([]),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
-    message: "Scan at least one asset or kit to add.",
+    message: "Select at least one asset or kit to remove.",
   });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -62,9 +70,6 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    // Bookings are a TEAM-tier (premium) feature. Every other booking mutation
-    // gates here; without it a PERSONAL workspace could add assets via mobile,
-    // bypassing the entitlement the web enforces.
     await assertMobileCanUseBookings(organizationId);
 
     const { bookingId, assetIds, kitIds } = BodySchema.parse(
@@ -93,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-    // Self-service users may only modify their own bookings (mirrors remove-assets).
+    // Self-service users may only modify their own bookings.
     if (isSelfService && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
@@ -109,7 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
         cause: null,
         title: "Action not allowed",
         message:
-          "Assets cannot be added to this booking in its current status.",
+          "Assets cannot be removed from this booking in its current status.",
         additionalData: { userId, bookingId, status: booking.status },
         label: "Booking",
         status: 403,
@@ -117,36 +122,56 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Org-scope the caller-supplied asset ids before they are connected to the
-    // booking. The downstream service connects them by id with no org check, so
-    // without this a caller could attach another workspace's assets (cross-org
-    // IDOR). Kit-derived asset ids are already org-scoped by the query below.
+    // Org-scope the caller-supplied (standalone) asset ids before disconnecting.
     await assertAssetsBelongToOrg({ assetIds, organizationId });
 
-    // Expand kits to their contained assets — the service only connects
-    // `assetIds` to the booking (`kitIds` drives status flags and notes).
-    // The web drawer does this expansion client-side; doing it here keeps
-    // the mobile client thin and the expansion org-scoped.
-    let expandedAssetIds = assetIds;
+    // Expand kits to their contained assets (org-scoped). The service
+    // disconnects the assets and uses `kitIds` / `kits` for the status reset and
+    // removal notes — mirrors the kit expansion in `add-scanned-assets`.
+    let kits: { id: string; name: string }[] = [];
+    let kitAssetIds: string[] = [];
     if (kitIds.length > 0) {
-      const kitAssets = await db.asset.findMany({
-        where: { kitId: { in: kitIds }, organizationId },
-        select: { id: true },
-      });
-      expandedAssetIds = [
-        ...new Set([...assetIds, ...kitAssets.map((a) => a.id)]),
-      ];
+      const [kitRecords, kitAssets] = await Promise.all([
+        db.kit.findMany({
+          where: { id: { in: kitIds }, organizationId },
+          select: { id: true, name: true },
+        }),
+        db.asset.findMany({
+          where: { kitId: { in: kitIds }, organizationId },
+          select: { id: true },
+        }),
+      ]);
+      kits = kitRecords;
+      kitAssetIds = kitAssets.map((asset) => asset.id);
     }
 
-    await addScannedAssetsToBooking({
-      assetIds: expandedAssetIds,
-      kitIds,
-      bookingId,
-      organizationId,
-      userId: user.id,
+    const allAssetIds = [...new Set([...assetIds, ...kitAssetIds])];
+
+    // Asset titles power the human-readable removal system note.
+    const assets = await db.asset.findMany({
+      where: { id: { in: allAssetIds }, organizationId },
+      select: { id: true, title: true },
     });
 
-    return data({ success: true });
+    const updated = await removeAssets({
+      booking: { id: bookingId, assetIds: allAssetIds },
+      kitIds,
+      kits,
+      firstName: user.firstName ?? "",
+      lastName: user.lastName ?? "",
+      userId: user.id,
+      assets,
+      organizationId,
+    });
+
+    return data({
+      booking: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+      },
+      removedCount: allAssetIds.length,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

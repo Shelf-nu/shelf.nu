@@ -8,6 +8,9 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Platform,
+  ActionSheetIOS,
+  Modal,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -44,6 +47,19 @@ export default function BookingDetailScreen() {
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
+  // False when the workspace requires explicit (scan/select) check-in for this
+  // user's role — hide the quick "Check In All" button to match web policy.
+  const [canQuickCheckin, setCanQuickCheckin] = useState(true);
+  // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
+  // computed server-side mirroring the web ActionsDropdown gating.
+  const [bookingActions, setBookingActions] = useState({
+    canCancel: false,
+    canArchive: false,
+    canDuplicate: false,
+    canDelete: false,
+  });
+  // Android overflow-menu visibility (iOS uses the native ActionSheetIOS).
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   // Mirrors the web's canUserManageBookingAssets: closed statuses reject;
   // self-service users may only build their own DRAFT bookings.
@@ -60,9 +76,9 @@ export default function BookingDetailScreen() {
   // Selection mode picks a subset of assets to act on. "checkin" selects
   // checked-out assets to return; "checkout" selects not-yet-out assets to take.
   // null = not selecting.
-  const [selectMode, setSelectMode] = useState<"checkin" | "checkout" | null>(
-    null
-  );
+  const [selectMode, setSelectMode] = useState<
+    "checkin" | "checkout" | "remove" | null
+  >(null);
   const isSelectMode = selectMode !== null;
 
   const lastFetchedAt = useRef(0);
@@ -81,6 +97,8 @@ export default function BookingDetailScreen() {
     setCheckedInAssetIds(data.checkedInAssetIds);
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
+    setCanQuickCheckin(data.canQuickCheckin);
+    setBookingActions(data.bookingActions);
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
@@ -275,6 +293,259 @@ export default function BookingDetailScreen() {
     );
   };
 
+  const handleReserve = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Reserve Booking",
+      `Reserve "${booking.name}"? This confirms the booking and checks for conflicts.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reserve",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.reserveBooking(
+              currentOrg.id,
+              booking.id,
+              getTimeZone()
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't reserve", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert("Reserved", `"${booking.name}" is now reserved.`, [
+              { text: "OK", onPress: () => fetchBooking() },
+            ]);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRemoveAssets = () => {
+    if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
+    const count = selectedAssetIds.size;
+    Alert.alert(
+      "Remove Selected",
+      `Remove ${count} selected ${
+        count === 1 ? "asset" : "assets"
+      } from this booking?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.removeAssets(
+              currentOrg.id,
+              booking.id,
+              Array.from(selectedAssetIds)
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't remove", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setSelectedAssetIds(new Set());
+            setSelectMode(null);
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Lifecycle actions (cancel / archive / delete / duplicate) ──────────
+  // Each is permission/status-gated server-side AND only offered when the
+  // detail endpoint's `bookingActions` flag says this role/status may use it.
+
+  const handleCancel = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Cancel Booking",
+      `Cancel "${booking.name}"? This releases its assets and can't be undone.`,
+      [
+        { text: "Keep booking", style: "cancel" },
+        {
+          text: "Cancel booking",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.cancelBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't cancel", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleArchive = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Archive Booking",
+      `Archive "${booking.name}"? It moves to your archived bookings.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.archiveBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't archive", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            fetchBooking();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDelete = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Delete Booking",
+      `Permanently delete "${booking.name}"? This can't be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setIsActioning(true);
+            const { error: err } = await api.deleteBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err) {
+              Alert.alert("Couldn't delete", err);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // The booking no longer exists — leave the detail screen.
+            router.back();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDuplicate = () => {
+    if (!booking || !currentOrg) return;
+    Alert.alert(
+      "Duplicate Booking",
+      `Create a copy of "${booking.name}" as a new draft you can edit?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Duplicate",
+          onPress: async () => {
+            setIsActioning(true);
+            const { data: dup, error: err } = await api.duplicateBooking(
+              currentOrg.id,
+              booking.id
+            );
+            setIsActioning(false);
+            if (err || !dup) {
+              Alert.alert("Couldn't duplicate", err || "Please try again.");
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Open the new draft's edit screen so the user can adjust dates etc.
+            router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
+          },
+        },
+      ]
+    );
+  };
+
+  // Build the available lifecycle actions for the overflow menu. Order: the
+  // non-destructive Duplicate first, destructive ones last.
+  const lifecycleActions: {
+    key: string;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    destructive: boolean;
+    onPress: () => void;
+  }[] = [];
+  if (bookingActions.canDuplicate)
+    lifecycleActions.push({
+      key: "duplicate",
+      label: "Duplicate booking",
+      icon: "copy-outline",
+      destructive: false,
+      onPress: handleDuplicate,
+    });
+  if (bookingActions.canArchive)
+    lifecycleActions.push({
+      key: "archive",
+      label: "Archive booking",
+      icon: "archive-outline",
+      destructive: false,
+      onPress: handleArchive,
+    });
+  if (bookingActions.canCancel)
+    lifecycleActions.push({
+      key: "cancel",
+      label: "Cancel booking",
+      icon: "close-circle-outline",
+      destructive: true,
+      onPress: handleCancel,
+    });
+  if (bookingActions.canDelete)
+    lifecycleActions.push({
+      key: "delete",
+      label: "Delete booking",
+      icon: "trash-outline",
+      destructive: true,
+      onPress: handleDelete,
+    });
+
+  // Open the lifecycle overflow menu: native ActionSheet on iOS, custom modal
+  // on Android (mirrors the asset detail's quick-actions overflow pattern).
+  const openActionsMenu = () => {
+    if (lifecycleActions.length === 0) return;
+    if (Platform.OS === "ios") {
+      const labels = lifecycleActions.map((a) => a.label);
+      const destructiveButtonIndex = lifecycleActions
+        .map((a, i) => (a.destructive ? i : -1))
+        .filter((i) => i >= 0);
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [...labels, "Cancel"],
+          cancelButtonIndex: labels.length,
+          destructiveButtonIndex,
+          title: booking?.name,
+        },
+        (idx) => {
+          if (idx < lifecycleActions.length) lifecycleActions[idx].onPress();
+        }
+      );
+    } else {
+      setShowActionsMenu(true);
+    }
+  };
+
   const toggleAssetSelection = useCallback((assetId: string) => {
     setSelectedAssetIds((prev) => {
       const next = new Set(prev);
@@ -302,6 +573,8 @@ export default function BookingDetailScreen() {
           ? isCheckedOut && !isCheckedIn
           : selectMode === "checkout"
           ? !isCheckedOut && !isCheckedIn
+          : selectMode === "remove"
+          ? true
           : false;
 
       return (
@@ -635,6 +908,63 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Action buttons */}
+            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(
+              booking.status
+            ) && (
+              <View style={styles.manageRow}>
+                <TouchableOpacity
+                  style={[styles.actionButtonOutline, styles.manageRowItem]}
+                  onPress={() =>
+                    router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
+                  }
+                  accessibilityLabel="Edit booking"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="create-outline"
+                    size={18}
+                    color={colors.buttonSecondaryText}
+                  />
+                  <Text style={styles.actionButtonOutlineText}>Edit</Text>
+                </TouchableOpacity>
+
+                {booking.status === "DRAFT" && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.manageRowItem]}
+                    onPress={handleReserve}
+                    accessibilityLabel="Reserve this booking"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={18}
+                      color={colors.primaryForeground}
+                    />
+                    <Text style={styles.actionButtonText}>Reserve</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* More lifecycle actions (duplicate / archive / cancel / delete).
+                Shows for ANY status — including closed ones (Archive on
+                COMPLETE, Duplicate always) — gated by server-computed flags. */}
+            {lifecycleActions.length > 0 && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={openActionsMenu}
+                accessibilityLabel="More booking actions"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="ellipsis-horizontal"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>More actions</Text>
+              </TouchableOpacity>
+            )}
+
             {booking &&
               !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
               (!isSelfService || booking.status === "DRAFT") && (
@@ -659,6 +989,76 @@ export default function BookingDetailScreen() {
                   />
                   <Text style={styles.actionButtonOutlineText}>
                     Scan to Add Assets
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+            {/* Browse available assets/kits to add (date-aware picker) */}
+            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+              (!isSelfService || booking.status === "DRAFT") && (
+                <TouchableOpacity
+                  style={styles.actionButtonOutline}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/bookings/add-assets?bookingId=${
+                        booking.id
+                      }&bookingName=${encodeURIComponent(
+                        booking.name
+                      )}&from=${encodeURIComponent(
+                        booking.from
+                      )}&to=${encodeURIComponent(booking.to)}`
+                    )
+                  }
+                  accessibilityLabel="Browse available assets and kits to add"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="search"
+                    size={18}
+                    color={colors.buttonSecondaryText}
+                  />
+                  <Text style={styles.actionButtonOutlineText}>
+                    Browse to Add
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+            {/* Select assets to remove (editable bookings with assets) */}
+            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+              (!isSelfService || booking.status === "DRAFT") &&
+              booking.assetCount > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.actionButtonOutline,
+                    selectMode === "remove" && styles.actionButtonOutlineActive,
+                  ]}
+                  onPress={() => {
+                    setSelectMode(selectMode === "remove" ? null : "remove");
+                    setSelectedAssetIds(new Set());
+                  }}
+                  accessibilityLabel={
+                    selectMode === "remove"
+                      ? "Cancel selection"
+                      : "Select assets to remove"
+                  }
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name={selectMode === "remove" ? "close" : "trash-outline"}
+                    size={18}
+                    color={
+                      selectMode === "remove"
+                        ? colors.error
+                        : colors.buttonSecondaryText
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.actionButtonOutlineText,
+                      selectMode === "remove" && { color: colors.error },
+                    ]}
+                  >
+                    {selectMode === "remove" ? "Cancel" : "Select to Remove"}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -727,19 +1127,24 @@ export default function BookingDetailScreen() {
 
             {canCheckin && (
               <View style={styles.checkinActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleFullCheckin}
-                  accessibilityLabel="Check in all assets"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="log-in-outline"
-                    size={18}
-                    color={colors.primaryForeground}
-                  />
-                  <Text style={styles.actionButtonText}>Check In All</Text>
-                </TouchableOpacity>
+                {/* Quick "Check In All" is hidden when the workspace requires
+                    explicit check-in for this role — the scan/select paths
+                    below remain (they ARE explicit check-in). Mirrors web. */}
+                {canQuickCheckin && (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleFullCheckin}
+                    accessibilityLabel="Check in all assets"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="log-in-outline"
+                      size={18}
+                      color={colors.primaryForeground}
+                    />
+                    <Text style={styles.actionButtonText}>Check In All</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={styles.actionButtonOutline}
@@ -819,28 +1224,86 @@ export default function BookingDetailScreen() {
             onPress={
               selectMode === "checkout"
                 ? handlePartialCheckout
+                : selectMode === "remove"
+                ? handleRemoveAssets
                 : handlePartialCheckin
             }
             accessibilityLabel={`${
-              selectMode === "checkout" ? "Check out" : "Check in"
+              selectMode === "checkout"
+                ? "Check out"
+                : selectMode === "remove"
+                ? "Remove"
+                : "Check in"
             } ${selectedAssetIds.size} selected assets`}
             accessibilityRole="button"
           >
             <Ionicons
               name={
-                selectMode === "checkout" ? "log-out-outline" : "log-in-outline"
+                selectMode === "checkout"
+                  ? "log-out-outline"
+                  : selectMode === "remove"
+                  ? "trash-outline"
+                  : "log-in-outline"
               }
               size={20}
               color={colors.primaryForeground}
             />
             <Text style={styles.floatingButtonText}>
-              {selectMode === "checkout" ? "Check Out" : "Check In"}{" "}
+              {selectMode === "checkout"
+                ? "Check Out"
+                : selectMode === "remove"
+                ? "Remove"
+                : "Check In"}{" "}
               {selectedAssetIds.size}{" "}
               {selectedAssetIds.size === 1 ? "Asset" : "Assets"}
             </Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* ── Lifecycle actions overflow (Android; iOS uses ActionSheetIOS) ── */}
+      <Modal
+        visible={showActionsMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowActionsMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.overflowBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowActionsMenu(false)}
+        >
+          <View style={styles.overflowMenu} accessibilityViewIsModal={true}>
+            {lifecycleActions.map((a) => (
+              <TouchableOpacity
+                key={a.key}
+                style={styles.overflowItem}
+                onPress={() => {
+                  setShowActionsMenu(false);
+                  a.onPress();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={a.label}
+              >
+                <Ionicons
+                  name={a.icon}
+                  size={20}
+                  color={a.destructive ? colors.error : colors.foreground}
+                />
+                <Text
+                  style={
+                    a.destructive
+                      ? styles.overflowItemTextDanger
+                      : styles.overflowItemText
+                  }
+                >
+                  {a.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1022,6 +1485,46 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   checkinActions: {
     gap: spacing.sm,
+  },
+  // Lifecycle actions overflow menu (Android)
+  overflowBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  overflowMenu: {
+    backgroundColor: colors.white,
+    borderRadius: borderRadius.xl,
+    width: "75%",
+    overflow: "hidden",
+    ...shadows.lg,
+  },
+  overflowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  overflowItemText: {
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  overflowItemTextDanger: {
+    fontSize: fontSize.lg,
+    fontWeight: "600",
+    color: colors.error,
+  },
+  manageRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  manageRowItem: {
+    flex: 1,
   },
   actionButtonOutline: {
     flexDirection: "row",

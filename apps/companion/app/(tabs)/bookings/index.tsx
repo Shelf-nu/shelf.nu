@@ -562,11 +562,27 @@ function BookingsListContent() {
           )}
         </Animated.View>
       </View>
+
+      {/* Create booking — only TEAM workspaces can use bookings (matches the
+          server premium gate; personal workspaces 403 on create). */}
+      {currentOrg?.type === "TEAM" && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/(tabs)/bookings/new");
+          }}
+          accessibilityLabel="Create booking"
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={28} color={colors.primaryForeground} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
 
-const useStyles = createStyles((colors) => ({
+const useStyles = createStyles((colors, shadows) => ({
   flexFill: {
     flex: 1,
   },
@@ -764,5 +780,17 @@ const useStyles = createStyles((colors) => ({
   },
   footer: {
     paddingVertical: spacing.lg,
+  },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    bottom: spacing.xl,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.lg,
   },
 }));
