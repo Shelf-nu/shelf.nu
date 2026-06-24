@@ -37,6 +37,12 @@ vi.mock("~/modules/booking/service.server", () => ({
   checkoutBooking: vi.fn(),
 }));
 
+// why: the endpoint now loads the booking's from/to (so checkoutBooking's
+// conflict guard fires) — mock the org-scoped lookup to avoid a DB call.
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
+}));
+
 // why: we need to control error formatting in the catch block
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn(),
@@ -54,6 +60,7 @@ import {
   requireOrganizationAccess,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -63,6 +70,10 @@ const mockUser = {
   firstName: "Test",
   lastName: "User",
 };
+
+// The booking's stored reservation window, returned by the org-scoped lookup.
+const BOOKING_FROM = new Date("2026-07-01T09:00:00Z");
+const BOOKING_TO = new Date("2026-07-01T17:00:00Z");
 
 function createCheckoutRequest(body: Record<string, unknown>, orgId = "org-1") {
   return new Request(
@@ -89,9 +100,13 @@ describe("POST /api/mobile/bookings/checkout", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (db.booking.findFirst as any).mockResolvedValue({
+      from: BOOKING_FROM,
+      to: BOOKING_TO,
+    });
   });
 
-  it("should checkout a booking and return booking data", async () => {
+  it("should checkout a booking and pass its window so the conflict guard fires", async () => {
     (checkoutBooking as any).mockResolvedValue({
       id: "booking-1",
       name: "Test Booking",
@@ -110,12 +125,27 @@ describe("POST /api/mobile/bookings/checkout", () => {
       status: "ONGOING",
     });
 
+    // Regression guard: the booking's from/to MUST be forwarded, otherwise
+    // checkoutBooking's `if (from && to)` conflict check is skipped and a
+    // reserved/overlapping asset is silently double-booked.
     expect(checkoutBooking).toHaveBeenCalledWith({
       id: "booking-1",
       organizationId: "org-1",
       hints: { timeZone: "UTC", locale: "en-US" },
       userId: "user-1",
+      from: BOOKING_FROM,
+      to: BOOKING_TO,
     });
+  });
+
+  it("returns 404 when the booking is not in the workspace", async () => {
+    (db.booking.findFirst as any).mockResolvedValue(null);
+
+    const request = createCheckoutRequest({ bookingId: "missing" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(404);
+    expect(checkoutBooking).not.toHaveBeenCalled();
   });
 
   it("should return 403 when user lacks checkout permission", async () => {
