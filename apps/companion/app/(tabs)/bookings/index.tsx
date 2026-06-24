@@ -34,7 +34,10 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { BookingListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
-import { consumeBookingsListDirty } from "@/lib/booking-refresh";
+import {
+  consumeBookingsListDirty,
+  markBookingsListDirty,
+} from "@/lib/booking-refresh";
 
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
@@ -125,8 +128,8 @@ function BookingsListContent() {
   }, [activeFilter, syncIndex]);
 
   const fetchBookings = useCallback(
-    async (pageNum: number, reset: boolean) => {
-      if (!currentOrg) return;
+    async (pageNum: number, reset: boolean): Promise<boolean> => {
+      if (!currentOrg) return false;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
         search: debouncedSearch || undefined,
@@ -135,17 +138,18 @@ function BookingsListContent() {
         page: pageNum,
         perPage: PAGE_SIZE,
       });
-      // Request cancelled (navigation) — ignore
-      if (!data && !fetchErr) return;
+      // Request cancelled (navigation): ignore, treat as not-refreshed.
+      if (!data && !fetchErr) return false;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load bookings");
-        return;
+        return false;
       }
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
       if (reset) setBookings(data.bookings);
       else setBookings((prev) => [...prev, ...data.bookings]);
+      return true;
     },
     [currentOrg, activeFilter, debouncedSearch, sortIndex]
   );
@@ -182,8 +186,8 @@ function BookingsListContent() {
     useCallback(() => {
       if (!currentOrg) return;
       // A lifecycle mutation on the detail screen (reserve/cancel/archive/
-      // delete/duplicate) marks the list dirty — bypass the freshness gate so
-      // we don't show stale rows on return.
+      // delete/duplicate) marks the list dirty; bypass the freshness gate so we
+      // don't show stale rows on return.
       const mustRefresh = consumeBookingsListDirty();
       if (
         !mustRefresh &&
@@ -196,21 +200,27 @@ function BookingsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedBookings.current;
-      fetchBookings(1, true).finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        if (isFirstLoad) {
-          hasFetchedBookings.current = true;
-          setBookings((current) => {
-            announce(
-              current.length === 0
-                ? "No bookings found"
-                : current.length + " bookings loaded"
-            );
-            return current;
-          });
-        }
-      });
+      fetchBookings(1, true)
+        .then((ok) => {
+          // If a forced (list-dirty) refresh failed or was cancelled, re-mark
+          // so the next focus retries instead of falling back to the 60s gate.
+          if (mustRefresh && !ok) markBookingsListDirty();
+        })
+        .finally(() => {
+          setIsLoading(false);
+          lastFetchedAt.current = Date.now();
+          if (isFirstLoad) {
+            hasFetchedBookings.current = true;
+            setBookings((current) => {
+              announce(
+                current.length === 0
+                  ? "No bookings found"
+                  : current.length + " bookings loaded"
+              );
+              return current;
+            });
+          }
+        });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, activeFilter, fetchBookings])
