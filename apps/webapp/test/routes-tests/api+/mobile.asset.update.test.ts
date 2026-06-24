@@ -58,6 +58,21 @@ vi.mock("~/utils/custom-fields", () => ({
   extractCustomFieldValuesFromPayload: vi.fn(() => []),
 }));
 
+// why: org-scope guard — mock so we can assert it ran with the submitted tag
+// ids and force the cross-org rejection path without hitting the DB.
+vi.mock("~/utils/org-validation.server", () => ({
+  assertTagsBelongToOrg: vi.fn(),
+}));
+
+// why: tag-set builder — pure helper; mock to keep the test isolated from the
+// real tag module (which pulls in DB-touching code) and to assert the connect
+// shape the route forwards to updateAsset.
+vi.mock("~/modules/tag/service.server", () => ({
+  buildTagsSet: vi.fn((tags?: string) => ({
+    set: tags ? tags.split(",").map((id) => ({ id })) : [],
+  })),
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -81,6 +96,7 @@ import {
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
+import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
 import { db } from "~/database/db.server";
 
 const mockUser = {
@@ -143,6 +159,53 @@ describe("POST /api/mobile/asset/update", () => {
         description: "New description",
       })
     );
+  });
+
+  it("org-validates submitted tags and connects them on update", async () => {
+    (updateAsset as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Laptop",
+      description: null,
+    });
+
+    const request = createRequest({
+      assetId: "asset-1",
+      tags: ["tag-1", "tag-2"],
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(200);
+    // org-scope guard ran with the submitted ids
+    expect(assertTagsBelongToOrg).toHaveBeenCalledWith({
+      tagIds: ["tag-1", "tag-2"],
+      organizationId: "org-1",
+    });
+    // tags forwarded to updateAsset as a replace set via buildTagsSet
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "asset-1",
+        tags: { set: [{ id: "tag-1" }, { id: "tag-2" }] },
+      })
+    );
+  });
+
+  it("rejects with 400 when a submitted tag does not belong to the org", async () => {
+    // why: trip the cross-org guard for this one call only (clearAllMocks resets
+    // calls, not implementations, so a persistent reject would leak downstream).
+    const orgError = new Error(
+      "Some of the selected tags do not exist in your workspace."
+    );
+    (orgError as any).status = 400;
+    (assertTagsBelongToOrg as any).mockRejectedValueOnce(orgError);
+
+    const request = createRequest({
+      assetId: "asset-1",
+      tags: ["tag-from-other-org"],
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(updateAsset).not.toHaveBeenCalled();
   });
 
   it("should return 403 when permission is denied", async () => {

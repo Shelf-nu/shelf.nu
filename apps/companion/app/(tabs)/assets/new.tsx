@@ -46,6 +46,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
+import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -99,7 +100,6 @@ export default function CreateAssetScreen() {
   const [showTagsPicker, setShowTagsPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
   const [locationSearch, setLocationSearch] = useState("");
-  const [tagsSearch, setTagsSearch] = useState("");
 
   // ── Custom fields state ─────────────────────────
   // Definitions are fetched whenever the selected category changes; values
@@ -271,12 +271,6 @@ export default function CreateAssetScreen() {
         l.name.toLowerCase().includes(locationSearch.toLowerCase())
       )
     : locations;
-
-  const filteredTags = tagsSearch
-    ? tags.filter((t) =>
-        t.name.toLowerCase().includes(tagsSearch.toLowerCase())
-      )
-    : tags;
 
   // ── Image Picker ───────────────────────────────
   const pickImage = async (source: "camera" | "library") => {
@@ -838,143 +832,21 @@ export default function CreateAssetScreen() {
         </View>
 
         {/* ── Tags Picker (multi-select) ───────────── */}
-        <View style={styles.field}>
-          <Text style={styles.label}>Tags</Text>
-          <TouchableOpacity
-            style={styles.pickerButton}
-            onPress={() => {
-              setShowTagsPicker(!showTagsPicker);
+        <TagPickerField
+          tags={tags}
+          selectedTags={selectedTags}
+          onChange={setSelectedTags}
+          isLoading={isTagsLoading}
+          isOpen={showTagsPicker}
+          onToggle={(next) => {
+            setShowTagsPicker(next);
+            // Keep only one dropdown open at a time.
+            if (next) {
               setShowCategoryPicker(false);
               setShowLocationPicker(false);
-            }}
-            accessibilityLabel={
-              selectedTags.length
-                ? `${selectedTags.length} tag${
-                    selectedTags.length === 1 ? "" : "s"
-                  } selected, tap to change`
-                : "Select tags"
             }
-            accessibilityRole="button"
-          >
-            <Text
-              style={
-                selectedTags.length
-                  ? styles.pickerSelectedText
-                  : styles.pickerPlaceholder
-              }
-            >
-              {selectedTags.length
-                ? `${selectedTags.length} tag${
-                    selectedTags.length === 1 ? "" : "s"
-                  } selected`
-                : "Select tags..."}
-            </Text>
-            <Ionicons
-              name={showTagsPicker ? "chevron-up" : "chevron-down"}
-              size={18}
-              color={colors.mutedLight}
-            />
-          </TouchableOpacity>
-
-          {/* Selected tags as removable chips */}
-          {selectedTags.length > 0 && (
-            <View style={styles.tagChips}>
-              {selectedTags.map((tag) => (
-                <TouchableOpacity
-                  key={tag.id}
-                  style={styles.tagChip}
-                  onPress={() =>
-                    setSelectedTags((prev) =>
-                      prev.filter((t) => t.id !== tag.id)
-                    )
-                  }
-                  accessibilityLabel={`Remove tag ${tag.name}`}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.tagChipText}>{tag.name}</Text>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {showTagsPicker && (
-            <View style={styles.pickerDropdown}>
-              {tags.length > 5 && (
-                <TextInput
-                  style={styles.pickerSearch}
-                  value={tagsSearch}
-                  onChangeText={setTagsSearch}
-                  placeholder="Search tags..."
-                  placeholderTextColor={colors.placeholderText}
-                  accessibilityLabel="Search tags"
-                />
-              )}
-              {isTagsLoading ? (
-                <ActivityIndicator
-                  style={styles.pickerLoading}
-                  color={colors.muted}
-                />
-              ) : filteredTags.length === 0 ? (
-                <Text style={styles.pickerEmpty}>No tags found</Text>
-              ) : (
-                <ScrollView
-                  nestedScrollEnabled
-                  keyboardShouldPersistTaps="handled"
-                >
-                  {filteredTags.map((tag) => {
-                    const isSelected = selectedTags.some(
-                      (t) => t.id === tag.id
-                    );
-                    return (
-                      <TouchableOpacity
-                        key={tag.id}
-                        style={[
-                          styles.pickerItem,
-                          isSelected && styles.pickerItemSelected,
-                        ]}
-                        // Multi-select: toggle the tag and keep the dropdown
-                        // open so several can be picked in one pass.
-                        onPress={() =>
-                          setSelectedTags((prev) =>
-                            isSelected
-                              ? prev.filter((t) => t.id !== tag.id)
-                              : [...prev, tag]
-                          )
-                        }
-                      >
-                        <Ionicons
-                          name="pricetag-outline"
-                          size={16}
-                          color={colors.muted}
-                        />
-                        <Text style={styles.pickerItemText}>{tag.name}</Text>
-                        {isSelected && (
-                          <Ionicons
-                            name="checkmark"
-                            size={18}
-                            color={colors.iconActive}
-                          />
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-              {selectedTags.length > 0 && (
-                <TouchableOpacity
-                  style={styles.pickerClear}
-                  onPress={() => {
-                    setSelectedTags([]);
-                    setTagsSearch("");
-                  }}
-                >
-                  <Text style={styles.pickerClearText}>Clear all</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
+          }}
+        />
 
         {/* ── Custom Fields (scoped to selected category) ────────── */}
         {isCustomFieldsLoading ? (
@@ -1287,30 +1159,6 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 10,
     height: 10,
     borderRadius: 5,
-  },
-
-  // ── Tag chips (selected, removable) ────────────
-  tagChips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
-  tagChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(239, 104, 32, 0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(239, 104, 32, 0.3)",
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  tagChipText: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
-    fontWeight: "500",
   },
 
   // ── Custom fields ──────────────────────────────

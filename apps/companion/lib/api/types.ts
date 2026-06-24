@@ -633,6 +633,11 @@ export type UpdateAssetPayload = {
   categoryId?: string;
   newLocationId?: string;
   currentLocationId?: string;
+  /**
+   * Full desired tag-id set (replace). Omit to leave tags unchanged; pass `[]`
+   * to clear all tags.
+   */
+  tags?: string[];
   valuation?: number | null;
   /**
    * Custom field updates. Each entry is the customField `id` (NOT the asset's
