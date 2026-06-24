@@ -147,8 +147,10 @@ function BookingsListContent() {
       setError(null);
       setTotalPages(data.totalPages);
       nextPage.current = pageNum + 1;
-      if (reset) setBookings(data.bookings);
-      else setBookings((prev) => [...prev, ...data.bookings]);
+      if (reset) {
+        setBookings(data.bookings);
+        lastLoadedCountRef.current = data.bookings.length;
+      } else setBookings((prev) => [...prev, ...data.bookings]);
       return true;
     },
     [currentOrg, activeFilter, debouncedSearch, sortIndex]
@@ -157,6 +159,9 @@ function BookingsListContent() {
   // Refresh on tab focus — skip if data is fresh (< 60s old)
   const hasFetchedBookings = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Count from the latest successful reset fetch, used for the first-load a11y
+  // summary without reading state inside a setBookings updater (impure).
+  const lastLoadedCountRef = useRef(0);
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
@@ -205,20 +210,22 @@ function BookingsListContent() {
           // If a forced (list-dirty) refresh failed or was cancelled, re-mark
           // so the next focus retries instead of falling back to the 60s gate.
           if (mustRefresh && !ok) markBookingsListDirty();
+          // First-load a11y summary, only when the fetch succeeded so screen
+          // readers don't announce "No bookings found" while the error/Retry
+          // view is what's actually on screen.
+          if (isFirstLoad && ok) {
+            announce(
+              lastLoadedCountRef.current === 0
+                ? "No bookings found"
+                : lastLoadedCountRef.current + " bookings loaded"
+            );
+          }
         })
         .finally(() => {
           setIsLoading(false);
           lastFetchedAt.current = Date.now();
           if (isFirstLoad) {
             hasFetchedBookings.current = true;
-            setBookings((current) => {
-              announce(
-                current.length === 0
-                  ? "No bookings found"
-                  : current.length + " bookings loaded"
-              );
-              return current;
-            });
           }
         });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
