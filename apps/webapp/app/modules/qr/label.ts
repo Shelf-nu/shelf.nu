@@ -192,7 +192,9 @@ export const labelSvgDataUrl = (
  * controllable — so we prefix those with an apostrophe before quoting.
  */
 const csvCell = (value: string): string => {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  // Leading control chars (tab/CR/LF) can also smuggle a formula payload, so
+  // neutralize them alongside the `= + - @` formula triggers.
+  const safe = /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
 };
 

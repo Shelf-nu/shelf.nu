@@ -14,7 +14,7 @@
  * @see {@link file://./../../modules/qr/label.ts}
  * @see {@link file://./../../routes/api+/assets.get-assets-for-bulk-qr-download.ts}
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import JSZip from "jszip";
 import { DownloadIcon, FileText, Printer, Sparkles } from "lucide-react";
@@ -79,7 +79,12 @@ export default function BulkDownloadQrDialog({
     enabled: isDialogOpen && canExportAssets && !!apiSearchParams,
   });
 
+  // Bumped on every close so an in-flight zip build that resolves AFTER the
+  // dialog was dismissed can't trigger a stray download or flip state to "done".
+  const buildTokenRef = useRef(0);
+
   function handleClose() {
+    buildTokenRef.current += 1;
     setView("choose");
     setZip({ status: "idle" });
     onClose();
@@ -87,6 +92,7 @@ export default function BulkDownloadQrDialog({
 
   async function downloadSvgZip() {
     if (!data) return;
+    const token = buildTokenRef.current;
     setZip({ status: "building" });
     try {
       const archive = new JSZip();
@@ -97,6 +103,8 @@ export default function BulkDownloadQrDialog({
       }).forEach((entry) => archive.file(entry.path, entry.content));
 
       const blob = await archive.generateAsync({ type: "blob" });
+      // Closed mid-build: abandon silently rather than download after dismissal.
+      if (token !== buildTokenRef.current) return;
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = `qr-codes-${Date.now()}.zip`;
@@ -104,6 +112,7 @@ export default function BulkDownloadQrDialog({
       setTimeout(() => URL.revokeObjectURL(link.href), 4e4);
       setZip({ status: "done" });
     } catch (cause) {
+      if (token !== buildTokenRef.current) return;
       setZip({
         status: "error",
         error: cause instanceof Error ? cause.message : "Something went wrong.",

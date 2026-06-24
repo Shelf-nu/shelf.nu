@@ -106,14 +106,17 @@ function makeAsset(over: Partial<any> = {}) {
   };
 }
 
-async function callLoader(assetIds: string[]) {
+async function callLoader(assetIds: string[], extraQuery = "") {
   const params = assetIds
     .map((id) => `assetIds=${encodeURIComponent(id)}`)
     .join("&");
+  // extraQuery carries real index filters (e.g. `s=laptop`) so select-all tests
+  // can verify the filters are forwarded, not just the magic key.
+  const query = [extraQuery, params].filter(Boolean).join("&");
   const args: any = {
     context: { getSession: () => ({ userId: "user-1" }) },
     request: new Request(
-      `https://x/api/assets/get-assets-for-bulk-qr-download?${params}`
+      `https://x/api/assets/get-assets-for-bulk-qr-download?${query}`
     ),
     params: {},
   };
@@ -271,11 +274,13 @@ describe("loader wiring (A15–A19, A24)", () => {
   });
 
   it("forwards the active filters to getAssetsWhereInput on select-all", async () => {
-    await callLoader([ALL_SELECTED, "s=laptop"].slice(0, 1)); // assetIds=all-selected
+    await callLoader([ALL_SELECTED], "s=laptop&category=cat-A");
     expect(getAssetsWhereInput).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: "org-1",
-        currentSearchParams: expect.stringContaining("assetIds=all-selected"),
+        // The real index filters — not just the ALL_SELECTED key — must reach
+        // the where-builder, otherwise select-all would ignore the user's filter.
+        currentSearchParams: expect.stringContaining("s=laptop"),
       })
     );
   });

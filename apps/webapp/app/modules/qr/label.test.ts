@@ -167,6 +167,13 @@ describe("buildManifestCsv (A12–A14)", () => {
       expect(csv).toContain(`"'${lead}cmd()"`);
     }
   });
+
+  it("A14c — a control-char-prefixed name (tab/CR/LF) is neutralized too", () => {
+    for (const lead of ["\t", "\r", "\n"]) {
+      const csv = buildManifestCsv([asset({ title: `${lead}=cmd()` })], base);
+      expect(csv).toContain(`"'${lead}=cmd()"`);
+    }
+  });
 });
 
 describe("buildLabelZipEntries (A22)", () => {

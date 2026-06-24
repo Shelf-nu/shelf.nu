@@ -44,23 +44,40 @@ export default function useApiQuery<TData>({
 
   useEffect(
     function handleQuery() {
-      if (enabled) {
-        setIsLoading(true);
-        fetch(apiUrl)
-          .then((response) => response.json())
-          .then((data: TData) => {
-            setData(data);
-            onSuccess?.(data);
-          })
-          .catch((error: Error) => {
-            const errorMessage = error?.message ?? "Something went wrong.";
-            setError(errorMessage);
-            onError?.(errorMessage);
-          })
-          .finally(() => {
-            setIsLoading(false);
-          });
-      }
+      if (!enabled) return;
+
+      // Guard against out-of-order responses: the consumer may stay mounted
+      // while `apiUrl` changes (e.g. selection/filter changes behind a dialog),
+      // so a slower earlier request could otherwise resolve last and overwrite
+      // the newer one. The cleanup marks this run stale and aborts its fetch, so
+      // only the latest request is allowed to set state.
+      let ignore = false;
+      const controller = new AbortController();
+
+      setIsLoading(true);
+      fetch(apiUrl, { signal: controller.signal })
+        .then((response) => response.json())
+        .then((data: TData) => {
+          if (ignore) return;
+          setData(data);
+          onSuccess?.(data);
+        })
+        .catch((error: Error) => {
+          // A superseded/aborted request is expected — never surface it.
+          if (ignore || error?.name === "AbortError") return;
+          const errorMessage = error?.message ?? "Something went wrong.";
+          setError(errorMessage);
+          onError?.(errorMessage);
+        })
+        .finally(() => {
+          if (ignore) return;
+          setIsLoading(false);
+        });
+
+      return () => {
+        ignore = true;
+        controller.abort();
+      };
     },
     [apiUrl, enabled, refetchTrigger, onSuccess, onError]
   );
