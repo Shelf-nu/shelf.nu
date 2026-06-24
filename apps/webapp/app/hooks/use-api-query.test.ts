@@ -142,6 +142,33 @@ describe("useApiQuery", () => {
     expect(result.current.data).toBeUndefined();
   });
 
+  it("clears a prior error when a refetch succeeds", async () => {
+    const mockData = { id: 1, name: "First" };
+    mockFetch
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce({
+        json: vi.fn().mockResolvedValueOnce(mockData),
+      });
+
+    const { result } = renderHook(() =>
+      useApiQuery({ api: "/api/test", enabled: true })
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.error).toBe("Network error");
+    });
+
+    act(() => {
+      result.current.refetch();
+    });
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual(mockData);
+    });
+    // The stale error must not linger after a successful refetch.
+    expect(result.current.error).toBeUndefined();
+  });
+
   it("should refetch when refetch is called", async () => {
     const mockData1 = { id: 1, name: "First" };
     const mockData2 = { id: 2, name: "Second" };

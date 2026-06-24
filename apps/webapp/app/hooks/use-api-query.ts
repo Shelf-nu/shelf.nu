@@ -55,6 +55,9 @@ export default function useApiQuery<TData>({
       const controller = new AbortController();
 
       setIsLoading(true);
+      // Clear any prior error so a successful refetch doesn't leave a stale
+      // message visible to consumers.
+      setError(undefined);
       fetch(apiUrl, { signal: controller.signal })
         .then((response) => response.json())
         .then((data: TData) => {

@@ -137,16 +137,22 @@ export function buildLabelSvg({
   const totalH = (showBranding ? brandY : idY) + gap;
   const cx = qrSize / 2;
 
-  let rects = "";
+  // Collect rects in an array and join once: across a bulk export (up to 1500
+  // labels) repeated string concatenation in this nested loop is a needless
+  // CPU/memory hotspot in the browser.
+  const rectParts: string[] = [];
   for (let r = 0; r < count; r++) {
     for (let c = 0; c < count; c++) {
       if (dark[r][c]) {
-        rects += `<rect x="${QUIET_ZONE + c}" y="${
-          QUIET_ZONE + r
-        }" width="1" height="1"/>`;
+        rectParts.push(
+          `<rect x="${QUIET_ZONE + c}" y="${
+            QUIET_ZONE + r
+          }" width="1" height="1"/>`
+        );
       }
     }
   }
+  const rects = rectParts.join("");
 
   const brand = showBranding
     ? `<text x="${cx}" y="${brandY}" font-size="${brandSize}" text-anchor="middle" fill="#475467">Powered by shelf.nu</text>`

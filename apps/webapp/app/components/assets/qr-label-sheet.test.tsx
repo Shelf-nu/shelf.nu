@@ -75,6 +75,19 @@ describe("QrLabelSheet", () => {
     expect(sheet()?.getAttribute("style")).toContain("repeat(6,");
   });
 
+  it("segmented controls expose the active option via aria-pressed", () => {
+    renderSheet();
+    // Medium is the default size; its button must be marked pressed for SR users.
+    const medium = screen.getByRole("button", { name: /Medium/ });
+    const small = screen.getByRole("button", { name: /Small/ });
+    expect(medium.getAttribute("aria-pressed")).toBe("true");
+    expect(small.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(small);
+    expect(small.getAttribute("aria-pressed")).toBe("true");
+    expect(medium.getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("branding inside the card follows showBranding", () => {
     const on = renderSheet(true);
     const onCard = on.container.querySelector(
