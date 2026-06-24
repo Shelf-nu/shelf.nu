@@ -3547,14 +3547,15 @@ describe("addScannedAssetsToBooking", () => {
     const from = new Date("2026-07-01T09:00:00Z");
     const to = new Date("2026-07-01T17:00:00Z");
 
-    // Target booking's reservation window (drives the overlap query).
+    // why: stub the booking-window lookup that drives the overlap query so the
+    // guard runs without hitting the DB.
     (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
       from,
       to,
     });
-    // The scanned asset is RESERVED by ANOTHER booking whose window overlaps —
-    // createBookingConflictConditions would surface it; hasAssetBookingConflicts
-    // treats an overlapping RESERVED booking as an always-conflict.
+    // why: return one asset RESERVED by another overlapping booking so the real
+    // hasAssetBookingConflicts fires (and assertAssetsBelongToOrg sees it as an
+    // org member) — keeps the test off a real DB.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
         id: "asset-1",
