@@ -114,7 +114,7 @@ describe("mergeDateDisplayOptions", () => {
     ).toEqual({ month: "short" });
   });
 
-  it("adds hour/minute for includeTime but skips date defaults under a style shortcut", () => {
+  it("includeTime under a timeStyle shortcut stays Intl-safe (no granular fields)", () => {
     const merged = mergeDateDisplayOptions({
       callerOptions: { timeStyle: "short" },
       numericDefaults: explicit,
@@ -124,6 +124,25 @@ describe("mergeDateDisplayOptions", () => {
 
     expect(merged).not.toHaveProperty("day");
     expect(merged).not.toHaveProperty("month");
+    // Granular hour/minute must NEVER be mixed with a style shortcut.
+    expect(merged).not.toHaveProperty("hour");
+    expect(merged).not.toHaveProperty("minute");
+    // The merged options must be accepted by Intl (no granular-vs-style throw).
+    expect(() => new Intl.DateTimeFormat("en-US", merged)).not.toThrow();
+  });
+
+  it("includeTime under a dateStyle shortcut adds timeStyle (not granular) and stays Intl-safe", () => {
+    const merged = mergeDateDisplayOptions({
+      callerOptions: { dateStyle: "short" },
+      numericDefaults: explicit,
+      includeTime: true,
+      onlyTime: false,
+    });
+
+    expect(merged).not.toHaveProperty("hour");
+    expect(merged).not.toHaveProperty("minute");
+    expect(merged).toMatchObject({ dateStyle: "short", timeStyle: "short" });
+    expect(() => new Intl.DateTimeFormat("en-US", merged)).not.toThrow();
   });
 
   it("returns only time fields for onlyTime", () => {

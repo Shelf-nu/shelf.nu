@@ -137,8 +137,13 @@ export function mergeDateDisplayOptions({
   if (includeTime) {
     return {
       ...dateDefaults,
-      hour: "numeric",
-      minute: "numeric",
+      // Granular hour/minute only on the non-shortcut path. With a dateStyle or
+      // timeStyle shortcut, add the time via the `timeStyle` shortcut instead.
+      // Mixing granular component fields (hour/minute) with a style shortcut
+      // makes Intl.DateTimeFormat throw a TypeError.
+      ...(hasStyleShortcut
+        ? { timeStyle: "short" as const }
+        : { hour: "numeric" as const, minute: "numeric" as const }),
       ...callerOptions,
     };
   }
