@@ -14,7 +14,12 @@ env:
 # booking's detail HIDES the one-tap "Check In All" and forces the explicit
 # scan/select flow.
 #
-# !! PRECONDITIONS — the fix is UNOBSERVABLE unless ALL THREE hold:
+# !! PRECONDITIONS — the fix is UNOBSERVABLE unless ALL of these hold:
+#   0. WORKSPACE MEMBERSHIP: the self-service account MUST be a member of the
+#      workspace under test. As of 2026-06-24 the `+selfself` QA account has NO
+#      workspace ("No workspace" on its Settings screen), so this flow cannot
+#      run until it is provisioned into GRANULAR WORKSPACE as a self-service
+#      member. Pass its creds via -e SHELF_TEST_SELF_SERVICE_EMAIL / PASSWORD.
 #   1. ROLE: run as a SELF_SERVICE (or ADMIN) member, NOT the workspace OWNER.
 #      There is no owner toggle, so an owner ALWAYS sees "Check In All" and this
 #      test false-fails. Hence runFlow login-self-service (NOT login).
