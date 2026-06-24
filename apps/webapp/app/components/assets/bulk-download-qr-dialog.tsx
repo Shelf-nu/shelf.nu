@@ -111,14 +111,20 @@ export default function BulkDownloadQrDialog({
     }
   }
 
-  const count = allAssetsSelected
-    ? data?.assets.length ?? 0
-    : selectedAssets.length;
-
   // The loader can return an error payload (e.g. a select-all over the export
   // limit). useApiQuery surfaces it as `data` without an `assets` array, so
   // guard before reading `data.assets` instead of crashing.
   const hasAssets = Array.isArray((data as { assets?: unknown })?.assets);
+
+  // Only read `data.assets.length` once we know `data` is a success payload —
+  // an error payload is truthy but has no `assets`, so `data?.assets` alone
+  // would throw on `.length` before the `hasAssets` guard below can apply.
+  const count = allAssetsSelected
+    ? hasAssets
+      ? data!.assets.length
+      : 0
+    : selectedAssets.length;
+
   const apiErrorMessage =
     data && !hasAssets
       ? (data as { error?: { message?: string } }).error?.message ??
