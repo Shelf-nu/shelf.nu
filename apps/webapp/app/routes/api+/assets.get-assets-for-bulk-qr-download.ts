@@ -149,10 +149,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         if (!qrId) {
           // Data-drift anomaly: every asset should have a QR (createAsset). Skip
           // gracefully rather than ship a label that can't scan, and surface it.
-          Logger.warn({
-            message: `Asset ${asset.id} has no QR code; excluded from QR export.`,
-            additionalData: { assetId: asset.id, organizationId },
-          });
+          Logger.warn(
+            new ShelfError({
+              cause: null,
+              message: `Asset ${asset.id} has no QR code; excluded from QR export.`,
+              additionalData: { assetId: asset.id, organizationId },
+              label: "Assets",
+              shouldBeCaptured: false,
+            })
+          );
           return null;
         }
         const resolved = resolveDisplayCode({
