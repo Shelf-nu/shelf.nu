@@ -40,6 +40,8 @@ const asset = (over: Partial<LabelAsset> = {}): LabelAsset => ({
 });
 
 describe("buildLabelSvg", () => {
+  // The sharp rasterize + jsQR decode is CPU-heavy and can exceed the default 5s
+  // timeout when the suite runs fully parallel; give the roundtrip room.
   it("A1′ — the printed QR decodes back to the exact asset URL (EC L)", async () => {
     const url = "https://eam.sh/kQ7m2aX";
     const svg = buildLabelSvg({
@@ -49,7 +51,7 @@ describe("buildLabelSvg", () => {
       showBranding: true,
     });
     await expect(decodeQrFromSvg(svg)).resolves.toBe(url);
-  });
+  }, 20000);
 
   it("A1′ — still decodes at higher error-correction (EC Q)", async () => {
     const url = "https://eam.sh/p3Rn9bY";
@@ -61,7 +63,7 @@ describe("buildLabelSvg", () => {
       ec: "Q",
     });
     await expect(decodeQrFromSvg(svg)).resolves.toBe(url);
-  });
+  }, 20000);
 
   it("A2 — output is vector <svg>/<rect>, never raster", () => {
     const svg = buildLabelSvg({

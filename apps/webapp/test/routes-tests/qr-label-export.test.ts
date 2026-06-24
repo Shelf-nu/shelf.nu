@@ -75,7 +75,9 @@ vi.mock("~/utils/subscription.server", () => ({
   assertUserCanExportAssets: vi.fn(),
 }));
 vi.mock("~/utils/logger", () => ({
-  Logger: { warn: vi.fn(), error: vi.fn() },
+  // handledClientError is invoked by http.server's error() path; stub it too so
+  // the 4xx/error branches don't blow up on a missing Logger method.
+  Logger: { warn: vi.fn(), error: vi.fn(), handledClientError: vi.fn() },
 }));
 
 const { loader, MAX_BULK_QR_EXPORT } = await import(
