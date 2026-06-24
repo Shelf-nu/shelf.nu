@@ -28,8 +28,10 @@ import {
 import { buildMobileCustomFieldPayload } from "~/modules/api/mobile-custom-fields.server";
 import { createAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
+import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,6 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
       description,
       categoryId,
       locationId,
+      tags,
       valuation,
       customFields,
       qrId,
@@ -88,6 +91,9 @@ export async function action({ request }: ActionFunctionArgs) {
         description: z.string().optional(),
         categoryId: z.string().optional(),
         locationId: z.string().optional(),
+        // Tag ids to assign to the new asset. Validated below against the
+        // caller's organization before they are connected.
+        tags: z.array(z.string()).optional(),
         valuation: z.number().optional(),
         customFields: z
           .array(
@@ -116,6 +122,12 @@ export async function action({ request }: ActionFunctionArgs) {
         );
       }
     }
+
+    // why: tag ids come from request input and are attacker-controlled. Assert
+    // they belong to the caller's organization before connecting them, using
+    // the shared org-scope guard (no-op when no tags are supplied). Mirrors the
+    // web create path and prevents a cross-org tag IDOR.
+    await assertTagsBelongToOrg({ tagIds: tags ?? [], organizationId });
 
     // why: every category may have its own set of required custom fields.
     // We always fetch the active definitions for the chosen category (or
@@ -194,6 +206,9 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       categoryId: categoryId || null,
       locationId: locationId || undefined,
+      // Connect the (org-validated) tags. `buildTagsSet` takes a comma-joined
+      // id string and is the same helper the web create form uses.
+      tags: buildTagsSet(tags && tags.length ? tags.join(",") : undefined),
       valuation: valuation ?? null,
       customFieldsValues,
       qrId: qrId || undefined,

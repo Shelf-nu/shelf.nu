@@ -61,6 +61,22 @@ vi.mock("~/utils/custom-fields", () => ({
   extractCustomFieldValuesFromPayload: vi.fn(() => []),
 }));
 
+// why: tag ids from the request are validated against the caller's org via the
+// shared guard (a DB read). Mock it so tests can assert the route calls it and
+// simulate the cross-org rejection without hitting Postgres.
+vi.mock("~/utils/org-validation.server", () => ({
+  assertTagsBelongToOrg: vi.fn(),
+}));
+
+// why: the tag connect-set builder is a pure helper; mock it to the same shape
+// so tests can assert the route forwards the org-validated tag ids to
+// createAsset without loading the full tag service module.
+vi.mock("~/modules/tag/service.server", () => ({
+  buildTagsSet: vi.fn((tags?: string) => ({
+    set: tags ? tags.split(",").map((id) => ({ id })) : [],
+  })),
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -84,6 +100,7 @@ import {
 import { createAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
+import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
 import { db } from "~/database/db.server";
 
 const mockUser = {
@@ -147,6 +164,48 @@ describe("POST /api/mobile/asset/create", () => {
         organizationId: "org-1",
       })
     );
+  });
+
+  it("org-validates submitted tags and connects them to the new asset", async () => {
+    (createAsset as any).mockResolvedValue({ id: "asset-1", title: "Tagged" });
+
+    const request = createRequest({
+      title: "Tagged",
+      tags: ["tag-1", "tag-2"],
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(200);
+    // The org-scope guard runs with the submitted tag ids before connecting.
+    expect(assertTagsBelongToOrg).toHaveBeenCalledWith({
+      tagIds: ["tag-1", "tag-2"],
+      organizationId: "org-1",
+    });
+    // The connect-set reaches createAsset.
+    expect(createAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tags: { set: [{ id: "tag-1" }, { id: "tag-2" }] },
+      })
+    );
+  });
+
+  it("rejects with 400 when a tag does not belong to the org", async () => {
+    // why: `mockRejectedValueOnce` (not `mockRejectedValue`) — the suite's
+    // beforeEach uses clearAllMocks, which clears calls but NOT a persistent
+    // implementation, so a sticky reject would leak into later tests.
+    (assertTagsBelongToOrg as any).mockRejectedValueOnce({
+      message: "Some of the selected tags do not exist in your workspace.",
+      status: 400,
+    });
+
+    const request = createRequest({
+      title: "Bad tag",
+      tags: ["other-org-tag"],
+    });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(createAsset).not.toHaveBeenCalled();
   });
 
   it("should return validation error when title is too short", async () => {

@@ -37,6 +37,7 @@ import {
   api,
   type Category,
   type Location,
+  type Tag,
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -76,6 +77,8 @@ export default function CreateAssetScreen() {
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(
     null
   );
+  // Tags are multi-select (an asset can carry several), unlike category/location.
+  const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Image state ───────────────────────────────
@@ -85,14 +88,18 @@ export default function CreateAssetScreen() {
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
+  const [isTagsLoading, setIsTagsLoading] = useState(false);
 
   // ── Picker visibility ───────────────────────────
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showTagsPicker, setShowTagsPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
   const [locationSearch, setLocationSearch] = useState("");
+  const [tagsSearch, setTagsSearch] = useState("");
 
   // ── Custom fields state ─────────────────────────
   // Definitions are fetched whenever the selected category changes; values
@@ -143,6 +150,17 @@ export default function CreateAssetScreen() {
       setLocations(data.locations);
     }
     setIsLocationsLoading(false);
+  }, [currentOrg]);
+
+  // ── Load tags ───────────────────────────────────
+  const loadTags = useCallback(async () => {
+    if (!currentOrg) return;
+    setIsTagsLoading(true);
+    const { data } = await api.tags(currentOrg.id);
+    if (data?.tags) {
+      setTags(data.tags);
+    }
+    setIsTagsLoading(false);
   }, [currentOrg]);
 
   // ── Load custom fields for the selected category ──
@@ -200,7 +218,8 @@ export default function CreateAssetScreen() {
   useEffect(() => {
     loadCategories();
     loadLocations();
-  }, [loadCategories, loadLocations]);
+    loadTags();
+  }, [loadCategories, loadLocations, loadTags]);
 
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
@@ -211,6 +230,7 @@ export default function CreateAssetScreen() {
     description.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
+    selectedTags.length > 0 ||
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
@@ -251,6 +271,12 @@ export default function CreateAssetScreen() {
         l.name.toLowerCase().includes(locationSearch.toLowerCase())
       )
     : locations;
+
+  const filteredTags = tagsSearch
+    ? tags.filter((t) =>
+        t.name.toLowerCase().includes(tagsSearch.toLowerCase())
+      )
+    : tags;
 
   // ── Image Picker ───────────────────────────────
   const pickImage = async (source: "camera" | "library") => {
@@ -410,6 +436,7 @@ export default function CreateAssetScreen() {
       description: description.trim() || undefined,
       categoryId: selectedCategory?.id,
       locationId: selectedLocation?.id,
+      tags: selectedTags.length ? selectedTags.map((t) => t.id) : undefined,
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
@@ -458,6 +485,7 @@ export default function CreateAssetScreen() {
           setDescription("");
           setSelectedCategory(null);
           setSelectedLocation(null);
+          setSelectedTags([]);
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
@@ -591,6 +619,7 @@ export default function CreateAssetScreen() {
             onPress={() => {
               setShowCategoryPicker(!showCategoryPicker);
               setShowLocationPicker(false);
+              setShowTagsPicker(false);
             }}
             accessibilityLabel={
               selectedCategory
@@ -705,6 +734,7 @@ export default function CreateAssetScreen() {
             onPress={() => {
               setShowLocationPicker(!showLocationPicker);
               setShowCategoryPicker(false);
+              setShowTagsPicker(false);
             }}
             accessibilityLabel={
               selectedLocation
@@ -801,6 +831,145 @@ export default function CreateAssetScreen() {
                   }}
                 >
                   <Text style={styles.pickerClearText}>Clear selection</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* ── Tags Picker (multi-select) ───────────── */}
+        <View style={styles.field}>
+          <Text style={styles.label}>Tags</Text>
+          <TouchableOpacity
+            style={styles.pickerButton}
+            onPress={() => {
+              setShowTagsPicker(!showTagsPicker);
+              setShowCategoryPicker(false);
+              setShowLocationPicker(false);
+            }}
+            accessibilityLabel={
+              selectedTags.length
+                ? `${selectedTags.length} tag${
+                    selectedTags.length === 1 ? "" : "s"
+                  } selected, tap to change`
+                : "Select tags"
+            }
+            accessibilityRole="button"
+          >
+            <Text
+              style={
+                selectedTags.length
+                  ? styles.pickerSelectedText
+                  : styles.pickerPlaceholder
+              }
+            >
+              {selectedTags.length
+                ? `${selectedTags.length} tag${
+                    selectedTags.length === 1 ? "" : "s"
+                  } selected`
+                : "Select tags..."}
+            </Text>
+            <Ionicons
+              name={showTagsPicker ? "chevron-up" : "chevron-down"}
+              size={18}
+              color={colors.mutedLight}
+            />
+          </TouchableOpacity>
+
+          {/* Selected tags as removable chips */}
+          {selectedTags.length > 0 && (
+            <View style={styles.tagChips}>
+              {selectedTags.map((tag) => (
+                <TouchableOpacity
+                  key={tag.id}
+                  style={styles.tagChip}
+                  onPress={() =>
+                    setSelectedTags((prev) =>
+                      prev.filter((t) => t.id !== tag.id)
+                    )
+                  }
+                  accessibilityLabel={`Remove tag ${tag.name}`}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.tagChipText}>{tag.name}</Text>
+                  <Ionicons name="close" size={14} color={colors.primary} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {showTagsPicker && (
+            <View style={styles.pickerDropdown}>
+              {tags.length > 5 && (
+                <TextInput
+                  style={styles.pickerSearch}
+                  value={tagsSearch}
+                  onChangeText={setTagsSearch}
+                  placeholder="Search tags..."
+                  placeholderTextColor={colors.placeholderText}
+                  accessibilityLabel="Search tags"
+                />
+              )}
+              {isTagsLoading ? (
+                <ActivityIndicator
+                  style={styles.pickerLoading}
+                  color={colors.muted}
+                />
+              ) : filteredTags.length === 0 ? (
+                <Text style={styles.pickerEmpty}>No tags found</Text>
+              ) : (
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {filteredTags.map((tag) => {
+                    const isSelected = selectedTags.some(
+                      (t) => t.id === tag.id
+                    );
+                    return (
+                      <TouchableOpacity
+                        key={tag.id}
+                        style={[
+                          styles.pickerItem,
+                          isSelected && styles.pickerItemSelected,
+                        ]}
+                        // Multi-select: toggle the tag and keep the dropdown
+                        // open so several can be picked in one pass.
+                        onPress={() =>
+                          setSelectedTags((prev) =>
+                            isSelected
+                              ? prev.filter((t) => t.id !== tag.id)
+                              : [...prev, tag]
+                          )
+                        }
+                      >
+                        <Ionicons
+                          name="pricetag-outline"
+                          size={16}
+                          color={colors.muted}
+                        />
+                        <Text style={styles.pickerItemText}>{tag.name}</Text>
+                        {isSelected && (
+                          <Ionicons
+                            name="checkmark"
+                            size={18}
+                            color={colors.iconActive}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              {selectedTags.length > 0 && (
+                <TouchableOpacity
+                  style={styles.pickerClear}
+                  onPress={() => {
+                    setSelectedTags([]);
+                    setTagsSearch("");
+                  }}
+                >
+                  <Text style={styles.pickerClearText}>Clear all</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1118,6 +1287,30 @@ const useStyles = createStyles((colors, shadows) => ({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+
+  // ── Tag chips (selected, removable) ────────────
+  tagChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  tagChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(239, 104, 32, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 104, 32, 0.3)",
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  tagChipText: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    fontWeight: "500",
   },
 
   // ── Custom fields ──────────────────────────────

@@ -599,6 +599,16 @@ export type CategoriesResponse = {
   categories: Category[];
 };
 
+/** A tag assignable to an asset (asset-create tag picker). */
+export type Tag = {
+  id: string;
+  name: string;
+};
+
+export type TagsResponse = {
+  tags: Tag[];
+};
+
 export type CreateAssetResponse = {
   asset: {
     id: string;
