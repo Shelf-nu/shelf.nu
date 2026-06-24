@@ -537,6 +537,26 @@ export const endBookingCheckinSessionAtom = atom(null, (_get, set) => {
 export const QUICK_CHECKIN_QR_PREFIX = "qty-checkin:";
 
 /**
+ * Synthetic QR-key prefix for quick-checkout of QUANTITY_TRACKED assets.
+ *
+ * Direction-twin of {@link QUICK_CHECKIN_QR_PREFIX}. Qty-tracked assets
+ * lack physical barcodes, so the partial-checkout drawer offers a
+ * "Check out without scanning" affordance on each pending qty row;
+ * clicking it inserts a synthetic entry into `scannedItemsAtom` under
+ * this prefix, and the checkout drawer's `AssetRow` `isQuickCheckout`
+ * probe (mirrors check-in's `isQuickCheckin`) recognizes the entry and
+ * paints the indigo "Checked out without scan" badge.
+ *
+ * Kept as a separate constant from `QUICK_CHECKIN_QR_PREFIX` so the
+ * drawer's prefix probe is deterministic per-direction — a combined
+ * prefix would force every consumer to disambiguate by mode on every
+ * read. Two prefixes also keep React keys disjoint between the two
+ * drawers (only one is ever mounted at a time, but the explicit
+ * separation guards against accidental cross-talk).
+ */
+export const QUICK_CHECKOUT_QR_PREFIX = "qty-checkout:";
+
+/**
  * Inserts a synthetic scanned-item entry for a pending QTY_TRACKED
  * asset. The entry has pre-populated `data` so `GenericItemRow` skips
  * its API fetch (see the `shouldFetch` guard in generic-item-row.tsx).
@@ -580,6 +600,75 @@ export const quickCheckinQtyAssetAtom = atom(
           id: asset.id,
           // The slice this synthetic scan represents. AssetRow reads it
           // back to key the disposition block + qtyRemaining lookups.
+          bookingAssetId: asset.bookingAssetId,
+          title: asset.title,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          kitId: asset.kitId ?? null,
+          consumptionType: asset.consumptionType,
+          type: "QUANTITY_TRACKED",
+        } as unknown as AssetFromQr,
+      },
+      ...current,
+    });
+  }
+);
+
+/**
+ * Inserts a synthetic scanned-item entry for a pending QTY_TRACKED
+ * asset during the partial-checkout flow.
+ *
+ * Direction-twin of {@link quickCheckinQtyAssetAtom}: same
+ * `bookingAssetId`-keyed shape, same pre-populated `data` payload
+ * (so `GenericItemRow`'s `shouldFetch` guard skips the API fetch in
+ * generic-item-row.tsx), same idempotency contract. Only the key
+ * prefix differs — entries land under {@link QUICK_CHECKOUT_QR_PREFIX}
+ * so the checkout drawer's `AssetRow` `isQuickCheckout` probe (mirror
+ * of check-in's `isQuickCheckin`) can recognize and badge them.
+ *
+ * Kept as a separate atom from `quickCheckinQtyAssetAtom` rather than
+ * a single atom with a mode discriminator: the drawer-side prefix
+ * probe needs deterministic key matching, and a combined atom would
+ * force every consumer to check both prefixes. Two atoms keep the
+ * probe one-shot and the synthetic-key space cleanly partitioned.
+ *
+ * Idempotent: re-dispatching for the same `bookingAssetId` is a no-op.
+ */
+export const quickCheckoutQtyAssetAtom = atom(
+  null,
+  (
+    get,
+    set,
+    asset: Extract<BookingExpectedAsset, { kind: "QUANTITY_TRACKED" }>
+  ) => {
+    // Keyed by `bookingAssetId` (Polish-7b), NOT `asset.id`. An asset can
+    // have multiple BookingAsset slices in one booking (kit-driven +
+    // standalone); keying by the slice lets each pending slice be
+    // quick-checked-out independently and gives the server an exact
+    // `PartialBookingCheckout.bookingAssetId` to attribute against.
+    const key = `${QUICK_CHECKOUT_QR_PREFIX}${asset.bookingAssetId}`;
+    const current = get(scannedItemsAtom);
+    if (current[key]) return;
+    set(scannedItemsAtom, {
+      // New entry first — matches the ordering convention used by
+      // `addScannedItemAtom` (newest scan appears at the top of the
+      // drawer's scanned list).
+      [key]: {
+        type: "asset",
+        codeType: "qr",
+        /**
+         * Cast through `unknown` for the same reason as the check-in
+         * twin: `AssetFromQr` is the full Prisma payload and the
+         * checkout drawer's `AssetRow` only reads a narrow subset
+         * (id, title, images, kitId, consumptionType,
+         * bookingAssetId). If a new consumer starts reading omitted
+         * fields, the TS error on the cast site flags it.
+         */
+        data: {
+          id: asset.id,
+          // The slice this synthetic scan represents. AssetRow reads it
+          // back to key the per-slice qty-input + remaining-to-checkout
+          // lookups.
           bookingAssetId: asset.bookingAssetId,
           title: asset.title,
           mainImage: asset.mainImage,
