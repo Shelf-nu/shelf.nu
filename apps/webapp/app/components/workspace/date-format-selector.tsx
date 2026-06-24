@@ -145,6 +145,10 @@ export default function DateFormatSelector({
             className="z-[999999] max-h-[400px] overflow-scroll rounded-md border bg-white"
             side="bottom"
             style={{ width: triggerRef?.current?.clientWidth }}
+            // role="listbox" gives the role="option" rows a valid ARIA parent
+            // (WCAG 2.1 AA / ARIA 1.2 — options must be owned by a listbox).
+            role="listbox"
+            aria-label="Date format options"
           >
             {OPTIONS.map((option) => {
               const isSelected = selectedOption.value === option.value;
