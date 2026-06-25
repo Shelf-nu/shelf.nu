@@ -3,8 +3,8 @@ import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
+  shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
-import { getPrimaryLocation } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -70,9 +70,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
       ...(myCustody
         ? {
+            // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for
+            // QUANTITY_TRACKED multi-custodian support, so we must filter
+            // via `some`. Without `some:`, Prisma rejects the where clause
+            // at runtime and the Custody tab returns 500. Mirrors the
+            // dashboard endpoint's myCustody count filter.
             custody: {
-              custodian: {
-                userId: user.id,
+              some: {
+                custodian: {
+                  userId: user.id,
+                },
               },
             },
           }
@@ -83,6 +90,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const [assets, totalCount] = await Promise.all([
       db.asset.findMany({
         where,
+        // Mirrors `MOBILE_ASSET_SELECT` (the canonical shape consumed by
+        // `shapeMobileAssetResponse`) PLUS list-only extras the companion
+        // already consumes: `mainImageExpiration` (drives the lazy
+        // refresh-image flow), `thumbnailImage`, and `category.id`. Keeping
+        // these here — rather than narrowing to `MOBILE_ASSET_SELECT` —
+        // preserves the legacy list-response contract for the in-App-Store
+        // companion (since 2026-05-20).
         select: {
           id: true,
           title: true,
@@ -90,12 +104,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
           mainImage: true,
           mainImageExpiration: true,
           thumbnailImage: true,
+          // why: powers the scan-to-booking "not available to book" blocker.
+          availableToBook: true,
+          // Keep `id` (list extra); helper only types `{ name }` but
+          // structurally accepts the wider shape.
           category: { select: { id: true, name: true } },
-          // Select location through the pivot and flatten to a singular
-          // `location` below to keep the mobile JSON contract flat.
+          // Kit linkage via the AssetKit pivot — flattened to top-level
+          // `kit` + `kitId` by `shapeMobileAssetResponse`.
+          assetKits: {
+            select: { kit: { select: { id: true, name: true } } },
+          },
+          // Location via the AssetLocation pivot — flattened to top-level
+          // `location` by the helper.
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
           },
+          // Custody is now 1:many (Phase 2/4); helper flattens `custody[0]`
+          // so the companion's single-or-null `asset.custody?.custodian`
+          // read keeps working.
           custody: {
             select: {
               custodian: {
@@ -111,18 +137,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.asset.count({ where }),
     ]);
 
-    // Flatten the AssetLocation pivot back to a singular `location` so the
-    // mobile JSON contract stays unchanged (Phase 4b).
-    const assetsWithLocation = assets.map((asset) => {
-      const { assetLocations: _, ...rest } = asset;
+    // Flatten kit/location/custody pivots into the legacy flat shape via the
+    // shared helper, then re-attach the list-only extras
+    // (`mainImageExpiration`, `thumbnailImage`) that the helper's return type
+    // doesn't carry but the companion list view consumes.
+    const shapedAssets = assets.map((asset) => {
+      const { mainImageExpiration, thumbnailImage, ...assetForHelper } = asset;
       return {
-        ...rest,
-        location: getPrimaryLocation(asset),
+        ...shapeMobileAssetResponse(assetForHelper),
+        mainImageExpiration,
+        thumbnailImage,
       };
     });
 
     return data({
-      assets: assetsWithLocation,
+      assets: shapedAssets,
       page,
       perPage,
       totalCount,
