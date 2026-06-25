@@ -9955,6 +9955,83 @@ async function addScannedAssetsToBookingWithinTx(
   );
 
   /**
+   * Conflict guard (mirrors the reserve/checkout guards): reject the add
+   * when any scanned asset (standalone OR kit-driven) is already RESERVED
+   * or CHECKED_OUT on a DIFFERENT booking whose window OVERLAPS this
+   * booking's from/to. Runs inside the same tx as the writes below so the
+   * read-then-write is atomic against concurrent reservations.
+   *
+   * Adapted from the main-side guard that previously lived inline in
+   * `addScannedAssetsToBooking` (resolved during 2026-06-25 merge): we
+   * already have `allScannedAssetIds` (union of standalone + kit-driven),
+   * so we skip main's `tx.asset.findMany({where: {kitId: ...}})` expansion
+   * — pre-pivot main relied on `Asset.kitId`, which Phase 4a removed.
+   */
+  if (allScannedAssetIds.length > 0) {
+    const conflictBooking = await tx.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { from: true, to: true },
+    });
+
+    if (conflictBooking?.from && conflictBooking?.to) {
+      const candidates = await tx.asset.findMany({
+        where: { id: { in: allScannedAssetIds }, organizationId },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          // Post-Phase-3a: bookings reach assets through the BookingAsset
+          // pivot. `hasAssetBookingConflicts` reads `asset.bookingAssets`
+          // (not `asset.bookings`) — the conflict-conditions helper now
+          // returns `Prisma.Asset$bookingAssetsArgs` accordingly.
+          bookingAssets: {
+            ...createBookingConflictConditions({
+              currentBookingId: bookingId,
+              fromDate: conflictBooking.from,
+              toDate: conflictBooking.to,
+            }),
+            select: {
+              booking: { select: { id: true, status: true } },
+            },
+          },
+        },
+      });
+
+      // Typed locally because `tx` is `any` (the dynamic extended Prisma
+      // client's tx type doesn't reduce to `Prisma.TransactionClient`).
+      type ConflictCandidate = {
+        id: string;
+        title: string;
+        status: string;
+        bookingAssets: Array<{ booking: { id: string; status: string } }>;
+      };
+      const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
+        hasAssetBookingConflicts(asset, bookingId)
+      );
+
+      if (conflicted.length > 0) {
+        const conflictedNames = conflicted
+          .slice(0, 3)
+          .map((asset) => asset.title)
+          .join(", ");
+        const additionalCount =
+          conflicted.length > 3 ? conflicted.length - 3 : 0;
+        const additionalText =
+          additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+        throw new ShelfError({
+          cause: null,
+          label,
+          title: "Booking conflict",
+          message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+  }
+
+  /**
    * Pre-fetch metadata for the scanned assets so we can run the
    * model-request materialization loop — each scanned asset that
    * matches an outstanding `BookingModelRequest` for its model
@@ -10178,7 +10255,9 @@ export async function addScannedAssetsToBooking({
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
      * {@link addScannedAssetsToBookingWithinTx} so the fulfil-and-checkout
-     * flow can reuse the same writes under a shared transaction.
+     * flow can reuse the same writes under a shared transaction. The
+     * overlap-conflict guard main added inline here was moved INTO the helper
+     * so both call sites get it atomically with the writes.
      */
     const updatedBooking = await db.$transaction(async (tx) =>
       addScannedAssetsToBookingWithinTx(tx, {
