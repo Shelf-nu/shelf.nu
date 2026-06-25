@@ -33,6 +33,7 @@ import {
   revertBookingToDraft,
   extendBooking,
   removeAssets,
+  addScannedAssetsToBooking,
   getOngoingBookingForAsset,
   bulkArchiveBookings,
   // Test helper functions
@@ -3534,5 +3535,47 @@ describe("bulkArchiveBookings", () => {
     await expect(
       bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
     ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("addScannedAssetsToBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("rejects when a scanned asset is reserved for an overlapping booking", async () => {
+    const from = new Date("2026-07-01T09:00:00Z");
+    const to = new Date("2026-07-01T17:00:00Z");
+
+    // why: stub the booking-window lookup that drives the overlap query so the
+    // guard runs without hitting the DB.
+    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      from,
+      to,
+    });
+    // why: return one asset RESERVED by another overlapping booking so the real
+    // hasAssetBookingConflicts fires (and assertAssetsBelongToOrg sees it as an
+    // org member) — keeps the test off a real DB.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Conflicting Asset",
+        status: AssetStatus.AVAILABLE,
+        bookings: [{ id: "other-booking", status: BookingStatus.RESERVED }],
+      },
+    ]);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: ["asset-1"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/already booked or checked out/i);
+
+    // The conflicting asset must never be connected to the booking — the guard
+    // runs before the connect/force-checkout transaction.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 });

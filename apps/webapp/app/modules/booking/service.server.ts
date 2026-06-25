@@ -5620,10 +5620,88 @@ export async function addScannedAssetsToBooking({
 }) {
   try {
     /**
-     * Step 1: Add assets to booking inside a transaction so we can mirror the
-     * status-sync behaviour used in manage-assets.
+     * Add the assets inside a transaction so the validation + conflict guard,
+     * the connect, and the active-booking status-sync all commit atomically
+     * (the guard runs against the `tx` snapshot to keep the read-then-connect
+     * tight against concurrent reservations/checkouts).
      */
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * Conflict + ownership guard (mirrors the reserve/checkout guards), run
+       * INSIDE the write transaction so the read-then-connect is atomic — this
+       * closes the validate→write race and org-scopes the caller-supplied ids
+       * before the raw connect below. Reject the add when any scanned asset
+       * (including a scanned kit's member assets) is already RESERVED, or
+       * CHECKED OUT, for a *different* booking whose window OVERLAPS this
+       * booking's window. The rule is "reserved/checked-out AND
+       * date-overlapping", not "any reservation"; the booking's stored from/to
+       * is the conflict window.
+       */
+      if (assetIds.length > 0 || kitIds.length > 0) {
+        // Org-scope the standalone asset ids before the connect: a foreign /
+        // missing id would otherwise be dropped by the org-scoped candidate
+        // query (so it bypasses the conflict check) yet still get connected.
+        if (assetIds.length > 0) {
+          await assertAssetsBelongToOrg({ assetIds, organizationId }, tx);
+        }
+
+        const conflictBooking = await tx.booking.findFirst({
+          where: { id: bookingId, organizationId },
+          select: { from: true, to: true },
+        });
+
+        if (conflictBooking?.from && conflictBooking?.to) {
+          const kitAssetIds =
+            kitIds.length > 0
+              ? (
+                  await tx.asset.findMany({
+                    where: { kitId: { in: kitIds }, organizationId },
+                    select: { id: true },
+                  })
+                ).map((a) => a.id)
+              : [];
+          const candidateIds = [...new Set([...assetIds, ...kitAssetIds])];
+
+          const candidates = await tx.asset.findMany({
+            where: { id: { in: candidateIds }, organizationId },
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              bookings: createBookingConflictConditions({
+                currentBookingId: bookingId,
+                fromDate: conflictBooking.from,
+                toDate: conflictBooking.to,
+              }),
+            },
+          });
+
+          const conflicted = candidates.filter((asset) =>
+            hasAssetBookingConflicts(asset, bookingId)
+          );
+
+          if (conflicted.length > 0) {
+            const conflictedNames = conflicted
+              .slice(0, 3)
+              .map((asset) => asset.title)
+              .join(", ");
+            const additionalCount =
+              conflicted.length > 3 ? conflicted.length - 3 : 0;
+            const additionalText =
+              additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+            throw new ShelfError({
+              cause: null,
+              label,
+              title: "Booking conflict",
+              message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
+        }
+      }
+
       const booking = await tx.booking.update({
         where: { id: bookingId, organizationId },
         data: {
