@@ -16,52 +16,33 @@ export const isValidDomain = (val: string) =>
   /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);
 
 /**
- * Validates if a string is a properly formatted URL and potentially an image URL
+ * Checks that a string is a well-formed `http:`/`https:` URL we can attempt to
+ * fetch an image from during CSV import.
+ *
+ * This deliberately does NOT try to guess whether the URL "looks like" an image
+ * from its string (extension / host allow-list / path keywords). Such heuristics
+ * reject legitimate dynamic image endpoints — e.g. ASP.NET handlers like
+ * `https://host/GetImage.ashx?guid=...` that serve real image bytes but have no
+ * extension, no recognizable host, and an opaque path. Whether a URL actually
+ * yields an image is decided authoritatively *after* download by
+ * `uploadImageFromUrl`, which validates the real `Content-Type` header and the
+ * file's magic bytes (`detectImageFormat`).
+ *
+ * SECURITY: This is a well-formedness pre-filter ONLY — it is NOT an SSRF
+ * boundary, and it never was (its old string heuristics were trivially
+ * bypassable; see GHSA-xgrm-8w6v-mvjg). The actual SSRF protection
+ * (private/reserved IP blocking, redirect revalidation, size cap) lives in
+ * `safeFetch` (`~/utils/ssrf.server`), which `uploadImageFromUrl` calls and
+ * which independently re-validates the protocol and resolved IP on every
+ * redirect hop. Do not rely on this function to gate server-side fetches.
+ *
  * @param url - The URL to validate
- * @returns boolean indicating if URL is valid
+ * @returns boolean indicating if `url` is a well-formed http(s) URL
  */
 export function isValidImageUrl(url: string): boolean {
   try {
     const parsedUrl = new URL(url);
-    // Check if URL has a valid protocol
-    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-      return false;
-    }
-
-    // Check if URL ends with common image extensions
-    const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-    const hasImageExtension = imageExtensions.some((ext) =>
-      parsedUrl.pathname.toLowerCase().endsWith(ext)
-    );
-
-    // If it has a clear image extension, it's valid
-    if (hasImageExtension) {
-      return true;
-    }
-
-    // Allow URLs from known image services that use dynamic URLs
-    const imageServiceDomains = [
-      "lnk.sortly.co",
-      "cloudinary.com",
-      "amazonaws.com",
-      "googleusercontent.com",
-      "imgur.com",
-      "unsplash.com",
-      "pexels.com",
-    ];
-
-    // Check if the hostname contains any known image service domains
-    const isImageService = imageServiceDomains.some((domain) =>
-      parsedUrl.hostname.includes(domain)
-    );
-
-    // Also check for common image-related path patterns
-    const hasImagePath =
-      /\/(photo|image|img|pic|picture|download|media|asset)/i.test(
-        parsedUrl.pathname
-      );
-
-    return isImageService || hasImagePath;
+    return ["http:", "https:"].includes(parsedUrl.protocol);
   } catch {
     return false;
   }
@@ -81,26 +62,6 @@ export function sanitizeFilename(filename: string): string {
     s = "_" + s;
   }
   return s;
-}
-
-export async function getImageAsBase64(url: string) {
-  try {
-    // Fetch the image data
-    const response = await fetch(url);
-
-    const arrayBuffer = await response.arrayBuffer();
-
-    // Convert the image data to a Base64-encoded string
-    const base64Image = Buffer.from(arrayBuffer).toString("base64");
-
-    return base64Image;
-
-    // Convert the image data to a Base64-encoded string
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Error fetching image:", error);
-    return null;
-  }
 }
 
 /**

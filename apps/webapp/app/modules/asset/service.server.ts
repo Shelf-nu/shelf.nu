@@ -19,6 +19,7 @@ import {
   BookingStatus,
   ErrorCorrection,
   KitStatus,
+  OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -103,6 +104,12 @@ import {
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
+  assertCustomFieldsBelongToOrg,
+  assertLocationBelongsToOrg,
+  assertTagsBelongToOrg,
+  assertTeamMemberBelongsToOrg,
+} from "~/utils/org-validation.server";
+import {
   createSignedUrl,
   parseFileFormData,
   uploadImageFromUrl,
@@ -157,6 +164,7 @@ const label: ErrorLabel = "Assets";
 const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
+  preferredBarcodeId: true,
   category: {
     select: {
       id: true,
@@ -241,6 +249,7 @@ async function setKitCustodyAfterAssetImport({
 
     if (kit && teamMember) {
       await db.kit.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: kit comes from the `kits` map built by createKitsIfNotExists({ organizationId }) at the call site (line ~2657); all ids are already org-scoped
         where: { id: kit.id },
         data: {
           status: KitStatus.IN_CUSTODY,
@@ -485,6 +494,33 @@ const unavailableBookingStatuses = [
 ];
 
 /**
+ * Matches the shape of an asset identifier or barcode / QR id. Two forms:
+ *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
+ *     prefix when scanning or typing an ID
+ *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
+ *     digits, matching the format produced by getNextSequentialId
+ *
+ * Used by getAssets to run ID-shaped queries against a narrower OR clause
+ * (sequentialId / barcodes.value / qrCodes.id) first, instead of the full
+ * 10-branch chain. The narrower clause skips the slow paths — custodian
+ * name traversal and the unindexed customFields JSON ILIKE — while still
+ * covering every place an ID-shaped value is *most likely* to live.
+ *
+ * Because a bare number can equally be a real barcode OR a value embedded
+ * in a title / description / custom field (indistinguishable by shape),
+ * getAssets falls back to the full search when this narrow clause returns
+ * zero rows — so nothing is ever silently missed. See the fallback re-query
+ * in {@link getAssets}.
+ *
+ * Loose terms like "lab-12" or "AS1000" don't match here and go straight to
+ * the full search, since they're more likely substrings of titles, custom
+ * fields, etc.
+ */
+function looksLikeAssetId(term: string): boolean {
+  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
+}
+
+/**
  * Fetches assets directly from the asset table with enhanced search capabilities
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
@@ -543,6 +579,18 @@ export async function getAssets(params: {
 
     const where: Prisma.AssetWhereInput = { organizationId };
 
+    // Lazily builds the full multi-column search clause. Held as a builder
+    // (not a prebuilt value) so a successful narrow ID lookup never pays to
+    // construct the 10-branch clause it won't use; it is only invoked by the
+    // non-ID path or by the fallback re-query when the narrow query is empty.
+    let shouldFallbackToFullSearch = false;
+    let buildFullSearchOr: (() => Prisma.AssetWhereInput[]) | undefined;
+    // Number of OR entries the narrow search contributed. Later filters
+    // (uncategorized / untagged / without-location / team-member) also append
+    // to `where.OR`, so the fallback re-query replaces only these first
+    // entries with the full clause and preserves the appended filter clauses.
+    let narrowSearchOrCount = 0;
+
     if (availableToBookOnly) {
       where.availableToBook = true;
     }
@@ -555,64 +603,124 @@ export async function getAssets(params: {
         .map((term) => term.trim())
         .filter(Boolean);
 
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in asset fields
-          { title: { contains: term, mode: "insensitive" } },
-          // Search in asset sequential id
-          { sequentialId: { contains: term, mode: "insensitive" } },
-          // Search in asset description
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in related category
-          { category: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related location
-          { location: { name: { contains: term, mode: "insensitive" } } },
-          // Search in related tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian names
-          {
-            custody: {
-              custodian: {
-                OR: [
-                  { name: { contains: term, mode: "insensitive" } },
-                  {
-                    user: {
-                      OR: [
-                        { firstName: { contains: term, mode: "insensitive" } },
-                        { lastName: { contains: term, mode: "insensitive" } },
-                      ],
-                    },
+      if (searchTerms.length > 0) {
+        // Builder for the full multi-column clause: matches a term anywhere it
+        // can legitimately live — title, sequentialId, description, category,
+        // location, tags, custodian names, QR/barcode, and custom fields. It
+        // is the slow path (custodian relation traversal + an unindexed
+        // customFields JSON ILIKE), so for ID-shaped searches we run the
+        // narrow clause first and only build/use this when it finds nothing
+        // (see the fallback re-query further down). Defined as a closure so the
+        // clause is constructed only when actually needed.
+        buildFullSearchOr = () =>
+          searchTerms.map((term) => ({
+            OR: [
+              // Search in asset fields
+              { title: { contains: term, mode: "insensitive" } },
+              // Search in asset sequential id
+              { sequentialId: { contains: term, mode: "insensitive" } },
+              // Search in asset description
+              { description: { contains: term, mode: "insensitive" } },
+              // Search in related category
+              { category: { name: { contains: term, mode: "insensitive" } } },
+              // Search in related location
+              { location: { name: { contains: term, mode: "insensitive" } } },
+              // Search in related tags
+              {
+                tags: {
+                  some: { name: { contains: term, mode: "insensitive" } },
+                },
+              },
+              // Search in custodian names
+              {
+                custody: {
+                  custodian: {
+                    OR: [
+                      { name: { contains: term, mode: "insensitive" } },
+                      {
+                        user: {
+                          OR: [
+                            {
+                              firstName: {
+                                contains: term,
+                                mode: "insensitive",
+                              },
+                            },
+                            {
+                              lastName: { contains: term, mode: "insensitive" },
+                            },
+                          ],
+                        },
+                      },
+                    ],
                   },
-                ],
+                },
+              },
+              // Search qr code id
+              {
+                qrCodes: {
+                  some: { id: { contains: term, mode: "insensitive" } },
+                },
+              },
+              // Search barcode values
+              {
+                barcodes: {
+                  some: { value: { contains: term, mode: "insensitive" } },
+                },
+              },
+              // Search in custom fields
+              {
+                customFields: {
+                  some: {
+                    OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
+                      value: {
+                        path: [jsonPath],
+                        string_contains: term,
+                        mode: "insensitive",
+                      },
+                    })),
+                  },
+                },
+              },
+            ],
+          }));
+
+        // Fast path: when every term looks like an asset identifier — either
+        // bare digits ("21035", a UPC barcode) or canonical sequentialId
+        // ("SAM-0001") — narrow the OR clause to the three columns where an
+        // ID-shaped value can legitimately live: sequentialId, barcode value,
+        // and QR id. All three are covered by trigram GIN indexes added in
+        // migration 20260525110348, so the planner stays on indexed scans and
+        // a real ID lookup (the common case) returns immediately.
+        //
+        // A bare number can ALSO be embedded in a title, description, or
+        // custom field (e.g. "Armchair (Old SKU: 103468)"), and the shape
+        // alone cannot tell those apart from a real barcode. So we flag the
+        // query for fallback: if this narrow clause returns zero rows,
+        // getAssets builds and re-runs with the full clause below.
+        if (searchTerms.every(looksLikeAssetId)) {
+          shouldFallbackToFullSearch = true;
+          where.OR = searchTerms.flatMap((term) => [
+            { sequentialId: { contains: term, mode: "insensitive" } },
+            {
+              barcodes: {
+                some: { value: { contains: term, mode: "insensitive" } },
               },
             },
-          },
-          // Search qr code id
-          {
-            qrCodes: { some: { id: { contains: term, mode: "insensitive" } } },
-          },
-          // Search barcode values
-          {
-            barcodes: {
-              some: { value: { contains: term, mode: "insensitive" } },
-            },
-          },
-          // Search in custom fields
-          {
-            customFields: {
-              some: {
-                OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                  value: {
-                    path: [jsonPath],
-                    string_contains: term,
-                    mode: "insensitive",
-                  },
-                })),
+            {
+              qrCodes: {
+                some: { id: { contains: term, mode: "insensitive" } },
               },
             },
-          },
-        ],
-      }));
+          ]);
+          // Remember how many entries belong to the search so the fallback can
+          // swap them out without disturbing filter clauses appended later.
+          narrowSearchOrCount = where.OR.length;
+        } else {
+          // Not an ID-shaped search — go straight to the full clause.
+          where.OR = buildFullSearchOr();
+        }
+      }
     }
 
     if (status) {
@@ -780,23 +888,50 @@ export async function getAssets(params: {
       where.kit = { isNot: null };
     }
 
-    const [assets, totalAssets] = await Promise.all([
-      db.asset.findMany({
-        skip,
-        take,
-        where,
-        include: {
-          ...assetIndexFields({
-            bookingFrom,
-            bookingTo,
-            unavailableBookingStatuses,
-          }),
-          ...extraInclude,
-        },
-        orderBy: { [orderBy]: orderDirection },
-      }),
-      db.asset.count({ where }),
-    ]);
+    /**
+     * Runs the paginated asset query and its total count for a given `where`
+     * clause. Extracted so the ID-shaped-search fallback can re-run the same
+     * query shape with a different `where.OR` without duplicating the include
+     * and ordering config.
+     *
+     * @param assetWhere - The Prisma where clause to fetch and count against
+     * @returns A tuple of `[assets, totalAssets]`
+     */
+    const fetchAssetsForWhere = (assetWhere: Prisma.AssetWhereInput) =>
+      Promise.all([
+        db.asset.findMany({
+          skip,
+          take,
+          where: assetWhere,
+          include: {
+            ...assetIndexFields({
+              bookingFrom,
+              bookingTo,
+              unavailableBookingStatuses,
+            }),
+            ...extraInclude,
+          },
+          orderBy: { [orderBy]: orderDirection },
+        }),
+        db.asset.count({ where: assetWhere }),
+      ]);
+
+    let [assets, totalAssets] = await fetchAssetsForWhere(where);
+
+    // Fallback: an ID-shaped search ran the narrow clause but matched no
+    // assets. The term may be embedded in a title, description, or custom
+    // field rather than being a real identifier, so re-run with the full
+    // search clause before giving up. Only the narrow search entries are
+    // swapped for the full clause; any filter clauses appended to `where.OR`
+    // afterwards (uncategorized / untagged / without-location / team-member)
+    // are kept so the fallback honours the same filters as the first query.
+    if (shouldFallbackToFullSearch && totalAssets === 0 && buildFullSearchOr) {
+      const appendedFilterOr = Array.isArray(where.OR)
+        ? where.OR.slice(narrowSearchOrCount)
+        : [];
+      where.OR = [...buildFullSearchOr(), ...appendedFilterOr];
+      [assets, totalAssets] = await fetchAssetsForWhere(where);
+    }
 
     return { assets, totalAssets };
   } catch (cause) {
@@ -1100,11 +1235,24 @@ export async function createAsset({
         });
       }
 
+      /** Custom-field ids referenced by this create. Sourced from form input
+       * and validated for org ownership inside the create transaction below
+       * (cross-org IDOR guard). */
+      let customFieldIdsToValidate: string[] = [];
+
       /** If custom fields are passed, create them */
       if (customFieldsValues && customFieldsValues.length > 0) {
         const customFieldValuesToAdd = customFieldsValues.filter(
           (cf) => !!cf.value
         );
+
+        // SECURITY (cross-org IDOR): these ids get connected to a CustomField
+        // by the nested `create` below, which has no org scoping of its own.
+        // Collected here and validated inside the transaction (see the
+        // assertCustomFieldsBelongToOrg call there).
+        customFieldIdsToValidate = customFieldValuesToAdd
+          .map(({ id }) => id)
+          .filter(Boolean);
 
         Object.assign(data, {
           /** Custom fields here refers to the values, check the Schema for more info */
@@ -1159,6 +1307,15 @@ export async function createAsset({
 
       // Use transaction to ensure asset creation and activity event are atomic
       const asset = await db.$transaction(async (tx) => {
+        // SECURITY (cross-org IDOR): prove every form-supplied custom-field id
+        // belongs to this org before the nested create connects them. Run inside
+        // the tx so the ownership check shares the write's transaction (no-op
+        // when there are no custom-field ids).
+        await assertCustomFieldsBelongToOrg(
+          { customFieldIds: customFieldIdsToValidate, organizationId },
+          tx
+        );
+
         const created = await tx.asset.create({
           data,
           include: {
@@ -1251,6 +1408,7 @@ export async function updateAsset({
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
   barcodes,
+  preferredBarcodeId,
   organizationId,
   request,
 }: UpdateAssetPayload) {
@@ -1290,7 +1448,8 @@ export async function updateAsset({
       typeof title !== "undefined" ||
         typeof description !== "undefined" ||
         typeof categoryId !== "undefined" ||
-        typeof valuation !== "undefined"
+        typeof valuation !== "undefined" ||
+        typeof preferredBarcodeId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -1424,26 +1583,184 @@ export async function updateAsset({
         (cf) => !cf.value
       );
 
+      // SECURITY (cross-org IDOR): the create/updateMany writes below connect
+      // values to a CustomField by an id sourced from form input. Prove every
+      // referenced custom field belongs to this org before writing. (Removals
+      // go through `deleteMany` scoped to this asset's own value rows, so only
+      // the added/updated ids need the check.)
+      await assertCustomFieldsBelongToOrg({
+        customFieldIds: customFieldValuesToAdd
+          .map(({ id }) => id)
+          .filter(Boolean),
+        organizationId,
+      });
+
+      /**
+       * Split the writes into create vs update ourselves instead of using a
+       * nested `upsert`. Prisma emulates each nested upsert with a
+       * SELECT-then-write round-trip per field, which is the N+1 reported in
+       * Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF. We already loaded the
+       * existing values above (`currentCustomFieldsValuesWithFields`), so we
+       * know which fields exist without asking the database again. Each
+       * custom field has at most one value row per asset, so keying by
+       * `customFieldId` is unambiguous.
+       */
+      const existingValueIdByFieldId = new Map(
+        currentCustomFieldsValuesWithFields.map((ccfv) => [
+          ccfv.customFieldId,
+          ccfv.id,
+        ])
+      );
+
+      const customFieldsToCreate = customFieldValuesToAdd
+        .filter(({ id }) => !existingValueIdByFieldId.has(id))
+        .map(({ id, value }) => ({ value, customFieldId: id }));
+
+      /**
+       * Existing values are written with `updateMany` (one entry per row),
+       * NOT a nested `update`. `update` would throw P2025 and abort the whole
+       * asset save if a concurrent edit deleted the value row in the window
+       * between the `findMany` above and this write; `updateMany` matches zero
+       * rows instead of throwing. The concurrent delete then wins (the row
+       * stays gone) rather than 500-ing the user — an acceptable
+       * last-write-wins outcome for this rare interleaving, and it keeps the
+       * per-field existence SELECT eliminated.
+       */
+      const customFieldsToUpdate = customFieldValuesToAdd
+        .filter(({ id }) => existingValueIdByFieldId.has(id))
+        .map(({ id, value }) => ({
+          where: { id: existingValueIdByFieldId.get(id) as string },
+          data: { value },
+        }));
+
       Object.assign(data, {
         customFields: {
-          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
-            where: {
-              id:
-                currentCustomFieldsValuesWithFields.find(
-                  (ccfv) => ccfv.customFieldId === id
-                )?.id || "",
-            },
-            update: { value },
-            create: {
-              value,
-              customFieldId: id,
-            },
-          })),
-          deleteMany: customFieldValuesToRemove.map((cf) => ({
-            customFieldId: cf.id,
-          })),
+          ...(customFieldsToCreate.length > 0
+            ? { create: customFieldsToCreate }
+            : {}),
+          ...(customFieldsToUpdate.length > 0
+            ? { updateMany: customFieldsToUpdate }
+            : {}),
+          ...(customFieldValuesToRemove.length > 0
+            ? {
+                deleteMany: customFieldValuesToRemove.map((cf) => ({
+                  customFieldId: cf.id,
+                })),
+              }
+            : {}),
         },
       });
+    }
+
+    // Normalize the form-submitted preferredBarcodeId early so the same
+    // value is used by the pre-flight validation below and the actual write
+    // further down. Both undefined (field absent from patch) and empty
+    // string (form sends "" for "workspace default") collapse to null —
+    // any non-null branch is then guarded by `preferredBarcodeId !== undefined`
+    // so we never mistake "field omitted from patch" for "user picked
+    // workspace default" when writing.
+    const targetPreferred: string | null =
+      preferredBarcodeId === null ||
+      preferredBarcodeId === undefined ||
+      preferredBarcodeId.length === 0
+        ? null
+        : preferredBarcodeId;
+
+    /**
+     * P1 atomicity guard (pre-flight):
+     *
+     * The preferred-barcode override must reference a barcode that will
+     * still exist on this asset AFTER `updateBarcodes` runs. Without this
+     * pre-flight, a save that simultaneously (a) removes the currently-
+     * preferred barcode from the `barcodes` array AND (b) keeps the now-
+     * stale `preferredBarcodeId` would delete the barcode first, then
+     * fail validation, returning a 400 to the user while leaving the
+     * barcodes table mutated. We surface the error before any write so
+     * the rejected save is genuinely atomic.
+     *
+     * Membership-check semantics:
+     * - If `barcodes` is being submitted, compute the post-update id-set
+     *   from the submission (only entries that already have an `id` —
+     *   freshly-created ones have no id yet and can't be referenced).
+     * - If `barcodes` is NOT being submitted, the current DB set is the
+     *   post-update set, so query the live barcodes table scoped to
+     *   `{ assetId, organizationId }` (also closes cross-org IDOR).
+     */
+    if (preferredBarcodeId !== undefined && targetPreferred !== null) {
+      // Addon entitlement gate. Non-addon (and addon-revoked) orgs must not
+      // be able to persist a non-null `preferredBarcodeId` via a tampered
+      // form post — the UI gates the override section by `canUseBarcodes`,
+      // but the server-side action must enforce the same invariant. The
+      // resolver already silently falls back to QR for addon-revoked orgs
+      // (the override branch is gated by `barcodesEnabled` in display.ts),
+      // so this check is belt-and-suspenders: it prevents the stale value
+      // from being written in the first place rather than leaving silent
+      // drift in the DB. `null` overrides are always allowed — that's the
+      // "clear my override" intent and shouldn't require the addon.
+      const orgEntitlement = await db.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { barcodesEnabled: true },
+      });
+      if (!orgEntitlement.barcodesEnabled) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Per-asset preferred-barcode overrides require the alternative-barcodes add-on. " +
+            "Enable the add-on or clear the override (leave it on workspace default).",
+          additionalData: {
+            assetId: id,
+            organizationId,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
+      // Org-scoped ownership check — ALWAYS run, even when `barcodes` is
+      // being submitted. The submitted-array check below proves the id will
+      // survive `updateBarcodes`'s mutation, but it does NOT prove the id
+      // actually belongs to this asset/org: a forged form could include
+      // `barcodes: [{ id: "victim-barcode-id", ... }]` to slip past the
+      // earlier check. The DB lookup closes the cross-asset / cross-org
+      // IDOR vector authoritatively.
+      const owned = await db.barcode.findFirst({
+        where: {
+          id: targetPreferred,
+          assetId: id,
+          organizationId,
+        },
+        select: { id: true },
+      });
+      let isMember = Boolean(owned);
+
+      // Additional gate when the patch is also rewriting the `barcodes`
+      // collection: the target must still be in the post-update set
+      // (i.e., not being deleted in the same save). Without this, a save
+      // that simultaneously removes the preferred barcode and keeps the
+      // override would partially-commit (barcodes deleted, then 400 on
+      // membership) — the original P1 from Codex.
+      if (isMember && barcodes !== undefined) {
+        isMember = barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === targetPreferred
+        );
+      }
+
+      if (!isMember) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "The selected preferred barcode is not linked to this asset.",
+          additionalData: {
+            assetId: id,
+            preferredBarcodeId: targetPreferred,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     const asset = await db.asset.update({
@@ -1467,6 +1784,100 @@ export async function updateAsset({
       });
     }
 
+    /**
+     * Per-asset preferred-barcode override.
+     * Membership of `targetPreferred` was already proven by the pre-flight
+     * guard above (either against the submitted `barcodes` array or against
+     * the current DB set), so this block is now purely the write + audit.
+     */
+    if (preferredBarcodeId !== undefined) {
+      const previousPreferred = assetBeforeUpdate?.preferredBarcodeId ?? null;
+
+      // Did THIS request's `updateBarcodes` call delete the previously-
+      // preferred barcode? True only when (a) a previously-preferred
+      // barcode existed AND (b) the patch submitted a `barcodes` array
+      // that no longer contains it (so updateBarcodes deleted it and the
+      // FK `onDelete: SetNull` cascade nulled `preferredBarcodeId`).
+      // This is the "explicit clear-by-this-request" signal we need to
+      // distinguish "we caused the cascade" from "someone else moved
+      // preferredBarcodeId concurrently".
+      const weDeletedPreferredViaCascade =
+        previousPreferred !== null &&
+        barcodes !== undefined &&
+        !barcodes.some(
+          (bc) => typeof bc.id === "string" && bc.id === previousPreferred
+        );
+
+      // Wrap the read + update + audit in one transaction so the *write*
+      // decision is based on the committed current state (defeats
+      // concurrent-external-write TOCTOU). The *audit* fires only when
+      // THIS request actually caused the change — either via the explicit
+      // write below, or via the cascade-delete branch above. We must NOT
+      // audit when the value simply differs between the pre-request
+      // snapshot and the in-tx read because of a concurrent external
+      // write — that would misattribute someone else's change to this actor.
+      const wroteOrAudited = await db.$transaction(async (tx) => {
+        const current = await tx.asset.findUniqueOrThrow({
+          where: { id, organizationId },
+          select: { preferredBarcodeId: true },
+        });
+        const currentPreferred = current.preferredBarcodeId ?? null;
+
+        const needsWrite = currentPreferred !== targetPreferred;
+        if (needsWrite) {
+          await tx.asset.update({
+            where: { id, organizationId },
+            data: { preferredBarcodeId: targetPreferred },
+          });
+        }
+
+        // Audit when THIS request caused the row change. Two attribution
+        // paths:
+        //   1. We performed the explicit DB write (target differed from
+        //      the in-tx current state).
+        //   2. The cascade-delete from THIS request's `updateBarcodes`
+        //      nulled the row AND the user's target is null too (the
+        //      cascade fulfilled the user's "clear my override" intent
+        //      silently; we still want an audit row).
+        // Concurrent external writes can't satisfy either condition.
+        const auditAttributableToUs =
+          needsWrite ||
+          (weDeletedPreferredViaCascade &&
+            targetPreferred === null &&
+            currentPreferred === null);
+
+        if (auditAttributableToUs && previousPreferred !== targetPreferred) {
+          // Structured event per `.claude/rules/use-record-event.md`.
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_PREFERRED_BARCODE_CHANGED",
+              entityType: "ASSET",
+              entityId: id,
+              assetId: id,
+              field: "preferredBarcodeId",
+              fromValue: previousPreferred,
+              toValue: targetPreferred,
+            },
+            tx
+          );
+          return true;
+        }
+
+        return false;
+      });
+
+      if (wroteOrAudited) {
+        // Sync the in-memory `asset` object so the returned shape reflects
+        // the post-update state — callers that destructure
+        // `preferredBarcodeId` (e.g., to drive an immediate cache
+        // invalidation) would otherwise see the stale value from the
+        // earlier `db.asset.update` snapshot.
+        asset.preferredBarcodeId = targetPreferred;
+      }
+    }
+
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {
       /**
@@ -1476,10 +1887,18 @@ export async function updateAsset({
 
       const user = await loadUserForNotes();
 
+      // why: cross-org safety for the location IDs is already enforced
+      // *before* the write — `newLocationId` is hard-validated at the
+      // org-scoped findFirst guard above (it throws 404 before connecting),
+      // and `currentLocationId` only drives a `disconnect` (value unused by
+      // Prisma) plus the org-scoped name lookups below (a foreign id resolves
+      // to null, never leaks). A post-write assert here previously threw a
+      // 404 *after* db.asset.update had already committed — removed.
       const currentLocation = currentLocationId
         ? await db.location.findFirst({
             where: {
               id: currentLocationId,
+              organizationId,
             },
           })
         : null;
@@ -1488,6 +1907,7 @@ export async function updateAsset({
         ? await db.location.findFirst({
             where: {
               id: newLocationId,
+              organizationId,
             },
           })
         : null;
@@ -1499,6 +1919,7 @@ export async function updateAsset({
         lastName: user.lastName || "",
         assetId: asset.id,
         userId,
+        organizationId,
         isRemoving: newLocationId === null,
       });
 
@@ -1567,6 +1988,7 @@ export async function updateAsset({
       await Promise.all([
         createAssetNameChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousName: assetBeforeUpdate.title,
           newName: title,
@@ -1574,6 +1996,7 @@ export async function updateAsset({
         }),
         createAssetDescriptionChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousDescription: assetBeforeUpdate.description,
           newDescription: description,
@@ -1581,6 +2004,7 @@ export async function updateAsset({
         }),
         createAssetCategoryChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousCategory: assetBeforeUpdate.category,
           newCategory: asset.category
@@ -1594,6 +2018,7 @@ export async function updateAsset({
         }),
         createAssetValuationChangeNote({
           assetId: asset.id,
+          organizationId,
           userId,
           previousValuation: assetBeforeUpdate.valuation,
           newValuation: asset.valuation,
@@ -1679,6 +2104,7 @@ export async function updateAsset({
     if (isTagUpdate) {
       await createTagChangeNoteIfNeeded({
         assetId: asset.id,
+        organizationId,
         userId,
         previousTags,
         currentTags: asset.tags ?? [],
@@ -1724,6 +2150,9 @@ export async function updateAsset({
           db.customField.findMany({
             where: {
               id: { in: customFieldsValuesFromForm.map((cf) => cf.id) },
+              // Org-scope the lookup so form-supplied custom field ids from
+              // another tenant cannot be resolved here (cross-org IDOR guard).
+              organizationId,
               active: true,
               deletedAt: null,
             },
@@ -1749,6 +2178,7 @@ export async function updateAsset({
               lastName: user?.lastName || "",
               assetId: asset.id,
               userId,
+              organizationId,
               isFirstTimeSet: change.isFirstTimeSet,
             })
           );
@@ -2112,6 +2542,22 @@ export function createCustomFieldsPayloadFromAsset(
   );
 }
 
+/**
+ * Creates one or more copies of an existing asset within the same organization.
+ *
+ * Copies the source asset's title, description, category, location, tags,
+ * valuation, custom field values and (best-effort) main image onto each
+ * duplicate.
+ *
+ * @param params.asset - The org-scoped source asset (with tags, custody, custom fields)
+ * @param params.userId - The acting user's ID
+ * @param params.amountOfDuplicates - How many copies to create
+ * @param params.organizationId - The caller's validated organization ID; all
+ *   duplicates and copied tags are constrained to this org
+ * @returns The list of created duplicate assets
+ * @throws {ShelfError} If a copied tag does not belong to `organizationId`
+ *   (cross-org guard) or if duplication otherwise fails
+ */
 export async function duplicateAsset({
   asset,
   userId,
@@ -2132,6 +2578,13 @@ export async function duplicateAsset({
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];
 
+    // why: defense-in-depth cross-org guard. The source `asset` is loaded
+    // org-scoped by the caller, but we re-validate the tag ids against the
+    // target `organizationId` before copying them onto the new assets so a
+    // tampered/stale payload can never connect tags from another workspace.
+    const copiedTagIds = asset.tags.map((tag) => tag.id);
+    await assertTagsBelongToOrg({ tagIds: copiedTagIds, organizationId });
+
     //irrespective category it has to copy all the custom fields;
     const customFields = await getActiveCustomFields({
       organizationId,
@@ -2145,7 +2598,7 @@ export async function duplicateAsset({
       userId,
       categoryId: asset.categoryId,
       locationId: asset.locationId ?? undefined,
-      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
     };
 
@@ -2173,6 +2626,7 @@ export async function duplicateAsset({
 
           if (typeof imagePath === "string") {
             await db.asset.update({
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) on line ~2216; this only writes back its own mainImage
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -2430,6 +2884,16 @@ export async function getPaginatedAndFilterableAssets({
   }
 }
 
+/**
+ * Creates a system note recording a change to a custom field value on an asset.
+ *
+ * @param params.assetId - The asset the note is attached to
+ * @param params.userId - The acting user's ID
+ * @param params.organizationId - The asset's organization ID; scopes the note
+ *   write so it cannot be attached cross-org
+ * @returns void (no note is created when the change produces an empty message)
+ * @throws {ShelfError} If the note creation fails
+ */
 export async function createCustomFieldChangeNote({
   customFieldName,
   previousValue,
@@ -2438,6 +2902,7 @@ export async function createCustomFieldChangeNote({
   lastName,
   assetId,
   userId,
+  organizationId,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -2447,6 +2912,7 @@ export async function createCustomFieldChangeNote({
   lastName: string;
   assetId: Asset["id"];
   userId: User["id"];
+  organizationId: Organization["id"];
   isFirstTimeSet: boolean;
 }) {
   try {
@@ -2469,6 +2935,7 @@ export async function createCustomFieldChangeNote({
       type: "UPDATE",
       userId,
       assetId,
+      organizationId,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -2719,7 +3186,8 @@ export async function createAssetsFromContentImport({
           if (!isValidImageUrl(asset.imageUrl)) {
             throw new ShelfError({
               cause: null,
-              message: "Invalid image format. Please use .png, .jpg, or .jpeg",
+              message:
+                "Image URL must be a valid http(s) URL, including the https:// prefix.",
               additionalData: { url: asset.imageUrl },
               label: "Assets",
               shouldBeCaptured: false,
@@ -3595,28 +4063,37 @@ export async function bulkDeleteAssets({
     });
 
     try {
-      await db.$transaction(async (tx) => {
-        // Activity events — one ASSET_DELETED per asset, emitted before the
-        // delete so the rows still exist for any cross-ref checks. Mirrors
-        // singular `deleteAsset`.
-        if (assets.length > 0) {
-          await recordEvents(
-            assets.map((asset) => ({
-              organizationId,
-              actorUserId: userId,
-              action: "ASSET_DELETED" as const,
-              entityType: "ASSET" as const,
-              entityId: asset.id,
-              assetId: asset.id,
-            })),
-            tx
-          );
-        }
+      // Defense-in-depth: a bulk delete cascades across every asset relation
+      // (notes, custody, codes, custom-field values, booking joins …), so a
+      // large selection can creep past Prisma's 5s interactive-tx default and
+      // abort with P2028 (Sentry SHELF-WEBAPP-1MJ). Bump the ceiling to 15s,
+      // matching the booking-checkout precedent.
+      await db.$transaction(
+        async (tx) => {
+          // Activity events — one ASSET_DELETED per asset, emitted before the
+          // delete so the rows still exist for any cross-ref checks. Mirrors
+          // singular `deleteAsset`.
+          if (assets.length > 0) {
+            await recordEvents(
+              assets.map((asset) => ({
+                organizationId,
+                actorUserId: userId,
+                action: "ASSET_DELETED" as const,
+                entityType: "ASSET" as const,
+                entityId: asset.id,
+                assetId: asset.id,
+              })),
+              tx
+            );
+          }
 
-        await tx.asset.deleteMany({
-          where: { id: { in: assets.map((asset) => asset.id) } },
-        });
-      });
+          await tx.asset.deleteMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3659-3665 with where { id in resolvedIds, organizationId }; every id here is already org-proven
+            where: { id: { in: assets.map((asset) => asset.id) } },
+          });
+        },
+        { timeout: 15000 }
+      );
 
       /** Deleting images of the assets (if any) */
       const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
@@ -3661,9 +4138,17 @@ export async function bulkDeleteAssets({
  *
  * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
  * (via `currentSearchParams` + `settings`).
+ *
+ * @param params.custodianId - Team member ID from request input; validated
+ *   against `organizationId` (cross-org IDOR guard) before any custody row
+ *   is written
+ * @param params.organizationId - The caller's validated organization ID
+ * @throws {ShelfError} If the custodian does not belong to `organizationId`,
+ *   or if any selected asset is not AVAILABLE
  */
 export async function bulkAssignCustody({
   userId,
+  role,
   assetIds,
   custodianId,
   custodianName,
@@ -3672,6 +4157,11 @@ export async function bulkAssignCustody({
   settings,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route.
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
@@ -3707,8 +4197,12 @@ export async function bulkAssignCustody({
           displayName: true,
         } satisfies Prisma.UserSelect,
       }),
-      db.teamMember.findUnique({
-        where: { id: custodianId },
+      // why: cross-org guard. `custodianId` comes from request input, so the
+      // team-member lookup is org-scoped — a foreign-org team member resolves
+      // to null here (and is hard-rejected by the assert inside the tx below)
+      // so custody can never be granted to a custodian from another workspace.
+      db.teamMember.findFirst({
+        where: { id: custodianId, organizationId },
         select: {
           name: true,
           user: {
@@ -3722,6 +4216,24 @@ export async function bulkAssignCustody({
         },
       }),
     ]);
+
+    // Self-service users may only assign custody to themselves. Enforced in the
+    // service so every caller (web + mobile) is covered; previously this lived
+    // only in the web route and the mobile routes bypassed it.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      custodianTeamMember?.user?.id !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message: "Self user can only assign custody to themselves only.",
+        additionalData: { userId, assetIds, custodianId },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const assetsNotAvailable = assets.some(
       (asset) => asset.status !== "AVAILABLE"
@@ -3744,6 +4256,15 @@ export async function bulkAssignCustody({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      // why: hard cross-org guard inside the tx. Mirrors the org-scoped
+      // validation pattern used by `updateBookingAssets`. This throws before
+      // any custody row is written if `custodianId` belongs to another
+      // organization, preventing a cross-tenant IDOR via the bulk endpoint.
+      await assertTeamMemberBelongsToOrg(
+        { teamMemberId: custodianId, organizationId },
+        tx
+      );
+
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
        * release/checkin updated status but failed to delete the custody row. */
@@ -3761,6 +4282,7 @@ export async function bulkAssignCustody({
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
@@ -3829,12 +4351,18 @@ export async function bulkAssignCustody({
  */
 export async function bulkReleaseCustody({
   userId,
+  role,
   assetIds,
   organizationId,
   currentSearchParams,
   settings,
 }: {
   userId: User["id"];
+  /**
+   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
+   * here for EVERY caller (web + mobile), not duplicated in each route.
+   */
+  role: OrganizationRoles;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
@@ -3888,6 +4416,24 @@ export async function bulkReleaseCustody({
       });
     }
 
+    // Self-service users may only release custody of assets assigned to them.
+    // Enforced in the service so every caller (web + mobile) is covered.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      assets.some((asset) => asset.custody?.custodian?.userId !== userId)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        message:
+          "Self service user can only release custody of assets assigned to their user.",
+        additionalData: { userId, assetIds },
+        label: "Assets",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     /**
      * updateMany does not allow to update nested relationship rows
      * so we have to make two queries to bulk release custody of assets
@@ -3917,6 +4463,7 @@ export async function bulkReleaseCustody({
 
       /** Updating status of assets to AVAILABLE */
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
@@ -4035,11 +4582,21 @@ export async function bulkUpdateAssetLocation({
       });
     }
 
-    const newLocation = newLocationId
-      ? await db.location.findFirst({
-          where: { id: newLocationId, organizationId },
-        })
-      : null;
+    // why: parity with the singular `updateAsset` path. When a location is
+    // provided it MUST belong to the caller's org — hard-reject a foreign/
+    // invalid id instead of silently coercing it to "remove location"
+    // (which previously returned success while clearing the asset's location).
+    // An empty/absent `newLocationId` is a legitimate "remove location" op.
+    let newLocation: Awaited<ReturnType<typeof db.location.findFirst>> = null;
+    if (newLocationId) {
+      await assertLocationBelongsToOrg({
+        locationId: newLocationId,
+        organizationId,
+      });
+      newLocation = await db.location.findFirst({
+        where: { id: newLocationId, organizationId },
+      });
+    }
 
     // Filter out assets already at the target location
     const assetsToUpdate = assets.filter(
@@ -4050,6 +4607,7 @@ export async function bulkUpdateAssetLocation({
       if (assetsToUpdate.length > 0) {
         /** Updating location of assets to newLocation */
         await tx.asset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsToUpdate is derived from `assets` fetched on lines 4088-4092 with where { id in resolvedIds, organizationId }; every id is already org-proven
           where: { id: { in: assetsToUpdate.map((asset) => asset.id) } },
           data: { locationId: newLocation?.id ? newLocation.id : null },
         });
@@ -4259,6 +4817,7 @@ export async function bulkUpdateAssetCategory({
 
     await db.$transaction(async (tx) => {
       await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange is derived from assetsBeforeUpdate fetched on lines 4322-4326 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assetsThatChange.map((a) => a.id) } },
         data: { categoryId: newCategoryId },
       });
@@ -4288,6 +4847,7 @@ export async function bulkUpdateAssetCategory({
         createAssetCategoryChangeNote({
           assetId: asset.id,
           userId,
+          organizationId,
           previousCategory: asset.category,
           newCategory,
           loadUserForNotes,
@@ -4384,60 +4944,68 @@ export async function bulkAssignAssetTags({
         }, new Map())
       );
 
-    const updatedAssets = await db.$transaction(async (tx) => {
-      const results = await Promise.all(
-        resolvedIds.map((id) =>
-          tx.asset.update({
-            where: { id, organizationId },
-            data: {
-              tags: {
-                [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
-                  id: tagId,
-                })),
+    // Defense-in-depth: this issues one `asset.update` per selected asset
+    // inside the interactive tx (needed to diff each asset's tag set), so a
+    // large selection serially exhausts Prisma's 5s default and aborts with
+    // P2028 (Sentry SHELF-WEBAPP-1MH). Bump the ceiling to 15s.
+    const updatedAssets = await db.$transaction(
+      async (tx) => {
+        const results = await Promise.all(
+          resolvedIds.map((id) =>
+            tx.asset.update({
+              where: { id, organizationId },
+              data: {
+                tags: {
+                  [remove ? "disconnect" : "connect"]: tagsIds.map((tagId) => ({
+                    id: tagId,
+                  })),
+                },
               },
-            },
-            include: {
-              tags: { select: { id: true, name: true } },
-            },
-          })
-        )
-      );
+              include: {
+                tags: { select: { id: true, name: true } },
+              },
+            })
+          )
+        );
 
-      // Activity events — one ASSET_TAGS_CHANGED per asset whose tag set
-      // actually changed. Same shape as the singular `updateAsset` flow.
-      const tagChangeEvents: Parameters<typeof recordEvents>[0] = [];
-      for (const asset of results) {
-        const previousTags = previousTagsByAssetId.get(asset.id) ?? [];
-        const previousTagIds = new Set(previousTags.map((t) => t.id));
-        const currentTagIds = new Set(asset.tags.map((t) => t.id));
-        const setsDiffer =
-          previousTagIds.size !== currentTagIds.size ||
-          [...previousTagIds].some((t) => !currentTagIds.has(t));
-        if (setsDiffer) {
-          tagChangeEvents.push({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_TAGS_CHANGED",
-            entityType: "ASSET",
-            entityId: asset.id,
-            assetId: asset.id,
-            field: "tags",
-            fromValue: [...previousTagIds],
-            toValue: [...currentTagIds],
-          });
+        // Activity events — one ASSET_TAGS_CHANGED per asset whose tag set
+        // actually changed. Same shape as the singular `updateAsset` flow.
+        const tagChangeEvents: Parameters<typeof recordEvents>[0] = [];
+        for (const asset of results) {
+          const previousTags = previousTagsByAssetId.get(asset.id) ?? [];
+          const previousTagIds = new Set(previousTags.map((t) => t.id));
+          const currentTagIds = new Set(asset.tags.map((t) => t.id));
+          const setsDiffer =
+            previousTagIds.size !== currentTagIds.size ||
+            [...previousTagIds].some((t) => !currentTagIds.has(t));
+          if (setsDiffer) {
+            tagChangeEvents.push({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_TAGS_CHANGED",
+              entityType: "ASSET",
+              entityId: asset.id,
+              assetId: asset.id,
+              field: "tags",
+              fromValue: [...previousTagIds],
+              toValue: [...currentTagIds],
+            });
+          }
         }
-      }
-      if (tagChangeEvents.length > 0) {
-        await recordEvents(tagChangeEvents, tx);
-      }
+        if (tagChangeEvents.length > 0) {
+          await recordEvents(tagChangeEvents, tx);
+        }
 
-      return results;
-    });
+        return results;
+      },
+      { timeout: 15000 }
+    );
 
     await Promise.all(
       updatedAssets.map((asset) =>
         createTagChangeNoteIfNeeded({
           assetId: asset.id,
+          organizationId,
           userId,
           previousTags: previousTagsByAssetId.get(asset.id) ?? [],
           currentTags: asset.tags,
@@ -4573,6 +5141,7 @@ export async function relinkAssetQrCode({
 
   await Promise.all([
     db.qr.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
       where: { id: qr.id },
       data: { organizationId, userId },
     }),
@@ -4588,6 +5157,7 @@ export async function relinkAssetQrCode({
     createNote({
       assetId,
       userId,
+      organizationId,
       type: "UPDATE",
       content: `${wrapUserLinkForNote({
         id: userId,

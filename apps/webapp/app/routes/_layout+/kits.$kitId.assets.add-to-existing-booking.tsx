@@ -89,17 +89,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Resolves the assets for the selected kits and the target booking.
+ *
+ * `organizationId` is threaded into `getAvailableKitAssetForBooking` so kit
+ * assets cannot be resolved across tenants (cross-org IDOR guard).
+ */
 const processBooking = async (
   bookingId: string,
-  kitIds: string[] | undefined
+  kitIds: string[] | undefined,
+  organizationId: string
 ) => {
   try {
     let finalAssetIds: string[] = [];
     let booking;
     if (kitIds && kitIds.length > 0) {
       const promises = [
-        getAvailableKitAssetForBooking(kitIds),
-        getExistingBookingDetails(bookingId),
+        getAvailableKitAssetForBooking(kitIds, organizationId),
+        getExistingBookingDetails(bookingId, organizationId),
       ];
 
       const [assets, bookingDetails] = await Promise.all(promises);
@@ -117,7 +124,9 @@ const processBooking = async (
       throw new ShelfError({
         cause: null,
         message: "No assets available.",
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
@@ -157,13 +166,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: `No kitIds found or booking not found.`,
+        status: 400,
         label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
     const { finalAssetIds, bookingInfo } = await processBooking(
       bookingId,
-      kitIds
+      kitIds,
+      organizationId
     );
 
     const bookingAssets = (
@@ -208,6 +220,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       type: "UPDATE",
       userId: authSession.userId,
       assetIds: finalAssetIds,
+      organizationId,
     });
 
     sendNotification({

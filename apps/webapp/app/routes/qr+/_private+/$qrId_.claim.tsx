@@ -44,6 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const qr = await db.qr
       .findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: claim flow resolves an unclaimed code (assetId/kitId null, and line 65 redirects away if it already has an org) before any org is assigned; scoping to an org is impossible because an unclaimed code has none
         where: {
           id: qrId,
           assetId: null,

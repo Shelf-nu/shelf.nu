@@ -44,6 +44,8 @@ vitest.mock("react-router", async () => {
 // why: external auth — we don't want to hit Supabase in tests
 vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn(),
+  // why: SAM/sequential resolution (added on main) scopes by the caller's org
+  requireOrganizationAccess: vitest.fn(),
   MOBILE_ASSET_SELECT: {
     id: true,
     title: true,
@@ -52,9 +54,11 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
     category: { select: { name: true } },
     location: { select: { name: true } },
   },
+  MOBILE_KIT_SELECT: { id: true, name: true },
 }));
 
-// why: external database — we don't want to hit the real database in tests
+// why: external database — we don't want to hit the real database in tests.
+// asset/kit are read via org-scoped `findFirst` (main moved off `findUnique`).
 vitest.mock("~/database/db.server", () => ({
   db: {
     qr: {
@@ -64,7 +68,10 @@ vitest.mock("~/database/db.server", () => ({
       findUnique: vitest.fn(),
     },
     asset: {
-      findUnique: vitest.fn(),
+      findFirst: vitest.fn(),
+    },
+    kit: {
+      findFirst: vitest.fn(),
     },
   },
 }));
@@ -161,7 +168,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
 
     (db.qr.findUnique as any).mockResolvedValue(mockQr);
     (db.userOrganization.findUnique as any).mockResolvedValue({ id: "uo-1" });
-    (db.asset.findUnique as any).mockResolvedValue(mockAsset);
+    (db.asset.findFirst as any).mockResolvedValue(mockAsset);
     (createScan as any).mockResolvedValue({ id: "scan-1" });
   });
 
@@ -188,6 +195,24 @@ describe("GET /api/mobile/qr/:qrId", () => {
     expect(createScan).toHaveBeenCalledWith(
       expect.objectContaining({ userAgent: "mobile-companion" })
     );
+  });
+
+  it("does NOT record provenance when the caller opts out via recordScan=false", async () => {
+    // why: audit lookups identify the code only; they record their own
+    // AuditScan separately and must not add an ad-hoc scan to the asset's
+    // history (mirrors the web's non-recording get-scanned-item resolve).
+    const request = new Request(
+      "http://localhost:3000/api/mobile/qr/qr-1?recordScan=false",
+      { headers: { Authorization: "Bearer test-token" } }
+    );
+    const result = await run(request);
+
+    // resolves normally...
+    expect(result instanceof Response).toBe(true);
+    const body = await (result as unknown as Response).json();
+    expect(body.qr.asset.id).toBe("asset-1");
+    // ...but records nothing
+    expect(createScan).not.toHaveBeenCalled();
   });
 
   it("does NOT record provenance when the QR is not found (404)", async () => {

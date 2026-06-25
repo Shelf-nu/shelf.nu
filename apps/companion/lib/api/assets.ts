@@ -48,8 +48,35 @@ export const assetsApi = {
       `/api/mobile/assets/${assetId}?orgId=${orgId}`
     ),
 
-  /** Resolve a QR code to an asset */
-  qr: (qrId: string) => apiFetch<QrResponse>(`/api/mobile/qr/${qrId}`),
+  /**
+   * Resolve a scanned code to an asset or kit.
+   *
+   * Handles both a Shelf QR id and a SAM / sequential id (e.g. `SAM-0001`).
+   * A QR id self-identifies its org, but a SAM id is unique only within a
+   * workspace, so callers pass `orgId` to scope SAM resolution (the server
+   * ignores it on the QR path). Mirrors the web scan resolver.
+   *
+   * By default a QR resolve records scan provenance (who + when), mirroring the
+   * web's public QR route. Pass `{ recordScan: false }` to only identify the
+   * code without recording, e.g. the audit scanner, which logs its own
+   * `AuditScan` and must not pollute an asset's "last scanned" history. This
+   * mirrors the web split between the recording public QR route and the
+   * non-recording `get-scanned-item` resolve.
+   *
+   * @param codeId - The scanned QR id or normalized SAM id.
+   * @param orgId - Caller's current workspace id; required for SAM lookups.
+   * @param opts.recordScan - When `false`, the server skips provenance
+   *   recording for this resolve. Defaults to recording.
+   */
+  qr: (codeId: string, orgId?: string, opts?: { recordScan?: boolean }) => {
+    const params = new URLSearchParams();
+    if (orgId) params.set("orgId", orgId);
+    if (opts?.recordScan === false) params.set("recordScan", "false");
+    const qs = params.toString();
+    return apiFetch<QrResponse>(
+      `/api/mobile/qr/${encodeURIComponent(codeId)}${qs ? `?${qs}` : ""}`
+    );
+  },
 
   /** Resolve a barcode (additional code) to an asset */
   barcode: (value: string, orgId: string) =>

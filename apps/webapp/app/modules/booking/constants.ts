@@ -87,6 +87,15 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       status: true,
       kitId: true,
       valuation: true,
+      // Asset-code resolution fields — see `app/modules/barcode/display.ts`
+      // for the canonical select shape. Tight `take: 1` + narrow `select`
+      // keeps query weight minimal even with hundreds of booking assets.
+      sequentialId: true,
+      preferredBarcodeId: true,
+      qrCodes: { take: 1, select: { id: true } },
+      barcodes: { select: { id: true, type: true, value: true } },
+      // Tag names — searchable in-memory by filterBookingAssets (assets only).
+      tags: { select: { name: true } },
       category: {
         select: {
           id: true,
@@ -94,12 +103,38 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           color: true,
         },
       },
-      kit: {
+      // Asset's own location — drives the Location column sort and search.
+      location: {
         select: {
+          id: true,
           name: true,
         },
       },
+      kit: {
+        select: {
+          name: true,
+          // Kit's own location + category — needed for kit-group location
+          // sorting and kit-level search. Kits have no sequentialId/tags.
+          location: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          category: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
     },
+    // Base fetch order. The rendered order is computed in-memory by the
+    // consuming route (sortBookingAssets / groupAndSortAssetsByKit); this DB
+    // order only acts as the stable tiebreaker fed into those sorts. Kept
+    // identical to the historical default (CHECKED_OUT first, then creation
+    // order) so the in-memory sorts receive the exact same input as before —
+    // preserving the booking page's default ordering 1:1.
     orderBy: [
       { status: "desc" }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { createdAt: "asc" }, // Then by creation order as fallback
@@ -137,6 +172,7 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
   status: "Status",
   title: "Name",
   category: "Category",
+  location: "Location",
 } as const;
 
 export type BookingAssetSortingOption =

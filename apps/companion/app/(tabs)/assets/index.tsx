@@ -31,6 +31,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
+import { InventorySegment } from "@/components/kits/inventory-segment";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -336,6 +337,9 @@ function AssetsListContent() {
 
   return (
     <View style={styles.container}>
+      {/* Assets | Kits switcher */}
+      <InventorySegment active="assets" />
+
       {/* Search bar */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={16} color={colors.mutedLight} />

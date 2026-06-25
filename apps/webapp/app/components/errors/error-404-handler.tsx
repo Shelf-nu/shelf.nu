@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { useFetcher } from "react-router";
+import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import type { Error404AdditionalData } from "./utils";
@@ -54,7 +55,7 @@ export default function Error404Handler({
                 to view the {modelLabel}?
               </p>
               <fetcher.Form
-                action="/api/user/change-current-organization"
+                action={CHANGE_CURRENT_ORGANIZATION_ACTION}
                 method="POST"
               >
                 <input
@@ -94,7 +95,7 @@ export default function Error404Handler({
                 switch to workspace to view the team member?
               </p>
               <fetcher.Form
-                action="/api/user/change-current-organization"
+                action={CHANGE_CURRENT_ORGANIZATION_ACTION}
                 method="POST"
                 className="flex flex-col items-center"
               >

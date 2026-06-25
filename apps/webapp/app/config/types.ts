@@ -61,6 +61,12 @@ export interface Config {
   collectBusinessIntel: boolean;
 
   /**
+   * Debounce window (ms) for recording mobile companion-app activity.
+   * Internal telemetry threshold used by the mobile API; not env-driven.
+   */
+  mobileActivityDebounceMs: number;
+
+  /**
    * Geocoding configuration
    */
   geocoding: {

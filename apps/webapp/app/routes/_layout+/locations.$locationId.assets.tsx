@@ -1,4 +1,10 @@
-import type { Asset, Category, Location, Tag } from "@prisma/client";
+import type {
+  Asset,
+  BarcodeType,
+  Category,
+  Location,
+  Tag,
+} from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -6,6 +12,7 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import z from "zod";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ASSET_SORTING_OPTIONS } from "~/components/assets/assets-index/filters";
@@ -32,6 +39,7 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
@@ -379,6 +387,8 @@ const ListAssetContent = ({
     category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
+    qrCodes: { id: string }[];
+    barcodes: { id: string; type: BarcodeType; value: string }[];
     custody: {
       custodian: {
         id: string;
@@ -396,6 +406,10 @@ const ListAssetContent = ({
   extraProps: { canReadCustody: boolean; userRoleCanManageAssets: boolean };
 }) => {
   const { category, tags, custody } = item;
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -426,11 +440,18 @@ const ListAssetContent = ({
                   {item.title}
                 </Button>
               </span>
-              <AssetStatusBadge
-                id={item.id}
-                status={item.status}
-                availableToBook={item.availableToBook}
-              />
+              {/*
+                Single metadata line: status first (glanceable color cue),
+                code chip second. flex-wrap keeps narrow viewports safe.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
+                <AssetStatusBadge
+                  id={item.id}
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
+              </div>
             </div>
           </div>
         </div>

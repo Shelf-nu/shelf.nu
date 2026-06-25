@@ -1,4 +1,5 @@
 import {
+  AssetStatus,
   BookingStatus,
   TagUseFor,
   OrganizationRoles,
@@ -29,26 +30,38 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import {
+  primeBookingOverviewCache,
+  readBookingOverviewCache,
+} from "~/modules/booking/booking-overview-client-cache";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
-import { groupAndSortAssetsByKit } from "~/modules/booking/helpers";
 import {
   archiveBooking,
   cancelBooking,
   checkinAssets,
   checkinBooking,
+  checkoutAssets,
   checkoutBooking,
+  checkoutRemainingAssets,
   deleteBooking,
   extendBooking,
   getBooking,
   getBookingFlags,
   getDetailedPartialCheckinData,
+  getDetailedPartialCheckoutData,
   removeAssets,
   reserveBooking,
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
-import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
+import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
+import {
+  calculateBookingLifecycleProgress,
+  calculatePartialCheckinProgress,
+  calculateUnitCheckinProgress,
+} from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -64,7 +77,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sortBookingAssets } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -96,6 +108,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { Route } from "./+types/bookings.$bookingId.overview";
 
 export type BookingPageLoaderData = typeof loader;
 
@@ -108,7 +121,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
-  const { page, perPageParam, orderDirection } = paramsValues;
+  const { page, perPageParam, orderDirection, search } = paramsValues;
   // Default to "status" for booking assets (getParamsValues defaults to "createdAt" which isn't valid here)
   const orderBy =
     paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
@@ -246,74 +259,53 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ? await getDetailedPartialCheckinData(booking.id)
         : { checkedInAssetIds: [] as string[], partialCheckinDetails: {} };
 
-    // We'll compute alreadyBooked after fetching assetDetails with full bookings relation
+    // Progressive checkout: a booking can have items scanned out one-by-one.
+    // Fetch the partial-checkout records whenever the booking could have them.
+    // This MUST include COMPLETE/ARCHIVED: once a booking is finished all assets
+    // are back to AVAILABLE, so a status check alone (`hasCheckedOutAssets`)
+    // would miss them — and then never-checked-out assets would wrongly render
+    // the "Returned" badge again (hasProgressiveCheckout would be false because
+    // checkedOutAssetIds came back empty). DRAFT/CANCELLED never have records.
+    const hasCheckedOutAssets = booking.assets.some(
+      (asset) => asset.status === "CHECKED_OUT"
+    );
+    const canHavePartialCheckouts = [
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "ARCHIVED",
+    ].includes(booking.status);
+    const { checkedOutAssetIds, partialCheckoutDetails } =
+      hasCheckedOutAssets || canHavePartialCheckouts
+        ? await getDetailedPartialCheckoutData({
+            bookingId: booking.id,
+            organizationId,
+          })
+        : { checkedOutAssetIds: [] as string[], partialCheckoutDetails: {} };
+
+    // `booking` already has full asset+kit light data; alias for clarity.
     const enhancedBooking = booking;
 
-    // Only apply sortBookingAssets for status sorting to get partial check-in date ordering
-    // For other sort options, the database orderBy is sufficient
-    const isStatusSort = !orderBy || orderBy === "status";
-    if (isStatusSort) {
-      enhancedBooking.assets = sortBookingAssets(
-        enhancedBooking.assets,
-        partialCheckinDetails
-      );
-    }
+    // Derive all asset IDs and all kit IDs from the booking (no pagination yet).
+    const allBookingAssetIds = booking.assets.map((a) => a.id);
+    const allBookingKitIds = [
+      ...new Set(
+        booking.assets
+          .map((a) => a.kitId)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
 
-    // Use helper to group assets by kit and sort them
-    const sortedAssets = groupAndSortAssetsByKit(
-      enhancedBooking.assets,
-      orderBy,
-      orderDirection
-    );
-
-    // Convert sorted assets to pagination items (kits grouped, individual assets separate)
-    const paginationItems: Array<{
-      type: "kit" | "asset";
-      id: string;
-      assets: Array<(typeof enhancedBooking.assets)[0]>;
-    }> = [];
-
-    const processedKitIds = new Set<string>();
-    for (const asset of sortedAssets) {
-      if (asset.kitId && asset.kit) {
-        // Kit asset - group with other assets from same kit
-        if (!processedKitIds.has(asset.kitId)) {
-          processedKitIds.add(asset.kitId);
-          const kitAssets = sortedAssets.filter((a) => a.kitId === asset.kitId);
-          paginationItems.push({
-            type: "kit",
-            id: asset.kitId,
-            assets: kitAssets,
-          });
-        }
-      } else {
-        // Individual asset
-        paginationItems.push({
-          type: "asset",
-          id: asset.id,
-          assets: [asset],
-        });
-      }
-    }
-
-    // Calculate pagination
-    const totalPaginationItems = paginationItems.length;
-    const totalPages = Math.ceil(totalPaginationItems / perPage);
-    const skip = page > 1 ? (page - 1) * perPage : 0;
-    const paginatedItems = paginationItems.slice(skip, skip + perPage);
-
-    // Get all asset IDs from the current pagination page
-    const assetIdsToFetch = paginatedItems.flatMap((item) =>
-      item.assets.map((asset) => asset.id)
-    );
-
-    // Execute all necessary queries in parallel
+    // Execute all necessary queries in parallel. Asset + kit enrichment now
+    // covers ALL booking assets/kits (not just the current page) so the
+    // clientLoader can re-shape from cache without a server round-trip.
     const [
       teamMembersData,
       teamMembersForFormData,
-      assetDetails,
+      rawAssets,
       bookingFlags,
-      kits,
+      rawKits,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -344,17 +336,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
 
       /**
-       * Get detailed asset information with bookings for the paginated assets
+       * Enrich ALL booking assets (full booking, not just the current page) so
+       * the clientLoader can re-shape from cache.
+       * SECURITY (cross-org IDOR): scope to the caller's organizationId.
        */
       db.asset.findMany({
         where: {
-          id: { in: assetIdsToFetch },
+          id: { in: allBookingAssetIds },
+          organizationId,
         },
         include: {
           category: true,
           custody: true,
           tags: TAG_WITH_COLOR_SELECT,
           kit: true,
+          // Asset's pickup location — rendered in the booking Location column.
+          location: LOCATION_WITH_HIERARCHY,
+          // Code-resolution relations — required for AssetCodeBadge on the
+          // booking detail page rows. Scalar fields (sequentialId,
+          // preferredBarcodeId) come in automatically via `include`; the
+          // relations must be listed explicitly. Tight selects per
+          // `~/modules/barcode/display.ts`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           bookings: {
             where: {
               ...(booking.from && booking.to
@@ -404,16 +408,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetIds: booking.assets.map((a) => a.id),
         from: booking.from,
         to: booking.to,
+        organizationId,
       }),
 
-      /** Get kit details for the kits in the current page */
+      /**
+       * Enrich ALL booking kits (full booking, not just the current page) so
+       * the clientLoader can re-shape from cache.
+       */
       db.kit.findMany({
         where: {
-          id: {
-            in: paginatedItems
-              .filter((item) => item.type === "kit")
-              .map((item) => item.id),
-          },
+          id: { in: allBookingKitIds },
+          organizationId,
         },
         include: {
           category: {
@@ -423,27 +428,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               color: true,
             },
           },
+          // Code-resolution relations — required for AssetCodeBadge on
+          // the kit row inside this booking. See `~/modules/barcode/display.ts`
+          // and `.claude/rules/code-bearing-entity-list-consistency.md`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
+          // Kit's pickup location — rendered on the kit row.
+          location: LOCATION_WITH_HIERARCHY,
           _count: { select: { assets: true } },
         },
       }),
     ]);
 
-    // Create maps for easy lookup
-    const assetDetailsMap = new Map(
-      assetDetails.map((asset) => [asset.id, asset])
-    );
-    const kitsMap = new Map(kits.map((kit) => [kit.id, kit]));
+    // Delegate filter → sort → group-by-kit → paginate to the shared pure
+    // shapeBookingAssets helper. The same function runs in clientLoader for
+    // subsequent navigations (no server round-trip).
+    const view = shapeBookingAssets({
+      rawAssets,
+      rawKits,
+      search,
+      orderBy,
+      orderDirection,
+      page,
+      perPage,
+      partialCheckinDetails,
+    });
 
-    // Enrich the paginated items with full asset details
-    const enrichedPaginatedItems = paginatedItems.map((item) => ({
-      ...item,
-      assets: item.assets.map((asset) => {
-        const details = assetDetailsMap.get(asset.id);
-        return details || asset;
-      }),
-      kit: item.type === "kit" ? kitsMap.get(item.id) : null,
-    }));
-
+    // Category options computed from the full booking (not just the current page).
     const assetCategories = enhancedBooking.assets
       .map((asset) => asset.category)
       .filter((category) => category !== null && category !== undefined)
@@ -452,7 +463,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // Find the index of the first occurrence of this category ID
           index === self.findIndex((c) => c.id === category.id)
       );
-    const kitCategories = kits
+    // Kit categories derived from all rawKits (all kits, not just current page).
+    const kitCategories = rawKits
       .map((kit) => kit.category)
       .filter((category) => category !== null && category !== undefined)
       .filter(
@@ -463,23 +475,57 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const allCategories = [...assetCategories, ...kitCategories];
 
-    // Calculate partial check-in progress
-    // For progress calculation, we need the TOTAL number of assets in the booking,
-    // not the filtered count from booking.assets (which may be filtered by status)
-    // So we need to get the unfiltered asset count
-    const totalBookingAssets = await db.asset.count({
-      where: {
-        bookings: {
-          some: { id: booking.id },
-        },
-      },
-    });
+    // Calculate partial check-in progress.
+    // `booking.assets` is already the FULL, unfiltered booking asset set — its
+    // `getBooking` include applies no status/search filter (those are page
+    // concerns handled in-memory), and each row carries `id` + `kitId`. So we
+    // reuse it for the progress input instead of a second org-scoped round-trip.
+    // It is org-scoped transitively via the org-scoped `getBooking` fetch.
+    const bookingAssetsForProgress = enhancedBooking.assets.map((asset) => ({
+      id: asset.id,
+      kitId: asset.kitId,
+    }));
+    const totalBookingAssets = bookingAssetsForProgress.length;
 
-    const partialCheckinProgress = calculatePartialCheckinProgress(
-      totalBookingAssets,
+    // Read the workspace setting with a lean query. We intentionally avoid
+    // getBookingSettingsForOrganization here because that performs an upsert
+    // write, which is undesirable in a read-only loader path.
+    const bookingSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { countKitsAsSingleUnit: true },
+    });
+    const countKitsAsSingleUnit =
+      bookingSettings?.countKitsAsSingleUnit ?? false;
+
+    const partialCheckinProgress = countKitsAsSingleUnit
+      ? calculateUnitCheckinProgress(
+          bookingAssetsForProgress,
+          checkedInAssetIds,
+          booking.status
+        )
+      : calculatePartialCheckinProgress(
+          totalBookingAssets,
+          checkedInAssetIds,
+          booking.status
+        );
+
+    // Segmented lifecycle progress (Booked / Checked out / Returned) backing the
+    // new progress bar on the booking detail page. Reuses the same org-scoped
+    // `enhancedBooking.assets` set as the check-in progress above — each row
+    // carries `id`, `kitId`, and `status` (BOOKING_WITH_ASSETS_INCLUDE selects
+    // status). "Checked out" is derived from asset `status`, "Returned" from the
+    // per-booking partial check-in records (`checkedInAssetIds`).
+    const lifecycleProgress = calculateBookingLifecycleProgress({
+      bookingAssets: enhancedBooking.assets.map((a) => ({
+        id: a.id,
+        kitId: a.kitId,
+        status: a.status,
+      })),
       checkedInAssetIds,
-      booking.status
-    );
+      checkedOutAssetIds,
+      bookingStatus: booking.status,
+      countKitsAsSingleUnit,
+    });
 
     const modelName = {
       singular: "item",
@@ -500,32 +546,48 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking: enhancedBooking,
         modelName,
-        items: enrichedPaginatedItems,
+        // Shaped view for first paint (same field names the component reads):
+        items: view.items,
         page,
-        totalItems: totalPaginationItems,
-        totalPaginationItems,
+        totalItems: view.totalPaginationItems,
+        totalPaginationItems: view.totalPaginationItems,
         perPage,
-        totalPages,
+        totalPages: view.totalPages,
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
-        totalKits: paginationItems.filter((item) => item.type === "kit").length,
+        totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           assets: enhancedBooking.assets,
           currency: currentOrganization.currency,
           locale: getClientHint(request).locale,
         }),
         /** Assets inside the booking without kits */
-        assetsCount: paginationItems.filter((item) => item.type === "asset")
-          .length,
+        assetsCount: view.assetsCount,
         totalAssets: totalBookingAssets,
         allCategories,
         tags,
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
-        // Asset search tooltip
-        searchFieldLabel: "Search by asset name",
+        // Progressive checkout: segmented lifecycle bar + per-asset checkout
+        // details (date/user) for the "Checked out on/by" columns.
+        lifecycleProgress,
+        checkedOutAssetIds,
+        partialCheckoutDetails,
+        // Raw enriched data + shaping inputs so clientLoader can re-shape
+        // without a server round-trip on search/sort/pagination navigations.
+        rawAssets,
+        rawKits,
+        // Current search string so the search input pre-fills on first paint /
+        // hard refresh (SearchForm reads `search` from loader data).
+        search,
+        // Asset search label + tooltip listing searchable fields
+        searchFieldLabel: "Search assets & kits",
+        searchFieldTooltip: {
+          title: "Search booking items",
+          text: "Search the assets and kits in this booking. Separate keywords with a comma (,) to search with OR. Supported fields:\n- Name\n- Asset ID (SAM-id, assets only)\n- Category\n- Tags (assets only)\n- Location\n- QR code value\n- Barcode value",
+        },
         ...notifyData,
       }),
       {
@@ -537,6 +599,72 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * Client loader: makes search/sort/pagination instant by re-shaping the cached
+ * server response in the browser instead of revalidating the server loader.
+ *
+ * Runs on hydration (`hydrate = true`); during hydration `serverLoader()`
+ * returns the SSR'd data with no extra fetch. On a pure view-param navigation
+ * it re-shapes from cache (no network); otherwise (first load, post-mutation
+ * revalidation, non-view param change) it refetches from the server and
+ * re-primes the cache.
+ *
+ * @see {@link file://./../../modules/booking/booking-overview-client-cache.ts}
+ * @see {@link file://./../../modules/booking/shape-booking-assets.ts}
+ */
+export async function clientLoader({
+  request,
+  params,
+  serverLoader,
+}: Route.ClientLoaderArgs) {
+  const bookingId = params.bookingId as string;
+  const url = new URL(request.url);
+
+  const cached = readBookingOverviewCache(bookingId, url);
+  if (cached.hit) {
+    // The cached data is the full server-loader payload. We re-shape the view
+    // fields in the browser so search/sort/pagination navigations are instant.
+    const serverData = cached.data as Awaited<ReturnType<typeof serverLoader>>;
+    const paramsValues = getParamsValues(url.searchParams);
+    // Mirror the createdAt → status normalization from the server loader.
+    const orderBy =
+      paramsValues.orderBy === "createdAt" ? "status" : paramsValues.orderBy;
+    const view = shapeBookingAssets({
+      rawAssets: serverData.rawAssets,
+      rawKits: serverData.rawKits,
+      search: paramsValues.search,
+      orderBy,
+      orderDirection: paramsValues.orderDirection,
+      page: paramsValues.page,
+      perPage: serverData.perPage,
+      partialCheckinDetails: serverData.partialCheckinDetails,
+    });
+    return {
+      ...serverData,
+      items: view.items,
+      // Override the view params so the pager/search UI stay in sync with the
+      // reshaped items (serverData holds the values from the initial load).
+      // perPage is intentionally not overridden — a per_page change is a cache
+      // miss (see CLIENT_VIEW_PARAM_KEYS), so serverData.perPage is current.
+      page: paramsValues.page,
+      search: paramsValues.search,
+      totalItems: view.totalPaginationItems,
+      totalPaginationItems: view.totalPaginationItems,
+      totalPages: view.totalPages,
+      totalKits: view.totalKits,
+      assetsCount: view.assetsCount,
+    };
+  }
+
+  // Cache miss: fetch from the server and prime the cache for subsequent
+  // view-only navigations.
+  const serverData = await serverLoader();
+  primeBookingOverviewCache(bookingId, url, serverData);
+  return serverData;
+}
+/** Run clientLoader on hydration so the cache is primed from the SSR data. */
+clientLoader.hydrate = true as const;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -579,6 +707,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "delete",
           "removeAsset",
           "checkOut",
+          "checkOutRemaining",
           "checkIn",
           "archive",
           "cancel",
@@ -587,6 +716,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
+          "partial-checkout",
           "updateNotificationRecipients",
         ]),
         nameChangeOnly: z
@@ -607,6 +737,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       save: PermissionAction.update,
       removeAsset: PermissionAction.update,
       checkOut: PermissionAction.checkout,
+      checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
@@ -615,6 +746,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
+      "partial-checkout": PermissionAction.checkout,
       updateNotificationRecipients: PermissionAction.update,
     };
 
@@ -697,6 +829,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         type: "UPDATE",
         userId: userId,
         assetIds: deletedBooking.assets.map((a) => a.id),
+        organizationId,
       });
 
       sendNotification({
@@ -715,8 +848,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Booking lookup, working hours, and booking settings are independent — fetch in parallel
     const [basicBookingInfo, workingHours, bookingSettings] = await Promise.all(
       [
-        db.booking.findUniqueOrThrow({
-          where: { id },
+        db.booking.findFirstOrThrow({
+          where: { id, organizationId },
           select: { id: true, status: true, from: true, to: true },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -868,6 +1001,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId: user.id,
           assetIds: booking.assets.map((a) => a.id),
+          organizationId,
         });
 
         sendNotification({
@@ -879,6 +1013,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         return data(payload({ booking }), {
           headers,
+        });
+      }
+      case "checkOutRemaining": {
+        // "Check out remaining" — check out every asset still in the booking's
+        // Booked bucket at once. The service resolves the eligible ids
+        // server-side (no client-supplied id list) and routes through the
+        // progressive partial-checkout path, which writes notes/events.
+        return await checkoutRemainingAssets({
+          formData,
+          request,
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
         });
       }
       case "checkIn": {
@@ -917,6 +1065,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "specificAssetIds[]"
         ) as string[];
 
+        // Only assets that were actually checked out get a check-in note —
+        // progressive checkout can leave never-checked-out assets in the booking.
+        const checkedOutAssetIdsBeforeCheckin = (
+          await db.asset.findMany({
+            where: {
+              bookings: { some: { id } },
+              organizationId,
+              status: AssetStatus.CHECKED_OUT,
+            },
+            select: { id: true },
+          })
+        ).map((a) => a.id);
+
         const booking = await checkinBooking({
           id,
           organizationId,
@@ -927,21 +1088,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
-        const bookingLink = wrapLinkForNote(
-          `/bookings/${booking.id}`,
-          booking.name
-        );
-        await createNotes({
-          content: `${actor} checked in asset with ${bookingLink}.`,
-          type: "UPDATE",
-          userId: user.id,
-          assetIds: booking.assets.map((a) => a.id),
-        });
+        if (checkedOutAssetIdsBeforeCheckin.length > 0) {
+          const actor = wrapUserLinkForNote({
+            id: userId,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
+          });
+          const bookingLink = wrapLinkForNote(
+            `/bookings/${booking.id}`,
+            booking.name
+          );
+          await createNotes({
+            content: `${actor} checked in asset with ${bookingLink}.`,
+            type: "UPDATE",
+            userId: user.id,
+            assetIds: checkedOutAssetIdsBeforeCheckin,
+            organizationId,
+          });
+        }
 
         sendNotification({
           title: "Booking checked-in",
@@ -956,6 +1120,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "partial-checkin": {
         return await checkinAssets({
+          formData,
+          request,
+          bookingId: id,
+          organizationId,
+          userId,
+          authSession,
+        });
+      }
+      case "partial-checkout": {
+        return await checkoutAssets({
           formData,
           request,
           bookingId: id,
@@ -1055,6 +1229,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           type: "UPDATE",
           userId,
           assetIds: cancelledBooking.assets.map((a) => a.id),
+          organizationId,
         });
 
         sendNotification({
@@ -1211,12 +1386,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * here we are separating them and excluding assets that belong to kits
          * */
         const assets = await db.asset.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
         });
 
         const kits = await db.kit.findMany({
-          where: { id: { in: assetOrKitIds } },
+          where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, name: true, assets: { select: { id: true } } },
         });
 
@@ -1292,6 +1467,7 @@ export default function BookingPage() {
   const shouldRenderOutlet = [
     "booking.overview.scan-assets",
     "booking.overview.checkin-assets",
+    "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
   return shouldRenderOutlet ? (

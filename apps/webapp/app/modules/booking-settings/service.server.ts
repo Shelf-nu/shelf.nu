@@ -23,6 +23,7 @@ export async function getBookingSettingsForOrganization(
         autoArchiveDays: 2,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        countKitsAsSingleUnit: false,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         organizationId,
@@ -37,6 +38,7 @@ export async function getBookingSettingsForOrganization(
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -78,6 +80,7 @@ export async function updateBookingSettings({
   autoArchiveDays,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
+  countKitsAsSingleUnit,
   notifyBookingCreator,
   notifyAdminsOnNewBooking,
 }: {
@@ -90,6 +93,7 @@ export async function updateBookingSettings({
   autoArchiveDays?: number;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
+  countKitsAsSingleUnit?: boolean;
   notifyBookingCreator?: boolean;
   notifyAdminsOnNewBooking?: boolean;
 }) {
@@ -113,6 +117,8 @@ export async function updateBookingSettings({
     if (requireExplicitCheckinForSelfService !== undefined)
       updateData.requireExplicitCheckinForSelfService =
         requireExplicitCheckinForSelfService;
+    if (countKitsAsSingleUnit !== undefined)
+      updateData.countKitsAsSingleUnit = countKitsAsSingleUnit;
     if (notifyBookingCreator !== undefined)
       updateData.notifyBookingCreator = notifyBookingCreator;
     if (notifyAdminsOnNewBooking !== undefined)
@@ -131,6 +137,7 @@ export async function updateBookingSettings({
         autoArchiveDays: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
         alwaysNotifyTeamMembers: {
@@ -164,6 +171,7 @@ export async function updateBookingSettings({
         maxBookingLengthSkipClosedDays,
         autoArchiveBookings,
         autoArchiveDays,
+        countKitsAsSingleUnit,
       },
       label,
     });

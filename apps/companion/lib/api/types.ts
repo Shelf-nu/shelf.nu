@@ -102,6 +102,20 @@ export type AssetDetail = {
   }[];
 };
 
+/**
+ * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
+ * statuses power the kit batch blockers ("kit has assets in custody"),
+ * mirroring the web scanner drawers.
+ */
+export type ScannedKit = {
+  id: string;
+  name: string;
+  status: string;
+  image: string | null;
+  _count: { assets: number };
+  assets: { id: string; status: string; availableToBook: boolean }[];
+};
+
 export type QrResponse = {
   qr: {
     id: string;
@@ -113,9 +127,15 @@ export type QrResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the QR is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
 
@@ -132,11 +152,90 @@ export type BarcodeResponse = {
       title: string;
       status: string;
       mainImage: string | null;
+      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+      kitId: string | null;
+      /** Drives the scan-to-booking "not available to book" blocker */
+      availableToBook: boolean;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
+    /** Set when the barcode is linked to a kit instead of an asset */
+    kit: ScannedKit | null;
   };
 };
+
+// ── Kits ────────────────────────────────────────────────
+
+export type KitStatus = "AVAILABLE" | "IN_CUSTODY" | "CHECKED_OUT";
+
+export type KitListItem = {
+  id: string;
+  name: string;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  _count: { assets: number };
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+  custody: { custodian: { id: string; name: string } } | null;
+};
+
+export type KitsResponse = {
+  kits: KitListItem[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type KitDetailAsset = {
+  id: string;
+  title: string;
+  status: string;
+  valuation: number | null;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  category: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+};
+
+export type KitDetail = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  createdAt: string;
+  updatedAt: string;
+  category: { id: string; name: string; color: string } | null;
+  location: { id: string; name: string } | null;
+  qrCodes: { id: string }[];
+  organization: { currency: string };
+  /** Sum of the contained assets' valuation (computed server-side). */
+  totalValue: number;
+  custody: {
+    createdAt: string;
+    custodian: {
+      id: string;
+      name: string;
+      user: {
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+      } | null;
+    };
+  } | null;
+  assets: KitDetailAsset[];
+};
+
+export type KitDetailResponse = { kit: KitDetail };
+
+/** Intents accepted by POST /api/mobile/kits/bulk-actions */
+export type KitBulkIntent =
+  | "assign-custody"
+  | "release-custody"
+  | "update-location";
 
 export type TeamMember = {
   id: string;
@@ -193,12 +292,15 @@ export type UpdateImageResponse = {
   };
 };
 
+/**
+ * Response of the three mobile bulk endpoints (bulk-assign-custody,
+ * bulk-release-custody, bulk-update-location). The underlying services are
+ * all-or-nothing — the routes return only `{ success: true }`, never partial
+ * counts. Client-side blockers (lib/batch-blockers.ts) guarantee only clean
+ * batches are submitted.
+ */
 export type BulkActionResponse = {
   success: boolean;
-  assigned?: number;
-  released?: number;
-  updated?: number;
-  skipped?: number;
 };
 
 export type BookingStatus =
@@ -288,6 +390,18 @@ export type BookingActionResponse = {
 export type PartialCheckinResponse = {
   success: boolean;
   checkedInCount: number;
+  remainingCount: number;
+  isComplete: boolean;
+  booking: {
+    id: string;
+    name: string;
+    status: BookingStatus;
+  };
+};
+
+export type PartialCheckoutResponse = {
+  success: boolean;
+  checkedOutCount: number;
   remainingCount: number;
   isComplete: boolean;
   booking: {
@@ -419,6 +533,43 @@ export type CompleteAuditResponse = {
   success: boolean;
 };
 
+// ── Audit Notes & Images Types ────────────────────────────
+
+export type AuditNoteUser = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  email: string;
+  profilePicture: string | null;
+};
+
+export type AuditNote = {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: AuditNoteUser | null;
+};
+
+export type CreateAuditNoteResponse = {
+  note: AuditNote;
+};
+
+export type AuditImage = {
+  id: string;
+  imageUrl: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  auditSessionId: string;
+  auditAssetId: string | null;
+  uploadedById: string | null;
+  createdAt: string;
+};
+
+export type UploadAuditImageResponse = {
+  image: AuditImage;
+};
+
 export type DashboardAudit = {
   id: string;
   name: string;
@@ -426,6 +577,15 @@ export type DashboardAudit = {
   expectedAssetCount: number;
   foundAssetCount: number;
   dueDate: string | null;
+  /**
+   * Number of users assigned; 0 = unassigned ("anyone can scan").
+   * Optional: older webapp builds (before this field shipped) omit it, so
+   * the client must tolerate its absence and hide ownership rather than
+   * render "undefined assigned" against a not-yet-deployed server.
+   */
+  assigneeCount?: number;
+  /** Whether the current user is among the assignees ("Assigned to you"). Optional — see `assigneeCount`. */
+  isAssignedToMe?: boolean;
 };
 
 export type Category = {

@@ -37,9 +37,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { organizationId, isSelfServiceOrBase } = permissionResult;
 
-    // Validate that the audit belongs to the user's organization
-    const audit = await db.auditSession.findUnique({
-      where: { id: auditId },
+    // Validate that the audit belongs to the user's organization.
+    // Scope the lookup by organizationId so a cross-org auditId can never
+    // resolve a record (defense-in-depth alongside the explicit check below).
+    const audit = await db.auditSession.findFirst({
+      where: { id: auditId, organizationId },
       select: {
         id: true,
         organizationId: true,

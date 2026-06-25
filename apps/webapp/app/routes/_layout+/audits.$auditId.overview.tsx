@@ -7,11 +7,7 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
 
-import { AssetImage } from "~/components/assets/asset-image";
-import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
-import { CategoryBadge } from "~/components/assets/category-badge";
-import { AuditAssetRowActionsDropdown } from "~/components/audit/audit-asset-row-actions-dropdown";
-import { AuditAssetStatusBadge } from "~/components/audit/audit-asset-status-badge";
+import { AuditAssetListItem } from "~/components/audit/audit-asset-list-item";
 import { AuditStatusBadgeWithOverdue } from "~/components/audit/audit-status-badge-with-overdue";
 import { AuditStatusFilter } from "~/components/audit/audit-status-filter";
 import BulkActionsDropdown from "~/components/audit/bulk-actions-dropdown";
@@ -19,22 +15,16 @@ import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
-import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
-import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { UserBadge } from "~/components/shared/user-badge";
-import { Td, Th } from "~/components/table";
-import { TeamMemberBadge } from "~/components/user/team-member-badge";
+import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import {
-  getAuditFilterMetadata,
-  getAuditStatusLabel,
-} from "~/modules/audit/audit-filter-utils";
+import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import { getAuditImages } from "~/modules/audit/image.service.server";
@@ -588,7 +578,7 @@ export default function AuditOverview() {
           }}
         />
         <List
-          ItemComponent={AssetListItem}
+          ItemComponent={AuditAssetListItem}
           customEmptyStateContent={filterMetadata.emptyState}
           bulkActions={canRemoveAssets ? <BulkActionsDropdown /> : undefined}
           headerChildren={
@@ -607,113 +597,6 @@ export default function AuditOverview() {
         />
       </div>
     </div>
-  );
-}
-
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-type AuditAssetItem = LoaderData["data"]["items"][number];
-
-function AssetListItem({ item }: { item: AuditAssetItem }) {
-  const { session, canRemoveAssets } = useLoaderData<typeof loader>();
-  const { category, location, custody } = item;
-  const [searchParams] = useSearchParams();
-  const currentFilter = searchParams.get("auditStatus");
-  const { roles } = useUserRoleHelper();
-
-  // Show audit status column when "ALL" or "EXPECTED" filter is active
-  const showAuditStatus =
-    currentFilter === null ||
-    currentFilter === "ALL" ||
-    currentFilter === "EXPECTED";
-  const isAuditCompleted = session.status === "COMPLETED";
-  const auditStatusLabel = getAuditStatusLabel(
-    item.auditData,
-    isAuditCompleted
-  );
-
-  const canReadCustody = userHasPermission({
-    roles,
-    entity: PermissionEntity.custody,
-    action: PermissionAction.read,
-  });
-
-  return (
-    <>
-      <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="relative flex size-10 shrink-0  justify-center">
-              <AssetImage
-                asset={{
-                  id: item.id,
-                  mainImage: item.mainImage,
-                  thumbnailImage: item.thumbnailImage,
-                  mainImageExpiration: item.mainImageExpiration,
-                }}
-                alt={`Image of ${item.title}`}
-                className="size-full rounded-[4px] border object-cover"
-                withPreview
-              />
-            </div>
-            <div className="min-w-[180px]">
-              <span className="word-break mb-1 block">
-                <Button
-                  to={`/assets/${item.id}`}
-                  variant="link"
-                  className="text-left font-medium text-gray-900 hover:text-gray-700"
-                  target="_blank"
-                  onlyNewTabIconOnHover
-                >
-                  {item.title}
-                </Button>
-              </span>
-            </div>
-          </div>
-        </div>
-      </Td>
-      {showAuditStatus && (
-        <Td>
-          <AuditAssetStatusBadge status={auditStatusLabel} />
-        </Td>
-      )}
-      <Td>
-        {location ? (
-          <LocationBadge
-            location={{
-              id: location.id,
-              name: location.name,
-              parentId: location.parentId ?? undefined,
-              childCount: location._count.children,
-            }}
-          />
-        ) : (
-          <EmptyTableValue />
-        )}
-      </Td>
-      {canReadCustody && (
-        <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
-          ) : (
-            <EmptyTableValue />
-          )}
-        </Td>
-      )}
-      <Td>
-        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
-      </Td>
-      <Td>
-        <ListItemTagsColumn tags={item.tags} />
-      </Td>
-      {canRemoveAssets && (
-        <Td className="text-right">
-          <AuditAssetRowActionsDropdown
-            auditAssetId={item.auditData?.auditAssetId || ""}
-            assetTitle={item.title}
-          />
-        </Td>
-      )}
-    </>
   );
 }
 

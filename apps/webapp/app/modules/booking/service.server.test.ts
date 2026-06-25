@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -32,7 +33,9 @@ import {
   revertBookingToDraft,
   extendBooking,
   removeAssets,
+  addScannedAssetsToBooking,
   getOngoingBookingForAsset,
+  bulkArchiveBookings,
   // Test helper functions
   getActionTextFromTransition,
   getSystemActionText,
@@ -80,10 +83,20 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       delete: vitest.fn().mockResolvedValue({}),
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
-      findMany: vitest.fn().mockResolvedValue([]),
+      // why: assertAssetsBelongToOrg (checkout/create cross-org guard) calls
+      // db.asset.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
+      // Echo the requested ids so the guard passes for happy-path tests; other
+      // call sites (no id.in) still get [], and tests override per-case.
+      findMany: vitest.fn().mockImplementation((args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       update: vitest.fn().mockResolvedValue({}),
     },
@@ -95,6 +108,11 @@ vitest.mock("~/database/db.server", () => ({
       count: vitest.fn().mockResolvedValue(0),
       findMany: vitest.fn().mockResolvedValue([]),
       aggregate: vitest.fn().mockResolvedValue({ _sum: { checkinCount: 0 } }),
+    },
+    partialBookingCheckout: {
+      create: vitest.fn().mockResolvedValue({}),
+      count: vitest.fn().mockResolvedValue(0),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     user: {
       findUniqueOrThrow: vitest.fn().mockResolvedValue({
@@ -116,6 +134,22 @@ vitest.mock("~/database/db.server", () => ({
     },
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: cross-org IDOR guard (assertTeamMemberBelongsToOrg) and the
+      // new-custodian lookup now query teamMember.findFirst scoped by
+      // organizationId. Echo a minimal row for the requested id so the
+      // guard passes; individual tests still override with richer shapes.
+      findFirst: vitest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) => ({
+          id: where.id,
+        })),
+    },
+    // why: cross-org IDOR guard assertUserBelongsToOrg now queries
+    // userOrganization.findFirst({ userId, organizationId }) before connecting
+    // a custodian user. Echo a membership row so happy-path booking tests pass;
+    // tests that exercise the foreign-user rejection override with null.
+    userOrganization: {
+      findFirst: vitest.fn().mockResolvedValue({ id: "user-org-1" }),
     },
     bookingSettings: {
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -255,6 +289,19 @@ const mockCreateBookingParams = {
 describe("createBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+
+    // why: createBooking now runs cross-org IDOR guards inside its
+    // transaction. assertAssetsBelongToOrg / assertTagsBelongToOrg compare
+    // findMany().length against the requested id count, so the mock must
+    // echo back exactly the requested ids (deduped) for the guards to pass.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id }))
+    );
+    (db.tag.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id }))
+    );
   });
 
   it("should create a booking successfully", async () => {
@@ -355,6 +402,12 @@ describe("createBooking", () => {
 describe("partialCheckinBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // Default: no progressive-checkout records (an all-at-once checkout), so
+    // check-in eligibility falls back to all booking assets. Tests that need a
+    // genuine progressive-checkout history override this per-test.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
   });
 
   const mockPartialCheckinParams = {
@@ -391,11 +444,21 @@ describe("partialCheckinBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
 
+    // Mock asset statuses - the scanned assets are CHECKED_OUT so they pass the
+    // progressive-checkout guard (only checked-out assets can be checked in).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.CHECKED_OUT },
+    ]);
+
     const result = await partialCheckinBooking(mockPartialCheckinParams);
 
     // Verify assets status updated (no longer disconnecting from booking)
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: partial check-in now scopes the asset status update by
+      // organizationId (cross-org IDOR hardening).
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -409,14 +472,21 @@ describe("partialCheckinBooking", () => {
       },
     });
 
-    // Verify notes created
-    expect(noteService.createNotes).toHaveBeenCalledWith({
-      content:
-        '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
-      type: "UPDATE",
-      userId: "user-1",
-      assetIds: ["asset-1", "asset-2"],
-    });
+    // Verify notes created — passed the transaction client so the note write is
+    // atomic with the partial check-in mutation.
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      {
+        content:
+          '{% link to="/settings/team/users/user-1" text="Test User" /%} checked in via partial check-in.',
+        type: "UPDATE",
+        userId: "user-1",
+        assetIds: ["asset-1", "asset-2"],
+        // why: createNotes now requires organizationId (it internally runs the
+        // cross-org asset guard); the booking service forwards the booking's org.
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
 
     expect(result).toEqual({
       booking: bookingWithAssets, // Assets remain in booking with new approach
@@ -424,6 +494,37 @@ describe("partialCheckinBooking", () => {
       remainingAssetCount: 1, // 3 total - 2 checked in = 1 remaining
       isComplete: false,
     });
+  });
+
+  it("should reject checking in assets that were never checked out (progressive checkout guard)", async () => {
+    expect.assertions(1);
+
+    // Booking holds both assets; asset-2 is still Booked (AVAILABLE) — it was
+    // never scanned out under progressive checkout, so it cannot be checked in.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // Progressive checkout history: only asset-1 was ever checked out for this
+    // booking, so asset-2 is ineligible for check-in (per-booking, not global).
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetIds: ["asset-1"] }]);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1" },
+      { id: "asset-2", title: "Asset 2" },
+    ]);
+
+    await expect(
+      partialCheckinBooking(mockPartialCheckinParams)
+    ).rejects.toThrow(/never checked out/i);
   });
 
   it("should redirect to complete check-in when all assets are being checked in", async () => {
@@ -458,6 +559,89 @@ describe("partialCheckinBooking", () => {
     await partialCheckinBooking(mockPartialCheckinParams);
 
     // Should not create partial check-in record when doing complete check-in
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+  });
+
+  it("should complete the booking from partial check-in records when the final batch returns the last outstanding asset, even though every asset reads CHECKED_OUT globally (shared across overlapping bookings)", async () => {
+    expect.assertions(2);
+
+    // Reproduces the production bug. Assets are shared across overlapping
+    // bookings, so an asset returned for THIS booking can be CHECKED_OUT again
+    // by a later booking. Completion must therefore be decided from this
+    // booking's PartialBookingCheckin records (the per-booking source of truth
+    // the progress bar uses), NOT from the assets' global `status`.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+        { id: "asset-3", kitId: null },
+      ],
+    });
+
+    // asset-1 and asset-2 were already returned for this booking in earlier
+    // sessions (records exist); asset-3 is the last outstanding asset.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1", "asset-2"] },
+    ]);
+
+    // Every asset still reads CHECKED_OUT globally because other active
+    // bookings hold the same physical items. The old status-based completion
+    // check never matched here, stranding the booking OVERDUE.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-3", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    // Final scan returns the last outstanding asset for this booking.
+    const result = await partialCheckinBooking({
+      ...mockPartialCheckinParams,
+      assetIds: ["asset-3"],
+    });
+
+    // The booking is fully returned → it completes via the full check-in path,
+    // which does NOT record another partial check-in. Before the fix, the
+    // status-based early-exit and the `total - currentBatch` count both failed
+    // to recognise completion and left the booking incomplete.
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+    expect(result.isComplete).toBe(true);
+  });
+
+  it("should reject a batch containing assets not in the booking before taking the completion shortcut", async () => {
+    expect.assertions(2);
+
+    // A batch of [lastOutstandingAsset, unrelatedSameOrgAsset] satisfies the
+    // record-based completion check (it covers every outstanding asset), so
+    // membership MUST be validated first — otherwise the booking would complete
+    // and write notes about an asset that was never on it instead of 400ing.
+    // The mobile endpoint forwards raw assetIds, so this guard matters there.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      assets: [
+        { id: "asset-1", kitId: null },
+        { id: "asset-2", kitId: null },
+      ],
+    });
+
+    // asset-1 already recorded → asset-2 is the only outstanding asset.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2", "asset-unrelated"],
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Must not have completed or recorded anything.
     expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
   });
 
@@ -525,7 +709,9 @@ describe("partialCheckinBooking", () => {
 
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1"] } },
+      // why: partial check-in now scopes the kit status update by
+      // organizationId (cross-org IDOR hardening).
+      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
       data: { status: KitStatus.AVAILABLE },
     });
 
@@ -1013,8 +1199,11 @@ describe("updateBasicBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
 
+    // why: the new-custodian lookup is now org-scoped via findFirst (was
+    // findUnique) for cross-org IDOR hardening; mock findFirst with the
+    // richer custodian shape so the email gets the new custodian's details.
     //@ts-expect-error missing vitest type
-    db.teamMember.findUnique.mockResolvedValue({
+    db.teamMember.findFirst.mockResolvedValue({
       id: "team-member-2",
       name: "New TM",
       user: { id: "user-2", firstName: "New", lastName: "Custodian" },
@@ -1150,10 +1339,48 @@ describe("updateBookingAssets", () => {
       data: { status: AssetStatus.CHECKED_OUT },
     });
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["kit-1", "kit-2"] },
+        organizationId: "org-1",
+        assets: { some: { id: { in: ["asset-1", "asset-2"] } } },
+      },
       data: { status: KitStatus.CHECKED_OUT },
     });
     expect(result).toEqual(mockBooking);
+  });
+
+  it("scopes the kit CHECKED_OUT flip to kits containing a newly-added asset, not arbitrary kitIds", async () => {
+    expect.assertions(2);
+
+    const mockBooking = {
+      id: "booking-1",
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+    };
+    // @ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+
+    await updateBookingAssets({
+      ...mockUpdateBookingAssetsParams, // assetIds: ["asset-1","asset-2"], org-1
+      // caller over-supplies kit-2; only kits owning a newly-added asset must flip
+      kitIds: ["kit-1", "kit-2"],
+    });
+
+    // assets still flipped as before (unchanged behavior)
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+
+    // kit flip carries the relation-scope guard tying it to the newly-added assets
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["kit-1", "kit-2"] },
+        organizationId: "org-1",
+        assets: { some: { id: { in: ["asset-1", "asset-2"] } } },
+      },
+      data: { status: KitStatus.CHECKED_OUT },
+    });
   });
 
   it("should not update kit status when no kitIds provided", async () => {
@@ -1452,6 +1679,19 @@ describe("reserveBooking", () => {
 describe("checkoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: checkoutBooking now runs assertAssetsBelongToOrg over the booking's
+    // assets (right after load, before any asset-derived logic). Echo the
+    // requested ids so the org guard passes and tests can exercise the
+    // conflict / custody / happy-path flows. (clearAllMocks keeps prior
+    // describe implementations, so set this explicitly per describe.)
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }
+    );
   });
 
   const mockCheckoutParams = {
@@ -1461,6 +1701,44 @@ describe("checkoutBooking", () => {
     from: futureFromDate,
     to: futureToDate,
   };
+
+  it("aborts checkout and performs no writes when an attached asset is not in the caller's org", async () => {
+    expect.assertions(3);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      assets: [
+        {
+          id: "asset-1",
+          kitId: null,
+          title: "Asset 1",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+        // legacy cross-org link — belongs to another workspace
+        {
+          id: "foreign-asset",
+          kitId: null,
+          title: "Foreign Asset",
+          status: "AVAILABLE",
+          bookings: [],
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // org guard: only the in-org asset resolves; "foreign-asset" is absent
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      "Some of the selected assets do not exist in your workspace"
+    );
+    // fail-safe: no status transition, no booking write
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 
   it("should checkout booking successfully with no conflicts", async () => {
     expect.assertions(2);
@@ -1498,7 +1776,9 @@ describe("checkoutBooking", () => {
     const result = await checkoutBooking(mockCheckoutParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: checkout now scopes the asset status update by organizationId
+      // (cross-org IDOR hardening) so foreign-org assets can't be mutated.
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
     });
 
@@ -1508,7 +1788,7 @@ describe("checkoutBooking", () => {
   });
 
   it("should throw error when assets have booking conflicts", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = {
       ...mockBookingData,
@@ -1536,6 +1816,11 @@ describe("checkoutBooking", () => {
     await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
       "Cannot check out booking. Some assets are already booked or checked out: Asset 1. Please remove conflicted assets and try again."
     );
+    // Expected business-rule conflict — must not be captured to Sentry
+    // (was noise: SHELF-WEBAPP-1KR; mirrors the reserve path).
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toMatchObject({
+      shouldBeCaptured: false,
+    });
   });
 
   it("should handle checkout for non-reserved booking", async () => {
@@ -1602,7 +1887,9 @@ describe("checkinBooking", () => {
     const result = await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1", "asset-2"] } },
+      // why: check-in now scopes the asset status update by organizationId
+      // (cross-org IDOR hardening) so foreign-org assets can't be mutated.
+      where: { id: { in: ["asset-1", "asset-2"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
 
@@ -1653,7 +1940,8 @@ describe("checkinBooking", () => {
     await checkinBooking(mockCheckinParams);
 
     expect(db.asset.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["asset-1"] } },
+      // why: check-in now scopes the asset status update by organizationId.
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
       data: { status: AssetStatus.AVAILABLE },
     });
   });
@@ -1758,6 +2046,8 @@ describe("checkinBooking", () => {
         id: {
           in: ["asset-2", "asset-3"],
         },
+        // why: check-in now scopes the asset status update by organizationId.
+        organizationId: "org-1",
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -1819,6 +2109,8 @@ describe("checkinBooking", () => {
         id: {
           in: ["kit-asset-1", "kit-asset-2", "kit-asset-3", "singular-asset"],
         },
+        // why: check-in now scopes the asset status update by organizationId.
+        organizationId: "org-1",
       },
       data: { status: AssetStatus.AVAILABLE },
     });
@@ -3173,5 +3465,117 @@ describe("getOngoingBookingForAsset", () => {
       },
     });
     expect(result).toEqual(checkedOutBooking);
+  });
+});
+
+describe("bulkArchiveBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  // Regression for Sentry SHELF-WEBAPP-1KQ: the per-booking status notes used
+  // to run inside an interactive transaction, which held the tx open across N
+  // sequential note writes and aborted the commit with P2028 on large
+  // selections. Notes are written via the global db (never `tx`), so they were
+  // never atomic — they must run AFTER a plain `updateMany`, with no tx.
+  it("archives via a plain updateMany (no interactive tx) and persists a status note for each booking", async () => {
+    expect.assertions(4);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: "u1",
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b2",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await bulkArchiveBookings({
+      bookingIds: ["b1", "b2"],
+      organizationId: "org-1",
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["b1", "b2"] }, organizationId: "org-1" },
+      data: { status: BookingStatus.ARCHIVED },
+    });
+    // The fix removed the interactive transaction entirely for this path.
+    expect(db.$transaction).not.toHaveBeenCalled();
+
+    // Observable outcome: each archived booking gets its own status note in the
+    // caller's org. `createSystemBookingNote` is the persistence boundary the
+    // suite stubs for booking notes (it forwards to db.bookingNote.create), so
+    // we assert per-booking payload here rather than just a call count.
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b1", organizationId: "org-1" })
+    );
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "b2", organizationId: "org-1" })
+    );
+  });
+
+  it("throws if any selected booking is not COMPLETE", async () => {
+    expect.assertions(1);
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b1",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({ bookingIds: ["b1"], organizationId: "org-1" })
+    ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("addScannedAssetsToBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("rejects when a scanned asset is reserved for an overlapping booking", async () => {
+    const from = new Date("2026-07-01T09:00:00Z");
+    const to = new Date("2026-07-01T17:00:00Z");
+
+    // why: stub the booking-window lookup that drives the overlap query so the
+    // guard runs without hitting the DB.
+    (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      from,
+      to,
+    });
+    // why: return one asset RESERVED by another overlapping booking so the real
+    // hasAssetBookingConflicts fires (and assertAssetsBelongToOrg sees it as an
+    // org member) — keeps the test off a real DB.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Conflicting Asset",
+        status: AssetStatus.AVAILABLE,
+        bookings: [{ id: "other-booking", status: BookingStatus.RESERVED }],
+      },
+    ]);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: ["asset-1"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toThrow(/already booked or checked out/i);
+
+    // The conflicting asset must never be connected to the booking — the guard
+    // runs before the connect/force-checkout transaction.
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 });

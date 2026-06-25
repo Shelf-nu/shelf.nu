@@ -71,6 +71,8 @@ const PRESETS: { id: TimeframePreset; label: string; shortLabel: string }[] = [
   { id: "all_time", label: "All time", shortLabel: "All" },
 ];
 
+const EMPTY_EXCLUDE_PRESETS: TimeframePreset[] = [];
+
 /**
  * Timeframe picker with preset buttons and custom date range.
  *
@@ -81,7 +83,7 @@ export function TimeframePicker({
   value,
   onChange,
   syncToUrl = true,
-  excludePresets = [],
+  excludePresets = EMPTY_EXCLUDE_PRESETS,
   disabled = false,
   className,
 }: TimeframePickerProps) {

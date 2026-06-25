@@ -1,10 +1,16 @@
 import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
+import type {
+  PartialCheckinDetailsType,
+  PartialCheckoutDetailsType,
+} from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import {
@@ -15,6 +21,7 @@ import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
+import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ListItemTagsColumn } from "../assets/assets-index/list-item-tags-column";
@@ -33,6 +40,10 @@ type ListAssetContentProps = {
   isKitAsset?: boolean;
   partialCheckinDetails: PartialCheckinDetailsType;
   shouldShowCheckinColumns: boolean;
+  /** Per-asset partial check-OUT details (date + user) keyed by asset id. */
+  partialCheckoutDetails: PartialCheckoutDetailsType;
+  /** Whether the "Checked out on/by" columns should render. */
+  shouldShowCheckoutColumns: boolean;
 };
 
 export default function ListAssetContent({
@@ -40,10 +51,23 @@ export default function ListAssetContent({
   isKitAsset,
   partialCheckinDetails,
   shouldShowCheckinColumns,
+  partialCheckoutDetails,
+  shouldShowCheckoutColumns,
 }: ListAssetContentProps) {
   const { category, tags } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const currentOrganization = useCurrentOrganization();
   const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+
+  // Resolve the asset's display code (QR id, SAM id, or barcode value) per
+  // the workspace preference and per-asset override. Cheap pure call; safe
+  // inline. Renders nothing if the asset lacks the necessary related fields.
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+      })
+    : null;
   const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
     booking.status
   );
@@ -114,6 +138,18 @@ export default function ListAssetContent({
     booking.status
   );
 
+  // Per-asset partial check-OUT record (if any). Presence of a record drives
+  // the "Checked out on/by" cell content for this asset.
+  const checkoutDetails = partialCheckoutDetails[item.id];
+
+  // An asset only "returned" if it was actually checked out. When the booking
+  // used progressive checkout, partialCheckoutDetails identifies the checked-out
+  // assets; when it has no checkout records (quick/all-at-once checkout), every
+  // asset was checked out.
+  const hasProgressiveCheckout = Object.keys(partialCheckoutDetails).length > 0;
+  const wasCheckedOut =
+    !hasProgressiveCheckout || Boolean(partialCheckoutDetails[item.id]);
+
   return (
     <>
       <When truthy={!isKitAsset} fallback={<Td> </Td>}>
@@ -159,8 +195,14 @@ export default function ListAssetContent({
                   {item.title}
                 </Button>
               </span>
-              <div>
-                {isFinished ? (
+              {/*
+                Single metadata line under the title: status (returned/active)
+                first as the most glanceable cue, code chip after as the
+                identification reference. `flex-wrap` keeps long codes safe on
+                narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
+                {isFinished && wasCheckedOut ? (
                   <ReturnedBadge />
                 ) : (
                   <AssetStatusBadge
@@ -169,6 +211,7 @@ export default function ListAssetContent({
                     availableToBook={item.availableToBook}
                   />
                 )}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>
@@ -199,6 +242,62 @@ export default function ListAssetContent({
       >
         <ListItemTagsColumn tags={tags} />
       </Td>
+
+      <Td
+        className={tw(
+          isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+        )}
+      >
+        {item.location ? (
+          <LocationBadge
+            location={{
+              id: item.location.id,
+              name: item.location.name,
+              parentId: item.location.parentId ?? undefined,
+              childCount: item.location._count?.children ?? 0,
+            }}
+          />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      {shouldShowCheckoutColumns && (
+        <>
+          {/* Checked out on */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {checkoutDetails ? (
+              <span className="text-sm text-gray-600">
+                <DateS date={checkoutDetails.checkoutDate} includeTime />
+              </span>
+            ) : (
+              <EmptyTableValue />
+            )}
+          </Td>
+
+          {/* Checked out by */}
+          <Td
+            className={tw(
+              isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
+            )}
+          >
+            {checkoutDetails ? (
+              <span className="text-sm text-gray-600">
+                <UserBadge
+                  name={resolveUserDisplayName(checkoutDetails.checkedOutBy)}
+                  img={checkoutDetails.checkedOutBy.profilePicture}
+                />
+              </span>
+            ) : (
+              <EmptyTableValue />
+            )}
+          </Td>
+        </>
+      )}
 
       {shouldShowCheckinColumns && (
         <>

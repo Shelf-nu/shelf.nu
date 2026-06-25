@@ -75,6 +75,7 @@ vi.mock("~/database/db.server", () => {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
+      findFirstOrThrow: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -129,6 +130,7 @@ const mockDb = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
+    findFirstOrThrow: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
@@ -207,7 +209,10 @@ describe("audit service", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    mockDb.auditSession.findUnique.mockResolvedValue({
+    // createAuditSession re-fetches the new session via org-scoped findFirst
+    // (was findUnique); stub both so the value resolves regardless of which
+    // read path the code uses.
+    const createdSession = {
       id: "audit-1",
       name: defaultInput.name,
       description: defaultInput.description,
@@ -236,7 +241,9 @@ describe("audit service", () => {
         },
       ],
       assets: [],
-    });
+    };
+    mockDb.auditSession.findUnique.mockResolvedValue(createdSession);
+    mockDb.auditSession.findFirst.mockResolvedValue(createdSession);
     mockDb.auditAsset.createMany.mockResolvedValue({ count: 2 });
     mockDb.auditAssignment.createMany.mockResolvedValue({ count: 1 });
     mockDb.auditAsset.findMany.mockResolvedValue([
@@ -853,6 +860,8 @@ describe("audit service", () => {
         expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
           where: {
             id: { in: ["a1", "a2"] },
+            // Write is org-scoped as defense-in-depth
+            organizationId: "org-1",
             status: {
               in: [AuditStatus.COMPLETED, AuditStatus.CANCELLED],
             },
@@ -1425,8 +1434,36 @@ describe("audit service", () => {
       // each test relies on.
       vi.clearAllMocks();
 
-      // Original audit lookup — overridden per test for not-found cases.
-      mockDb.auditSession.findFirst.mockResolvedValue(originalAudit);
+      // duplicateAuditSession reads the original via findFirst; the nested
+      // createAuditSession re-fetches the NEW session via the same org-scoped
+      // findFirst (was findUnique). Discriminate by where.id so per-test
+      // mockResolvedValueOnce overrides on the original lookup still work,
+      // while the create re-fetch ("audit-copy") always returns the copy.
+      const copySession = {
+        id: "audit-copy",
+        name: `${originalAudit.name} (Copy)`,
+        description: originalAudit.description,
+        organizationId: "org-1",
+        createdById: baseInput.userId,
+        expectedAssetCount: 3,
+        foundAssetCount: 0,
+        missingAssetCount: 3,
+        unexpectedAssetCount: 0,
+        status: AuditStatus.PENDING,
+        scopeMeta: originalAudit.scopeMeta,
+        targetId: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        assignments: [],
+      };
+      mockDb.auditSession.findFirst.mockImplementation((args: any) =>
+        Promise.resolve(
+          args?.where?.id === "audit-copy" ? copySession : originalAudit
+        )
+      );
 
       // Default: all assets still exist.
       mockDb.asset.findMany.mockResolvedValue([
@@ -1668,11 +1705,15 @@ describe("audit service", () => {
       // Atomic transition succeeds (count: 1) and the post-update re-fetch
       // returns the cancelled row.
       mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
-      mockDb.auditSession.findUniqueOrThrow.mockResolvedValue({
+      // cancelAuditSession re-fetches the cancelled row via org-scoped
+      // findFirstOrThrow (was findUniqueOrThrow); stub both.
+      const cancelledRow = {
         ...baseAudit,
         status: AuditStatus.CANCELLED,
         cancelledAt: new Date(),
-      });
+      };
+      mockDb.auditSession.findUniqueOrThrow.mockResolvedValue(cancelledRow);
+      mockDb.auditSession.findFirstOrThrow.mockResolvedValue(cancelledRow);
       mockDb.user.findFirst.mockResolvedValue({
         firstName: "Acting",
         lastName: "User",

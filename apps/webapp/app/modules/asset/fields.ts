@@ -166,29 +166,21 @@ export const assetIndexFields = ({
         },
       },
     },
-    customFields: {
-      where: {
-        customField: {
-          active: true,
-          deletedAt: null,
-        },
-      },
-      include: {
-        customField: {
-          select: {
-            id: true,
-            name: true,
-            helpText: true,
-            required: true,
-            type: true,
-            categories: true,
-          },
-        },
-      },
-    },
+    // why: customFields used to be eagerly loaded here for every asset row.
+    // The simple asset index doesn't render them (only the advanced columns
+    // do), and on a 13k-asset workspace this multi-row include scaled with
+    // the number of active custom fields. Advanced mode uses
+    // advancedAssetIndexFields below; the command-palette search re-adds
+    // customFields via extraInclude.
     qrCodes: {
       select: { id: true },
       take: 1,
+    },
+    // Asset-code resolution: surfaces the linked barcodes so `resolveDisplayCode`
+    // (in `app/modules/barcode/display.ts`) can render the workspace-preferred
+    // or per-asset-override code on list views. Narrow select keeps payload small.
+    barcodes: {
+      select: { id: true, type: true, value: true },
     },
     /**
      * Include booking custodian data for CHECKED_OUT assets inline,

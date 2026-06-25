@@ -74,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         message:
           "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
         label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -133,12 +134,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
+
+    // SECURITY: mirror the loader guard on the action. Bookings cannot be
+    // created in personal workspaces; without this check a crafted POST could
+    // bypass the (loader-only) UI restriction.
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const formData = await request.formData();
     const intent = formData.get("intent") as string;
@@ -160,6 +177,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         isAdminOrOwner,
       }),
       {
+        // Expected user-input validation (e.g. "Start date must be at least N
+        // hours from now") — a 400, not a server error. Don't capture to
+        // Sentry (was noise: SHELF-WEBAPP-1KZ).
+        shouldBeCaptured: false,
         additionalData: { userId, organizationId },
       }
     );

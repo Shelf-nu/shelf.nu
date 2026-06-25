@@ -167,6 +167,10 @@ export interface ReportPayload<TRow = Record<string, unknown>> {
   // Top Booked Assets report specific fields
   /** The #1 most booked asset (independent of pagination) */
   topBookedAsset?: TopBookedAssetRow | null;
+
+  // Top Booked Kits report specific fields
+  /** The #1 most booked kit (independent of pagination) */
+  topBookedKit?: TopBookedKitRow | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -378,6 +382,40 @@ export type TopBookedAssetsKpiId =
   | "avg_bookings_per_asset"
   | "most_booked_asset";
 
+/**
+ * Row type for the Top Booked Kits report.
+ *
+ * Kits have no direct relation to bookings — a kit is "booked" when its
+ * member assets (which carry its `kitId`) are added to a booking, and kits
+ * move atomically (you cannot book a single item out of a kit). So
+ * `bookingCount` is the number of distinct bookings the kit appeared in
+ * within the timeframe, deduped per booking. Mirrors {@link TopBookedAssetRow}.
+ */
+export interface TopBookedKitRow {
+  id: string;
+  kitId: string;
+  kitName: string;
+  /** Kit image URL (server-refreshed if the signed URL had expired) */
+  image: string | null;
+  /** Kit image signed-URL expiration, passed through for client-side fallback */
+  imageExpiration: Date | string | null;
+  category: string | null;
+  location: string | null;
+  /** Number of distinct bookings the kit appeared in during the timeframe */
+  bookingCount: number;
+  /** Total days booked (summed booking durations, counted once per booking) */
+  totalDaysBooked: number;
+  /** Time booked percentage (days booked / days in period) */
+  timeBookedRate: number;
+}
+
+/** KPI IDs for the Top Booked Kits report */
+export type TopBookedKitsKpiId =
+  | "total_kit_bookings"
+  | "unique_kits_booked"
+  | "avg_bookings_per_kit"
+  | "most_booked_kit";
+
 // -----------------------------------------------------------------------------
 // R10: Asset Distribution Report Types
 // -----------------------------------------------------------------------------
@@ -585,6 +623,13 @@ export interface CompliancePdfMeta extends ReportPdfMetaBase {
     periodLabel: string;
   };
   custodianPerformance: Array<{
+    /**
+     * TeamMember id when available — used as the row key in PDF tables.
+     * Falls back to `custodianName` only for legacy rows where the id is
+     * missing; names are NOT unique in the schema and shouldn't be the
+     * primary key.
+     */
+    custodianId: string | null;
     custodianName: string;
     rate: number;
     onTime: number;

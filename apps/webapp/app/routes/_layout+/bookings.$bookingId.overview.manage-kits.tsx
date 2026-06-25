@@ -28,6 +28,7 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
   getKitAvailabilityStatus,
   KitAvailabilityLabel,
@@ -53,7 +54,9 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   getBooking,
@@ -85,6 +88,11 @@ export type KitForBooking = Prisma.KitGetPayload<{
   include: {
     location: typeof LOCATION_WITH_HIERARCHY;
     _count: { select: { assets: true } };
+    // Code-resolution relations for the AssetCodeBadge — kits are code-bearing
+    // entities too. The runtime loader already includes these via
+    // KITS_INCLUDE_FIELDS; declaring them here lines the type up.
+    qrCodes: { take: 1; select: { id: true } };
+    barcodes: { select: { id: true; type: true; value: true } };
     assets: {
       select: {
         id: true;
@@ -314,7 +322,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const selectedKits = await db.kit.findMany({
-      where: { id: { in: kitIds } },
+      // Scope to caller's org: kitIds come from request input, so an
+      // attacker could otherwise reference kits from another workspace.
+      where: { id: { in: kitIds }, organizationId },
       select: {
         id: true,
         name: true,
@@ -384,17 +394,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /** We only update the booking if there are NEW assets to add */
     if (newAssetIds.length > 0) {
+      // Only the kits actually being added now (those contributing a new asset) —
+      // NOT the full submitted selection. Passing the whole selection would flip
+      // still-available kits already on an ongoing booking to CHECKED_OUT.
+      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
+
       /** We update the booking with ONLY the new assets to avoid connecting already-connected assets */
       const b = await updateBookingAssets({
         id: bookingId,
         organizationId,
         assetIds: newAssetIds, // Only the newly added assets from kits
-        kitIds, // Pass the kit IDs so kit status can be updated if booking is checked out
+        kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
       });
 
-      /** We create notes for the newly added kits instead of individual assets */
-      const newlyAddedKitIds = newlyAddedKits.map((kit) => kit.id);
       if (newlyAddedKitIds.length > 0) {
         await createKitBookingNote({
           bookingId: b.id,
@@ -410,7 +423,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     /** If some kits were removed, we also need to handle those */
     if (removedKitIds.length > 0) {
       const removedKits = await db.kit.findMany({
-        where: { id: { in: removedKitIds } },
+        // Scope to caller's org: removedKitIds come from request input, so an
+        // attacker could otherwise reference kits from another workspace.
+        where: { id: { in: removedKitIds }, organizationId },
         select: {
           id: true,
           name: true,
@@ -677,6 +692,10 @@ export default function AddKitsToBooking() {
 function Row({ item: kit }: { item: KitForBooking }) {
   const { booking } = useLoaderData<typeof loader>();
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    : null;
 
   // For Case 1: Check if kit is checked out in current booking
   // This happens when kit status is CHECKED_OUT and has bookings with current booking ID
@@ -734,6 +753,8 @@ function Row({ item: kit }: { item: KitForBooking }) {
                   />
                 </When>
                 <KitAvailabilityLabel kit={kit} />
+                {/* Kit's display code chip — same identifier surface as assets. */}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>

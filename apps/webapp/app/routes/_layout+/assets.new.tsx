@@ -209,6 +209,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
         type: "UPDATE",
         userId: authSession.userId,
         assetId: asset.id,
+        organizationId,
       }),
     ];
 
@@ -223,6 +224,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
           type: "UPDATE",
           userId: authSession.userId,
           assetId: asset.id,
+          organizationId,
         })
       );
     }

@@ -1,11 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import * as Haptics from "expo-haptics";
+import type { ScanResult as ScanResultType } from "@/components/scanner/scan-result-card";
 
-type ScanResult = {
-  type: "success" | "error" | "not_found";
-  title: string;
-  message: string;
-} | null;
+type ScanResult = ScanResultType | null;
 
 type FrameHighlight = "success" | "error" | null;
 

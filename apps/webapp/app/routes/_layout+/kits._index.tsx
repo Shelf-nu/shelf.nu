@@ -7,6 +7,7 @@ import type {
   LinksFunction,
 } from "react-router";
 import { data, redirect, Link, useLoaderData } from "react-router";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { useKitAvailabilityData } from "~/components/assets/assets-index/use-kit-availability-data";
 import { AvailabilityViewToggle } from "~/components/assets/assets-index/view-toggle";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -37,6 +38,7 @@ import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -401,6 +403,14 @@ function ListContent({
     typeof LOCATION_WITH_HIERARCHY
   > | null;
 
+  // Resolve the kit's display code. Kits don't have sequentialId/preferred-
+  // BarcodeId in v1 — the resolver's optional fields tolerate that and fall
+  // back to QR when the workspace prefers SAM.
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    : null;
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -427,11 +437,17 @@ function ListContent({
               <span className="word-break mb-1 block font-medium">
                 {item.name}
               </span>
-              <div>
+              {/*
+                Same metadata-line composition as the asset surfaces: status
+                first (glanceable color), code chip second. flex-wrap handles
+                narrow viewports.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
                   availableToBook={!item.assets.some((a) => !a.availableToBook)}
                 />
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
             </div>
           </div>

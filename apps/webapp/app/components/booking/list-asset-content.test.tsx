@@ -115,6 +115,16 @@ vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
 
+// why: useCurrentOrganization calls useRouteLoaderData under the hood, which
+// throws outside a router context. Mock returns a minimal org shape so the
+// AssetCodeBadge resolver receives valid inputs in component tests.
+vi.mock("~/hooks/use-current-organization", () => ({
+  useCurrentOrganization: () => ({
+    barcodesEnabled: false,
+    qrIdDisplayPreference: "QR_ID",
+  }),
+}));
+
 // why: controlling asset status logic to test returned badge vs status badge behavior
 vi.mock("~/utils/booking-assets", () => ({
   getBookingContextAssetStatus: (
@@ -179,6 +189,8 @@ describe("ListAssetContent", () => {
               item={baseAsset}
               partialCheckinDetails={basePartialDetails}
               shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{}}
+              shouldShowCheckoutColumns={false}
             />
           </tr>
         </tbody>
@@ -195,6 +207,90 @@ describe("ListAssetContent", () => {
     expect(icon).not.toBeNull();
     expect(icon).toHaveStyle({ color: BADGE_COLORS.gray.text });
 
+    expect(assetStatusBadgeMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT show the returned badge for a never-checked-out asset on a complete booking", () => {
+    // Progressive checkout: checkout records exist (for asset-2), but the asset
+    // being rendered (asset-1) was never checked out, so it must NOT be marked
+    // "Returned" even though the booking is COMPLETE.
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: "COMPLETE",
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListAssetContent
+              item={baseAsset}
+              partialCheckinDetails={basePartialDetails}
+              shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{
+                "asset-2": {
+                  checkoutDate: "2026-06-01",
+                  checkedOutBy: {
+                    id: "user-1",
+                    firstName: "Test",
+                    lastName: "User",
+                    profilePicture: null,
+                  },
+                },
+              }}
+              shouldShowCheckoutColumns={false}
+            />
+          </tr>
+        </tbody>
+      </table>
+    );
+
+    expect(screen.queryByText("Returned")).not.toBeInTheDocument();
+    expect(assetStatusBadgeMock).toHaveBeenCalled();
+  });
+
+  it("shows the returned badge for a checked-out asset on a complete booking with progressive checkout", () => {
+    // asset-1 HAS a checkout record → it was actually checked out → Returned.
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: "COMPLETE",
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListAssetContent
+              item={baseAsset}
+              partialCheckinDetails={basePartialDetails}
+              shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{
+                "asset-1": {
+                  checkoutDate: "2026-06-01",
+                  checkedOutBy: {
+                    id: "user-1",
+                    firstName: "Test",
+                    lastName: "User",
+                    profilePicture: null,
+                  },
+                },
+              }}
+              shouldShowCheckoutColumns={false}
+            />
+          </tr>
+        </tbody>
+      </table>
+    );
+
+    expect(screen.getByText("Returned")).toBeInTheDocument();
     expect(assetStatusBadgeMock).not.toHaveBeenCalled();
   });
 
@@ -216,6 +312,8 @@ describe("ListAssetContent", () => {
               item={baseAsset}
               partialCheckinDetails={basePartialDetails}
               shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{}}
+              shouldShowCheckoutColumns={false}
             />
           </tr>
         </tbody>
@@ -244,6 +342,8 @@ describe("ListAssetContent", () => {
               item={baseAsset}
               partialCheckinDetails={basePartialDetails}
               shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{}}
+              shouldShowCheckoutColumns={false}
             />
           </tr>
         </tbody>

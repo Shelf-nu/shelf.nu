@@ -31,6 +31,10 @@ export default function AssetsLayout() {
       <Stack.Screen name="[id]" options={{ title: "Asset Details" }} />
       <Stack.Screen name="new" options={{ title: "New Asset" }} />
       <Stack.Screen name="edit" options={{ title: "Edit Asset" }} />
+      {/* Kits live in this stack so the segmented Assets|Kits switcher swaps
+          lists in place and the tab bar keeps Assets active. */}
+      <Stack.Screen name="kits/index" options={{ title: "Kits" }} />
+      <Stack.Screen name="kits/[id]" options={{ title: "Kit Details" }} />
     </Stack>
   );
 }

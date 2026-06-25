@@ -10,6 +10,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "./auth-context";
 import { api, type Organization } from "./api";
+import { setSentryUser } from "./sentry";
 
 const SELECTED_ORG_KEY = "shelf_selected_org_id";
 
@@ -104,6 +105,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchOrgs();
   }, [fetchOrgs]);
+
+  // Keep Sentry's user/org/role scope in sync so every event (crashes included)
+  // is self-describing — which org, what role, which user — for triage without
+  // re-investigation. No-ops in dev / without a DSN. IDs & roles only, no PII.
+  useEffect(() => {
+    setSentryUser({
+      userId: userProfile?.id ?? null,
+      orgId: currentOrg?.id ?? null,
+      role: currentOrg?.roles?.join(",") ?? null,
+    });
+  }, [userProfile?.id, currentOrg?.id, currentOrg?.roles]);
 
   const value = useMemo(
     () => ({

@@ -1,32 +1,15 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
-
-/**
- * Generates dynamic Prisma orderBy clause for booking assets
- * @param orderBy - The field to sort by (status, title, category, kit)
- * @param orderDirection - The sort direction (asc or desc)
- * @returns Array of Prisma orderBy inputs
- */
-export function getBookingAssetsOrderBy(
-  orderBy: string = "status",
-  orderDirection: "asc" | "desc" = "desc"
-): Prisma.AssetOrderByWithRelationInput[] {
-  const orderByMap: Record<string, Prisma.AssetOrderByWithRelationInput[]> = {
-    status: [{ status: orderDirection }, { createdAt: "asc" }],
-    title: [{ title: orderDirection }],
-    category: [{ category: { name: orderDirection } }],
-  };
-  return orderByMap[orderBy] || orderByMap.status;
-}
 
 type AssetWithKit = {
   id: string;
   title: string;
   status: string;
   kitId: string | null;
-  kit: { name: string } | null;
+  kit: { name: string; location?: { name: string } | null } | null;
   category: { name: string } | null;
+  location?: { name: string } | null;
   [key: string]: unknown;
 };
 
@@ -35,7 +18,7 @@ type AssetWithKit = {
  * Returns: sorted kit assets (grouped) followed by sorted individual assets.
  *
  * @param assets - Array of assets with kit information
- * @param orderBy - Field to sort by (status, title, category, kit)
+ * @param orderBy - Field to sort by (status, title, category, location)
  * @param orderDirection - Sort direction (asc or desc)
  * @returns Sorted array with kit assets grouped together
  */
@@ -57,11 +40,18 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
   }
 
   // Group kit assets by kitId
-  const kitGroups = new Map<string, { kitName: string; assets: T[] }>();
+  const kitGroups = new Map<
+    string,
+    { kitName: string; kitLocationName: string | null; assets: T[] }
+  >();
   for (const asset of kitAssets) {
     const kitId = asset.kitId!;
     if (!kitGroups.has(kitId)) {
-      kitGroups.set(kitId, { kitName: asset.kit!.name, assets: [] });
+      kitGroups.set(kitId, {
+        kitName: asset.kit!.name,
+        kitLocationName: asset.kit!.location?.name ?? null,
+        assets: [],
+      });
     }
     kitGroups.get(kitId)!.assets.push(asset);
   }
@@ -82,6 +72,15 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
         if (!catA && !catB) return a.title.localeCompare(b.title);
         // At this point both catA and catB are defined (handled above)
         return multiplier * catA!.localeCompare(catB!);
+      }
+      case "location": {
+        const locA = a.location?.name;
+        const locB = b.location?.name;
+        // Null locations go to the end regardless of direction
+        if (!locA && locB) return 1;
+        if (locA && !locB) return -1;
+        if (!locA && !locB) return a.title.localeCompare(b.title);
+        return multiplier * locA!.localeCompare(locB!);
       }
       case "status":
       default: {
@@ -134,6 +133,16 @@ export function groupAndSortAssetsByKit<T extends AssetWithKit>(
           // At this point both catA and catB are defined (handled above)
           return multiplier * catA!.localeCompare(catB!);
         }
+        case "location": {
+          const locA = groupA.kitLocationName;
+          const locB = groupB.kitLocationName;
+          // Null locations go to the end regardless of direction
+          if (!locA && locB) return 1;
+          if (locA && !locB) return -1;
+          if (!locA && !locB)
+            return groupA.kitName.localeCompare(groupB.kitName);
+          return multiplier * locA!.localeCompare(locB!);
+        }
         case "status":
         default: {
           // Sort kits by "most urgent" status in the kit
@@ -178,6 +187,85 @@ export function isBookingEarlyCheckout(from: Date): boolean {
   const now = new Date();
   const fromWithBuffer = subMinutes(from, 15);
   return isAfter(fromWithBuffer, now);
+}
+
+/**
+ * Decide whether a checkout should show the early-checkout "adjust start date"
+ * prompt. This is ONLY appropriate for the first checkout that transitions the
+ * booking RESERVED → ONGOING: adjusting the start date once the booking has
+ * already started is meaningless, and `partialCheckoutBooking` ignores the date
+ * choice unless the booking is RESERVED. Used by the scanner drawer and the
+ * bulk partial-checkout dialog so a progressive checkout of remaining items on
+ * an ONGOING/OVERDUE booking never re-prompts.
+ *
+ * @param status - The booking's current status
+ * @param from - The booking's start date
+ * @returns `true` only when the booking is RESERVED and starts >15min from now
+ */
+export function shouldPromptEarlyCheckout(
+  status: BookingStatus,
+  from: Date
+): boolean {
+  return status === BookingStatus.RESERVED && isBookingEarlyCheckout(from);
+}
+
+/** Minimal asset shape needed to decide check-out eligibility. */
+type CheckoutEligibilityAsset = { id: string; status: AssetStatus };
+
+/**
+ * Decide whether a booking asset is still eligible to be checked out right now.
+ *
+ * An asset is eligible when it has NOT already left the "Booked" bucket and can
+ * physically be checked out. Specifically it must not be:
+ * - already checked out — by a partial-checkout record (`checkedOutIds`) OR a
+ *   live `CHECKED_OUT` status (the all-at-once flow leaves no record);
+ * - already returned via partial check-in (`returnedIds`) — those are AVAILABLE
+ *   again but DONE for this booking;
+ * - in custody (must be released before it can be checked out).
+ *
+ * Shared by the scanner drawer's eligibility filter and its "remaining to check
+ * out" denominator so the numerator and denominator always describe the SAME
+ * set (the progress bar can reach 100%).
+ *
+ * @param asset - The asset (id + live status)
+ * @param checkedOutIds - Set of asset ids already checked out for this booking
+ * @param returnedIds - Set of asset ids already returned via partial check-in
+ * @returns `true` when the asset can still be scanned out
+ */
+export function isAssetCheckoutEligible(
+  asset: CheckoutEligibilityAsset,
+  checkedOutIds: Set<string>,
+  returnedIds: Set<string>
+): boolean {
+  return (
+    !checkedOutIds.has(asset.id) &&
+    !returnedIds.has(asset.id) &&
+    asset.status !== AssetStatus.CHECKED_OUT &&
+    asset.status !== AssetStatus.IN_CUSTODY
+  );
+}
+
+/**
+ * Count the booking assets still available to check out — the scanner's
+ * "remaining to check out" denominator. Asset-scoped (kit assets counted
+ * individually) and uses {@link isAssetCheckoutEligible}, so it stays in lock
+ * step with the scanner's eligibility filter.
+ *
+ * @param bookingAssets - All assets on the booking (id + live status)
+ * @param checkedOutAssetIds - Asset ids already checked out (record or status)
+ * @param checkedInAssetIds - Asset ids already returned via partial check-in
+ * @returns Number of assets still eligible to be checked out
+ */
+export function countRemainingCheckoutAssets(
+  bookingAssets: CheckoutEligibilityAsset[],
+  checkedOutAssetIds: string[],
+  checkedInAssetIds: string[]
+): number {
+  const checkedOutIds = new Set(checkedOutAssetIds);
+  const returnedIds = new Set(checkedInAssetIds);
+  return bookingAssets.filter((asset) =>
+    isAssetCheckoutEligible(asset, checkedOutIds, returnedIds)
+  ).length;
 }
 
 /**
@@ -271,4 +359,119 @@ export function isAssetAlreadyBooked(
   currentBookingId: string
 ): boolean {
   return hasAssetBookingConflicts(asset, currentBookingId);
+}
+
+/**
+ * Minimal asset shape needed for in-memory booking search. Mirrors the fields
+ * selected by `BOOKING_WITH_ASSETS_INCLUDE.assets.select`. Relation fields are
+ * optional/nullable to allow structural subtyping against the richer Prisma
+ * asset payload.
+ *
+ * @see {@link file://./constants.ts} BOOKING_WITH_ASSETS_INCLUDE.assets.select
+ */
+export type SearchableBookingAsset = {
+  id: string;
+  kitId: string | null;
+  title: string;
+  sequentialId?: string | null;
+  category?: { name: string } | null;
+  tags?: { name: string }[] | null;
+  location?: { name: string } | null;
+  qrCodes?: { id: string }[] | null;
+  barcodes?: { value: string }[] | null;
+  kit?: {
+    name?: string | null;
+    location?: { name: string } | null;
+    category?: { name: string } | null;
+  } | null;
+};
+
+/**
+ * Splits a raw search string into lowercased, trimmed, non-empty terms.
+ * Commas separate terms (comma = OR).
+ *
+ * @param search - Raw search string from the `s` query param
+ * @returns Array of normalized terms (empty if the input is blank)
+ */
+function parseBookingSearchTerms(search: string): string[] {
+  return search
+    .toLowerCase()
+    .trim()
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+/**
+ * True when `term` is a case-insensitive substring of any searchable field of
+ * the asset (its own fields, its tags/codes, or its kit's fields).
+ *
+ * @param asset - The asset to test
+ * @param term - An already-lowercased search term
+ */
+function assetMatchesBookingTerm(
+  asset: SearchableBookingAsset,
+  term: string
+): boolean {
+  const haystacks: (string | null | undefined)[] = [
+    asset.title,
+    asset.sequentialId,
+    asset.category?.name,
+    asset.location?.name,
+    asset.kit?.name,
+    asset.kit?.location?.name,
+    asset.kit?.category?.name,
+    ...(asset.tags?.map((tag) => tag.name) ?? []),
+    ...(asset.qrCodes?.map((qr) => qr.id) ?? []),
+    ...(asset.barcodes?.map((barcode) => barcode.value) ?? []),
+  ];
+
+  return haystacks.some(
+    (value) => value != null && value.toLowerCase().includes(term)
+  );
+}
+
+/**
+ * In-memory replacement for the old Prisma multi-relation `OR` search on a
+ * booking's assets. An asset matches if ANY comma-separated term is a
+ * case-insensitive substring of ANY of its searchable fields. A match inside a
+ * kit re-expands to surface the ENTIRE kit (all sibling assets).
+ *
+ * Input order is preserved (callers sort afterwards). Blank/missing search
+ * returns the input array unchanged.
+ *
+ * @param assets - The booking's full asset list
+ * @param search - Raw search string from the `s` query param (may be blank)
+ * @returns The filtered subset (with kits re-expanded)
+ */
+export function filterBookingAssets<T extends SearchableBookingAsset>(
+  assets: T[],
+  search: string | null | undefined
+): T[] {
+  const terms = search ? parseBookingSearchTerms(search) : [];
+  if (terms.length === 0) {
+    return assets;
+  }
+
+  // Comma = OR: an asset matches if any term matches any of its fields.
+  const directMatches = assets.filter((asset) =>
+    terms.some((term) => assetMatchesBookingTerm(asset, term))
+  );
+
+  // Kit re-expansion: a matched asset surfaces its whole kit.
+  const matchedKitIds = new Set(
+    directMatches
+      .map((asset) => asset.kitId)
+      .filter((kitId): kitId is string => Boolean(kitId))
+  );
+  if (matchedKitIds.size === 0) {
+    return directMatches;
+  }
+
+  const directIds = new Set(directMatches.map((asset) => asset.id));
+  return assets.filter(
+    (asset) =>
+      directIds.has(asset.id) ||
+      (asset.kitId != null && matchedKitIds.has(asset.kitId))
+  );
 }
