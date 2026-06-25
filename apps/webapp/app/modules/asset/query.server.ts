@@ -1885,13 +1885,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         '[]'::jsonb
       ) AS tags,
       COALESCE(
-        CASE 
+        CASE
           WHEN cu.id IS NOT NULL THEN
             jsonb_build_object(
               'name', tm.name,
               'custodian', jsonb_build_object(
                 'name', tm.name,
-                'user', CASE 
+                'user', CASE
                   WHEN u.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', u.id,
@@ -1906,9 +1906,23 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             )
           WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
             jsonb_build_object(
-              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+              -- why: when the booking custodian is an NRM (team member with no
+              -- user account), bu.* is NULL. We must NOT CONCAT the user columns
+              -- here: Postgres CONCAT ignores NULLs and returns ' ' (a space),
+              -- which is non-NULL, so a COALESCE(CONCAT(...), btm.name) would
+              -- never fall back to the NRM name and the badge renders blank.
+              -- Guard on bu.id (mirrors the 'user' sub-object branch below).
+              'name', CASE
+                WHEN bu.id IS NOT NULL
+                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                ELSE btm.name
+              END,
               'custodian', jsonb_build_object(
-                'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+                'name', CASE
+                  WHEN bu.id IS NOT NULL
+                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                  ELSE btm.name
+                END,
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
