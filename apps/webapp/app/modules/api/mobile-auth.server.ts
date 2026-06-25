@@ -245,19 +245,42 @@ export async function getMobileUserContext(
 /**
  * Shared Prisma select shape for asset data returned by mobile scanner endpoints.
  * Used by both QR and barcode resolution routes for consistent responses.
+ *
+ * NOTE: Post-Phase-4a/4b the `Asset` model no longer carries direct `kitId` or
+ * `location` columns — kit linkage now lives on the `AssetKit` pivot
+ * (`assetKits`) and location on the `AssetLocation` pivot (`assetLocations`).
+ * Custody also became 1:many (`Custody[]`). The companion app currently in
+ * App Store review (since 2026-05-20) consumes the legacy flat shape
+ * (`asset.kit`, `asset.kitId`, `asset.location`, `asset.custody` as a single
+ * object). To keep that live build working without a forced update, mobile
+ * routes fetch this select and then call `shapeMobileAssetResponse` to
+ * flatten the pivot rows into the legacy shape — mirroring the
+ * `MOBILE_KIT_SELECT` + `shapeMobileKitResponse` pair below.
  */
 export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
   mainImage: true,
-  // why: kitId powers the scanner's "part of a kit" batch blocker — assets
-  // inside a kit must be (un)assigned via the kit, mirroring the web drawers.
-  kitId: true,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
   category: { select: { name: true } },
-  location: { select: { name: true } },
+  // Kit linkage now lives on the `AssetKit` pivot. shapeMobileAssetResponse
+  // flattens `assetKits[0]` to top-level `kit` + `kitId` so the in-App-Store
+  // companion's `asset.kit` / `asset.kitId` reads still work.
+  assetKits: {
+    select: { kit: { select: { id: true, name: true } } },
+  },
+  // Location ditto via the `AssetLocation` pivot — flattened to top-level
+  // `location` by the shaper.
+  assetLocations: {
+    select: { location: { select: { id: true, name: true } } },
+  },
+  // Custody is now 1:many; the shaper flattens `custody[0]` so companion's
+  // `asset.custody?.custodian` single-object read still works.
+  custody: {
+    select: { custodian: { select: { id: true, name: true } } },
+  },
 } as const;
 
 /**
@@ -337,5 +360,71 @@ export function shapeMobileKitResponse(
     image: kit.image,
     _count: { assets: kit._count.assetKits },
     assets: kit.assetKits.map((ak) => ak.asset),
+  };
+}
+
+/**
+ * Shape returned to mobile clients for a single asset. Preserves the legacy
+ * flat contract — top-level `kit` / `kitId` / `location` / `custody` (as a
+ * single-or-null object) — so the companion app currently in App Store review
+ * (since 2026-05-20) keeps working unchanged after the Phase-4a/4b migrations
+ * that moved kit/location onto pivots and turned custody into a 1:many
+ * relation on `Asset`.
+ */
+export type MobileAssetResponse = {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  availableToBook: boolean;
+  category: { name: string } | null;
+  kitId: string | null;
+  kit: { id: string; name: string } | null;
+  location: { id: string; name: string } | null;
+  custody: { custodian: { id: string; name: string } } | null;
+};
+
+/**
+ * Flattens an asset row fetched with `MOBILE_ASSET_SELECT` (which surfaces the
+ * `assetKits`, `assetLocations`, and 1:many `custody` relations as arrays)
+ * into the legacy flat shape (`kit`, `kitId`, `location`, single-or-null
+ * `custody`) expected by the companion app's scanner / list / detail routes.
+ *
+ * Mirrors `shapeMobileKitResponse` above — same JSDoc style, same null
+ * semantics, same flatten-the-pivot pattern. The kit/location/custody
+ * flattening picks the first row from each pivot/relation: INDIVIDUAL assets
+ * are capped at one row per pivot by DB triggers, so this is lossless for the
+ * current companion contract. QUANTITY_TRACKED assets (Phase 4a+) may have
+ * multiple rows, but they're out of scope for the in-review companion build
+ * (see plan: Phase 4d will expose the richer pivot data after companion
+ * ships QT support).
+ *
+ * The input type is hand-mirrored from `MOBILE_ASSET_SELECT` (not derived via
+ * `Prisma.AssetGetPayload`) to match the local convention established by
+ * `shapeMobileKitResponse` and to avoid Prisma's deep-generic recursion
+ * warnings on selects that nest pivot relations.
+ *
+ * @param asset Asset row selected via `MOBILE_ASSET_SELECT`
+ * @returns The legacy flat mobile response shape
+ */
+export function shapeMobileAssetResponse(asset: {
+  id: string;
+  title: string;
+  status: string;
+  mainImage: string | null;
+  availableToBook: boolean;
+  category: { name: string } | null;
+  assetKits: Array<{ kit: { id: string; name: string } }>;
+  assetLocations: Array<{ location: { id: string; name: string } }>;
+  custody: Array<{ custodian: { id: string; name: string } }>;
+}): MobileAssetResponse {
+  const { assetKits, assetLocations, custody, ...rest } = asset;
+  const kit = assetKits[0]?.kit ?? null;
+  return {
+    ...rest,
+    kitId: kit?.id ?? null,
+    kit,
+    location: assetLocations[0]?.location ?? null,
+    custody: custody[0] ?? null,
   };
 }
