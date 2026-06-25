@@ -421,13 +421,12 @@ function AuditScannerContent() {
         if (qrLookupId) {
           // ── Shelf QR / SAM path ──
           // Audit lookups only identify the code: the AuditScan is recorded
-          // separately, so skip scan-provenance recording here. Otherwise every
+          // separately, so use the non-recording resolve. Otherwise every
           // audited item would also get an ad-hoc "last scanned" entry (web
           // parity: audits resolve through the non-recording get-scanned-item).
-          const { data: qrData, error } = await api.qr(
+          const { data: qrData, error } = await api.getScannedItem(
             qrLookupId,
-            currentOrg.id,
-            { recordScan: false }
+            currentOrg.id
           );
           if (error || !qrData?.qr?.asset) {
             flashFrame("error");

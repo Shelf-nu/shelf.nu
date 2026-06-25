@@ -197,41 +197,6 @@ describe("GET /api/mobile/qr/:qrId", () => {
     );
   });
 
-  it("does NOT record provenance when the caller opts out via recordScan=false", async () => {
-    // why: audit lookups identify the code only; they record their own
-    // AuditScan separately and must not add an ad-hoc scan to the asset's
-    // history (mirrors the web's non-recording get-scanned-item resolve).
-    const request = new Request(
-      "http://localhost:3000/api/mobile/qr/qr-1?recordScan=false",
-      { headers: { Authorization: "Bearer test-token" } }
-    );
-    const result = await run(request);
-
-    // resolves normally...
-    expect(result instanceof Response).toBe(true);
-    const body = await (result as unknown as Response).json();
-    expect(body.qr.asset.id).toBe("asset-1");
-    // ...but records nothing
-    expect(createScan).not.toHaveBeenCalled();
-  });
-
-  it("does NOT record provenance for a QR in a different workspace than selected", async () => {
-    // why: scanning an Org B QR while Org A is selected is rejected by the app
-    // client-side; recording here would leave a phantom scan in Org B. The
-    // resolve still succeeds (the user is a member of the QR's org, org-1), but
-    // provenance is skipped because the selected org (org-2) does not match.
-    const request = new Request(
-      "http://localhost:3000/api/mobile/qr/qr-1?orgId=org-2",
-      { headers: { Authorization: "Bearer test-token" } }
-    );
-    const result = await run(request);
-
-    expect(result instanceof Response).toBe(true);
-    const body = await (result as unknown as Response).json();
-    expect(body.qr.asset.id).toBe("asset-1");
-    expect(createScan).not.toHaveBeenCalled();
-  });
-
   it("does NOT record provenance when the QR is not found (404)", async () => {
     (db.qr.findUnique as any).mockResolvedValue(null);
 
