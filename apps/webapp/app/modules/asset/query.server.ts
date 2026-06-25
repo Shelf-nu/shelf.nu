@@ -1979,16 +1979,37 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         -- subquery so a multi-custodian qty-tracked asset returns one
         -- row with the full list, not N rows. Always wins over the
         -- booking-derived fallback when the asset has any direct
-        -- custody rows.
+        -- custody rows. Replaces main's COALESCE+CASE direct-custody
+        -- path: the LATERAL custody_agg join covers the 1:many widening
+        -- that Phase 2 introduced.
         WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody
         -- Booking-derived synthetic custody for CHECKED_OUT assets that
         -- have no direct Custody row but are part of an active booking.
+        -- Wrapped in jsonb_build_array() so the output shape matches
+        -- the Custody[] schema consistently — same as custody_agg above.
+        -- The inner jsonb_build_object below carries main's NRM-name
+        -- CASE guard fix (commit 37d40781e), which auto-merged into
+        -- this branch via the post-conflict region.
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+              -- why: when the booking custodian is an NRM (team member with no
+              -- user account), bu.* is NULL. We must NOT CONCAT the user columns
+              -- here: Postgres CONCAT ignores NULLs and returns ' ' (a space),
+              -- which is non-NULL, so a COALESCE(CONCAT(...), btm.name) would
+              -- never fall back to the NRM name and the badge renders blank.
+              -- Guard on bu.id (mirrors the 'user' sub-object branch below).
+              'name', CASE
+                WHEN bu.id IS NOT NULL
+                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                ELSE btm.name
+              END,
               'custodian', jsonb_build_object(
-                'name', COALESCE(CONCAT(bu."firstName", ' ', bu."lastName"), btm.name),
+                'name', CASE
+                  WHEN bu.id IS NOT NULL
+                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
+                  ELSE btm.name
+                END,
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(

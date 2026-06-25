@@ -690,6 +690,21 @@ describe("assetQueryFragment", () => {
         "jsonb_array_length(custody_agg.custody) > 0 AND a.status = 'CHECKED_OUT'"
       );
     });
+
+    it("falls back to the NRM team-member name for booking custody", () => {
+      // why: when the booking custodian is an NRM (TeamMember with no User),
+      // Postgres CONCAT returns ' ' (a space, non-NULL) for the absent user, so
+      // the old COALESCE(CONCAT(...), btm.name) never reached the NRM name and the
+      // badge rendered blank. The name must be guarded on bu.id with a btm.name
+      // fallback instead.
+      const fragment = assetQueryFragment();
+      const sql = getFragmentSqlString(fragment);
+
+      // The buggy COALESCE(CONCAT(...)) pattern must be gone
+      expect(sql).not.toContain('COALESCE(CONCAT(bu."firstName"');
+      // Booking custody name must fall back to the team-member (NRM) name
+      expect(sql).toContain("ELSE btm.name");
+    });
   });
 
   describe("custody lateral aggregation (Issue A)", () => {
