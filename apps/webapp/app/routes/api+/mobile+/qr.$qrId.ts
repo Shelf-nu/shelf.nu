@@ -129,16 +129,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // Record scan provenance (who + when) for a real field scan, mirroring the
-    // public web QR resolver. Skipped when the caller opts out via
-    // `?recordScan=false` (the audit scanner, which records its own AuditScan
-    // and must not add ad-hoc scans to an asset's timeline, matching the web
-    // where audits resolve through the non-recording `get-scanned-item`). Org
-    // membership is verified above, so this only ever logs in-org scans.
-    // Non-fatal: a provenance failure must never turn a successful resolve into
-    // an error response for the scanner.
+    // Record scan provenance (who + when) for a genuine in-workspace field
+    // scan, mirroring the public web QR resolver. Recording is skipped when:
+    //   - the caller opts out via `?recordScan=false` (the audit scanner, which
+    //     records its own AuditScan and must not add ad-hoc scans to the
+    //     timeline, matching the web's non-recording `get-scanned-item`); or
+    //   - the scanned QR belongs to a DIFFERENT workspace than the one the
+    //     caller has selected (`orgId` / `x-shelf-organization`). The companion
+    //     rejects such cross-workspace scans client-side, so recording one would
+    //     leave a phantom scan in the OTHER org. Deep links pass no selected
+    //     org, so they record normally.
+    // Org membership in `qr.organizationId` is verified above. Non-fatal: a
+    // provenance failure must never turn a successful resolve into an error.
+    const url = new URL(request.url);
+    const selectedOrgId =
+      url.searchParams.get("orgId") ||
+      request.headers.get("x-shelf-organization");
     const recordScan =
-      new URL(request.url).searchParams.get("recordScan") !== "false";
+      url.searchParams.get("recordScan") !== "false" &&
+      (!selectedOrgId || selectedOrgId === qr.organizationId);
     if (recordScan) {
       try {
         await createScan({
