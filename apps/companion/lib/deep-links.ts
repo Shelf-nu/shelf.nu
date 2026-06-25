@@ -23,8 +23,10 @@ import { openShelfWebUrl, pushIntoTab } from "./navigation";
  *   https://app.shelf.nu/audits/{id}
  *
  * The claimed paths are kept in sync with the iOS AASA `components` list and
- * the Android `intentFilters` path prefixes. Anything not listed there is
- * never delivered to the app and keeps opening the web app.
+ * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
+ * are never delivered to the app and keep opening the web. A claimed prefix that
+ * nests deeper than the app can render (e.g. `/assets/:id/edit`) is opened in
+ * the in-app web view instead of landing on the wrong native screen.
  */
 
 type ParsedLink =
@@ -34,6 +36,10 @@ type ParsedLink =
   | { type: "audit"; id: string }
   | { type: "qr"; id: string }
   | { type: "scanner" }
+  // A claimed HTTPS prefix matched but the path nests deeper than the native
+  // app can render (e.g. /assets/:id/edit) — open the original URL in the web
+  // view rather than a wrong native screen.
+  | { type: "web"; url: string }
   | { type: "unknown" };
 
 function parseDeepLink(url: string): ParsedLink {
@@ -53,6 +59,23 @@ function parseDeepLink(url: string): ParsedLink {
     if (segments.length === 0) return { type: "unknown" };
 
     const [resource, id] = segments;
+
+    // Over-claim guard: the OS delivers every nested path under a claimed prefix
+    // (e.g. /assets/:id/edit, /bookings/:id/overview/checkin-assets), but the
+    // native app only renders the resource detail and the OS path patterns can't
+    // be scoped to a single segment. So for an HTTPS link that nests deeper than
+    // `resource/id`, open the original URL in the in-app web view (loop-safe via
+    // openShelfWebUrl, NOT Linking.openURL which App Links would re-intercept)
+    // rather than landing on the wrong native screen.
+    const CLAIMED_HTTPS_PREFIXES = ["qr", "assets", "bookings", "audits"];
+    if (
+      isHttp &&
+      id &&
+      segments.length > 2 &&
+      CLAIMED_HTTPS_PREFIXES.includes(resource)
+    ) {
+      return { type: "web", url };
+    }
 
     switch (resource) {
       case "assets":
@@ -145,6 +168,12 @@ export function useDeepLinkHandler() {
           break;
         case "scanner":
           pushIntoTab("/(tabs)/scanner");
+          break;
+        case "web":
+          // Claimed prefix nested deeper than the app renders: open the real
+          // web page in the in-app browser (loop-safe) instead of a wrong
+          // native screen.
+          void openShelfWebUrl(link.url);
           break;
         case "unknown":
           // Ignore unrecognized links — nothing to navigate to.

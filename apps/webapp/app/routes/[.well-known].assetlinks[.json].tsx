@@ -23,8 +23,10 @@
  * @see https://developer.android.com/training/app-links/verify-android-applinks
  */
 
-/** The Companion app's Android package name (constant; see app.json). */
-const ANDROID_PACKAGE_NAME = "com.shelf.companion";
+import { config } from "~/config/shelf.config";
+
+/** The Companion app's Android package name (single source: shelf.config). */
+const ANDROID_PACKAGE_NAME = config.companionAndroidPackageName;
 
 /**
  * Resource route loader. Returns the Digital Asset Links JSON with an explicit
