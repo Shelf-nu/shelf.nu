@@ -21,7 +21,7 @@
  * @see {@link file://../components/asset-edit/custom-field-input.tsx CustomFieldInput}
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   api,
   type AssetDetail,
@@ -289,12 +289,24 @@ export function useEditAssetForm(
     setIsLocationsLoading(false);
   }, [orgId]);
 
+  // Stale-response guard: if orgId changes mid-flight, only the latest fetch
+  // commits its tag list. Unlike the create screen we intentionally do NOT prune
+  // selectedTags against the list here, because in edit they are the asset's own
+  // saved tags and must be preserved even if a tag was later made booking-only.
+  const latestTagsRequestRef = useRef(0);
   const loadTags = useCallback(async () => {
     if (!orgId) return;
+    const requestId = ++latestTagsRequestRef.current;
     setIsTagsLoading(true);
-    const { data } = await api.tags(orgId);
-    if (data?.tags) setTags(data.tags);
-    setIsTagsLoading(false);
+    try {
+      const { data } = await api.tags(orgId);
+      if (requestId !== latestTagsRequestRef.current) return;
+      if (data?.tags) setTags(data.tags);
+    } finally {
+      if (requestId === latestTagsRequestRef.current) {
+        setIsTagsLoading(false);
+      }
+    }
   }, [orgId]);
 
   useEffect(() => {

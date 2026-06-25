@@ -605,6 +605,7 @@ export type Tag = {
   name: string;
 };
 
+/** Response payload for `GET /api/mobile/tags` (the asset tag picker source). */
 export type TagsResponse = {
   tags: Tag[];
 };

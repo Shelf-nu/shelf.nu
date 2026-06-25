@@ -42,7 +42,7 @@ import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
-import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
+import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -216,9 +216,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // why: tag ids from request input are attacker-controlled; assert they
-    // belong to the caller's org before connecting (shared guard, no-op when no
-    // tags supplied). Mirrors the create path.
-    await assertTagsBelongToOrg({ tagIds: tags ?? [], organizationId });
+    // belong to the caller's org AND are assignable to assets (useFor empty or
+    // ASSET) before connecting, so a crafted request can't attach a booking-only
+    // tag. No-op when no tags supplied. Mirrors the create path.
+    await assertTagsAssignableToAssets({ tagIds: tags ?? [], organizationId });
 
     const asset = await updateAsset({
       id: assetId,

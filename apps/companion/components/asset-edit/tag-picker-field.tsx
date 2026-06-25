@@ -164,6 +164,11 @@ export function TagPickerField({
                       styles.pickerItem,
                       isSelected && styles.pickerItemSelected,
                     ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={
+                      isSelected ? `${tag.name}, selected` : tag.name
+                    }
                     // Keep the dropdown open across toggles so several tags can
                     // be picked in one pass.
                     onPress={() => toggleTag(tag)}

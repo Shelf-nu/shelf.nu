@@ -61,11 +61,11 @@ vi.mock("~/utils/custom-fields", () => ({
   extractCustomFieldValuesFromPayload: vi.fn(() => []),
 }));
 
-// why: tag ids from the request are validated against the caller's org via the
-// shared guard (a DB read). Mock it so tests can assert the route calls it and
-// simulate the cross-org rejection without hitting Postgres.
+// why: tag ids from the request are validated against the caller's org AND
+// asset-assignability via the shared guard (a DB read). Mock it so tests can
+// assert the route calls it and simulate the rejection without hitting Postgres.
 vi.mock("~/utils/org-validation.server", () => ({
-  assertTagsBelongToOrg: vi.fn(),
+  assertTagsAssignableToAssets: vi.fn(),
 }));
 
 // why: the tag connect-set builder is a pure helper; mock it to the same shape
@@ -100,7 +100,7 @@ import {
 import { createAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
-import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
+import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import { db } from "~/database/db.server";
 
 const mockUser = {
@@ -176,8 +176,8 @@ describe("POST /api/mobile/asset/create", () => {
     const result = await action(createActionArgs({ request }));
 
     expect((result as unknown as Response).status).toBe(200);
-    // The org-scope guard runs with the submitted tag ids before connecting.
-    expect(assertTagsBelongToOrg).toHaveBeenCalledWith({
+    // The org + asset-assignable guard runs with the submitted ids before connect.
+    expect(assertTagsAssignableToAssets).toHaveBeenCalledWith({
       tagIds: ["tag-1", "tag-2"],
       organizationId: "org-1",
     });
@@ -189,12 +189,13 @@ describe("POST /api/mobile/asset/create", () => {
     );
   });
 
-  it("rejects with 400 when a tag does not belong to the org", async () => {
+  it("rejects with 400 when a tag is not assignable to assets or not in the org", async () => {
     // why: `mockRejectedValueOnce` (not `mockRejectedValue`) — the suite's
     // beforeEach uses clearAllMocks, which clears calls but NOT a persistent
     // implementation, so a sticky reject would leak into later tests.
-    (assertTagsBelongToOrg as any).mockRejectedValueOnce({
-      message: "Some of the selected tags do not exist in your workspace.",
+    (assertTagsAssignableToAssets as any).mockRejectedValueOnce({
+      message:
+        "Some of the selected tags can't be assigned to assets in your workspace.",
       status: 400,
     });
 

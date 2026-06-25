@@ -31,7 +31,7 @@ import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
-import { assertTagsBelongToOrg } from "~/utils/org-validation.server";
+import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -124,10 +124,11 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // why: tag ids come from request input and are attacker-controlled. Assert
-    // they belong to the caller's organization before connecting them, using
-    // the shared org-scope guard (no-op when no tags are supplied). Mirrors the
-    // web create path and prevents a cross-org tag IDOR.
-    await assertTagsBelongToOrg({ tagIds: tags ?? [], organizationId });
+    // they belong to the caller's org AND are assignable to assets (useFor empty
+    // or ASSET) before connecting them — matching the picker's source — so a
+    // crafted request can't attach a booking-only tag. No-op when no tags are
+    // supplied.
+    await assertTagsAssignableToAssets({ tagIds: tags ?? [], organizationId });
 
     // why: every category may have its own set of required custom fields.
     // We always fetch the active definitions for the chosen category (or

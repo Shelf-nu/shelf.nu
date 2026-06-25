@@ -29,6 +29,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
+import { TagUseFor } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -295,6 +296,56 @@ export async function assertTagsBelongToOrg(
       title: "Invalid tags",
       message:
         "Some of the selected tags do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every tag id is BOTH owned by `organizationId` AND assignable to
+ * assets (its `useFor` is empty or includes `ASSET`).
+ *
+ * Use this on asset create/update paths. {@link assertTagsBelongToOrg} only
+ * proves org ownership, so on its own it would let a crafted request connect a
+ * booking-only tag to an asset and break the asset-tag contract. Booking paths
+ * keep using {@link assertTagsBelongToOrg}. The predicate mirrors
+ * `getTagsForAssetTagsFilter` (the source the mobile picker reads from), so the
+ * picker and the write path agree on what "asset-assignable" means.
+ *
+ * @param params.tagIds - Tag IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing, in another org, or not
+ *   assignable to assets
+ */
+export async function assertTagsAssignableToAssets(
+  { tagIds, organizationId }: { tagIds: Tag["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (tagIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(tagIds)];
+
+  const found = await client.tag.findMany({
+    where: {
+      id: { in: uniqueIds },
+      organizationId,
+      // Asset-assignable = useFor empty (applies to every entity) or ASSET.
+      OR: [{ useFor: { isEmpty: true } }, { useFor: { has: TagUseFor.ASSET } }],
+    },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid tags",
+      message:
+        "Some of the selected tags can't be assigned to assets in your workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,

@@ -153,14 +153,34 @@ export default function CreateAssetScreen() {
   }, [currentOrg]);
 
   // ── Load tags ───────────────────────────────────
+  // Guards against a stale response winning after an org switch: each call gets
+  // a monotonic id and only the latest one commits. Also prunes selectedTags to
+  // the refreshed list so tags picked under a previous org don't linger and get
+  // rejected by the org-scoped create endpoint on submit.
+  const latestTagsRequestRef = useRef(0);
   const loadTags = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsTagsLoading(true);
-    const { data } = await api.tags(currentOrg.id);
-    if (data?.tags) {
-      setTags(data.tags);
+    if (!currentOrg) {
+      setTags([]);
+      setSelectedTags([]);
+      return;
     }
-    setIsTagsLoading(false);
+    const requestId = ++latestTagsRequestRef.current;
+    setIsTagsLoading(true);
+    try {
+      const { data } = await api.tags(currentOrg.id);
+      if (requestId !== latestTagsRequestRef.current) return;
+      const nextTags = data?.tags ?? [];
+      setTags(nextTags);
+      setSelectedTags((prev) =>
+        prev.filter((selected) =>
+          nextTags.some((tag) => tag.id === selected.id)
+        )
+      );
+    } finally {
+      if (requestId === latestTagsRequestRef.current) {
+        setIsTagsLoading(false);
+      }
+    }
   }, [currentOrg]);
 
   // ── Load custom fields for the selected category ──
