@@ -102,10 +102,17 @@ output for each pasted into the transcript on the final turn:
 (4) coverage of net-new lines in the new printable component + new export
     route is >= 90% (paste coverage table rows);
 (5) `git diff --stat main...HEAD` shows: no test file outside the two named
-    above modified; the two test files have only ADDED lines vs commit-1
-    (no deletions/edits to committed assertions); no new dependency in
-    package.json (we do NOT add a server PDF library — react-to-print is
-    already in the repo); (paste the stat);
+    above modified; no new dependency in package.json (we do NOT add a
+    server PDF library, react-to-print is already in the repo) (paste the
+    stat). Separately, to catch assertions weakened AFTER the freeze (a
+    three-dot `main...HEAD` diff cannot detect this, since the test files
+    are net-new and always render as all-additions vs the merge-base), run
+    `git diff --numstat <COMMIT_1_SHA>..HEAD --
+    apps/webapp/app/components/assets/assets-index/export-assets-pdf.test.tsx
+    apps/webapp/test/routes-tests/asset-index-pdf-export.test.ts` and confirm
+    the deletions column is 0 for both files (no edits or deletions to
+    committed assertions vs the recorded commit-1; record COMMIT_1_SHA at
+    §4.2 when the suite is frozen) (paste the numstat);
 (6) `grep -rn "TODO\|FIXME\|\.skip(\|\.only(\|expect(true)" <net-new files>`
     returns nothing (paste empty result);
 (7) `git log --oneline main...HEAD` shows test commit is FIRST and precedes
