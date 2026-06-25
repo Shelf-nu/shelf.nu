@@ -109,7 +109,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     const labelFor = (name: string): string => `LBL-${name.toUpperCase()}`;
 
     it("A1.a returns only visible:true entries, sorted by position ascending", () => {
-      console.log("[A1.a] selectVisibleColumns filter+sort");
       const raw: RawColumnEntry[] = [
         { name: "a", visible: true, position: 2 },
         { name: "b", visible: false, position: 1 },
@@ -120,7 +119,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A1.b returns an empty array when all entries are visible:false", () => {
-      console.log("[A1.b] selectVisibleColumns all-hidden");
       expect(
         selectVisibleColumns(
           [{ name: "a", visible: false, position: 0 }],
@@ -130,7 +128,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A1.c derives the display label for each visible column via labelFor", () => {
-      console.log("[A1.c] selectVisibleColumns derives labels");
       const raw: RawColumnEntry[] = [
         { name: "valuation", visible: true, position: 0 },
         { name: "name", visible: true, position: 1 },
@@ -144,7 +141,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A1b — component renders input column order verbatim (no reordering)", () => {
     it("A1b renders headers in input order without re-sorting", () => {
-      console.log("[A1b] component renders input order verbatim");
       const props = makeProps({
         // deliberately non-sequential position; component must NOT re-sort
         columns: [
@@ -163,7 +159,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A2 — custom-field columns render + XSS guard", () => {
     it("A2.a renders custom-field headers and values from row.values[name]", () => {
-      console.log("[A2.a] custom-field columns render");
       const props = makeProps({
         columns: [{ name: "cf_serial", position: 0, label: "Serial #" }],
         rows: [
@@ -176,7 +171,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A2.b renders a malicious string as text, not HTML (XSS regression guard)", () => {
-      console.log("[A2.b] XSS regression: value renders as text");
       const props = makeProps({
         columns: [{ name: "cf_note", position: 0, label: "Note" }],
         rows: [
@@ -197,7 +191,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A3 — thumbnail checkbox initial state mirrors AssetIndexSettings.showAssetImage", () => {
     it("A3.a starts unchecked when initialIncludeImages=false", () => {
-      console.log("[A3.a] thumbnail toggle initial=false");
       render(
         <ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />
       );
@@ -207,7 +200,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A3.b starts checked when initialIncludeImages=true", () => {
-      console.log("[A3.b] thumbnail toggle initial=true");
       render(
         <ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />
       );
@@ -218,7 +210,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A4 — thumbnails conditional render", () => {
     it("A4.a renders an <img> per row when includeImages=true and thumbnailUrl is set", () => {
-      console.log("[A4.a] includeImages=true renders images");
       // B2 fix (CR re-review on 46d0da59f): the <img> render now lives
       // exclusively in the column-loop branch where col.name === "image".
       // The loader's job is to inject this column when includeImages=true;
@@ -250,7 +241,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A4.b renders zero <img> when includeImages=false", () => {
-      console.log("[A4.b] includeImages=false renders no images");
       const props = makeProps({
         includeImages: false,
         rows: [
@@ -266,7 +256,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A4.c includeImages=true but thumbnailUrl=null renders no <img> for that row", () => {
-      console.log("[A4.c] null-thumb fallback");
       // why: in real workspaces many assets lack photos — must not render
       // a broken/empty <img> for those rows even when includeImages=true.
       const props = makeProps({
@@ -283,7 +272,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A5 — filter summary line", () => {
     it("A5.a summarises filter values from any non-empty URL search params", () => {
-      console.log("[A5.a] summarizeFilters with filters");
       // why: not pinning specific param NAMES (asset-index filter conventions
       // may use any of `location=`, `filter[location]=`, etc.). The contract
       // is: given non-empty search params containing distinctive values, the
@@ -299,14 +287,12 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A5.b returns empty string when no filters", () => {
-      console.log("[A5.b] summarizeFilters empty");
       expect(summarizeFilters(new URLSearchParams())).toBe("");
     });
   });
 
   describe("A6 — footer metadata", () => {
     it("A6 footer contains generatedAt, generatedBy, and totalRowCount", () => {
-      console.log("[A6] footer metadata present");
       const props = makeProps({
         generatedAt: new Date("2026-05-20T14:22:07Z"),
         generatedBy: { displayName: "Maria López" },
@@ -322,13 +308,11 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A7 — print-CSS + page-break structure", () => {
     it("A7.a uses a native <thead> element so headers repeat per print page", () => {
-      console.log("[A7.a] native <thead> present");
       const { container } = render(<AssetIndexPdf {...makeProps()} />);
       expect(container.querySelectorAll("thead").length).toBeGreaterThan(0);
     });
 
     it("A7.b rows carry a break-inside-avoid class", () => {
-      console.log("[A7.b] break-inside-avoid on rows");
       const props = makeProps({
         rows: Array.from({ length: 5 }, (_, i) => ({
           id: `row-${i}`,
@@ -353,7 +337,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A9 — filename sanitization", () => {
     it("A9.a builds a filename containing the workspace slug and ISO date", () => {
-      console.log("[A9.a] valid name");
       const fn = buildPdfFilename(
         "Acme Inc.",
         new Date("2026-05-20T00:00:00Z")
@@ -363,7 +346,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A9.b ENFORCES that the existing sanitizeFilename helper is invoked (not a custom sanitizer)", () => {
-      console.log("[A9.b] helper enforcement");
       // why: the PRD §6.1 contract is "uses the existing sanitizeFilename helper".
       // A lazy impl could write its own sanitizer and pass a regex assertion;
       // mocking and asserting the call enforces reuse of the canonical helper.
@@ -379,7 +361,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A9.c output never contains path-traversal characters", () => {
-      console.log("[A9.c] no traversal chars in output");
       const fn = buildPdfFilename(
         "../etc/passwd Acme™ 🚀",
         new Date("2026-01-01T00:00:00Z")
@@ -392,7 +373,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
 
   describe("A3.c — button wires the export navigation (not pure-display)", () => {
     it("A3.c.1 renders a navigation element (anchor or form) targeting the export route", () => {
-      console.log("[A3.c.1] navigation element exists");
       const { container } = render(
         <ExportAssetsPdfButton disabled={false} initialIncludeImages={false} />
       );
@@ -411,7 +391,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A3.c.2 initialIncludeImages=true encodes includeImages=true into the navigation target", () => {
-      console.log("[A3.c.2] includeImages reflected in navigation");
       const { container } = render(
         <ExportAssetsPdfButton disabled={false} initialIncludeImages={true} />
       );
@@ -423,7 +402,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
     });
 
     it("A3.c.3 current URL filter params are forwarded into the export href (B1 fix)", () => {
-      console.log("[A3.c.3] filter params forwarded");
       // CR B1 finding (re-review on 46d0da59f): an earlier impl built the
       // export href from an empty URLSearchParams, silently dropping the
       // user's active filters. This test pins that the current URL's
@@ -450,7 +428,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       // events-none` alone leaves an anchor in the keyboard tab order
       // and activatable via Enter/Space. WCAG 2.1 AA requires disabled
       // controls to be non-focusable / non-activatable for keyboard users.
-      console.log("[A3.c.4] CR-B — disabled link not keyboard-activatable");
       const { container } = render(
         <ExportAssetsPdfButton disabled={true} initialIncludeImages={false} />
       );
@@ -481,7 +458,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       // "January 15, 2026" too — coincidentally same here — so we also
       // assert that the DEFAULT (option-less) cell formatter is in use
       // for cells.
-      console.log("[A8.a] CR-A — long-form date rendering");
       const props = makeProps({
         generatedAt: new Date("2026-01-15T12:00:00Z"),
         columns: [{ name: "name", position: 0, label: "Name" }],
@@ -502,7 +478,6 @@ describe("Suite A — Asset-Index PDF Export (component)", () => {
       // and shifting calendar days near midnight. The loader now passes
       // raw Dates through `values`, and the component formats them via
       // `formatAbsoluteDate` in the cell renderer.
-      console.log("[A8b.a] CR-C — Date cell rendered via formatAbsoluteDate");
       const props = makeProps({
         columns: [{ name: "createdAt", position: 0, label: "Created" }],
         rows: [
