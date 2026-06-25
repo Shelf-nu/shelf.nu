@@ -50,7 +50,13 @@ export type OrgValidationTxClient = {
   };
   tag: {
     findMany: (args: {
-      where: { id: { in: string[] }; organizationId: string };
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        // Optional asset-assignability filter used by
+        // `assertTagsAssignableToAssets` (useFor empty or includes ASSET).
+        OR?: Array<{ useFor: { isEmpty: true } | { has: TagUseFor } }>;
+      };
       select: { id: true };
     }) => Promise<{ id: string }[]>;
   };
