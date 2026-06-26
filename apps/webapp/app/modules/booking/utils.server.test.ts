@@ -219,6 +219,67 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
     expect(p.checkinProgressPercentage).toBe(100);
   });
 
+  it("DRAFT ignores global CHECKED_OUT status — everything Booked, no progress", () => {
+    // Regression: duplicating an ongoing booking creates a DRAFT booking that
+    // connects the SAME assets, which are still physically CHECKED_OUT in the
+    // original booking. A DRAFT has never been checked out *in this booking*, so
+    // the global asset status must not bleed into its lifecycle bar.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.CHECKED_OUT),
+        A("b", AssetStatus.CHECKED_OUT),
+        A("c", AssetStatus.AVAILABLE),
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.DRAFT,
+    });
+    expect(p.totalUnits).toBe(3);
+    expect(p.bookedCount).toBe(3);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.returnedCount).toBe(0);
+    expect(p.checkoutProgressCount).toBe(0);
+    expect(p.checkoutProgressPercentage).toBe(0);
+    expect(p.hasPartialCheckouts).toBe(false);
+    expect(p.hasPartialCheckins).toBe(false);
+  });
+
+  it("RESERVED ignores global CHECKED_OUT status — everything Booked, no progress", () => {
+    // A RESERVED booking has never had any of its own assets checked out:
+    // progressive checkout's first scan flips RESERVED → ONGOING. So a
+    // CHECKED_OUT status here belongs to a different booking (e.g. the asset is
+    // reserved for a future window while physically out elsewhere now) and must
+    // not register as this booking's checkout progress.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.CHECKED_OUT),
+        A("b", AssetStatus.AVAILABLE),
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.RESERVED,
+    });
+    expect(p.bookedCount).toBe(2);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.returnedCount).toBe(0);
+    expect(p.hasPartialCheckouts).toBe(false);
+  });
+
+  it("CANCELLED ignores global CHECKED_OUT status — everything Booked, no progress", () => {
+    // A cancelled booking has released its assets; any CHECKED_OUT status comes
+    // from a different (live) booking and must not show as this booking's progress.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.CHECKED_OUT),
+        A("b", AssetStatus.AVAILABLE),
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.CANCELLED,
+    });
+    expect(p.bookedCount).toBe(2);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.returnedCount).toBe(0);
+    expect(p.hasPartialCheckouts).toBe(false);
+  });
+
   it("COMPLETE with a checked-out subset marks only that subset returned, the rest booked", () => {
     // Progressive checkout: 4 assets, only 2 were ever checked out. At COMPLETE,
     // the 2 never-checked-out assets must stay Booked (not forced to Returned),
