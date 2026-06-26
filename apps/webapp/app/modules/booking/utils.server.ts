@@ -255,6 +255,13 @@ export type BookingLifecycleProgress = {
  * exist when progressive checkout was used — stay in the Booked bucket.
  * Percentages reflect that split rather than being forced to 100%.
  *
+ * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED) no checkout has happened
+ * in THIS booking — only ONGOING/OVERDUE own a live checkout — so every unit is
+ * forced into the Booked bucket. This prevents the global asset `status` (which
+ * may be CHECKED_OUT because the asset is out in a DIFFERENT booking — e.g.
+ * after duplicating an ongoing booking, or reserving an asset that's checked out
+ * elsewhere for a future window) from leaking into this booking's progress bar.
+ *
  * @returns bucket counts, checkout/check-in counts + percentages, and flags.
  */
 export function calculateBookingLifecycleProgress({
@@ -282,6 +289,22 @@ export function calculateBookingLifecycleProgress({
   const isFinal =
     bookingStatus === BookingStatus.COMPLETE ||
     bookingStatus === BookingStatus.ARCHIVED;
+  // Only ONGOING/OVERDUE bookings own a live checkout, so only there is an
+  // asset's global `status === CHECKED_OUT` attributable to THIS booking
+  // (conflict detection guarantees an asset can't be live-checked-out in two
+  // overlapping bookings). Every pre-checkout state — DRAFT, RESERVED, CANCELLED
+  // — has never had any of its own assets checked out: progressive checkout's
+  // first scan already flips RESERVED → ONGOING, and a cancelled booking has
+  // released its assets. Their assets may still read CHECKED_OUT because they're
+  // physically out in a DIFFERENT booking (e.g. after duplicating an ongoing
+  // booking into a fresh DRAFT, or reserving an asset for a future window while
+  // it's checked out elsewhere now). Force every unit to Booked so cross-booking
+  // status never leaks into this booking's progress bar. (COMPLETE/ARCHIVED is
+  // handled separately below via `checkedOutAssetIds`, not live status.)
+  const isPreCheckout =
+    bookingStatus === BookingStatus.DRAFT ||
+    bookingStatus === BookingStatus.RESERVED ||
+    bookingStatus === BookingStatus.CANCELLED;
 
   // An asset "was actually checked out" iff it has a checkout record. When no
   // records exist at all (empty array), every asset was checked out.
@@ -310,7 +333,13 @@ export function calculateBookingLifecycleProgress({
       ? "returned"
       : "booked";
 
-  const resolveBucket = isFinal ? finalBucketOf : bucketOf;
+  // Pre-checkout bookings (DRAFT/CANCELLED): force every unit to Booked,
+  // ignoring the global asset status that may belong to another booking.
+  const resolveBucket = isPreCheckout
+    ? (): "booked" => "booked"
+    : isFinal
+    ? finalBucketOf
+    : bucketOf;
 
   let booked = 0;
   let checkedOut = 0;
