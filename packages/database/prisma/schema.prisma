@@ -806,6 +806,11 @@ model Organization {
   // QR code display preference - which ID to show on QR code labels
   qrIdDisplayPreference QrIdDisplayPreference @default(QR_ID)
 
+  // Workspace date-format preference. AUTO keeps the legacy behavior (format
+  // derived from the browser Accept-Language header). Any explicit value forces
+  // the ordering of dates rendered across the app (see ~/utils/date-format).
+  dateFormat DateFormat @default(AUTO)
+
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
 
@@ -849,6 +854,16 @@ enum QrIdDisplayPreference {
   DataMatrix
   ExternalQR
   EAN13
+}
+
+// Workspace date-format preference. Controls how dates are rendered across the
+// app. AUTO preserves the legacy behavior (locale derived from the browser
+// Accept-Language header); the explicit values force the day/month/year order.
+enum DateFormat {
+  AUTO // Browser locale (legacy default)
+  DD_MM_YYYY // e.g. 03/04/2026
+  MM_DD_YYYY // e.g. 04/03/2026
+  YYYY_MM_DD // e.g. 2026-04-03
 }
 
 enum OrganizationRoles {

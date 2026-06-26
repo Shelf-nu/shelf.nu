@@ -1,5 +1,10 @@
 import { format } from "date-fns";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { getDateTimeFormatFromHints, useHints } from "~/utils/client-hints";
+import {
+  mergeDateDisplayOptions,
+  resolveDateFormat,
+} from "~/utils/date-format";
 
 /**
  * Formats a date using locale-specific formatting without timezone conversion.
@@ -102,11 +107,24 @@ export const DateS = ({
   localeOnly?: boolean;
 }) => {
   const hints = useHints();
+  // The active workspace's date-format preference (undefined outside the
+  // authenticated layout, e.g. auth/onboarding pages → falls back to AUTO).
+  const currentOrganization = useCurrentOrganization();
   if (!date) {
     // eslint-disable-next-line no-console
     console.warn("DateS component received null date:", date);
     return null;
   }
+
+  // Resolve the org date-format preference. For AUTO this is a no-op (legacy
+  // Accept-Language behavior); for explicit formats it overrides the locale the
+  // Intl pipeline is keyed on (which reorders dates) and supplies zero-padded
+  // numeric defaults for plain date displays.
+  const { locale, numericDefaults } = resolveDateFormat(
+    currentOrganization?.dateFormat,
+    hints.locale
+  );
+  const hintsForFormat = locale === hints.locale ? hints : { ...hints, locale };
 
   // Handle locale-only formatting (no timezone conversion)
   if (localeOnly) {
@@ -125,31 +143,22 @@ export const DateS = ({
     d = new Date(date);
   }
 
-  // Determine formatting options based on flags
-  let timeOptions: Intl.DateTimeFormatOptions;
+  // Build the Intl options, folding in the explicit-format numeric defaults.
+  // mergeDateDisplayOptions skips those defaults when the caller uses a
+  // dateStyle/timeStyle shortcut (Intl throws if they're combined with granular
+  // fields); the resolved locale still fixes the day/month/year order. For AUTO
+  // numericDefaults is undefined, so this reduces to the legacy behavior.
+  const timeOptions = mergeDateDisplayOptions({
+    callerOptions: options,
+    numericDefaults,
+    includeTime,
+    onlyTime,
+  });
 
-  if (onlyTime) {
-    // Only show time (no date)
-    // Use timeStyle to prevent default date options from being added
-    timeOptions = {
-      timeStyle: "short",
-      ...options,
-    };
-  } else if (includeTime) {
-    // Show both date and time
-    timeOptions = {
-      hour: "numeric",
-      minute: "numeric",
-      ...options,
-    };
-  } else {
-    // Show only date (default)
-    timeOptions = options || {};
-  }
-
-  const formattedDate = getDateTimeFormatFromHints(hints, timeOptions).format(
-    new Date(d)
-  );
+  const formattedDate = getDateTimeFormatFromHints(
+    hintsForFormat,
+    timeOptions
+  ).format(new Date(d));
 
   return <span>{formattedDate}</span>;
 };
