@@ -10,7 +10,7 @@ import type {
   Tag,
   OrganizationRoles,
 } from "@prisma/client";
-import { addDays, isBefore } from "date-fns";
+import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import z from "zod";
@@ -30,7 +30,6 @@ import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
   getClientHint,
   getDateTimeFormatFromHints,
-  getHints,
   type ClientHint,
 } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
@@ -5990,17 +5989,40 @@ export async function loadBookingsData({
 }
 
 /**
+ * Duplicates an existing booking into a new DRAFT booking.
  *
+ * The new booking copies the original's name (suffixed with " (Copy)"),
+ * description, custodian, assets, tags, and per-booking notification
+ * recipients. The booking period is taken from the caller-provided `from`/`to`
+ * dates rather than being derived here, so the call site controls the new
+ * booking's window (and any timezone normalization happens upstream).
+ *
+ * @param args - The arguments for duplicating the booking.
+ * @param args.bookingId - ID of the booking to duplicate.
+ * @param args.organizationId - Organization the booking belongs to (tenant scope).
+ * @param args.userId - ID of the user performing the duplication; becomes the
+ *   new booking's creator.
+ * @param args.from - Start date for the new booking.
+ * @param args.to - End date for the new booking.
+ * @param args.request - The incoming request, forwarded to `getBooking` for
+ *   client-hint resolution and ownership checks.
+ * @returns The newly created DRAFT booking record.
+ * @throws {ShelfError} If the source booking cannot be loaded or the new
+ *   booking cannot be created.
  */
 export async function duplicateBooking({
   bookingId,
   organizationId,
   userId,
+  from,
+  to,
   request,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
   userId: User["id"];
+  from: Date;
+  to: Date;
   request: Request;
 }) {
   try {
@@ -6012,26 +6034,13 @@ export async function duplicateBooking({
         notificationRecipients: { select: { id: true } },
       },
     });
-    const hints = getHints(request);
 
     const newBooking = await db.booking.create({
       data: {
         name: bookingToDuplicate.name + " (Copy)",
         description: bookingToDuplicate.description,
-        from: DateTime.fromFormat(
-          DateTime.fromJSDate(new Date(), { zone: hints.timeZone }).toFormat(
-            DATE_TIME_FORMAT
-          ),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
-        to: DateTime.fromFormat(
-          DateTime.fromJSDate(addDays(new Date(), 1), {
-            zone: hints.timeZone,
-          }).toFormat(DATE_TIME_FORMAT),
-          DATE_TIME_FORMAT,
-          { zone: hints.timeZone }
-        ).toJSDate(),
+        from,
+        to,
         organizationId,
         creatorId: userId,
         status: BookingStatus.DRAFT,

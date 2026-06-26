@@ -2452,19 +2452,29 @@ describe("duplicateBooking", () => {
     vitest.clearAllMocks();
   });
 
-  it("should duplicate booking successfully", async () => {
+  it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(2);
 
     const originalBooking = {
       ...mockBookingData,
       assets: [{ id: "asset-1" }, { id: "asset-2" }],
       tags: [{ id: "tag-1" }],
+      // getBooking is called with extraInclude.notificationRecipients, so the
+      // duplicated booking must carry these over too.
+      notificationRecipients: [{ id: "tm-recipient-1" }],
     };
     const duplicatedBooking = {
       ...originalBooking,
       id: "booking-2",
-      name: "Copy of Test Booking",
+      name: "Test Booking (Copy)",
     };
+
+    // Caller-chosen window, intentionally different from the source booking's
+    // from/to (futureFromDate/futureToDate) so the assertion proves the new
+    // booking uses the passed-in dates rather than the source's window or the
+    // old now/now+1day default that duplicateBooking used to compute itself.
+    const from = new Date("2099-08-01T09:00:00.000Z");
+    const to = new Date("2099-08-03T17:00:00.000Z");
 
     //@ts-expect-error missing vitest type
     db.booking.findFirstOrThrow.mockResolvedValue(originalBooking);
@@ -2475,9 +2485,16 @@ describe("duplicateBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      from,
+      to,
       request: new Request("https://example.com"),
     });
 
+    // The new booking is a DRAFT named "<name> (Copy)" that copies the source's
+    // custodian, assets, tags, and notification recipients — and crucially uses
+    // the exact from/to passed by the caller (not the source's window, not a
+    // now/tomorrow default). Matching the Date objects here would fail if the
+    // service recomputed them internally.
     expect(db.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -2485,6 +2502,13 @@ describe("duplicateBooking", () => {
           status: BookingStatus.DRAFT,
           organizationId: "org-1",
           creatorId: "user-1",
+          from,
+          to,
+          custodianUserId: "user-1",
+          custodianTeamMemberId: null,
+          assets: { connect: [{ id: "asset-1" }, { id: "asset-2" }] },
+          tags: { connect: [{ id: "tag-1" }] },
+          notificationRecipients: { connect: [{ id: "tm-recipient-1" }] },
         }),
       })
     );
