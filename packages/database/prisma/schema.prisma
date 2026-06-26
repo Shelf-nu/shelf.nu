@@ -1297,6 +1297,12 @@ model Booking {
   // When a booking is auto-archived, we store the timestamp here
   autoArchivedAt DateTime? @db.Timestamptz(3)
 
+  // True when the booking was archived directly from RESERVED — i.e. its end
+  // date passed without ever being checked out/in. Such bookings were never
+  // "returned", so return-behaviour reports (e.g. Booking Compliance) must
+  // exclude them. Bookings archived from COMPLETE keep the default `false`.
+  archivedWithoutCheckin Boolean @default(false)
+
   cancellationReason String?
 
   // Per-booking notification recipients (team members who receive all email updates for this booking)
@@ -1322,7 +1328,12 @@ model BookingSettings {
   maxBookingLengthSkipClosedDays Boolean @default(false) // If true, the max booking length will skip closed days
 
   autoArchiveBookings Boolean @default(false) // Whether to automatically archive completed bookings
-  autoArchiveDays     Int     @default(2) // Number of days after completion before auto-archiving
+  autoArchiveDays     Int     @default(2) // Number of days after a booking is done before auto-archiving (shared by both auto-archive toggles)
+
+  // Whether to automatically archive reserved bookings whose end date has passed
+  // without ever being checked out (for teams that use bookings as a reservation
+  // calendar and don't check out/in). Reuses autoArchiveDays for the delay.
+  autoArchiveExpiredReservations Boolean @default(false)
 
   requireExplicitCheckinForAdmin       Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in

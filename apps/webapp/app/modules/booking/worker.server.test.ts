@@ -3,7 +3,10 @@ import { db } from "~/database/db.server";
 import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import { BOOKING_SCHEDULER_EVENTS_ENUM } from "./constants";
-import { createStatusTransitionNote } from "./service.server";
+import {
+  createStatusTransitionNote,
+  scheduleExpiryArchiveJob,
+} from "./service.server";
 import type { SchedulerData } from "./types";
 import { registerBookingWorkers } from "./worker.server";
 
@@ -38,6 +41,7 @@ vitest.mock("~/utils/scheduler.server", () => ({
 vitest.mock("./service.server", () => ({
   createStatusTransitionNote: vitest.fn().mockResolvedValue(undefined),
   scheduleNextBookingJob: vitest.fn().mockResolvedValue(undefined),
+  scheduleExpiryArchiveJob: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: avoiding actual booking note creation during worker tests
@@ -248,5 +252,118 @@ describe("autoArchiveHandler", () => {
     await workerHandler(mockJob);
 
     expect(Logger.error).toHaveBeenCalled();
+  });
+});
+
+describe("autoArchiveExpiredHandler", () => {
+  let workerHandler: (job: { data: SchedulerData }) => Promise<void>;
+
+  beforeAll(async () => {
+    workerHandler = await getWorkerHandler();
+  });
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const mockJob = {
+    data: {
+      id: "booking-1",
+      hints: { timeZone: "UTC", locale: "en-US" },
+      eventType: BOOKING_SCHEDULER_EVENTS_ENUM.autoArchiveExpiredHandler,
+    },
+  };
+
+  const pastReservedBooking = {
+    id: "booking-1",
+    status: BookingStatus.RESERVED,
+    to: new Date("2020-01-01T00:00:00Z"),
+    custodianUserId: "user-1",
+    organizationId: "org-1",
+  };
+
+  it("archives a past-due RESERVED booking and flags it as never-checked-in", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(pastReservedBooking);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      autoArchiveExpiredReservations: true,
+      autoArchiveDays: 2,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...pastReservedBooking,
+      status: BookingStatus.ARCHIVED,
+    });
+
+    await workerHandler(mockJob);
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "booking-1", status: BookingStatus.RESERVED },
+        data: expect.objectContaining({
+          status: BookingStatus.ARCHIVED,
+          archivedWithoutCheckin: true,
+          autoArchivedAt: expect.any(Date),
+        }),
+      })
+    );
+    expect(createStatusTransitionNote).toHaveBeenCalledWith({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      fromStatus: BookingStatus.RESERVED,
+      toStatus: BookingStatus.ARCHIVED,
+      custodianUserId: "user-1",
+    });
+    expect(Logger.info).toHaveBeenCalledWith(
+      "Auto-archived expired reservation booking-1"
+    );
+  });
+
+  it("skips a booking that is no longer RESERVED (e.g. checked out)", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      ...pastReservedBooking,
+      status: BookingStatus.ONGOING,
+    });
+
+    await workerHandler(mockJob);
+
+    expect(db.bookingSettings.findUnique).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("skips when the setting is disabled for the organization", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(pastReservedBooking);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      autoArchiveExpiredReservations: false,
+      autoArchiveDays: 2,
+    });
+
+    await workerHandler(mockJob);
+
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("reschedules (does not archive) when the end date + grace has not elapsed", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      ...pastReservedBooking,
+      to: new Date("2999-01-01T00:00:00Z"),
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      autoArchiveExpiredReservations: true,
+      autoArchiveDays: 2,
+    });
+
+    await workerHandler(mockJob);
+
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(scheduleExpiryArchiveJob).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: "booking-1" })
+    );
   });
 });

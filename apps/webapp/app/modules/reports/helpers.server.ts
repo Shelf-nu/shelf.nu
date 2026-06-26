@@ -144,6 +144,9 @@ export async function bookingComplianceReport(
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
+      // Exclude bookings archived straight from RESERVED (never checked in):
+      // they were never returned, so they must not count toward compliance.
+      archivedWithoutCheckin: false,
     };
 
     // Allow further status filtering within the measurable statuses
@@ -500,6 +503,8 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Bookings scheduled to end within the timeframe
       to: { gte: timeframe.from, lte: timeframe.to },
     },
@@ -535,6 +540,8 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Filter by scheduled end date for consistency with main query
       to: { gte: priorFrom, lte: priorTo },
     },
@@ -667,6 +674,8 @@ async function computeComplianceTrend(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
+      archivedWithoutCheckin: false,
       to: { gte: timeframe.from, lte: timeframe.to },
     },
     select: {
@@ -795,6 +804,8 @@ async function computeCustodianPerformance(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
       // Filter by scheduled end date for consistency with main compliance query
       to: { gte: timeframe.from, lte: timeframe.to },
     },
