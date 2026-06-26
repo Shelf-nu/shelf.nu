@@ -855,7 +855,7 @@ export function describeBulkUpdateRowFailure(cause: unknown): string {
     : "Unknown error";
 
   // Unwrap one level: the generic ShelfError stores the original error (often a
-  // Prisma error) on `.cause`. Surface its code + first line.
+  // Prisma error) on `.cause`.
   const underlying = isLikeShelfError(cause)
     ? (cause as ShelfError).cause
     : null;
@@ -866,12 +866,15 @@ export function describeBulkUpdateRowFailure(cause: unknown): string {
       typeof (underlying as { code?: unknown }).code === "string"
         ? `${(underlying as { code: string }).code}: `
         : "";
-    const detail = underlying.message
+    // Prisma messages prefix the reason with an "Invalid `prisma...` invocation"
+    // line plus a file path; the actionable reason is the LAST non-empty line.
+    // Surface only that, so the report stays concise and doesn't leak the
+    // invocation preamble or internal paths.
+    const lines = underlying.message
       .split("\n")
       .map((line) => line.trim())
-      .filter(Boolean)
-      .join(" ")
-      .slice(0, 300);
+      .filter(Boolean);
+    const detail = (lines[lines.length - 1] ?? "").slice(0, 300);
     if (detail && detail !== baseMessage) {
       return `${baseMessage} (${code}${detail})`;
     }

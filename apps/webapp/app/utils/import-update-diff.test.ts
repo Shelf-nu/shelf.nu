@@ -945,7 +945,9 @@ describe("describeBulkUpdateRowFailure", () => {
     expect(result).toContain(GENERIC);
     expect(result).toContain("P2022:");
     expect(result).toContain("The column `Asset.foo` does not exist.");
-    // single-lined and bounded so the CSV report stays readable
+    // Only the actionable last line — not the "Invalid `prisma...` invocation"
+    // preamble — so the CSV report stays concise and leaks no internal detail.
+    expect(result).not.toContain("invocation");
     expect(result).not.toContain("\n");
   });
 
