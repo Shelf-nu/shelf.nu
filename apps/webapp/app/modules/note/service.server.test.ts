@@ -8,6 +8,8 @@ vi.mock("~/database/db.server", () => ({
       create: vi.fn(),
       createMany: vi.fn(),
       deleteMany: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
     user: {
       findFirstOrThrow: vi.fn(),
@@ -30,6 +32,13 @@ vi.mock("~/modules/note/helpers.server", () => ({
   buildNameChangeNote: vi.fn(),
   buildValuationChangeNote: vi.fn(),
   resolveUserLink: vi.fn(),
+}));
+
+// why: updateCookieWithPerPage parses/serializes cookies for per-page state;
+// stub it to a fixed page size so pagination math in
+// getPaginatedAndFilterableAssetNotes is deterministic.
+vi.mock("~/utils/cookies.server", () => ({
+  updateCookieWithPerPage: vi.fn(() => Promise.resolve({ perPage: 20 })),
 }));
 
 vi.mock("~/utils/markdoc-wrappers", () => ({
@@ -61,6 +70,7 @@ import {
   createNote,
   createNotes,
   deleteNote,
+  getPaginatedAndFilterableAssetNotes,
 } from "./service.server";
 
 describe("note service", () => {
@@ -981,6 +991,145 @@ describe("note service", () => {
       ).rejects.toThrow(
         "Something went wrong while creating asset notes for audit removal"
       );
+    });
+  });
+
+  describe("getPaginatedAndFilterableAssetNotes", () => {
+    beforeEach(() => {
+      vi.mocked(db.note.findMany).mockResolvedValue([]);
+      vi.mocked(db.note.count).mockResolvedValue(0);
+    });
+
+    it("scopes the query to the asset and its organization", async () => {
+      const request = new Request("http://localhost/assets/asset-1/activity");
+
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(db.note.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+          orderBy: { createdAt: "desc" },
+        })
+      );
+      // count must use the same org-scoped where so totals can't leak cross-tenant
+      expect(db.note.count).toHaveBeenCalledWith({
+        where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+      });
+    });
+
+    it("maps the Comments filter to the COMMENT note type", async () => {
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?noteType=Comments"
+      );
+
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(db.note.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ type: "COMMENT" }),
+        })
+      );
+    });
+
+    it("maps the Updates filter to the UPDATE note type", async () => {
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?noteType=Updates"
+      );
+
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      expect(db.note.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ type: "UPDATE" }),
+        })
+      );
+    });
+
+    it("does not filter by type for the ALL sentinel", async () => {
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?noteType=ALL"
+      );
+
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      const where = vi.mocked(db.note.findMany).mock.calls[0]?.[0]
+        ?.where as any;
+      expect(where).not.toHaveProperty("type");
+    });
+
+    it("searches note content and author name when `s` is present", async () => {
+      const request = new Request(
+        "http://localhost/assets/asset-1/activity?s=lens"
+      );
+
+      await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      const where = vi.mocked(db.note.findMany).mock.calls[0]?.[0]
+        ?.where as any;
+      expect(where.OR).toEqual([
+        { content: { contains: "lens", mode: "insensitive" } },
+        {
+          user: {
+            OR: [
+              { firstName: { contains: "lens", mode: "insensitive" } },
+              { lastName: { contains: "lens", mode: "insensitive" } },
+              { displayName: { contains: "lens", mode: "insensitive" } },
+            ],
+          },
+        },
+      ]);
+    });
+
+    it("returns pagination metadata derived from the total count", async () => {
+      vi.mocked(db.note.count).mockResolvedValue(25);
+
+      const request = new Request("http://localhost/assets/asset-1/activity");
+
+      const result = await getPaginatedAndFilterableAssetNotes({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        request,
+      });
+
+      // 25 notes / 20 per page => 2 pages
+      expect(result.totalItems).toBe(25);
+      expect(result.perPage).toBe(20);
+      expect(result.totalPages).toBe(2);
+      expect(result.page).toBe(1);
+    });
+
+    it("throws ShelfError when the database query fails", async () => {
+      vi.mocked(db.note.findMany).mockRejectedValue(new Error("db down"));
+
+      const request = new Request("http://localhost/assets/asset-1/activity");
+
+      await expect(
+        getPaginatedAndFilterableAssetNotes({
+          assetId: "asset-1",
+          organizationId: "org-1",
+          request,
+        })
+      ).rejects.toThrow(ShelfError);
     });
   });
 });
