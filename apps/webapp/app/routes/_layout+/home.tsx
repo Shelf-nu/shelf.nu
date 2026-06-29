@@ -166,7 +166,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -183,7 +183,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -197,7 +197,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -211,7 +211,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
-          _count: { select: { assets: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -221,7 +221,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           where: { organizationId },
           orderBy: { createdAt: "desc" },
           take: 5,
-          include: { category: true },
+          include: {
+            category: true,
+            custody: { select: { quantity: true } },
+          },
         })
         .catch((cause) => {
           throw new ShelfError({
@@ -262,18 +265,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           select: {
             id: true,
             name: true,
-            _count: { select: { assets: true } },
+            // Count pivot rows (one per asset placed at this location).
+            _count: { select: { assetLocations: true } },
           },
-          orderBy: { assets: { _count: "desc" } },
+          orderBy: { assetLocations: { _count: "desc" } },
           take: 5,
         })
         .then((locs) =>
           locs
-            .filter((l) => l._count.assets > 0)
+            .filter((l) => l._count.assetLocations > 0)
             .map((l) => ({
               locationId: l.id,
               locationName: l.name,
-              assetCount: l._count.assets,
+              assetCount: l._count.assetLocations,
             }))
         ),
 

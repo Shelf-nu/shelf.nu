@@ -9,8 +9,8 @@ import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";
+import { NewAssetDropdown } from "~/components/assets/new-asset-dropdown";
 import Header from "~/components/layout/header";
-import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
@@ -349,14 +349,7 @@ export default function AssetIndexPage() {
         >
           <>
             <ImportButton canImportAssets={canImportAssets} />
-            <Button
-              to="new"
-              role="link"
-              aria-label={`new asset`}
-              data-test-id="createNewAsset"
-            >
-              New asset
-            </Button>
+            <NewAssetDropdown canImportAssets={canImportAssets} />
           </>
         </When>
       </Header>

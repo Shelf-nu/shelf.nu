@@ -1,9 +1,11 @@
-import type { CustomFieldType } from "@prisma/client";
+import { AssetType, type CustomFieldType } from "@prisma/client";
 import {
   compareCustomFieldValues,
   detectPotentialChanges,
   detectCustomFieldChanges,
   getCustomFieldUpdateNoteContent,
+  getKitLocationUpdateNoteContent,
+  getLocationUpdateNoteContent,
 } from "./utils.server";
 
 // @vitest-environment node
@@ -631,5 +633,209 @@ describe("detectCustomFieldChanges - Display Value Formatting", () => {
         isFirstTimeSet: false,
       },
     ]);
+  });
+});
+
+describe("getLocationUpdateNoteContent", () => {
+  const userArgs = {
+    userId: "u1",
+    firstName: "Alex",
+    lastName: "Doe",
+  };
+  const officeA = { id: "loc-a", name: "Office A" };
+  const officeB = { id: "loc-b", name: "Office B" };
+
+  describe("INDIVIDUAL phrasing (unchanged)", () => {
+    it("renders the original 'set the location' phrasing without a count", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: null,
+        newLocation: officeA,
+        type: AssetType.INDIVIDUAL,
+      });
+
+      expect(result).toContain("set the location to");
+      expect(result).toContain("Office A");
+      expect(result).not.toMatch(/\d+\s+units?/);
+    });
+
+    it("renders the original 'updated the location from … to …' phrasing", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: officeA,
+        newLocation: officeB,
+        type: AssetType.INDIVIDUAL,
+      });
+
+      expect(result).toContain("updated the location from");
+      expect(result).toContain("Office A");
+      expect(result).toContain("Office B");
+      expect(result).not.toMatch(/\d+\s+units?/);
+    });
+
+    it("renders the original 'removed the asset from location' phrasing", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: officeA,
+        newLocation: null,
+        isRemoving: true,
+        type: AssetType.INDIVIDUAL,
+      });
+
+      expect(result).toContain("removed the asset from location");
+      expect(result).toContain("Office A");
+      expect(result).not.toMatch(/\d+\s+units?/);
+    });
+
+    it("falls back to the original phrasing when type/quantity are omitted (back-compat)", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: null,
+        newLocation: officeA,
+      });
+
+      expect(result).toContain("set the location to");
+      expect(result).not.toMatch(/\d+\s+units?/);
+    });
+  });
+
+  describe("QUANTITY_TRACKED phrasing (units)", () => {
+    it("renders 'placed N units at L' when setting a first location", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: null,
+        newLocation: officeA,
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 50,
+      });
+
+      expect(result).toContain("placed 50 units at");
+      expect(result).toContain("Office A");
+      expect(result).not.toContain("set the location");
+    });
+
+    it("renders 'moved N units from A to B' when changing locations", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: officeA,
+        newLocation: officeB,
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 50,
+      });
+
+      expect(result).toContain("moved 50 units from");
+      expect(result).toContain("Office A");
+      expect(result).toContain("Office B");
+      expect(result).not.toContain("updated the location");
+    });
+
+    it("renders 'removed N units from L' when unplacing", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: officeA,
+        newLocation: null,
+        isRemoving: true,
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 50,
+      });
+
+      expect(result).toContain("removed 50 units from");
+      expect(result).toContain("Office A");
+      expect(result).not.toContain("removed the asset from location");
+    });
+
+    it("uses the asset's unitOfMeasure label when supplied", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: null,
+        newLocation: officeA,
+        type: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: "boxes",
+        quantity: 12,
+      });
+
+      expect(result).toContain("placed 12 boxes at");
+    });
+
+    it("falls back to original phrasing when quantity is missing for qty-tracked", () => {
+      const result = getLocationUpdateNoteContent({
+        ...userArgs,
+        currentLocation: null,
+        newLocation: officeA,
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: null,
+      });
+
+      // formatUnitCount returns null for null qty → original phrasing
+      expect(result).toContain("set the location to");
+      expect(result).not.toMatch(/\d+\s+units?/);
+    });
+  });
+});
+
+describe("getKitLocationUpdateNoteContent", () => {
+  const userArgs = {
+    userId: "u1",
+    firstName: "Alex",
+    lastName: "Doe",
+  };
+  const officeA = { id: "loc-a", name: "Office A" };
+
+  it("appends the kit-assignment suffix to the original INDIVIDUAL phrase", () => {
+    const result = getKitLocationUpdateNoteContent({
+      ...userArgs,
+      currentLocation: null,
+      newLocation: officeA,
+      isRemoving: false,
+      type: AssetType.INDIVIDUAL,
+    });
+
+    expect(result).toContain("set the location to");
+    expect(result).toContain("Office A");
+    expect(result.endsWith("via parent kit assignment.")).toBe(true);
+    expect(result).not.toMatch(/\d+\s+units?/);
+  });
+
+  it("appends the kit-removal suffix to the original INDIVIDUAL phrase", () => {
+    const result = getKitLocationUpdateNoteContent({
+      ...userArgs,
+      currentLocation: officeA,
+      newLocation: null,
+      isRemoving: true,
+      type: AssetType.INDIVIDUAL,
+    });
+
+    expect(result).toContain("removed the asset from location");
+    expect(result.endsWith("via parent kit removal.")).toBe(true);
+  });
+
+  it("renders 'placed N units at L … via parent kit assignment.' for qty-tracked", () => {
+    const result = getKitLocationUpdateNoteContent({
+      ...userArgs,
+      currentLocation: null,
+      newLocation: officeA,
+      isRemoving: false,
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 50,
+    });
+
+    expect(result).toContain("placed 50 units at");
+    expect(result).toContain("Office A");
+    expect(result.endsWith("via parent kit assignment.")).toBe(true);
+  });
+
+  it("renders 'removed N units from L … via parent kit removal.' for qty-tracked", () => {
+    const result = getKitLocationUpdateNoteContent({
+      ...userArgs,
+      currentLocation: officeA,
+      newLocation: null,
+      isRemoving: true,
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 50,
+    });
+
+    expect(result).toContain("removed 50 units from");
+    expect(result).toContain("Office A");
+    expect(result.endsWith("via parent kit removal.")).toBe(true);
   });
 });
