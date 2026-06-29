@@ -50,6 +50,7 @@ type AssetImageAction =
   | { type: "load_success" }
   | { type: "load_error" }
   | { type: "clear_error" }
+  | { type: "asset_changed" }
   | { type: "mark_refresh_attempted" }
   | { type: "open_dialog" }
   | { type: "close_dialog" }
@@ -83,6 +84,19 @@ function assetImageReducer(
       return { ...state, isLoading: false, isImageError: true };
     case "clear_error":
       return { ...state, isImageError: false };
+    case "asset_changed":
+      // The rendered asset changed under a reused component instance — drop the
+      // previous asset's refreshed URLs and in-flight/error flags so we never
+      // show a stale image or skip the new asset's refresh/generation.
+      return {
+        ...state,
+        isLoading: true,
+        isImageError: false,
+        isFetchingImage: false,
+        hasAttemptedRefresh: false,
+        refreshedMainImage: null,
+        refreshedThumbnailImage: null,
+      };
     case "mark_refresh_attempted":
       return { ...state, hasAttemptedRefresh: true };
     case "open_dialog":
@@ -98,9 +112,10 @@ function assetImageReducer(
         ...state,
         isFetchingImage: false,
         // A successful refresh means we have valid new URLs — clear any prior
-        // error so the freshly-signed image is shown.
+        // error so the freshly-signed image is shown. Check for `null`
+        // explicitly (the fields are `string | null`) rather than truthiness.
         isImageError:
-          action.mainImage || action.thumbnailImage
+          action.mainImage != null || action.thumbnailImage != null
             ? false
             : state.isImageError,
         refreshedMainImage: action.mainImage ?? state.refreshedMainImage,
@@ -148,6 +163,10 @@ export const AssetImage = ({
 
   const { id: assetId, thumbnailImage } = asset;
 
+  // Tracks which asset this instance last rendered, so the mount/refresh effect
+  // can detect an asset swap (instance reuse) and reset its per-asset guards.
+  const previousAssetIdRef = useRef(assetId);
+
   // Safely access main image properties using the type guard
   const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
   const isPreviewAsset = isAssetForPreview(asset);
@@ -160,8 +179,11 @@ export const AssetImage = ({
   // Create a stable cache-busting key that won't change on re-renders
   const [cacheBuster] = useState(isImageError ? `?t=${Date.now()}` : "");
 
-  const currentThumbnail = refreshedThumbnailImage || thumbnailImage;
-  const currentMainImage = refreshedMainImage || mainImage;
+  // Prefer a freshly-refreshed URL, falling back to the prop value. Use nullish
+  // coalescing (not `||`) so only `null` falls back, matching the
+  // `string | null` contract of these fields.
+  const currentThumbnail = refreshedThumbnailImage ?? thumbnailImage;
+  const currentMainImage = refreshedMainImage ?? mainImage;
 
   // Only add cache-buster if we've had an error and attempted refresh
   const imageUrl =
@@ -279,8 +301,20 @@ export const AssetImage = ({
     dispatch({ type: "close_dialog" });
   };
 
-  // Check for image expiration and generate thumbnail on component mount only
+  // Check for image expiration and generate the thumbnail. Keyed on `assetId`
+  // (not `[]`) so that if this component instance is reused for a different
+  // asset — i.e. rendered without a stable `key` — we reset the per-asset
+  // guards and re-run the refresh/generation for the new asset instead of
+  // showing the previous one's image.
   useEffect(() => {
+    // When the asset actually changes (not the initial mount), clear the
+    // one-shot guard and the previously-refreshed URLs before scheduling work.
+    if (previousAssetIdRef.current !== assetId) {
+      previousAssetIdRef.current = assetId;
+      hasAttemptedRefreshRef.current = false;
+      dispatch({ type: "asset_changed" });
+    }
+
     // Stagger refresh requests with a random delay to avoid
     // overwhelming Supabase with concurrent requests (429 errors)
     const timerIds: ReturnType<typeof setTimeout>[] = [];
@@ -306,12 +340,14 @@ export const AssetImage = ({
       }
     }
 
-    // Generate thumbnail if needed and we haven't tried yet
+    // Generate thumbnail if needed and we haven't tried yet. The
+    // `hasAttemptedRefreshRef` guard (reset above on asset change) prevents
+    // duplicate generation, so we don't also gate on `refreshedThumbnailImage`
+    // here (its closure value would be stale right after an asset_changed reset).
     if (
       useThumbnail &&
       mainImage &&
       !thumbnailImage &&
-      !refreshedThumbnailImage &&
       !hasAttemptedRefreshRef.current
     ) {
       timerIds.push(
@@ -325,7 +361,7 @@ export const AssetImage = ({
       timerIds.forEach((id) => clearTimeout(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array to run only on mount
+  }, [assetId]); // Re-run when the rendered asset changes
 
   // Debug the image URLs - uncomment during debugging
   // useEffect(() => {
