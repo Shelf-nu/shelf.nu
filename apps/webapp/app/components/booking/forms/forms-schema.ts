@@ -362,6 +362,19 @@ function buildBookingDateSchemas({
  * - Other actions:
  *   - No relevant fields are updated.
  *   - Only base-level validation applies.
+ *
+ * @param params - The form schema inputs. See {@link BookingFormSchemaParams}.
+ * @param params.hints - Client hints (timezone) used to coerce/validate dates.
+ * @param params.action - The form action ("new" | "save" | "reserve"); selects
+ *   which field set and refinements apply.
+ * @param params.status - The current booking status (drives the "save" branch).
+ * @param params.workingHours - The org's working-hours config (normalized
+ *   internally) used to validate start/end dates.
+ * @param params.bookingSettings - Buffer, tag-required, and max-length settings.
+ * @param params.isAdminOrOwner - When true, buffer/max-length restrictions are
+ *   bypassed (working-hours restrictions still apply).
+ * @returns A Zod schema (with cross-field date refinement) for the booking form,
+ *   shaped per the given `action`/`status`.
  */
 export function BookingFormSchema({
   hints,

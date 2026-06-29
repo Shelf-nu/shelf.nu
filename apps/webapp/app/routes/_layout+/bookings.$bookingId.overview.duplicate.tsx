@@ -386,7 +386,9 @@ export default function DuplicateBooking() {
         </div>
 
         {actionData?.error && (
-          <div className="mb-4 rounded-md bg-red-50 p-4">
+          // role="alert" so non-field server errors are announced to screen
+          // readers when the dialog re-renders after a failed submit.
+          <div role="alert" className="mb-4 rounded-md bg-red-50 p-4">
             <p className="text-sm text-red-500">{actionData.error.message}</p>
           </div>
         )}
