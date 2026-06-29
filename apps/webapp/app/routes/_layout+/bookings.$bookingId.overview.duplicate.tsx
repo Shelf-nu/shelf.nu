@@ -20,7 +20,6 @@
  */
 import { useRef, useState } from "react";
 import { AssetType } from "@prisma/client";
-import { DateTime } from "luxon";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -51,7 +50,6 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getHints, useHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
@@ -151,7 +149,13 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
     const isAdminOrOwner = !isSelfServiceOrBase;
 
-    parseData(
+    // `coerceLocalDate` (inside the schema) parses the `datetime-local` wire
+    // strings into absolute instants in the user's timezone via `fromISO`,
+    // which tolerates second-precision input. Use the validated/coerced result
+    // directly rather than re-parsing the raw form data with a stricter
+    // minute-only format (which would yield an Invalid Date if seconds slipped
+    // through).
+    const { startDate: from, endDate: to } = parseData(
       formData,
       DuplicateBookingSchema({
         hints,
@@ -166,22 +170,6 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
         additionalData: { userId, organizationId, bookingId },
       }
     );
-
-    const from = DateTime.fromFormat(
-      formData.get("startDate")!.toString(),
-      DATE_TIME_FORMAT,
-      {
-        zone: hints.timeZone,
-      }
-    ).toJSDate();
-
-    const to = DateTime.fromFormat(
-      formData.get("endDate")!.toString(),
-      DATE_TIME_FORMAT,
-      {
-        zone: hints.timeZone,
-      }
-    ).toJSDate();
 
     const newBooking = await duplicateBooking({
       bookingId,
