@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
@@ -45,12 +45,46 @@ export default function BulkPartialCheckinDialog({
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
+  // Denormalised view of `booking.bookingAssets` (the QT pivot). We flatten
+  // the pivot to a plain asset list shape so the SHARED resolver
+  // (`flattenSelectedBookingItems`) — authored against the old `booking.assets`
+  // array — can enrich entries by id without needing to know about the pivot.
+  // Preserves `bookingAssetId` (used as React key for per-slice hidden inputs),
+  // `bookedQuantity`, and resolves the row's kit attribution via
+  // `BookingAsset.assetKitId` so a qty-tracked asset booked as both standalone
+  // and kit-member surfaces under the right group.
+  const assetsList = useMemo(
+    () =>
+      booking.bookingAssets.map((ba) => {
+        // Resolve the per-row kit attribution by matching this BookingAsset's
+        // `assetKitId` (the per-row pivot discriminator) against the asset's
+        // set of `AssetKit` memberships. A qty-tracked asset can be a member
+        // of multiple kits and appear in this booking as both a standalone
+        // slice (`assetKitId IS NULL`) and a kit-driven slice — only the
+        // membership whose `id` matches contributes its kit identity to this
+        // row. Mirrors the loader's `bookingAssets` flattening at
+        // `bookings.$bookingId.overview.tsx` (~L273) so the shared resolver
+        // sees the same shape from both sides.
+        const sourceKit = ba.assetKitId
+          ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId) ?? null
+          : null;
+        return {
+          ...ba.asset,
+          bookingAssetId: ba.id,
+          bookedQuantity: ba.quantity,
+          kitId: sourceKit?.kitId ?? null,
+          kit: sourceKit?.kit ?? null,
+        };
+      }),
+    [booking.bookingAssets]
+  );
+
   // Flatten/enrich the selection via the SHARED resolver (single source of
   // truth with the dropdown and checkout dialog), then keep kits + the assets
   // that are actually checkable-in.
   const flattenedItems = flattenSelectedBookingItems(
     rawSelectedItems,
-    booking.assets
+    assetsList
   );
   const selectedItems = flattenedItems.filter((item) => {
     if (item.type === "kit" || (item.name && item._count)) return true;
@@ -82,7 +116,12 @@ export default function BulkPartialCheckinDialog({
   const checkedInAssetIds = new Set(
     partialCheckinProgress?.checkedInAssetIds || []
   );
-  const remainingCheckedOutAssets = booking.assets.filter(
+  // Source remaining-CHECKED_OUT assets from the denormalised `assetsList`
+  // (pivot-aware) — `booking.assets` was the pre-pivot shape and no longer
+  // exists. Check-in eligibility is fully encoded in `partialCheckinDetails`
+  // (see `isAssetCheckableIn`), so we only need the plain status probe here
+  // to detect the "final checkin" case.
+  const remainingCheckedOutAssets = assetsList.filter(
     (asset) =>
       asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
   );

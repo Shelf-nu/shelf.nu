@@ -6,7 +6,8 @@
  * custom date component.
  */
 
-import type { Category } from "@prisma/client";
+import type { AssetType, Category } from "@prisma/client";
+import { formatUnitCount } from "~/utils/asset-quantity";
 import { resolveUserDisplayName } from "~/utils/user";
 
 /**
@@ -77,6 +78,35 @@ export function wrapAssetsWithDataForNote(
       "&quot;"
     )}" /%}`;
   }
+}
+
+/**
+ * Composes a single-asset note fragment that prefixes a unit count for
+ * QUANTITY_TRACKED assets, e.g. `"50 units of {asset link}"`.
+ *
+ * For INDIVIDUAL assets — or a missing / non-positive quantity — it returns
+ * the bare asset link, so existing note phrasing is byte-for-byte unchanged.
+ * Use this for per-asset notes (kit add/remove, location move, booking add)
+ * where the asset appears as a single link in the sentence; the calling verb
+ * wraps around it (e.g. `added ${fragment} to ${kit}`).
+ *
+ * @param asset - Asset with id, title, type, and unitOfMeasure
+ * @param quantity - The PIVOT-row quantity (AssetKit / AssetLocation /
+ *   BookingAsset / Custody `.quantity`), NOT `Asset.quantity`
+ * @returns `"50 units of {% link ... /%}"` or just `"{% link ... /%}"`
+ */
+export function wrapAssetWithCountForNote(
+  asset: {
+    id: string;
+    title: string;
+    type: AssetType;
+    unitOfMeasure?: string | null;
+  },
+  quantity: number | null | undefined
+): string {
+  const link = wrapAssetsWithDataForNote(asset);
+  const count = formatUnitCount(asset, quantity);
+  return count ? `${count} of ${link}` : link;
 }
 
 /**

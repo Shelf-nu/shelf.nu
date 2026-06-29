@@ -47,6 +47,7 @@ import {
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { getPrimaryLocation } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
 
@@ -661,9 +662,13 @@ export async function getAuditSessionDetails({
                 preferredBarcodeId: true,
                 qrCodes: { take: 1, select: { id: true } },
                 barcodes: { select: { id: true, type: true, value: true } },
-                location: {
+                assetLocations: {
                   select: {
-                    name: true,
+                    location: {
+                      select: {
+                        name: true,
+                      },
+                    },
                   },
                 },
                 // why: surface category + active custodian on the
@@ -754,7 +759,10 @@ export async function getAuditSessionDetails({
         // "external" custodians (contractors etc.). Routes through the
         // shared `resolveUserDisplayName` helper so the precedence
         // (displayName → first+last) stays in one place.
-        const custodian = auditAsset.asset?.custody?.custodian;
+        // `custody` is an array on the quantities data model (an asset can
+        // be split across multiple custodians); surface the primary row's
+        // custodian for the audit detail row.
+        const custodian = auditAsset.asset?.custody?.[0]?.custodian;
         const custodianName =
           (custodian?.user && resolveUserDisplayName(custodian.user)) ||
           custodian?.name ||
@@ -768,7 +776,9 @@ export async function getAuditSessionDetails({
           auditImagesCount: auditAsset._count?.images ?? 0,
           mainImage: auditAsset.asset?.mainImage ?? null,
           thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          locationName: auditAsset.asset?.location?.name ?? null,
+          // An asset can sit at multiple locations via the AssetLocation
+          // pivot; surface only its single primary placement on the row.
+          locationName: getPrimaryLocation(auditAsset.asset)?.name ?? null,
           categoryName: auditAsset.asset?.category?.name ?? null,
           custodianName,
         };
@@ -1000,8 +1010,12 @@ export async function getAssetsForAuditSession({
           },
         },
         {
-          location: {
-            name: { contains: searchTerm, mode: "insensitive" },
+          assetLocations: {
+            some: {
+              location: {
+                name: { contains: searchTerm, mode: "insensitive" },
+              },
+            },
           },
         },
         // Search by QR id and barcode values — audits are where field
@@ -1044,14 +1058,19 @@ export async function getAssetsForAuditSession({
           },
         },
         tags: TAG_WITH_COLOR_SELECT,
-        location: {
+        assetLocations: {
           select: {
-            id: true,
-            name: true,
-            parentId: true,
-            _count: {
+            quantity: true,
+            location: {
               select: {
-                children: true,
+                id: true,
+                name: true,
+                parentId: true,
+                _count: {
+                  select: {
+                    children: true,
+                  },
+                },
               },
             },
           },
@@ -1085,6 +1104,7 @@ export async function getAssetsForAuditSession({
     // Enrich assets with audit status data for "ALL" filter
     const enrichedAssets = assets.map((asset) => ({
       ...asset,
+      location: getPrimaryLocation(asset),
       auditData: auditStatusMap.get(asset.id) || null,
     }));
 
@@ -1483,9 +1503,13 @@ export async function getAuditScans({
           select: {
             id: true,
             title: true,
-            location: {
+            assetLocations: {
               select: {
-                name: true,
+                location: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -1571,7 +1595,7 @@ export async function getAuditScans({
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
-        assetLocationName: scan.asset?.location?.name ?? null,
+        assetLocationName: getPrimaryLocation(scan.asset)?.name ?? null,
       };
     });
   } catch (cause) {

@@ -23,8 +23,11 @@ import {
  * delegating to {@link partialCheckoutBooking}.
  *
  * @param args - Remix action args; `request` carries the JSON body
- *   `{ bookingId: string; assetIds: string[]; timeZone?: string }` and mobile
- *   auth headers.
+ *   `{ bookingId: string; assetIds: string[]; checkouts?: Array<{ assetId: string;
+ *   bookingAssetId?: string | null; quantity: number }>; timeZone?: string }` and
+ *   mobile auth headers. The optional `checkouts` field enables partial
+ *   (sub-quantity) check-outs for PARTIAL-tracked assets; legacy clients omit it
+ *   and get INDIVIDUAL semantics driven by `assetIds` alone.
  * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
  *   on success, or `{ error: { message } }` with the appropriate status on failure.
  * @throws Never throws to the caller — errors are normalized via
@@ -43,10 +46,26 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     const body = await request.json();
-    const { bookingId, assetIds, timeZone } = z
+    const { bookingId, assetIds, checkouts, timeZone } = z
       .object({
         bookingId: z.string().min(1),
-        assetIds: z.array(z.string().min(1)).min(1),
+        assetIds: z.array(z.string().cuid()).min(1),
+        /**
+         * Optional per-asset checkout payload mirroring the webapp check-in
+         * JSON shape. When present, the service uses it to perform partial
+         * (sub-quantity) checkouts for PARTIAL-tracked assets. Legacy mobile
+         * clients omit this field and continue to receive INDIVIDUAL
+         * semantics driven solely by `assetIds`.
+         */
+        checkouts: z
+          .array(
+            z.object({
+              assetId: z.string().cuid(),
+              bookingAssetId: z.string().cuid().nullable().optional(),
+              quantity: z.number().int().positive(),
+            })
+          )
+          .optional(),
         timeZone: z.string().optional(),
       })
       .parse(body);
@@ -64,6 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: bookingId,
       organizationId,
       assetIds,
+      checkouts,
       userId: user.id,
       hints,
     });

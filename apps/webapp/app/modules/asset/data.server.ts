@@ -165,27 +165,33 @@ export async function simpleModeLoader({
       extraInclude:
         view === "availability"
           ? {
-              bookings: {
+              bookingAssets: {
                 where: {
-                  status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                  booking: {
+                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                  },
                 },
-                select: {
-                  id: true,
-                  name: true,
-                  status: true,
-                  from: true,
-                  to: true,
-                  description: true,
-                  custodianTeamMember: true,
-                  custodianUser: true,
-                  tags: TAG_WITH_COLOR_SELECT,
-                  creator: {
+                include: {
+                  booking: {
                     select: {
                       id: true,
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
+                      name: true,
+                      status: true,
+                      from: true,
+                      to: true,
+                      description: true,
+                      custodianTeamMember: true,
+                      custodianUser: true,
+                      tags: TAG_WITH_COLOR_SELECT,
+                      creator: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
+                      },
                     },
                   },
                 },
@@ -378,21 +384,34 @@ export async function advancedModeLoader({
     organizationId
   );
 
-  const { selectedTags, selectedCategory, selectedLocation } =
-    await getAllSelectedValuesFromFilters(
-      filters,
-      settings.columns as Column[],
-      organizationId,
-      parsedFilters
-    );
+  const {
+    selectedTags,
+    selectedCategory,
+    selectedLocation,
+    selectedAssetModel,
+  } = await getAllSelectedValuesFromFilters(
+    filters,
+    settings.columns as Column[],
+    organizationId,
+    parsedFilters
+  );
 
   // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
-  // categories, locations). Its output is only used in the final response
-  // payload — no other query depends on it. Running it inside Promise.all
-  // lets it overlap with the asset query instead of blocking it.
+  // categories, locations, asset models). Its output is only used in the final
+  // response payload — no other query depends on it. Running it inside
+  // Promise.all lets it overlap with the asset query instead of blocking it.
   /** Query entities, tierLimit, assets & more — all in parallel */
   const [
-    { tags, totalTags, categories, totalCategories, locations, totalLocations },
+    {
+      tags,
+      totalTags,
+      categories,
+      totalCategories,
+      locations,
+      totalLocations,
+      assetModels,
+      totalAssetModels,
+    },
     tierLimit,
     { search, totalAssets, perPage, page, assets, totalPages, cookie },
     customFields,
@@ -413,6 +432,7 @@ export async function advancedModeLoader({
       selectedTagIds: selectedTags,
       selectedCategoryIds: selectedCategory,
       selectedLocationIds: selectedLocation,
+      selectedAssetModelIds: selectedAssetModel,
     }),
     getOrganizationTierLimit({
       organizationId,
@@ -588,6 +608,8 @@ export async function advancedModeLoader({
       tagsData,
       bookings,
       totalBookings,
+      assetModels,
+      totalAssetModels,
       // Saved filter presets
       savedFilterPresets: advSavedFilterPresets,
       savedFilterPresetLimit: MAX_SAVED_FILTER_PRESETS,

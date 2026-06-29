@@ -61,28 +61,32 @@ const mockKits = [
     name: "Photography Kit",
     image: "kit-image-1.jpg",
     imageExpiration: "2024-12-31T23:59:59Z",
-    assets: [
+    assetKits: [
       {
-        id: "asset-1",
-        title: "Canon Camera",
-        mainImage: "camera.jpg",
-        mainImageExpiration: "2024-12-31T23:59:59Z",
-        category: {
-          name: "Cameras",
+        asset: {
+          id: "asset-1",
+          title: "Canon Camera",
+          mainImage: "camera.jpg",
+          mainImageExpiration: "2024-12-31T23:59:59Z",
+          category: {
+            name: "Cameras",
+          },
         },
       },
       {
-        id: "asset-2",
-        title: "Tripod",
-        mainImage: "tripod.jpg",
-        mainImageExpiration: "2024-12-31T23:59:59Z",
-        category: {
-          name: "Accessories",
+        asset: {
+          id: "asset-2",
+          title: "Tripod",
+          mainImage: "tripod.jpg",
+          mainImageExpiration: "2024-12-31T23:59:59Z",
+          category: {
+            name: "Accessories",
+          },
         },
       },
     ],
     _count: {
-      assets: 2,
+      assetKits: 2,
     },
   },
   {
@@ -90,19 +94,21 @@ const mockKits = [
     name: "Video Production Kit",
     image: "kit-image-2.jpg",
     imageExpiration: "2024-12-31T23:59:59Z",
-    assets: [
+    assetKits: [
       {
-        id: "asset-3",
-        title: "Video Camera",
-        mainImage: "video-camera.jpg",
-        mainImageExpiration: "2024-12-31T23:59:59Z",
-        category: {
-          name: "Cameras",
+        asset: {
+          id: "asset-3",
+          title: "Video Camera",
+          mainImage: "video-camera.jpg",
+          mainImageExpiration: "2024-12-31T23:59:59Z",
+          category: {
+            name: "Cameras",
+          },
         },
       },
     ],
     _count: {
-      assets: 1,
+      assetKits: 1,
     },
   },
 ];
@@ -148,25 +154,27 @@ describe("/api/kits", () => {
           name: true,
           image: true,
           imageExpiration: true,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              mainImage: true,
-              mainImageExpiration: true,
-              category: {
+              asset: {
                 select: {
-                  name: true,
+                  id: true,
+                  title: true,
+                  mainImage: true,
+                  mainImageExpiration: true,
+                  category: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
               },
             },
-            orderBy: {
-              title: "asc",
-            },
+            orderBy: { asset: { title: "asc" } },
           },
           _count: {
             select: {
-              assets: true,
+              assetKits: true,
             },
           },
         },
@@ -253,25 +261,27 @@ describe("/api/kits", () => {
           name: true,
           image: true,
           imageExpiration: true,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              mainImage: true,
-              mainImageExpiration: true,
-              category: {
+              asset: {
                 select: {
-                  name: true,
+                  id: true,
+                  title: true,
+                  mainImage: true,
+                  mainImageExpiration: true,
+                  category: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
               },
             },
-            orderBy: {
-              title: "asc",
-            },
+            orderBy: { asset: { title: "asc" } },
           },
           _count: {
             select: {
-              assets: true,
+              assetKits: true,
             },
           },
         },
@@ -307,25 +317,27 @@ describe("/api/kits", () => {
           name: true,
           image: true,
           imageExpiration: true,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              mainImage: true,
-              mainImageExpiration: true,
-              category: {
+              asset: {
                 select: {
-                  name: true,
+                  id: true,
+                  title: true,
+                  mainImage: true,
+                  mainImageExpiration: true,
+                  category: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
               },
             },
-            orderBy: {
-              title: "asc",
-            },
+            orderBy: { asset: { title: "asc" } },
           },
           _count: {
             select: {
-              assets: true,
+              assetKits: true,
             },
           },
         },
@@ -366,25 +378,27 @@ describe("/api/kits", () => {
           name: true,
           image: true,
           imageExpiration: true,
-          assets: {
+          assetKits: {
             select: {
-              id: true,
-              title: true,
-              mainImage: true,
-              mainImageExpiration: true,
-              category: {
+              asset: {
                 select: {
-                  name: true,
+                  id: true,
+                  title: true,
+                  mainImage: true,
+                  mainImageExpiration: true,
+                  category: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
               },
             },
-            orderBy: {
-              title: "asc",
-            },
+            orderBy: { asset: { title: "asc" } },
           },
           _count: {
             select: {
-              assets: true,
+              assetKits: true,
             },
           },
         },
@@ -508,7 +522,7 @@ describe("/api/kits", () => {
             name: true,
             image: true,
             imageExpiration: true,
-            assets: expect.any(Object),
+            assetKits: expect.any(Object),
             _count: expect.any(Object),
           },
         })
