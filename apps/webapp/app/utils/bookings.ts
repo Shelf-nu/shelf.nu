@@ -1,5 +1,6 @@
 import type { Asset, Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
+import { getAssetTotalValue } from "./asset-value";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 import { resolveTeamMemberName } from "./user";
@@ -76,11 +77,17 @@ export function calculateTotalValueOfAssets({
   currency,
   locale,
 }: {
-  assets: Pick<Asset, "valuation">[];
+  // `quantity` is required so QT assets contribute valuation × quantity.
+  // INDIVIDUAL assets always have quantity: 1, so behaviour is unchanged for them.
+  assets: Pick<Asset, "valuation" | "quantity">[];
   currency: Currency;
   locale: string;
 }): string {
-  const value = assets.reduce((acc, asset) => acc + (asset.valuation || 0), 0);
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+  const value = assets.reduce(
+    (acc, asset) => acc + getAssetTotalValue(asset),
+    0
+  );
   return formatCurrency({
     value: value,
     locale,

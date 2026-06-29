@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -95,20 +96,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       cookieResult,
     ] = await Promise.all([
       // 1a. Asset count + total valuation
-      db.asset
-        .aggregate({
-          where: { organizationId },
-          _count: { _all: true },
-          _sum: { valuation: true },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to load asset aggregation",
-            additionalData: { userId, organizationId },
-            label: "Dashboard",
-          });
-        }),
+      // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+      // `aggregate({_sum: { valuation }})` would only sum the per-unit price; QT assets with
+      // quantity > 1 would silently underreport. `$queryRaw` lets us express the multiplication.
+      Promise.all([
+        db.asset
+          .aggregate({
+            where: { organizationId },
+            _count: { _all: true },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to load asset aggregation",
+              additionalData: { userId, organizationId },
+              label: "Dashboard",
+            });
+          }),
+        db
+          .$queryRaw<{ total: bigint }[]>(
+            Prisma.sql`
+            SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+            FROM "Asset"
+            WHERE "organizationId" = ${organizationId}
+          `
+          )
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to load asset total valuation",
+              additionalData: { userId, organizationId },
+              label: "Dashboard",
+            });
+          }),
+      ]).then(([countResult, valuationRows]) => ({
+        _count: countResult._count,
+        totalValuation: Number(valuationRows[0]?.total ?? 0),
+      })),
 
       // 1a. Count of assets with known valuation
       db.asset.count({
@@ -296,7 +320,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ]);
 
     const totalAssets = assetAggregation._count._all;
-    const totalValuation = assetAggregation._sum.valuation ?? 0;
+    const totalValuation = assetAggregation.totalValuation;
 
     const header: HeaderData = {
       title: "Home",

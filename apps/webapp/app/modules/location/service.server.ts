@@ -1,5 +1,4 @@
 import type {
-  Prisma,
   User,
   Location,
   Organization,
@@ -7,7 +6,7 @@ import type {
   Asset,
   Kit,
 } from "@prisma/client";
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -680,13 +679,22 @@ export async function getLocationTotalValuation({
 }: {
   locationId: Location["id"];
 }) {
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   // Filter via the `AssetLocation` pivot — there is no `Asset.locationId`.
-  const result = await db.asset.aggregate({
-    _sum: { valuation: true },
-    where: { assetLocations: { some: { locationId } } },
-  });
+  // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
+  // to `$queryRaw` and keep the same scope (assets joined to the pivot).
+  const rows = await db.$queryRaw<{ total: bigint }[]>(
+    Prisma.sql`
+      SELECT COALESCE(SUM(a.valuation * a.quantity), 0)::bigint AS total
+      FROM "Asset" a
+      WHERE a.id IN (
+        SELECT al."assetId" FROM "AssetLocation" al
+        WHERE al."locationId" = ${locationId}
+      )
+    `
+  );
 
-  return result._sum.valuation ?? 0;
+  return Number(rows[0]?.total ?? 0);
 }
 
 /**

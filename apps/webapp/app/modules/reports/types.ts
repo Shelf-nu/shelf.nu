@@ -10,7 +10,7 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { BookingStatus, Currency } from "@prisma/client";
+import type { AssetType, BookingStatus, Currency } from "@prisma/client";
 
 // -----------------------------------------------------------------------------
 // KPI Types
@@ -313,8 +313,17 @@ export interface IdleAssetRow {
   daysSinceLastUse: number;
   /** Current asset status */
   status: string;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Idle Assets report */
@@ -343,8 +352,17 @@ export interface CustodySnapshotRow {
   assignedAt: Date;
   /** Days in custody */
   daysInCustody: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Custody Snapshot report */
@@ -465,8 +483,17 @@ export interface AssetInventoryRow {
   location: string | null;
   status: string;
   custodian: string | null;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
   /** Date asset was created */
   createdAt: Date;
   /** QR code ID if assigned */
@@ -529,8 +556,17 @@ export interface AssetUtilizationRow {
   utilizationRate: number;
   /** Number of bookings in the period */
   bookingCount: number;
-  /** Asset valuation if set */
+  /** Per-unit valuation if set. The displayed "Value" column shows the
+   * TOTAL (valuation × quantity) for QT assets; see {@link CurrencyCell}. */
   valuation: number | null;
+  /** Asset kind — drives the quantity-aware value breakdown in cells. */
+  type: AssetType;
+  /** Total stock count; >1 only for QT assets. Nullable to match
+   * Prisma's `Asset.quantity` shape; consumers treat `null` as 1
+   * (see `getAssetTotalValue` in `~/utils/asset-value`). */
+  quantity: number | null;
+  /** Optional unit label (e.g. "boxes") used by the value breakdown. */
+  unitOfMeasure: string | null;
 }
 
 /** KPI IDs for the Asset Utilization report */

@@ -17,7 +17,9 @@ const KIT_OVERVIEW_BARCODES_FIELDS = {
 const KIT_OVERVIEW_BASE_FIELDS = {
   assetKits: {
     select: {
-      asset: { select: { valuation: true } },
+      // `quantity` is needed by the overview's totalValue reducer so it can
+      // compute valuation × quantity per asset (QT-aware totals).
+      asset: { select: { valuation: true, quantity: true } },
     },
   },
   qrCodes: {

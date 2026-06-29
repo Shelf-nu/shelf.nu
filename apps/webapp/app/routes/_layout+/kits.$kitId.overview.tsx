@@ -14,6 +14,7 @@ import When from "~/components/when/when";
 import { getKitOverviewFields } from "~/modules/kit/fields";
 import { getKit } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getAssetTotalValue } from "~/utils/asset-value";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
@@ -88,8 +89,9 @@ export const handle = {
 export default function KitOverview() {
   const { kit, currentOrganization, locale } = useLoaderData<typeof loader>();
   const { canUseBarcodes } = useBarcodePermissions();
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   const totalValue = kit.assetKits.reduce(
-    (total, ak) => total + (ak.asset.valuation ?? 0),
+    (total, ak) => total + getAssetTotalValue(ak.asset),
     0
   );
 

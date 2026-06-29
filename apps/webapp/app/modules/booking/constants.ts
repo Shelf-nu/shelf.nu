@@ -126,6 +126,10 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           availableToBook: true,
           status: true,
           valuation: true,
+          // `quantity` is needed by `calculateTotalValueOfAssets` (booking
+          // overview total + PDF total) so QT assets contribute
+          // valuation × quantity instead of just per-unit.
+          quantity: true,
           // Asset-code resolution fields — see `app/modules/barcode/display.ts`
           // for the canonical select shape. Tight `take: 1` + narrow `select`
           // keeps query weight minimal even with hundreds of booking assets.

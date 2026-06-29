@@ -16,8 +16,8 @@ import type {
   ActivityAction,
   AssetStatus,
   BookingStatus,
-  Prisma,
 } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import {
@@ -26,6 +26,7 @@ import {
   isOnTime,
   resolveCheckInAt,
 } from "~/modules/booking/lateness";
+import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
@@ -1125,7 +1126,9 @@ async function computeOverdueKpis(
       bookingAssets: {
         select: {
           asset: {
-            select: { id: true, valuation: true },
+            // `quantity` is selected so the value-at-risk reducer below can
+            // compute valuation × quantity (QT-aware totals).
+            select: { id: true, valuation: true, quantity: true },
           },
         },
       },
@@ -1163,9 +1166,10 @@ async function computeOverdueKpis(
       0,
       b._count.bookingAssets - checkedInAssetIds.size
     );
+    // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
     totalValueAtRisk += b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((assetSum, ba) => assetSum + (ba.asset.valuation || 0), 0);
+      .reduce((assetSum, ba) => assetSum + getAssetTotalValue(ba.asset), 0);
   }
 
   // Also track total for context in hero subtitle
@@ -1409,6 +1413,9 @@ async function fetchIdleAssetRows(
       thumbnailImage: true,
       status: true,
       valuation: true,
+      type: true,
+      quantity: true,
+      unitOfMeasure: true,
       updatedAt: true,
       category: {
         select: {
@@ -1472,6 +1479,9 @@ async function fetchIdleAssetRows(
       daysSinceLastUse,
       status: asset.status,
       valuation: asset.valuation,
+      type: asset.type,
+      quantity: asset.quantity,
+      unitOfMeasure: asset.unitOfMeasure,
     };
   });
 }
@@ -1560,6 +1570,9 @@ async function computeIdleAssetsKpis(
     select: {
       id: true,
       valuation: true,
+      // `quantity` is selected so `totalIdleValue` below can compute
+      // valuation × quantity (QT-aware totals).
+      quantity: true,
       updatedAt: true,
       bookingAssets: {
         where: {
@@ -1585,9 +1598,9 @@ async function computeIdleAssetsKpis(
   const idlePercentage =
     totalAssets > 0 ? Math.round((totalIdle / totalAssets) * 100) : 0;
 
-  // Calculate total value of idle assets
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   const totalIdleValue = trulyIdle.reduce(
-    (sum, asset) => sum + (asset.valuation || 0),
+    (sum, asset) => sum + getAssetTotalValue(asset),
     0
   );
 
@@ -1803,6 +1816,9 @@ async function fetchCustodyRows(
           mainImageExpiration: true,
           thumbnailImage: true,
           valuation: true,
+          type: true,
+          quantity: true,
+          unitOfMeasure: true,
           category: {
             select: { name: true },
           },
@@ -1849,6 +1865,9 @@ async function fetchCustodyRows(
       assignedAt,
       daysInCustody,
       valuation: c.asset.valuation,
+      type: c.asset.type,
+      quantity: c.asset.quantity,
+      unitOfMeasure: c.asset.unitOfMeasure,
     };
   });
 }
@@ -1870,6 +1889,9 @@ async function computeCustodyKpis(
       asset: {
         select: {
           valuation: true,
+          // `quantity` is selected so the totalValue reducer below can
+          // compute valuation × quantity (QT-aware totals).
+          quantity: true,
         },
       },
     },
@@ -1881,9 +1903,9 @@ async function computeCustodyKpis(
   const uniqueCustodians = new Set(custodyRecords.map((c) => c.teamMemberId))
     .size;
 
-  // Calculate total value
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
   const totalValue = custodyRecords.reduce(
-    (sum, c) => sum + (c.asset.valuation || 0),
+    (sum, c) => sum + getAssetTotalValue(c.asset),
     0
   );
 
@@ -2835,18 +2857,23 @@ async function computeDistributionByStatus(
 async function computeDistributionKpis(
   organizationId: string
 ): Promise<ReportKpi[]> {
-  const [totalAssets, totalValue, categoryCount, locationCount] =
+  const [totalAssets, totalValueRows, categoryCount, locationCount] =
     await Promise.all([
       db.asset.count({ where: { organizationId } }),
-      db.asset.aggregate({
-        where: { organizationId },
-        _sum: { valuation: true },
-      }),
+      // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+      // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop to `$queryRaw`.
+      db.$queryRaw<{ total: bigint }[]>(
+        Prisma.sql`
+          SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+          FROM "Asset"
+          WHERE "organizationId" = ${organizationId}
+        `
+      ),
       db.category.count({ where: { organizationId } }),
       db.location.count({ where: { organizationId } }),
     ]);
 
-  const totalAssetValue = totalValue._sum.valuation || 0;
+  const totalAssetValue = Number(totalValueRows[0]?.total ?? 0);
 
   return [
     {
@@ -2942,7 +2969,13 @@ export async function assetInventoryReport(
     const [rows, totalCount, kpis] = await Promise.all([
       fetchInventoryRows(where, page, pageSize),
       db.asset.count({ where }),
-      computeInventoryKpis(organizationId, where),
+      // Filters are passed through so the KPI helper can mirror them in its
+      // `$queryRaw` valuation sum (Prisma doesn't expose where → SQL).
+      computeInventoryKpis(organizationId, where, {
+        categoryIds,
+        locationIds,
+        statuses: statuses as AssetStatus[] | undefined,
+      }),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -3005,6 +3038,9 @@ async function fetchInventoryRows(
       thumbnailImage: true,
       status: true,
       valuation: true,
+      type: true,
+      quantity: true,
+      unitOfMeasure: true,
       createdAt: true,
       category: { select: { name: true } },
       assetLocations: {
@@ -3042,6 +3078,9 @@ async function fetchInventoryRows(
       ? stripNameSuffix(a.custody[0].custodian.name)
       : null,
     valuation: a.valuation,
+    type: a.type,
+    quantity: a.quantity,
+    unitOfMeasure: a.unitOfMeasure,
     createdAt: a.createdAt,
     qrId: a.qrCodes[0]?.id || null,
   }));
@@ -3049,18 +3088,53 @@ async function fetchInventoryRows(
 
 async function computeInventoryKpis(
   organizationId: string,
-  where: Prisma.AssetWhereInput
+  where: Prisma.AssetWhereInput,
+  filters: {
+    categoryIds?: string[];
+    locationIds?: string[];
+    statuses?: AssetStatus[];
+  }
 ): Promise<ReportKpi[]> {
   // Defense-in-depth: enforce organizationId on every query even though
   // callers' `where` already includes it. Cheap to add, prevents an
   // accidental cross-org leak if the where-builder ever regresses.
   const scopedWhere: Prisma.AssetWhereInput = { ...where, organizationId };
-  const [totalAssets, totalValue, statusCounts] = await Promise.all([
+
+  // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
+  // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
+  // to `$queryRaw` and mirror the same filters (organizationId + the optional
+  // category / location / status filters) the Prisma `where` carries.
+  const filterFragments: Prisma.Sql[] = [
+    Prisma.sql`"organizationId" = ${organizationId}`,
+  ];
+  if (filters.categoryIds && filters.categoryIds.length > 0) {
+    filterFragments.push(
+      Prisma.sql`"categoryId" IN (${Prisma.join(filters.categoryIds)})`
+    );
+  }
+  if (filters.locationIds && filters.locationIds.length > 0) {
+    filterFragments.push(
+      Prisma.sql`id IN (SELECT "assetId" FROM "AssetLocation" WHERE "locationId" IN (${Prisma.join(
+        filters.locationIds
+      )}))`
+    );
+  }
+  if (filters.statuses && filters.statuses.length > 0) {
+    filterFragments.push(
+      Prisma.sql`status::text IN (${Prisma.join(filters.statuses)})`
+    );
+  }
+  const whereSql = Prisma.join(filterFragments, " AND ");
+
+  const [totalAssets, totalValueRows, statusCounts] = await Promise.all([
     db.asset.count({ where: scopedWhere }),
-    db.asset.aggregate({
-      where: scopedWhere,
-      _sum: { valuation: true },
-    }),
+    db.$queryRaw<{ total: bigint }[]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(valuation * quantity), 0)::bigint AS total
+        FROM "Asset"
+        WHERE ${whereSql}
+      `
+    ),
     db.asset.groupBy({
       by: ["status"],
       where: scopedWhere,
@@ -3072,7 +3146,7 @@ async function computeInventoryKpis(
     statusCounts.find((s) => s.status === "AVAILABLE")?._count.id || 0;
   const inCustodyCount =
     statusCounts.find((s) => s.status === "IN_CUSTODY")?._count.id || 0;
-  const totalAssetValue = totalValue._sum.valuation || 0;
+  const totalAssetValue = Number(totalValueRows[0]?.total ?? 0);
 
   return [
     {
@@ -3436,6 +3510,9 @@ export async function assetUtilizationReport(
         mainImageExpiration: true,
         thumbnailImage: true,
         valuation: true,
+        type: true,
+        quantity: true,
+        unitOfMeasure: true,
         category: { select: { name: true } },
         assetLocations: {
           select: {
@@ -3508,6 +3585,9 @@ export async function assetUtilizationReport(
         utilizationRate,
         bookingCount: bookingIds.size,
         valuation: asset.valuation,
+        type: asset.type,
+        quantity: asset.quantity,
+        unitOfMeasure: asset.unitOfMeasure,
       };
     });
 
