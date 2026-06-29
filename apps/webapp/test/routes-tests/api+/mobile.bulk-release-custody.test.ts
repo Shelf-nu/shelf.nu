@@ -35,7 +35,7 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: external service — we mock bulk release custody without hitting the database
 vitest.mock("~/modules/asset/service.server", () => ({
-  bulkReleaseCustody: vitest.fn().mockResolvedValue(undefined),
+  bulkCheckInAssets: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: external service — we mock asset index settings without hitting the database
@@ -64,7 +64,7 @@ import {
   requireMobilePermission,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { bulkReleaseCustody } from "~/modules/asset/service.server";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 
 const mockUser = {
   id: "user-1",
@@ -122,13 +122,35 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
 
-    expect(bulkReleaseCustody).toHaveBeenCalledWith(
+    expect(bulkCheckInAssets).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         assetIds: ["asset-1", "asset-2"],
         organizationId: "org-1",
         currentSearchParams: "",
+        role: "ADMIN",
       })
+    );
+  });
+
+  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202161632)", async () => {
+    // Pre-fix the mobile route resolved `role` but never passed it to
+    // `bulkCheckInAssets`; the service's "self-service can only release
+    // their own custody" guard never ran. This regression guard asserts
+    // the route now plumbs `role` through.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+    });
+
+    const request = createBulkReleaseRequest({
+      assetIds: ["asset-1"],
+    });
+
+    await action(createActionArgs({ request }));
+
+    expect(bulkCheckInAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "SELF_SERVICE" })
     );
   });
 

@@ -72,11 +72,22 @@ export function generateWhereClause(
           c.name ILIKE ${`%${term}%`} OR
           l.name ILIKE ${`%${term}%`} OR
           t.name ILIKE ${`%${term}%`} OR
-          tm.name ILIKE ${`%${term}%`} OR
-          u."firstName" ILIKE ${`%${term}%`} OR
-          u."lastName" ILIKE ${`%${term}%`} OR
           EXISTS (
-            SELECT 1 FROM public."Qr" q 
+            -- Custodian search. Custody moved to the custody_agg LATERAL
+            -- (multi-custodian), so there is no top-level tm/u join to
+            -- reference here — match against ALL of the asset's
+            -- custodians via a per-asset scoped subquery instead.
+            SELECT 1 FROM public."Custody" cust
+            LEFT JOIN public."TeamMember" ctm ON cust."teamMemberId" = ctm.id
+            LEFT JOIN public."User" cusr ON ctm."userId" = cusr.id
+            WHERE cust."assetId" = a.id AND (
+              ctm.name ILIKE ${`%${term}%`} OR
+              cusr."firstName" ILIKE ${`%${term}%`} OR
+              cusr."lastName" ILIKE ${`%${term}%`}
+            )
+          ) OR
+          EXISTS (
+            SELECT 1 FROM public."Qr" q
             WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
           ) OR
           EXISTS (
@@ -374,36 +385,32 @@ function addStringFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 }
 
 function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  /**
+   * Cast the column to float for comparison. This handles both Float columns
+   * (valuation) and Int columns (quantity) uniformly, and avoids the
+   * "operator does not exist: integer = text" error from Prisma's
+   * parameterized queries sending values as text.
+   */
+  const col = Prisma.raw(filter.name);
+  const val = Number(filter.value);
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" = ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float = ${val}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" != ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float != ${val}`;
     case "gt":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" > ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float > ${val}`;
     case "lt":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" < ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float < ${val}`;
     case "gte":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" >= ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float >= ${val}`;
     case "lte":
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(filter.name)}" <= ${
-        filter.value
-      }`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float <= ${val}`;
     case "between": {
       const [min, max] = filter.value as [number, number];
-      return Prisma.sql`${whereClause} AND a."${Prisma.raw(
-        filter.name
-      )}" BETWEEN ${min} AND ${max}`;
+      return Prisma.sql`${whereClause} AND a."${col}"::float BETWEEN ${Number(
+        min
+      )} AND ${Number(max)}`;
     }
     default:
       return whereClause;
@@ -481,6 +488,23 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       default:
         return whereClause;
     }
+  }
+
+  // Handle asset type enum (Individual vs Quantity Tracked)
+  if (filter.name === "type") {
+    switch (filter.operator) {
+      case "is": {
+        whereClause = Prisma.sql`${whereClause} AND a."type" = ${filter.value}::public."AssetType"`;
+        break;
+      }
+      case "isNot": {
+        whereClause = Prisma.sql`${whereClause} AND a."type" != ${filter.value}::public."AssetType"`;
+        break;
+      }
+      default:
+        break;
+    }
+    return whereClause;
   }
 
   // Handle custody enums by delegating to specialized function
@@ -564,34 +588,35 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     }
   }
 
-  // Add location handling using asset's locationId since we're using LEFT JOIN
+  // Location handling — an asset's placement lives on the `AssetLocation`
+  // pivot (qty-tracked can be at many locations; INDIVIDUAL capped at one
+  // by trigger). EXISTS checks against AssetLocation give a yes/no answer
+  // per asset without fan-out.
   if (filter.name === "location") {
     switch (filter.operator) {
       case "is":
         if (filter.value === "in-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
         if (filter.value === "without-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
-        //Reference the Location table for name comparison
+        // Match assets placed at the specified location via AssetLocation.
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Location"
-          WHERE id = a."locationId" AND id = ${filter.value}
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ${filter.value}
         )`;
 
       case "isNot":
         if (filter.value === "in-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
         if (filter.value === "without-location") {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
-        return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (
-            SELECT 1 FROM public."Location"
-            WHERE id = a."locationId" AND id = ${filter.value}
-          ) OR a."locationId" IS NULL
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ${filter.value}
         )`;
 
       case "containsAny": {
@@ -613,7 +638,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
         // Handle "in-location" - assets that have a location
         if (hasLocation) {
-          return Prisma.sql`${whereClause} AND a."locationId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
         }
 
         // Handle "without-location" - assets that don't have a location
@@ -621,7 +646,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           const locationIds = values.filter((v) => v !== "without-location");
 
           if (locationIds.length === 0) {
-            return Prisma.sql`${whereClause} AND a."locationId" IS NULL`;
+            return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)`;
           }
 
           const locationIdsArray = Prisma.join(
@@ -629,10 +654,10 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             ", "
           );
           return Prisma.sql`${whereClause} AND (
-            a."locationId" IS NULL
+            NOT EXISTS (SELECT 1 FROM public."AssetLocation" al WHERE al."assetId" = a.id)
             OR EXISTS (
-              SELECT 1 FROM public."Location"
-              WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
+              SELECT 1 FROM public."AssetLocation" al
+              WHERE al."assetId" = a.id AND al."locationId" = ANY(ARRAY[${locationIdsArray}]::text[])
             )
           )`;
         }
@@ -651,9 +676,59 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Location"
-          WHERE id = a."locationId" AND id = ANY(ARRAY[${locationIdsArray}]::text[])
+          SELECT 1 FROM public."AssetLocation" al
+          WHERE al."assetId" = a.id AND al."locationId" = ANY(ARRAY[${locationIdsArray}]::text[])
         )`;
+      }
+
+      default:
+        return whereClause;
+    }
+  }
+
+  // Add asset model handling using asset's assetModelId
+  if (filter.name === "assetModel") {
+    switch (filter.operator) {
+      case "is":
+        if (filter.value === "without-model") {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NULL`;
+        }
+        return Prisma.sql`${whereClause} AND a."assetModelId" = ${filter.value}`;
+
+      case "isNot":
+        if (filter.value === "without-model") {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NOT NULL`;
+        }
+        return Prisma.sql`${whereClause} AND (a."assetModelId" IS NULL OR a."assetModelId" != ${filter.value})`;
+
+      case "containsAny": {
+        const values = (
+          typeof filter.value === "string"
+            ? filter.value.split(",").map((v) => v.trim())
+            : Array.isArray(filter.value)
+            ? filter.value
+            : [filter.value]
+        ).filter(Boolean);
+
+        const hasWithoutModel = values.includes("without-model");
+        const modelIds = values.filter((v) => v !== "without-model");
+
+        if (hasWithoutModel && modelIds.length > 0) {
+          const modelIdsArray = Prisma.join(
+            modelIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
+          return Prisma.sql`${whereClause} AND (a."assetModelId" IS NULL OR a."assetModelId" = ANY(ARRAY[${modelIdsArray}]::text[]))`;
+        } else if (hasWithoutModel) {
+          return Prisma.sql`${whereClause} AND a."assetModelId" IS NULL`;
+        } else if (modelIds.length > 0) {
+          const modelIdsArray = Prisma.join(
+            modelIds.map((id) => Prisma.sql`${id}`),
+            ", "
+          );
+          return Prisma.sql`${whereClause} AND a."assetModelId" = ANY(ARRAY[${modelIdsArray}]::text[])`;
+        }
+        return whereClause;
       }
 
       default:
@@ -666,34 +741,34 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     return addUpcomingBookingsFilter(whereClause, filter);
   }
 
-  // Add kit handling using asset's kitId since we're using LEFT JOIN
+  // Kit handling — an asset's kit membership lives on the `AssetKit`
+  // pivot. `@@unique([assetId])` enforces "at most one kit per asset",
+  // so EXISTS checks against AssetKit give a yes/no answer per asset.
   if (filter.name === "kit") {
     switch (filter.operator) {
       case "is":
         if (filter.value === "in-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
         if (filter.value === "without-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
-        //Reference the Kit table for name comparison
+        // Match assets linked to the specified kit via AssetKit.
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Kit"
-          WHERE id = a."kitId" AND id = ${filter.value}
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ${filter.value}
         )`;
 
       case "isNot":
         if (filter.value === "in-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+          return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
         if (filter.value === "without-kit") {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
-        return Prisma.sql`${whereClause} AND (
-          NOT EXISTS (
-            SELECT 1 FROM public."Kit"
-            WHERE id = a."kitId" AND id = ${filter.value}
-          ) OR a."kitId" IS NULL
+        return Prisma.sql`${whereClause} AND NOT EXISTS (
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ${filter.value}
         )`;
 
       case "containsAny": {
@@ -715,7 +790,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
 
         // Handle "in-kit" - assets that are in a kit
         if (hasInKit) {
-          return Prisma.sql`${whereClause} AND a."kitId" IS NOT NULL`;
+          return Prisma.sql`${whereClause} AND EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
         }
 
         // Handle "without-kit" - assets that are not in a kit
@@ -723,7 +798,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           const kitIds = values.filter((v) => v !== "without-kit");
 
           if (kitIds.length === 0) {
-            return Prisma.sql`${whereClause} AND a."kitId" IS NULL`;
+            return Prisma.sql`${whereClause} AND NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)`;
           }
 
           const kitIdsArray = Prisma.join(
@@ -731,10 +806,10 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
             ", "
           );
           return Prisma.sql`${whereClause} AND (
-            a."kitId" IS NULL
+            NOT EXISTS (SELECT 1 FROM public."AssetKit" ak WHERE ak."assetId" = a.id)
             OR EXISTS (
-              SELECT 1 FROM public."Kit"
-              WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
+              SELECT 1 FROM public."AssetKit" ak
+              WHERE ak."assetId" = a.id AND ak."kitId" = ANY(ARRAY[${kitIdsArray}]::text[])
             )
           )`;
         }
@@ -750,8 +825,8 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND EXISTS (
-          SELECT 1 FROM public."Kit"
-          WHERE id = a."kitId" AND id = ANY(ARRAY[${kitIdsArray}]::text[])
+          SELECT 1 FROM public."AssetKit" ak
+          WHERE ak."assetId" = a.id AND ak."kitId" = ANY(ARRAY[${kitIdsArray}]::text[])
         )`;
       }
 
@@ -912,20 +987,20 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // Only count booking custody when asset is still CHECKED_OUT
         // (partially checked-in assets should not show as in custody)
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
       }
       if (filter.value === "without-custody") {
         // Exclude both direct custody and active booking custody
-        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+        return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           )
         )`;
@@ -938,7 +1013,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ${filter.value}
@@ -952,10 +1027,10 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
     case "isNot":
       if (filter.value === "in-custody") {
         // Exclude both direct custody and active booking custody
-        return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+        return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
           ${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           )
         )`;
@@ -963,10 +1038,10 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
       if (filter.value === "without-custody") {
         // Include both direct custody and active booking custody
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
@@ -979,7 +1054,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ${filter.value}
@@ -1012,10 +1087,10 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         // "in-custody" subsumes specific custodian IDs - just check for any custody
         // Only count booking custody when asset is still CHECKED_OUT
         return Prisma.sql`${whereClause} AND (
-          cu.id IS NOT NULL
+          jsonb_array_length(custody_agg.custody) > 0
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
           ))
         )`;
@@ -1026,10 +1101,10 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         const custodianIds = values.filter((v) => v !== "without-custody");
 
         if (custodianIds.length === 0) {
-          return Prisma.sql`${whereClause} AND cu.id IS NULL AND NOT (
+          return Prisma.sql`${whereClause} AND jsonb_array_length(custody_agg.custody) = 0 AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
-              JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+              JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
             )
           )`;
@@ -1040,10 +1115,10 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           ", "
         );
         return Prisma.sql`${whereClause} AND (
-          (cu.id IS NULL AND NOT (
+          (jsonb_array_length(custody_agg.custody) = 0 AND NOT (
             ${ASSET_IS_CHECKED_OUT} AND EXISTS (
               SELECT 1 FROM "Booking" b
-              JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+              JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
               WHERE b.status IN ('ONGOING', 'OVERDUE')
             )
           ))
@@ -1054,7 +1129,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           )
           OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
             SELECT 1 FROM "Booking" b
-            JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+            JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
             WHERE b.status IN ('ONGOING', 'OVERDUE')
             AND (
               b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
@@ -1085,7 +1160,7 @@ function addCustodyFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
         )
         OR (${ASSET_IS_CHECKED_OUT} AND EXISTS (
           SELECT 1 FROM "Booking" b
-          JOIN "_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+          JOIN "BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
           WHERE b.status IN ('ONGOING', 'OVERDUE')
           AND (
             b."custodianTeamMemberId" = ANY(ARRAY[${custodianIdsArray}]::text[])
@@ -1111,9 +1186,9 @@ function addUpcomingBookingsFilter(
   filter: Filter
 ): Prisma.Sql {
   const bookingExistsSubquery = Prisma.sql`EXISTS (
-    SELECT 1 FROM public."_AssetToBooking" atb
-    JOIN public."Booking" bk ON atb."B" = bk.id
-    WHERE atb."A" = a.id
+    SELECT 1 FROM public."BookingAsset" atb
+    JOIN public."Booking" bk ON atb."bookingId" = bk.id
+    WHERE atb."assetId" = a.id
     AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
   )`;
 
@@ -1126,9 +1201,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND NOT ${bookingExistsSubquery}`;
       }
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ${filter.value}
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1141,9 +1216,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND ${bookingExistsSubquery}`;
       }
       return Prisma.sql`${whereClause} AND NOT EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ${filter.value}
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1185,9 +1260,9 @@ function addUpcomingBookingsFilter(
         return Prisma.sql`${whereClause} AND (
           NOT ${bookingExistsSubquery}
           OR EXISTS (
-            SELECT 1 FROM public."_AssetToBooking" atb
-            JOIN public."Booking" bk ON atb."B" = bk.id
-            WHERE atb."A" = a.id
+            SELECT 1 FROM public."BookingAsset" atb
+            JOIN public."Booking" bk ON atb."bookingId" = bk.id
+            WHERE atb."assetId" = a.id
             AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
             AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
           )
@@ -1205,9 +1280,9 @@ function addUpcomingBookingsFilter(
         ", "
       );
       return Prisma.sql`${whereClause} AND EXISTS (
-        SELECT 1 FROM public."_AssetToBooking" atb
-        JOIN public."Booking" bk ON atb."B" = bk.id
-        WHERE atb."A" = a.id
+        SELECT 1 FROM public."BookingAsset" atb
+        JOIN public."Booking" bk ON atb."bookingId" = bk.id
+        WHERE atb."assetId" = a.id
         AND bk.id = ANY(ARRAY[${bookingIdsArray}]::text[])
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
       )`;
@@ -1341,7 +1416,9 @@ type DirectAssetField =
   | "description"
   | "createdAt"
   | "updatedAt"
-  | "availableToBook";
+  | "availableToBook"
+  | "type"
+  | "quantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
   id: "assetId",
@@ -1353,6 +1430,8 @@ const directAssetFields: Record<DirectAssetField, string> = {
   createdAt: "assetCreatedAt",
   updatedAt: "assetUpdatedAt",
   availableToBook: "assetAvailableToBook",
+  type: "assetType",
+  quantity: "assetQuantity",
 };
 
 /**
@@ -1517,6 +1596,10 @@ export function parseSortingOptions(sortBy: string[]): {
     } else if (field.name === "category") {
       orderByParts.push(
         getNormalizedSortExpression(`"categoryName"`, field.direction)
+      );
+    } else if (field.name === "assetModel") {
+      orderByParts.push(
+        getNormalizedSortExpression(`"assetModelName"`, field.direction)
       );
     } else if (field.name === "location") {
       orderByParts.push(
@@ -1774,14 +1857,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         ),
         '[]'::jsonb
       )
-      FROM public."_AssetToBooking" atb
-      JOIN public."Booking" bk ON atb."B" = bk.id
+      FROM public."BookingAsset" atb
+      JOIN public."Booking" bk ON atb."bookingId" = bk.id
       LEFT JOIN public."TeamMember" ctm ON bk."custodianTeamMemberId" = ctm.id
       LEFT JOIN public."User" ctmu ON ctm."userId" = ctmu.id
       LEFT JOIN public."User" cu ON bk."custodianUserId" = cu.id
       LEFT JOIN public."User" cr ON bk."creatorId" = cr.id
       WHERE 
-        atb."A" = a.id 
+        atb."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ) AS bookings`
     : Prisma.sql``;
@@ -1852,13 +1935,18 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."mainImage" AS "assetMainImage",
       a."thumbnailImage" AS "assetThumbnailImage",
       a."mainImageExpiration" AS "assetMainImageExpiration",
-      a."locationId" AS "assetLocationId",
+      l.id AS "assetLocationId",
       a."organizationId" AS "assetOrganizationId",
       a.status AS "assetStatus",
+      a.type AS "assetType",
       a.value AS "assetValue",
+      a.quantity AS "assetQuantity",
+      a."unitOfMeasure" AS "assetUnitOfMeasure",
       a."availableToBook" AS "assetAvailableToBook",
-      a."kitId" AS "assetKitId",
+      k.id AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
+      a."assetModelId" AS "assetModelId",
+      am.name AS "assetModelName",
       k.id AS "kitId",
       k.name AS "kitName",
       k.status AS "kitStatus",
@@ -1878,33 +1966,32 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN l.name IS NOT NULL THEN l.name
         ELSE NULL
       END AS "locationName",
+      kits_agg.kits AS kits,
+      locations_agg.locations AS locations,
       COALESCE(
         jsonb_agg(
           DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'color', t.color)
         ) FILTER (WHERE t.id IS NOT NULL),
         '[]'::jsonb
       ) AS tags,
-      COALESCE(
-        CASE
-          WHEN cu.id IS NOT NULL THEN
-            jsonb_build_object(
-              'name', tm.name,
-              'custodian', jsonb_build_object(
-                'name', tm.name,
-                'user', CASE
-                  WHEN u.id IS NOT NULL THEN
-                    jsonb_build_object(
-                      'id', u.id,
-                      'firstName', u."firstName",
-                      'lastName', u."lastName",
-                      'profilePicture', u."profilePicture",
-                      'email', u.email
-                    )
-                  ELSE NULL
-                END
-              )
-            )
-          WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+      CASE
+        -- Direct custody (via Custody table) — aggregated by lateral
+        -- subquery so a multi-custodian qty-tracked asset returns one
+        -- row with the full list, not N rows. Always wins over the
+        -- booking-derived fallback when the asset has any direct
+        -- custody rows. Replaces main's COALESCE+CASE direct-custody
+        -- path: the LATERAL custody_agg join covers the 1:many widening
+        -- that Phase 2 introduced.
+        WHEN jsonb_array_length(custody_agg.custody) > 0 THEN custody_agg.custody
+        -- Booking-derived synthetic custody for CHECKED_OUT assets that
+        -- have no direct Custody row but are part of an active booking.
+        -- Wrapped in jsonb_build_array() so the output shape matches
+        -- the Custody[] schema consistently — same as custody_agg above.
+        -- The inner jsonb_build_object below carries main's NRM-name
+        -- CASE guard fix (commit 37d40781e), which auto-merged into
+        -- this branch via the post-conflict region.
+        WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
+          jsonb_build_array(
             jsonb_build_object(
               -- why: when the booking custodian is an NRM (team member with no
               -- user account), bu.* is NULL. We must NOT CONCAT the user columns
@@ -1936,10 +2023,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                 END
               )
             )
-          ELSE NULL
-        END,
-        NULL
-      ) AS custody,
+          )
+        ELSE NULL
+      END AS custody,
       (
         SELECT jsonb_agg(
           jsonb_build_object(
@@ -1993,18 +2079,115 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
 
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
-  LEFT JOIN public."Kit" k ON a."kitId" = k.id
+  -- Kit membership goes through the AssetKit pivot. AssetKit has no
+  -- @@unique([assetId]) (qty-tracked assets can belong to multiple
+  -- kits), so a plain LEFT JOIN AssetKit would fan out and duplicate
+  -- the asset in the index. Use a LATERAL primary-pick (oldest pivot
+  -- row) to keep exactly one kit row per asset — used for ORDER BY
+  -- (by primary kit name) and for the singular kit field on the row
+  -- projection.
+  LEFT JOIN LATERAL (
+    SELECT k.id, k.name, k.status
+    FROM public."AssetKit" ak
+    JOIN public."Kit" k ON ak."kitId" = k.id
+    WHERE ak."assetId" = a.id
+    ORDER BY ak."createdAt" ASC
+    LIMIT 1
+  ) k ON TRUE
+  -- Full kit membership aggregated as a jsonb array, so the asset-index
+  -- "Kit" column can render primary + "+N more" for multi-kit qty-
+  -- tracked assets (mirror of custody_agg below). Always returns an
+  -- array (COALESCE → '[]'::jsonb) so the column code never branches
+  -- on null.
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object('id', k2.id, 'name', k2.name, 'status', k2.status)
+        ORDER BY ak2."createdAt" ASC
+      ),
+      '[]'::jsonb
+    ) AS kits
+    FROM public."AssetKit" ak2
+    JOIN public."Kit" k2 ON ak2."kitId" = k2.id
+    WHERE ak2."assetId" = a.id
+  ) kits_agg ON TRUE
   LEFT JOIN public."Category" c ON a."categoryId" = c.id
-  LEFT JOIN public."Location" l ON a."locationId" = l.id
+  LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
+  -- Placement goes through the AssetLocation pivot. Same fan-out concern
+  -- as kit (qty-tracked can be at many locations) — LATERAL primary-pick
+  -- yields one "primary location" per asset.
+  LEFT JOIN LATERAL (
+    SELECT l.id, l.name, l."parentId"
+    FROM public."AssetLocation" al
+    JOIN public."Location" l ON al."locationId" = l.id
+    WHERE al."assetId" = a.id
+    ORDER BY al."createdAt" ASC
+    LIMIT 1
+  ) l ON TRUE
+  -- Full placement list aggregated as a jsonb array, mirror of
+  -- kits_agg above. Drives the asset-index "Location" column's
+  -- primary + "+N more" rendering for qty-tracked assets placed at
+  -- multiple locations.
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', l2.id,
+          'name', l2.name,
+          'parentId', l2."parentId",
+          'childCount', (
+            SELECT COUNT(*)::integer
+            FROM public."Location" lc2
+            WHERE lc2."parentId" = l2.id
+          )
+        )
+        ORDER BY al2."createdAt" ASC
+      ),
+      '[]'::jsonb
+    ) AS locations
+    FROM public."AssetLocation" al2
+    JOIN public."Location" l2 ON al2."locationId" = l2.id
+    WHERE al2."assetId" = a.id
+  ) locations_agg ON TRUE
   LEFT JOIN public."_AssetToTag" att ON a.id = att."A"
   LEFT JOIN public."Tag" t ON att."B" = t.id
-  LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
-  LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
-  LEFT JOIN public."User" u ON tm."userId" = u.id
+  LEFT JOIN LATERAL (
+    -- Aggregate ALL custody rows for this asset into a single jsonb
+    -- array. Replaces the previous direct LEFT JOINs on Custody +
+    -- TeamMember + User which caused per-custody-row duplication for
+    -- qty-tracked assets with multiple custodians (Issue A).
+    SELECT COALESCE(
+      jsonb_agg(
+        jsonb_build_object(
+          'name', tm.name,
+          'quantity', cu.quantity,
+          'custodian', jsonb_build_object(
+            'name', tm.name,
+            'user', CASE
+              WHEN u.id IS NOT NULL THEN
+                jsonb_build_object(
+                  'id', u.id,
+                  'firstName', u."firstName",
+                  'lastName', u."lastName",
+                  'profilePicture', u."profilePicture",
+                  'email', u.email
+                )
+              ELSE NULL
+            END
+          )
+        )
+      ),
+      '[]'::jsonb
+    ) AS custody
+    FROM public."Custody" cu
+    LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
+    LEFT JOIN public."User" u ON tm."userId" = u.id
+    WHERE cu."assetId" = a.id
+  ) custody_agg ON TRUE
   LEFT JOIN LATERAL (
     SELECT b.*
     FROM public."Booking" b
-    JOIN public."_AssetToBooking" atb ON b.id = atb."B" AND a.id = atb."A"
+    JOIN public."BookingAsset" atb ON b.id = atb."bookingId" AND a.id = atb."assetId"
     WHERE b.status IN ('ONGOING', 'OVERDUE')
     LIMIT 1
   ) b ON TRUE
@@ -2047,16 +2230,21 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'thumbnailImage', aq."assetThumbnailImage",
           'mainImageExpiration', aq."assetMainImageExpiration",
           'categoryId', aq."assetCategoryId",
-          'locationId', aq."assetLocationId",
+          'assetModelId', aq."assetModelId",
+          'assetModelName', aq."assetModelName",
           'organizationId', aq."assetOrganizationId",
           'status', aq."assetStatus",
+          'type', aq."assetType",
           'valuation', aq."assetValue",
+          'quantity', aq."assetQuantity",
+          'unitOfMeasure', aq."assetUnitOfMeasure",
           'availableToBook', aq."assetAvailableToBook",
           'kitId', aq."assetKitId",
           'kit', CASE WHEN aq."kitId" IS NOT NULL THEN jsonb_build_object('id', aq."kitId", 'name', aq."kitName", 'status', aq."kitStatus") ELSE NULL END,
+          'kits', COALESCE(aq.kits, '[]'::jsonb),
           'category', CASE WHEN aq."categoryId" IS NOT NULL THEN jsonb_build_object('id', aq."categoryId", 'name', aq."categoryName", 'color', aq."categoryColor") ELSE NULL END,
           'tags', aq.tags,
-          'location', CASE 
+          'location', CASE
             WHEN aq."assetLocationId" IS NOT NULL THEN jsonb_build_object(
               'id', aq."assetLocationId",
               'name', aq."locationName",
@@ -2065,6 +2253,7 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
             )
             ELSE NULL
           END,
+          'locations', COALESCE(aq.locations, '[]'::jsonb),
           'custody', aq.custody,
           'customFields', COALESCE(aq."customFields", '[]'::jsonb),
           'upcomingReminder', aq.upcomingReminder${bookingsField}${barcodesField}

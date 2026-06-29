@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
@@ -55,6 +55,7 @@ function ConditionalDropdown() {
     booking,
     partialCheckinDetails = {},
     checkedOutAssetIds = [],
+    remainingToCheckOutByAsset = {},
   } = useLoaderData<BookingPageLoaderData>();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus
@@ -79,12 +80,39 @@ function ConditionalDropdown() {
     booking.status === BookingStatus.COMPLETE ||
     booking.status === BookingStatus.ARCHIVED;
 
+  // Denormalised view of `booking.bookingAssets` (the QT pivot). Project the
+  // pivot rows down to the plain asset shape the shared resolver
+  // (`flattenSelectedBookingItems`) was authored against — `booking.assets`
+  // no longer exists post-pivot. Mirrors the projection used by both
+  // bulk-partial dialogs so all three call sites stay in lock-step.
+  const assetsList = useMemo(
+    () =>
+      booking.bookingAssets.map((ba) => {
+        // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
+        // matched via `ba.assetKitId`. Standalone rows leave kit/kitId null.
+        const matchedAssetKit = ba.assetKitId
+          ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
+          : null;
+        return {
+          ...ba.asset,
+          bookingAssetId: ba.id,
+          // `?? 1` defends test fixtures that omit BookingAsset.quantity
+          // from overwriting a caller-supplied bookedQuantity with
+          // `undefined` when this object is spread downstream.
+          bookedQuantity: ba.quantity ?? 1,
+          kitId: matchedAssetKit?.kitId ?? null,
+          kit: matchedAssetKit?.kit ?? null,
+        };
+      }),
+    [booking.bookingAssets]
+  );
+
   // Resolve the selection to enriched asset rows (kits excluded) with the SAME
   // resolver the dialogs use, so the dropdown's enable/disable state can never
   // disagree with what a dialog would actually act on.
   const selectedAssets = flattenSelectedBookingItems(
     selectedItems,
-    booking.assets
+    assetsList
   ).filter((item) => item.title && !item._count);
 
   const checkedOutIdsSet = new Set(checkedOutAssetIds);
@@ -97,8 +125,13 @@ function ConditionalDropdown() {
       booking.status
     )
   ).length;
+  // QT-aware top-off: pass the per-booking remaining map so QUANTITY_TRACKED
+  // assets stay eligible while units remain, even if some are already out.
+  // Falls back to the binary check for INDIVIDUAL rows / legacy loaders.
   const checkOutEligibleCount = selectedAssets.filter((asset) =>
-    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet)
+    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet, {
+      remainingByAssetId: remainingToCheckOutByAsset ?? {},
+    })
   ).length;
 
   // Grey out check-in when nothing in the selection is checked out. Tailor the

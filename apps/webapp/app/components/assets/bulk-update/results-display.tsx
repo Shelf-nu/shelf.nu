@@ -53,6 +53,13 @@ export function ResultsDisplay({
         )},${escapeCsvValue(row.error)}`
       );
     }
+    for (const warning of result.warnings) {
+      lines.push(
+        `Warning,${warning.rowNumber || ""},${escapeCsvValue(
+          warning.id || "(unknown)"
+        )},,${escapeCsvValue(warning.message)}`
+      );
+    }
 
     const csv = lines.join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -83,6 +90,13 @@ export function ResultsDisplay({
           color="gray"
         />
         <SummaryPill count={result.summary.failed} label="failed" color="red" />
+        {result.warnings.length > 0 ? (
+          <SummaryPill
+            count={result.warnings.length}
+            label="warnings"
+            color="yellow"
+          />
+        ) : null}
       </div>
 
       {/* Updated assets */}
@@ -133,6 +147,40 @@ export function ResultsDisplay({
                   <Tr key={asset.id}>
                     <Td>{asset.title}</Td>
                     <Td className="text-gray-500">{asset.reason}</Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        </details>
+      )}
+
+      {/* Warnings — partial-apply rows (e.g. assetModel ignored on a
+          QUANTITY_TRACKED row). The row's other cells still updated;
+          this surfaces the dropped cell so the user knows it didn't take
+          effect. Distinct from `failed` (whole-row reject) and `skipped`
+          (nothing to apply). */}
+      {result.warnings.length > 0 && (
+        <details className="mb-3" open>
+          <summary className="cursor-pointer font-medium text-yellow-700">
+            {result.warnings.length} warning
+            {result.warnings.length !== 1 ? "s" : ""}
+          </summary>
+          <div className="mt-2 max-h-[200px] overflow-y-auto rounded-md border border-yellow-200">
+            <Table className="[&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-1.5">
+              <thead className="sticky top-0 bg-yellow-50">
+                <Tr>
+                  <Th>Row</Th>
+                  <Th>Asset</Th>
+                  <Th>Warning</Th>
+                </Tr>
+              </thead>
+              <tbody>
+                {result.warnings.map((warning) => (
+                  <Tr key={`${warning.rowNumber}-${warning.id}`}>
+                    <Td>{warning.rowNumber}</Td>
+                    <Td>{warning.id || "(unknown)"}</Td>
+                    <Td className="text-yellow-700">{warning.message}</Td>
                   </Tr>
                 ))}
               </tbody>

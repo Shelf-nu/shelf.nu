@@ -7,6 +7,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { createNote } from "~/modules/note/service.server";
 import { makeShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
@@ -47,8 +48,14 @@ export async function action({ request }: ActionFunctionArgs) {
       select: {
         id: true,
         title: true,
-        location: { select: { id: true, name: true } },
-        kit: { select: { id: true, name: true } },
+        type: true,
+        quantity: true,
+        assetLocations: {
+          select: { location: { select: { id: true, name: true } } },
+        },
+        assetKits: {
+          select: { kit: { select: { id: true, name: true } } },
+        },
       },
     });
 
@@ -57,11 +64,12 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Prevent location update if asset belongs to a kit
-    if (asset.kit) {
+    const parentKit = asset.assetKits[0]?.kit;
+    if (parentKit) {
       return data(
         {
           error: {
-            message: `This asset's location is managed by its parent kit "${asset.kit.name}". Please update the kit's location instead.`,
+            message: `This asset's location is managed by its parent kit "${parentKit.name}". Please update the kit's location instead.`,
           },
         },
         { status: 400 }
@@ -82,34 +90,35 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // why: short-circuit when the requested location matches the asset's
-    // current location. Without this guard the route would write a no-op
-    // `tx.asset.update`, an `ASSET_LOCATION_CHANGED` event whose
-    // `fromValue === toValue`, and a misleading "updated the location
-    // from X to X" note. The bulk path (`bulkUpdateAssetLocation`) does
-    // exactly the same filter before recording events — see the
-    // singular/bulk parity rule in `.claude/rules/bulk-event-parity.md`.
-    if (asset.location?.id === location.id) {
+    // current primary placement. Without this guard the route would write a
+    // no-op pivot replace, an `ASSET_LOCATION_CHANGED` event whose
+    // `fromValue === toValue`, and a misleading "updated the location from
+    // X to X" note. Mirrors the singular/bulk parity rule in
+    // `.claude/rules/bulk-event-parity.md`.
+    const currentPrimaryLocation = getPrimaryLocation(asset);
+    if (currentPrimaryLocation?.id === location.id) {
       return data({
         asset: {
           id: asset.id,
           title: asset.title,
-          location: asset.location,
+          location: currentPrimaryLocation,
         },
       });
     }
 
-    // Update the asset's location and atomically record the
-    // ASSET_LOCATION_CHANGED activity event so reports + activity-event
+    // Setting a single primary location is a pivot replace: wipe any
+    // existing AssetLocation rows then create the new link.
+    // QUANTITY_TRACKED assets place their full quantity at the location;
+    // INDIVIDUAL assets are always quantity 1. The ASSET_LOCATION_CHANGED
+    // activity event is recorded atomically so reports + activity-event
     // aggregations include mobile-initiated location changes.
+    const pivotQuantity =
+      isQuantityTracked(asset) && asset.quantity != null ? asset.quantity : 1;
+
     const updatedAsset = await db.$transaction(async (tx) => {
-      const updated = await tx.asset.update({
-        where: { id: assetId, organizationId },
-        data: { locationId },
-        select: {
-          id: true,
-          title: true,
-          location: { select: { id: true, name: true } },
-        },
+      await tx.assetLocation.deleteMany({ where: { assetId } });
+      await tx.assetLocation.create({
+        data: { assetId, locationId, organizationId, quantity: pivotQuantity },
       });
 
       await recordEvent(
@@ -122,14 +131,30 @@ export async function action({ request }: ActionFunctionArgs) {
           assetId,
           locationId: location.id,
           field: "locationId",
-          fromValue: asset.location?.id ?? null,
+          fromValue: currentPrimaryLocation?.id ?? null,
           toValue: location.id,
         },
         tx
       );
 
-      return updated;
+      return tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
+        where: { id: assetId },
+        select: {
+          id: true,
+          title: true,
+          assetLocations: {
+            select: { location: { select: { id: true, name: true } } },
+          },
+        },
+      });
     });
+
+    const { assetLocations: _, ...updatedAssetRest } = updatedAsset;
+    const updatedAssetWithLocation = {
+      ...updatedAssetRest,
+      location: getPrimaryLocation(updatedAsset),
+    };
 
     // Create activity note (matches webapp format)
     const actor = wrapUserLinkForNote({
@@ -143,11 +168,13 @@ export async function action({ request }: ActionFunctionArgs) {
       location.name.trim()
     );
 
+    const previousLocation = getPrimaryLocation(asset);
+
     let noteContent: string;
-    if (asset.location) {
+    if (previousLocation) {
       const currentLocationLink = wrapLinkForNote(
-        `/locations/${asset.location.id}`,
-        asset.location.name.trim()
+        `/locations/${previousLocation.id}`,
+        previousLocation.name.trim()
       );
       noteContent = `${actor} updated the location from ${currentLocationLink} to ${newLocationLink} via mobile app.`;
     } else {
@@ -162,7 +189,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return data({ asset: updatedAsset });
+    return data({ asset: updatedAssetWithLocation });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
