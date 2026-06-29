@@ -1,11 +1,14 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 
@@ -41,6 +44,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         thumbnailImage: true,
         availableToBook: true,
         valuation: true,
+        // Quantity fields (additive) — surfaced so the companion detail
+        // screen can DISPLAY quantity. Null for INDIVIDUAL assets.
+        type: true,
+        quantity: true,
+        minQuantity: true,
+        unitOfMeasure: true,
+        consumptionType: true,
         createdAt: true,
         updatedAt: true,
         userId: true,
@@ -53,6 +63,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custody: {
           select: {
             createdAt: true,
+            // why: feeds the helper's many-aware `custodyList` (additive);
+            // the detail screen's existing `custody` read is unchanged.
+            quantity: true,
             custodian: {
               select: {
                 id: true,
@@ -133,14 +146,52 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       availableToBook: asset.availableToBook,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
+      // Quantity scalars the helper now requires (this route only consumes
+      // the helper's flattened kit/location below, but the param type must
+      // be satisfied).
+      type: asset.type,
+      quantity: asset.quantity,
+      minQuantity: asset.minQuantity,
+      unitOfMeasure: asset.unitOfMeasure,
+      consumptionType: asset.consumptionType,
       assetKits: asset.assetKits.map((ak) => ({
         kit: { id: ak.kit.id, name: ak.kit.name },
       })),
       assetLocations: asset.assetLocations,
       custody: asset.custody.map((c) => ({
+        quantity: c.quantity,
         custodian: { id: c.custodian.id, name: c.custodian.name },
       })),
     });
+
+    // Quantity breakdown (additive). For QUANTITY_TRACKED assets we fetch the
+    // per-booking/custody slices (with the effective ONGOING/OVERDUE math
+    // applied by the shared helper) and reduce them via the same pure
+    // `getQuantityData` the web badge uses. INDIVIDUAL assets skip the query
+    // entirely and report `null`.
+    let quantityBreakdown: {
+      total: number;
+      available: number;
+      inCustody: number;
+      reserved: number;
+      checkedOut: number;
+    } | null = null;
+    if (isQuantityTracked(asset)) {
+      const rows = await getAssetQuantityRows(db, {
+        assetId,
+        organizationId,
+      });
+      const breakdown = getQuantityData(rows);
+      quantityBreakdown = breakdown
+        ? {
+            total: breakdown.total,
+            available: breakdown.available,
+            inCustody: breakdown.inCustody,
+            reserved: breakdown.reserved,
+            checkedOut: breakdown.checkedOut,
+          }
+        : null;
+    }
 
     // Strip internal user id and the raw pivot arrays the helper already
     // flattened; keep mainImageExpiration so the client can decide when to
@@ -164,9 +215,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // why: re-attach the detail-shape custody (with createdAt +
         // custodian.user) — the helper's narrower shape drops both.
         custody: detailCustody[0] ?? null,
+        // Many-aware custody list (additive) — every holder + their quantity,
+        // so the detail screen can show per-custodian quantities for
+        // QUANTITY_TRACKED assets. Legacy single `custody` above is unchanged.
+        custodyList: flattened.custodyList,
         // why: re-attach the wider category shape (id + color) the detail
         // endpoint loads — the helper only types {name}.
         category: detailCategory,
+        // Aggregated quantity breakdown (additive). Null for INDIVIDUAL
+        // assets and for QUANTITY_TRACKED assets with no custody/booking
+        // activity (see getQuantityData's null contract).
+        quantityBreakdown,
       },
     });
   } catch (cause) {
