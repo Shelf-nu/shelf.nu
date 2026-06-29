@@ -44,6 +44,7 @@ import {
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getAssetTotalValue } from "./asset-value";
 import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getDateTimeFormat } from "./client-hints";
@@ -454,9 +455,14 @@ export const buildCsvExportDataFromAssets = ({
               : "";
             break;
           case "valuation":
+            // Per the QT-aware design pick: the CSV valuation column now emits
+            // the TOTAL value (per-unit × quantity). Asset.valuation is still
+            // per-unit in the DB. CSV round-trip is lossy for QT assets —
+            // flagged in the plan as a follow-up to address with a per-unit
+            // column or import-side handling.
             value = asset.valuation
               ? formatCurrency({
-                  value: asset.valuation,
+                  value: getAssetTotalValue(asset),
                   locale: "en-US", // Default locale for CSV exports
                   currency: currentOrganization.currency,
                 })
