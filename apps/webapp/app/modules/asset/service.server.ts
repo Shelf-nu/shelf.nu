@@ -2295,9 +2295,17 @@ export async function updateAsset({
             : {}),
           ...(customFieldValuesToRemove.length > 0
             ? {
-                deleteMany: customFieldValuesToRemove.map((cf) => ({
-                  customFieldId: cf.id,
-                })),
+                // Collapse N per-field deleteMany filters into ONE `IN`
+                // clause so Prisma issues a single SELECT pre-flight +
+                // single DELETE, not 2N round trips (Sentry N+1
+                // SHELF-WEBAPP-1NZ, 1P0). Prisma's nested `deleteMany`
+                // accepts EITHER a single where OR an array of wheres —
+                // the array form fans out into per-entry queries.
+                deleteMany: {
+                  customFieldId: {
+                    in: customFieldValuesToRemove.map((cf) => cf.id),
+                  },
+                },
               }
             : {}),
         },
