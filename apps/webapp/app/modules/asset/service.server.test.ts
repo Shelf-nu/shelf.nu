@@ -2102,8 +2102,8 @@ describe("bulkCreateAssetsFromModel — pre-validation rejects before any write"
   // Note on the duplicate-titles branch: with `{i}` substitution + a fixed
   // template, duplicates are only reachable via pathological inputs we
   // can't construct with public params (the renderer always varies the
-  // suffix by `startNumber + i`). The branch is defensive and exercised
-  // by the runtime walk-through (TESTING-BULK-CREATE.md §4).
+  // suffix by `startNumber + i`). The branch is defensive — exercised by
+  // manual walk-through, not by an automated test.
 });
 
 describe("moveAssetLocationUnits", () => {

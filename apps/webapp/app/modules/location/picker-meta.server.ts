@@ -14,8 +14,10 @@
  * and reserved for a booking — each axis carries its own
  * `sum ≤ Asset.quantity` invariant independently.
  *
- * See CLAUDE-CONTEXT.md §"Picker MAX = orthogonal model" and the PRD
- * design principle #3 for the rationale.
+ * See PRD design principle #3 in
+ * `docs/proposals/quantitative-assets.md` for the rationale
+ * ("orthogonal placement axes" — each pivot's `sum ≤ Asset.quantity`
+ * invariant holds independently of the others).
  *
  * @see {@link file://./../../routes/_layout+/locations.$locationId.assets.manage-assets.tsx}
  * @see {@link file://./service.server.ts} — `updateLocationAssets` re-validates with the same formula
