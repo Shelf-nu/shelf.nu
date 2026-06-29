@@ -502,7 +502,7 @@ export default function BookingsIndexPage({
 }
 
 const ListBookingsContent = ({
-  item,
+  item: rawItem,
 }: {
   item: Prisma.BookingGetPayload<{
     include: {
@@ -589,17 +589,26 @@ const ListBookingsContent = ({
     };
   }>;
 }) => {
-  // Defensive `?? []` against a Sentry-observed crash (SHELF-WEBAPP-1NW):
-  // a single client-side render hit `item.bookingAssets` as undefined and
-  // tripped the `.some(...)` call, breaking the row through the error
-  // boundary. The component's prop type declares `bookingAssets` as
-  // required and the loader always selects it, so the undefined was either
-  // a stale-bundle / hydration mismatch in the deploy window or an as-yet
-  // unidentified loader edge case. The empty-array fallback turns a hard
-  // crash into a safe degraded render (the row simply shows "no
-  // unavailable assets" instead of crashing).
+  // Defensive normalisation against a Sentry-observed crash
+  // (SHELF-WEBAPP-1NW): a single client-side render hit
+  // `item.bookingAssets` as undefined and tripped `.some(...)`, breaking
+  // the row through the error boundary. The component's prop type
+  // declares `bookingAssets` as required and the loader always selects
+  // it, so the undefined was either a stale-bundle / hydration mismatch
+  // in the deploy window or an as-yet unidentified loader edge case.
+  //
+  // Normalise once at the top so EVERY downstream reader gets a safe
+  // array — the badge calc below, `<BookingAssetsSidebar />` (which
+  // calls `groupAssets(booking.bookingAssets)` + reads
+  // `booking.bookingAssets.length` in multiple places), and any future
+  // additions. A scoped `?? []` on each reader would be brittle.
+  const item = {
+    ...rawItem,
+    bookingAssets: rawItem.bookingAssets ?? [],
+  };
+
   const hasUnavaiableAssets =
-    (item.bookingAssets ?? []).some(
+    item.bookingAssets.some(
       (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
