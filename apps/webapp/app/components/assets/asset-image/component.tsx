@@ -1,10 +1,8 @@
 import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 
-import { useFetcher } from "react-router";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import type { loader as refreshImageLoader } from "~/routes/api+/asset.refresh-main-image";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
@@ -13,17 +11,39 @@ import { isAssetForPreview } from "./utils";
 // import { debugImageUrl } from "~/utils/debug-helpers";
 
 /**
- * Consolidated UI state for AssetImage. Grouped in a reducer because
+ * Shape returned by the `refresh-main-image` and `generate-thumbnail` resource
+ * routes. Both wrap their result in `payload({ asset, error? })`, so a plain
+ * `fetch().json()` yields this object.
+ */
+type AssetImageApiResponse = {
+  asset?: {
+    id?: string;
+    mainImage?: string | null;
+    thumbnailImage?: string | null;
+  } | null;
+  error?: string | { message?: string };
+};
+
+/**
+ * Consolidated UI + data state for AssetImage. Grouped in a reducer because
  * several of these transitions are triggered together (e.g. `load_success`
- * flips both `isLoading` and `isImageError`), so expressing them as
- * explicit actions makes the flow easier to reason about than four
- * separate useState setters.
+ * flips both `isLoading` and `isImageError`), so expressing them as explicit
+ * actions makes the flow easier to reason about than many separate useState
+ * setters. The background-fetch results (`refreshedMainImage`,
+ * `refreshedThumbnailImage`) live here too so a settled request updates the
+ * rendered URL atomically with clearing the in-flight flag.
  */
 type AssetImageState = {
   isLoading: boolean;
   isImageError: boolean;
   isDialogOpen: boolean;
   hasAttemptedRefresh: boolean;
+  /** True while a background refresh / thumbnail request is in flight. */
+  isFetchingImage: boolean;
+  /** Fresh main-image URL returned by the refresh endpoint, if any. */
+  refreshedMainImage: string | null;
+  /** Fresh thumbnail URL returned by the refresh or generate endpoint, if any. */
+  refreshedThumbnailImage: string | null;
 };
 
 type AssetImageAction =
@@ -32,13 +52,24 @@ type AssetImageAction =
   | { type: "clear_error" }
   | { type: "mark_refresh_attempted" }
   | { type: "open_dialog" }
-  | { type: "close_dialog" };
+  | { type: "close_dialog" }
+  | { type: "fetch_start" }
+  | { type: "fetch_settled" }
+  | {
+      type: "image_refreshed";
+      mainImage: string | null;
+      thumbnailImage: string | null;
+    }
+  | { type: "thumbnail_generated"; thumbnailImage: string | null };
 
 const INITIAL_ASSET_IMAGE_STATE: AssetImageState = {
   isLoading: true,
   isImageError: false,
   isDialogOpen: false,
   hasAttemptedRefresh: false,
+  isFetchingImage: false,
+  refreshedMainImage: null,
+  refreshedThumbnailImage: null,
 };
 
 function assetImageReducer(
@@ -58,6 +89,31 @@ function assetImageReducer(
       return { ...state, isDialogOpen: true };
     case "close_dialog":
       return { ...state, isDialogOpen: false };
+    case "fetch_start":
+      return { ...state, isFetchingImage: true };
+    case "fetch_settled":
+      return { ...state, isFetchingImage: false };
+    case "image_refreshed":
+      return {
+        ...state,
+        isFetchingImage: false,
+        // A successful refresh means we have valid new URLs — clear any prior
+        // error so the freshly-signed image is shown.
+        isImageError:
+          action.mainImage || action.thumbnailImage
+            ? false
+            : state.isImageError,
+        refreshedMainImage: action.mainImage ?? state.refreshedMainImage,
+        refreshedThumbnailImage:
+          action.thumbnailImage ?? state.refreshedThumbnailImage,
+      };
+    case "thumbnail_generated":
+      return {
+        ...state,
+        isFetchingImage: false,
+        refreshedThumbnailImage:
+          action.thumbnailImage ?? state.refreshedThumbnailImage,
+      };
     default:
       return state;
   }
@@ -71,14 +127,19 @@ export const AssetImage = ({
   alt,
   ...rest
 }: AssetImageProps) => {
-  const imageFetcher = useFetcher<typeof refreshImageLoader>();
-  const thumbnailFetcher = useFetcher<{ asset: { thumbnailImage: string } }>();
-
   const [state, dispatch] = useReducer(
     assetImageReducer,
     INITIAL_ASSET_IMAGE_STATE
   );
-  const { isLoading, isImageError, isDialogOpen, hasAttemptedRefresh } = state;
+  const {
+    isLoading,
+    isImageError,
+    isDialogOpen,
+    hasAttemptedRefresh,
+    isFetchingImage,
+    refreshedMainImage,
+    refreshedThumbnailImage,
+  } = state;
 
   // Track if we've already tried refreshing to prevent loops.
   // The ref is the authoritative guard (readable from stale closures);
@@ -95,24 +156,12 @@ export const AssetImage = ({
   const mainImage = hasMainImageData ? asset.mainImage : null;
   const mainImageExpiration = isPreviewAsset ? asset.mainImageExpiration : null;
 
-  // Get updated images from fetchers when available
-  const updatedAssetMainImage = imageFetcher.data?.error
-    ? null
-    : imageFetcher.data?.asset?.mainImage;
-  const updatedAssetThumbnailImage = imageFetcher.data?.error
-    ? null
-    : imageFetcher.data?.asset?.thumbnailImage;
-
-  // Get thumbnail from thumbnail fetcher if available
-  const dynamicThumbnailImage = thumbnailFetcher.data?.asset?.thumbnailImage;
-
   // Choose the appropriate image URL with fallbacks
   // Create a stable cache-busting key that won't change on re-renders
   const [cacheBuster] = useState(isImageError ? `?t=${Date.now()}` : "");
 
-  const currentThumbnail =
-    dynamicThumbnailImage || updatedAssetThumbnailImage || thumbnailImage;
-  const currentMainImage = updatedAssetMainImage || mainImage;
+  const currentThumbnail = refreshedThumbnailImage || thumbnailImage;
+  const currentMainImage = refreshedMainImage || mainImage;
 
   // Only add cache-buster if we've had an error and attempted refresh
   const imageUrl =
@@ -126,35 +175,86 @@ export const AssetImage = ({
     (currentMainImage || "/static/images/asset-placeholder.jpg") +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
-  // Safe refresh function that prevents loops
-  const refreshImage = useCallback(() => {
-    if (assetId && mainImage && !hasAttemptedRefreshRef.current) {
-      hasAttemptedRefreshRef.current = true;
-      dispatch({ type: "mark_refresh_attempted" });
-      void imageFetcher.submit(
-        { assetId, mainImage },
-        {
-          method: "get",
-          action: "/api/asset/refresh-main-image",
-        }
-      );
+  /**
+   * Refreshes the asset's signed main-image (and thumbnail) URLs.
+   *
+   * Uses a native `fetch` rather than a React Router data fetcher on purpose:
+   * a data fetcher issues a single-fetch `.data` request, and any non-OK
+   * response (e.g. a 429 from the per-path loader rate-limiter) is decoded as a
+   * failed data response that bubbles to the route error boundary — crashing
+   * the whole index. A native request lets us swallow failures locally and keep
+   * showing the existing image. Guarded by `hasAttemptedRefreshRef` so it runs
+   * at most once per mount (no retry storms).
+   */
+  const refreshImage = useCallback(async () => {
+    if (!assetId || !mainImage || hasAttemptedRefreshRef.current) {
+      return;
     }
-  }, [assetId, mainImage, imageFetcher]);
+    hasAttemptedRefreshRef.current = true;
+    dispatch({ type: "mark_refresh_attempted" });
+    dispatch({ type: "fetch_start" });
 
-  // Safe thumbnail generator that prevents loops
-  const generateThumbnail = useCallback(() => {
-    if (assetId && !hasAttemptedRefreshRef.current) {
-      hasAttemptedRefreshRef.current = true;
-      dispatch({ type: "mark_refresh_attempted" });
-      void thumbnailFetcher.submit(
-        { assetId },
-        {
-          method: "get",
-          action: "/api/asset/generate-thumbnail",
-        }
+    try {
+      const params = new URLSearchParams({ assetId, mainImage });
+      const response = await fetch(
+        `/api/asset/refresh-main-image?${params.toString()}`
       );
+
+      // why: a non-OK status (rate limit, transient 5xx) must never crash the
+      // surrounding UI — keep the existing image and stop.
+      if (!response.ok) {
+        dispatch({ type: "fetch_settled" });
+        return;
+      }
+
+      const json = (await response.json()) as AssetImageApiResponse;
+      dispatch({
+        type: "image_refreshed",
+        mainImage: json?.asset?.mainImage ?? null,
+        thumbnailImage: json?.asset?.thumbnailImage ?? null,
+      });
+    } catch {
+      // Network error / aborted request — degrade gracefully, no crash.
+      dispatch({ type: "fetch_settled" });
     }
-  }, [assetId, thumbnailFetcher]);
+  }, [assetId, mainImage]);
+
+  /**
+   * Generates (or re-signs) the asset's thumbnail.
+   *
+   * Same native-`fetch` rationale as {@link refreshImage}: this endpoint is the
+   * one that 429s after a large import, and routing it through a React Router
+   * fetcher is what crashed the index. Guarded to run at most once per mount.
+   */
+  const generateThumbnail = useCallback(async () => {
+    if (!assetId || hasAttemptedRefreshRef.current) {
+      return;
+    }
+    hasAttemptedRefreshRef.current = true;
+    dispatch({ type: "mark_refresh_attempted" });
+    dispatch({ type: "fetch_start" });
+
+    try {
+      const params = new URLSearchParams({ assetId });
+      const response = await fetch(
+        `/api/asset/generate-thumbnail?${params.toString()}`
+      );
+
+      // why: swallow rate-limit / error responses so the index UI never crashes.
+      if (!response.ok) {
+        dispatch({ type: "fetch_settled" });
+        return;
+      }
+
+      const json = (await response.json()) as AssetImageApiResponse;
+      dispatch({
+        type: "thumbnail_generated",
+        thumbnailImage: json?.asset?.thumbnailImage ?? null,
+      });
+    } catch {
+      dispatch({ type: "fetch_settled" });
+    }
+  }, [assetId]);
 
   const handleImageLoad = () => {
     // Successfully loaded, clear both loading and error states
@@ -165,7 +265,7 @@ export const AssetImage = ({
     // Only set error state and trigger refresh once
     if (!isImageError && !hasAttemptedRefreshRef.current) {
       dispatch({ type: "load_error" });
-      refreshImage();
+      void refreshImage();
     } else {
       dispatch({ type: "load_error" });
     }
@@ -195,7 +295,7 @@ export const AssetImage = ({
         if (now > expiration && !hasAttemptedRefreshRef.current) {
           timerIds.push(
             setTimeout(() => {
-              refreshImage();
+              void refreshImage();
             }, jitter)
           );
         }
@@ -211,12 +311,12 @@ export const AssetImage = ({
       useThumbnail &&
       mainImage &&
       !thumbnailImage &&
-      !dynamicThumbnailImage &&
+      !refreshedThumbnailImage &&
       !hasAttemptedRefreshRef.current
     ) {
       timerIds.push(
         setTimeout(() => {
-          generateThumbnail();
+          void generateThumbnail();
         }, jitter)
       );
     }
@@ -226,17 +326,6 @@ export const AssetImage = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array to run only on mount
-
-  // Reset error state when fetchers successfully provide new image URLs
-  useEffect(() => {
-    const hasValidNewImage =
-      updatedAssetMainImage || updatedAssetThumbnailImage;
-
-    if (hasValidNewImage && isImageError) {
-      // We have new images, clear the error state but don't trigger new loading
-      dispatch({ type: "clear_error" });
-    }
-  }, [updatedAssetMainImage, updatedAssetThumbnailImage, isImageError]);
 
   // Debug the image URLs - uncomment during debugging
   // useEffect(() => {
@@ -274,9 +363,7 @@ export const AssetImage = ({
     <>
       <div className={tw("relative overflow-hidden", className)}>
         {(isLoading ||
-          (useThumbnail &&
-            (thumbnailFetcher.state === "submitting" ||
-              (imageFetcher.state === "submitting" && !thumbnailImage)))) && (
+          (useThumbnail && isFetchingImage && !thumbnailImage)) && (
           <div
             className={tw(
               "absolute inset-0 flex items-center justify-center bg-gray-100",
