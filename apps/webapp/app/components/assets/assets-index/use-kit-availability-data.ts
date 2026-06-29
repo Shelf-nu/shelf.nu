@@ -46,7 +46,16 @@ export function useKitAvailabilityData(items: Items) {
       kit.assetKits.forEach((ak) => {
         const asset = ak.asset;
         if ("bookingAssets" in asset && asset.bookingAssets) {
-          (asset.bookingAssets as Array<{ booking: Booking }>).forEach((ba) => {
+          // Cast through `unknown` because the kits._index loader passes
+          // its `extraInclude` shape through a `<T extends Prisma.KitInclude>`
+          // generic that doesn't propagate the deep `bookingAssets.select.booking`
+          // selection back to consumers — TS sees the default BookingAsset scalar
+          // shape (id, quantity, assetId, assetKitId, bookingId) which doesn't
+          // overlap with the asserted `{ booking: Booking }[]`. Runtime shape is
+          // correct: loader at kits._index.tsx selects `bookingAssets.booking`.
+          (
+            asset.bookingAssets as unknown as Array<{ booking: Booking }>
+          ).forEach((ba) => {
             const booking = ba.booking;
             const key = `${booking.id}-${kit.id}`;
             if (!allBookings.has(key)) {

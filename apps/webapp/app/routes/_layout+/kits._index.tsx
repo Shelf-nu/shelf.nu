@@ -117,20 +117,34 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   id: true,
                   availableToBook: true,
                   status: true,
+                  // Post-Phase-3a: bookings reach assets through the
+                  // BookingAsset pivot (Asset.bookings was removed).
+                  // useKitAvailabilityData already reads
+                  // asset.bookingAssets[].booking — see
+                  // components/assets/assets-index/use-kit-availability-data.ts.
+                  // The pre-pivot `bookings: { ... }` select here threw a
+                  // PrismaClientValidationError on every kit search with
+                  // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
-                    bookings: {
+                    bookingAssets: {
                       where: {
-                        status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        booking: {
+                          status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                        },
                       },
                       select: {
-                        id: true,
-                        name: true,
-                        status: true,
-                        from: true,
-                        to: true,
-                        description: true,
-                        custodianTeamMember: true,
-                        custodianUser: true,
+                        booking: {
+                          select: {
+                            id: true,
+                            name: true,
+                            status: true,
+                            from: true,
+                            to: true,
+                            description: true,
+                            custodianTeamMember: true,
+                            custodianUser: true,
+                          },
+                        },
                       },
                     },
                   }),
