@@ -207,4 +207,70 @@ describe("AssetImage thumbnail resilience", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1][0])).toContain("assetId=asset-9");
   });
+
+  it("ignores a stale in-flight response after the asset changes", async () => {
+    // why: fetch is the external network boundary; here we hold each request
+    // open (deferred) so we can resolve the stale one last and prove it's
+    // dropped rather than applied to the new asset.
+    const calls: Array<{
+      url: string;
+      signal?: AbortSignal | null;
+      resolve: (r: Response) => void;
+    }> = [];
+    vi.spyOn(global, "fetch").mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          calls.push({ url: String(input), signal: init?.signal, resolve });
+        })
+    );
+
+    const { rerender } = render(
+      <AssetImage
+        asset={createAssetNeedingThumbnail({ id: "asset-1" })}
+        alt="Pic"
+      />
+    );
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain("assetId=asset-1");
+
+    // Swap to a new asset while the first request is still in flight.
+    rerender(
+      <AssetImage
+        asset={createAssetNeedingThumbnail({ id: "asset-9" })}
+        alt="Pic"
+      />
+    );
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toContain("assetId=asset-9");
+    // The asset swap must have aborted the first request's signal.
+    expect(calls[0].signal?.aborted).toBe(true);
+
+    // Resolve the NEW asset's request, then the STALE one, flushing the fetch
+    // handler's microtasks (fetch + json + dispatch) after each.
+    const flushPromises = async () => {
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+    };
+    const thumbResponse = (file: string) =>
+      new Response(JSON.stringify({ asset: { thumbnailImage: file } }), {
+        status: 200,
+      });
+
+    await act(async () => {
+      calls[1].resolve(thumbResponse("thumb-9.jpg"));
+      await flushPromises();
+    });
+    await act(async () => {
+      calls[0].resolve(thumbResponse("thumb-1.jpg"));
+      await flushPromises();
+    });
+
+    // The rendered thumbnail must be asset-9's, never the stale asset-1 result.
+    const img = screen.getByAltText("Pic") as HTMLImageElement;
+    expect(img.src).toContain("thumb-9.jpg");
+    expect(img.src).not.toContain("thumb-1.jpg");
+  });
 });

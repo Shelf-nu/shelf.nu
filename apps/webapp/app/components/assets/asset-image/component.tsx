@@ -12,16 +12,18 @@ import { isAssetForPreview } from "./utils";
 
 /**
  * Shape returned by the `refresh-main-image` and `generate-thumbnail` resource
- * routes. Both wrap their result in `payload({ asset, error? })`, so a plain
- * `fetch().json()` yields this object.
+ * routes. Both wrap their result in `payload(...)`, which always injects an
+ * `error` key (`null` on success) and these routes always include an `asset`
+ * key (`null` when the asset is missing/deleted). The nested image fields are
+ * optional because the route's `select` varies by path.
  */
 type AssetImageApiResponse = {
-  asset?: {
-    id?: string;
+  asset: {
+    id: string;
     mainImage?: string | null;
     thumbnailImage?: string | null;
   } | null;
-  error?: string | { message?: string };
+  error: string | null;
 };
 
 /**
@@ -207,39 +209,59 @@ export const AssetImage = ({
    * the whole index. A native request lets us swallow failures locally and keep
    * showing the existing image. Guarded by `hasAttemptedRefreshRef` so it runs
    * at most once per mount (no retry storms).
+   *
+   * @param signal - Optional abort signal. When the rendered asset changes the
+   *   mount effect aborts the prior request and ignores its result, so a stale
+   *   in-flight response can never overwrite state with the previous asset's URLs.
    */
-  const refreshImage = useCallback(async () => {
-    if (!assetId || !mainImage || hasAttemptedRefreshRef.current) {
-      return;
-    }
-    hasAttemptedRefreshRef.current = true;
-    dispatch({ type: "mark_refresh_attempted" });
-    dispatch({ type: "fetch_start" });
-
-    try {
-      const params = new URLSearchParams({ assetId, mainImage });
-      const response = await fetch(
-        `/api/asset/refresh-main-image?${params.toString()}`
-      );
-
-      // why: a non-OK status (rate limit, transient 5xx) must never crash the
-      // surrounding UI — keep the existing image and stop.
-      if (!response.ok) {
-        dispatch({ type: "fetch_settled" });
+  const refreshImage = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!assetId || !mainImage || hasAttemptedRefreshRef.current) {
         return;
       }
+      hasAttemptedRefreshRef.current = true;
+      dispatch({ type: "mark_refresh_attempted" });
+      dispatch({ type: "fetch_start" });
 
-      const json = (await response.json()) as AssetImageApiResponse;
-      dispatch({
-        type: "image_refreshed",
-        mainImage: json?.asset?.mainImage ?? null,
-        thumbnailImage: json?.asset?.thumbnailImage ?? null,
-      });
-    } catch {
-      // Network error / aborted request — degrade gracefully, no crash.
-      dispatch({ type: "fetch_settled" });
-    }
-  }, [assetId, mainImage]);
+      try {
+        const params = new URLSearchParams({ assetId, mainImage });
+        const response = await fetch(
+          `/api/asset/refresh-main-image?${params.toString()}`,
+          { signal }
+        );
+
+        // The asset changed mid-flight — drop this response entirely so it can't
+        // apply the previous asset's URLs.
+        if (signal?.aborted) {
+          return;
+        }
+
+        // why: a non-OK status (rate limit, transient 5xx) must never crash the
+        // surrounding UI — keep the existing image and stop.
+        if (!response.ok) {
+          dispatch({ type: "fetch_settled" });
+          return;
+        }
+
+        const json = (await response.json()) as AssetImageApiResponse;
+        if (signal?.aborted) {
+          return;
+        }
+        dispatch({
+          type: "image_refreshed",
+          mainImage: json?.asset?.mainImage ?? null,
+          thumbnailImage: json?.asset?.thumbnailImage ?? null,
+        });
+      } catch {
+        // Network error / aborted request — degrade gracefully, no crash. Skip
+        // the settle dispatch when aborted: the instance moved on / unmounted.
+        if (!signal?.aborted) {
+          dispatch({ type: "fetch_settled" });
+        }
+      }
+    },
+    [assetId, mainImage]
+  );
 
   /**
    * Generates (or re-signs) the asset's thumbnail.
@@ -247,36 +269,52 @@ export const AssetImage = ({
    * Same native-`fetch` rationale as {@link refreshImage}: this endpoint is the
    * one that 429s after a large import, and routing it through a React Router
    * fetcher is what crashed the index. Guarded to run at most once per mount.
+   *
+   * @param signal - Optional abort signal; see {@link refreshImage}. Prevents a
+   *   stale in-flight response from setting a thumbnail for the wrong asset.
    */
-  const generateThumbnail = useCallback(async () => {
-    if (!assetId || hasAttemptedRefreshRef.current) {
-      return;
-    }
-    hasAttemptedRefreshRef.current = true;
-    dispatch({ type: "mark_refresh_attempted" });
-    dispatch({ type: "fetch_start" });
-
-    try {
-      const params = new URLSearchParams({ assetId });
-      const response = await fetch(
-        `/api/asset/generate-thumbnail?${params.toString()}`
-      );
-
-      // why: swallow rate-limit / error responses so the index UI never crashes.
-      if (!response.ok) {
-        dispatch({ type: "fetch_settled" });
+  const generateThumbnail = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!assetId || hasAttemptedRefreshRef.current) {
         return;
       }
+      hasAttemptedRefreshRef.current = true;
+      dispatch({ type: "mark_refresh_attempted" });
+      dispatch({ type: "fetch_start" });
 
-      const json = (await response.json()) as AssetImageApiResponse;
-      dispatch({
-        type: "thumbnail_generated",
-        thumbnailImage: json?.asset?.thumbnailImage ?? null,
-      });
-    } catch {
-      dispatch({ type: "fetch_settled" });
-    }
-  }, [assetId]);
+      try {
+        const params = new URLSearchParams({ assetId });
+        const response = await fetch(
+          `/api/asset/generate-thumbnail?${params.toString()}`,
+          { signal }
+        );
+
+        if (signal?.aborted) {
+          return;
+        }
+
+        // why: swallow rate-limit / error responses so the index never crashes.
+        if (!response.ok) {
+          dispatch({ type: "fetch_settled" });
+          return;
+        }
+
+        const json = (await response.json()) as AssetImageApiResponse;
+        if (signal?.aborted) {
+          return;
+        }
+        dispatch({
+          type: "thumbnail_generated",
+          thumbnailImage: json?.asset?.thumbnailImage ?? null,
+        });
+      } catch {
+        if (!signal?.aborted) {
+          dispatch({ type: "fetch_settled" });
+        }
+      }
+    },
+    [assetId]
+  );
 
   const handleImageLoad = () => {
     // Successfully loaded, clear both loading and error states
@@ -320,6 +358,10 @@ export const AssetImage = ({
     const timerIds: ReturnType<typeof setTimeout>[] = [];
     const jitter = Math.random() * 3000;
 
+    // Aborts the in-flight request when the asset changes or the component
+    // unmounts, so a stale response can't apply the previous asset's URLs.
+    const controller = new AbortController();
+
     // Check for expiration
     if (withPreview && mainImage && mainImageExpiration) {
       try {
@@ -329,7 +371,7 @@ export const AssetImage = ({
         if (now > expiration && !hasAttemptedRefreshRef.current) {
           timerIds.push(
             setTimeout(() => {
-              void refreshImage();
+              void refreshImage(controller.signal);
             }, jitter)
           );
         }
@@ -352,12 +394,13 @@ export const AssetImage = ({
     ) {
       timerIds.push(
         setTimeout(() => {
-          void generateThumbnail();
+          void generateThumbnail(controller.signal);
         }, jitter)
       );
     }
 
     return () => {
+      controller.abort();
       timerIds.forEach((id) => clearTimeout(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
