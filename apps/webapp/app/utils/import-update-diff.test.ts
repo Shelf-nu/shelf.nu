@@ -5,11 +5,13 @@
  * @see {@link file://./import-update-diff.ts}
  */
 import { describe, expect, it } from "vitest";
+import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
   compareCoreField,
   compareCustomField,
   computeAssetDiffs,
+  describeBulkUpdateRowFailure,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -1147,5 +1149,66 @@ describe("computeAssetDiffs", () => {
     // Name is exempt from clearing
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeBulkUpdateRowFailure
+// ---------------------------------------------------------------------------
+
+describe("describeBulkUpdateRowFailure", () => {
+  const GENERIC =
+    "We could not create or update this Asset. Please try again or contact support.";
+
+  it("returns 'Unknown error' for non-Error causes", () => {
+    expect(describeBulkUpdateRowFailure("oops")).toBe("Unknown error");
+    expect(describeBulkUpdateRowFailure(null)).toBe("Unknown error");
+  });
+
+  it("returns the message for a plain Error", () => {
+    expect(describeBulkUpdateRowFailure(new Error("boom"))).toBe("boom");
+  });
+
+  it("returns the ShelfError message when it wraps no underlying error", () => {
+    const err = new ShelfError({
+      cause: null,
+      message: GENERIC,
+      label: "Assets",
+    });
+    expect(describeBulkUpdateRowFailure(err)).toBe(GENERIC);
+  });
+
+  it("surfaces the underlying Prisma code + detail behind the generic wrapper", () => {
+    // why: mimic a Prisma known-request error shape (code + multi-line message)
+    const prismaError = Object.assign(
+      new Error(
+        "Invalid `prisma.asset.update()` invocation\n\n  The column `Asset.foo` does not exist."
+      ),
+      { code: "P2022" }
+    );
+    const wrapped = new ShelfError({
+      cause: prismaError,
+      message: GENERIC,
+      label: "Assets",
+    });
+
+    const result = describeBulkUpdateRowFailure(wrapped);
+
+    expect(result).toContain(GENERIC);
+    expect(result).toContain("P2022:");
+    expect(result).toContain("The column `Asset.foo` does not exist.");
+    // Only the actionable last line — not the "Invalid `prisma...` invocation"
+    // preamble — so the CSV report stays concise and leaks no internal detail.
+    expect(result).not.toContain("invocation");
+    expect(result).not.toContain("\n");
+  });
+
+  it("does not duplicate the message when the underlying matches the wrapper", () => {
+    const wrapped = new ShelfError({
+      cause: new Error(GENERIC),
+      message: GENERIC,
+      label: "Assets",
+    });
+    expect(describeBulkUpdateRowFailure(wrapped)).toBe(GENERIC);
   });
 });

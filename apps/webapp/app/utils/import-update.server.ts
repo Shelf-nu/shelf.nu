@@ -25,9 +25,11 @@ import type {
 } from "~/modules/asset/types";
 import { buildCustomFieldValue } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   analyzeUpdateHeaders,
   computeAssetDiffs,
+  describeBulkUpdateRowFailure,
   normalizeExportedCurrencyValue,
   parseYesNo,
 } from "./import-update-diff";
@@ -869,14 +871,26 @@ export async function applyBulkUpdatesFromImport({
         }
       }
     } catch (cause) {
-      const msg = isLikeShelfError(cause)
-        ? (cause as ShelfError).message
-        : "Unknown error";
+      // `updateAsset` wraps unexpected database errors in a *generic* ShelfError
+      // ("We could not create or update this Asset…") whose own message hides the
+      // real reason, and that wrapper is not captured to Sentry. For a bulk import
+      // that means a row can fail with zero diagnosable signal. So we (a) capture
+      // the failure (with its full cause chain) to Sentry, scoped to this feature,
+      // and (b) surface the underlying reason in the per-row report message.
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Bulk asset update: row failed to apply",
+          additionalData: { matchId, rowNumber, organizationId, userId },
+          label: "Assets",
+          shouldBeCaptured: true,
+        })
+      );
       failed.push({
         id: matchId,
         title: assetTitle,
         rowNumber,
-        error: msg,
+        error: describeBulkUpdateRowFailure(cause),
       });
     }
   }
