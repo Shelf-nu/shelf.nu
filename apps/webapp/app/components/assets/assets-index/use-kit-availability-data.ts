@@ -46,13 +46,35 @@ export function useKitAvailabilityData(items: Items) {
       kit.assetKits.forEach((ak) => {
         const asset = ak.asset;
         if ("bookingAssets" in asset && asset.bookingAssets) {
-          (asset.bookingAssets as Array<{ booking: Booking }>).forEach((ba) => {
-            const booking = ba.booking;
-            const key = `${booking.id}-${kit.id}`;
-            if (!allBookings.has(key)) {
-              allBookings.set(key, { ...booking, kitId: kit.id });
-            }
-          });
+          // Cast through `unknown` because the kits._index loader passes
+          // its `extraInclude` shape through a `<T extends Prisma.KitInclude>`
+          // generic that doesn't propagate the deep
+          // `bookingAssets.select.{assetKitId, booking}` selection back to
+          // consumers — TS sees the default BookingAsset scalar shape
+          // which doesn't overlap with the asserted projection. Runtime
+          // shape is correct: loader at kits._index.tsx selects
+          // assetKitId + booking.
+          (
+            asset.bookingAssets as unknown as Array<{
+              assetKitId: string | null;
+              booking: Booking;
+            }>
+          )
+            // Per-kit-slice filter (Codex review #2676 P2): a QT asset
+            // shared between Kit A and Kit B has one BookingAsset row per
+            // kit slice, each tagged with its own assetKitId. Only emit
+            // the slice belonging to THIS outer kit-iteration (ak.id),
+            // so Kit B's calendar doesn't render bookings that actually
+            // reserved Kit A's slice. Standalone slices (assetKitId =
+            // null) are intentionally dropped — they're not kit-specific.
+            .filter((ba) => ba.assetKitId === ak.id)
+            .forEach((ba) => {
+              const booking = ba.booking;
+              const key = `${booking.id}-${kit.id}`;
+              if (!allBookings.has(key)) {
+                allBookings.set(key, { ...booking, kitId: kit.id });
+              }
+            });
         }
       });
     });
