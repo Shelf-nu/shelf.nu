@@ -388,7 +388,7 @@ function ExistingRequestRow({
         <div className="flex items-center gap-2">
           {/* Inline upsert form — same endpoint as the Add row, just
               pre-filled with this row's assetModelId. Enables the
-              "edit existing reservation" flow per TESTING-PHASE-3D §4. */}
+              "edit existing reservation" flow. */}
           <updateFetcher.Form
             ref={zo.ref}
             method="POST"

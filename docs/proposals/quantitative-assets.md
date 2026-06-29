@@ -702,7 +702,7 @@ All phases ship together as one release. This ordering reflects build dependenci
 - Partial check-in with consumption reports (returnable assets)
 - ~~Calendar view updates~~ — **deferred to post-Phase-4.** Calendar tooltip quantity info + multi-bookings-on-same-pool edge cases are entangled with Phase 4's split/merge mechanic; bundling with the other 3e/3d-follow-up polish at the end avoids redoing the work.
 
-> **Sub-phase 3d follow-ups** (bulk-create N assets per AssetModel, AssetModel CSV import round-trip, asset index group-by-model view) and **Sub-phase 3e** (calendar polish) are both **deferred to post-Phase-4** as of 2026-05-08. Reasoning: Phase 4 reshapes kit + location qty flows and the "model" UX direction. Doing these now means redoing them. Detailed bullets live in `CLAUDE-CONTEXT.md` → "Sub-phase 3d follow-ups" + "Sub-phase 3e: Calendar + Polish".
+> **Sub-phase 3d follow-ups** (bulk-create N assets per AssetModel, AssetModel CSV import round-trip, asset index group-by-model view) and **Sub-phase 3e** (calendar polish) are both **deferred to post-Phase-4** as of 2026-05-08. Reasoning: Phase 4 reshapes kit + location qty flows and the "model" UX direction. Doing these now means redoing them.
 
 ### Phase 4: Kit, Location, and Auxiliary Features
 
@@ -812,9 +812,9 @@ Available pool for new claims is the same Phase 2 formula: `Asset.quantity − s
 
 - Location detail page (assets at this location → reads `AssetLocation`).
 - Kit detail page assets list (reads `AssetKit`, with the kit-aware qty display already in place).
-- Asset list location/kit columns (reads pivot, displays primary placement inline + `+N more` chip for multi-placement — mirror the multi-custodian column pattern from Phase 3d-Polish-2). **Status:** initial 4b commit (`b43a3ae56`) shipped with primary-only rendering — the `+N more` aggregate half was missed and surfaced during manual testing on 2026-05-20. Recovered as **Phase 4b-Polish-1**: parallel `kits_agg` / `locations_agg` LATERAL aggregates feed new `KitColumn` / `LocationColumn` components (mirror of `CustodyColumn`). Validation file: `TESTING-PHASE-4B.md` §1a. Tracked in `CLAUDE-CONTEXT.md` under the Phase 4b-Polish-1 subsection.
+- Asset list location/kit columns (reads pivot, displays primary placement inline + `+N more` chip for multi-placement — mirror the multi-custodian column pattern from Phase 3d-Polish-2). **Status:** initial 4b commit (`b43a3ae56`) shipped with primary-only rendering — the `+N more` aggregate half was missed and surfaced during manual testing on 2026-05-20. Recovered as **Phase 4b-Polish-1**: parallel `kits_agg` / `locations_agg` LATERAL aggregates feed new `KitColumn` / `LocationColumn` components (mirror of `CustodyColumn`).
 - Filter `?location=X` and `?kit=Y` rewritten against pivot.
-- Pickers (kit manage-assets, location manage-assets, scan drawers) source from pivot. **Status:** kit picker shipped with per-row qty input in 4a-Polish-2; the matching location picker + asset-overview "Update location" dialog were missed by 4b's typecheck-driven sweep and shipped without qty UX (hardcoded `quantity: Asset.quantity` full-pool on every new pivot row). Recovered as **Phase 4b-Polish-2** on 2026-05-21: new `getLocationPickerMeta` helper with the orthogonal MAX, `updateLocationAssets` accepts `assetQuantities` + per-row qty-edit branch + strict-available re-validator, `updateAsset` accepts `newLocationQuantity` + validation, location manage-assets RowComponent renders the qty input (mirror of kit picker), asset-overview dialog grows a qty input + multi-placement warning. Scan drawer + bulk dialog + mobile API kept on the full-pool default (multi-placement is a separate UX call deferred to post-4c). Validation file: `TESTING-PHASE-4B.md` §3a + §6a. Tracked in `CLAUDE-CONTEXT.md` under the Phase 4b-Polish-2 subsection.
+- Pickers (kit manage-assets, location manage-assets, scan drawers) source from pivot. **Status:** kit picker shipped with per-row qty input in 4a-Polish-2; the matching location picker + asset-overview "Update location" dialog were missed by 4b's typecheck-driven sweep and shipped without qty UX (hardcoded `quantity: Asset.quantity` full-pool on every new pivot row). Recovered as **Phase 4b-Polish-2** on 2026-05-21: new `getLocationPickerMeta` helper with the orthogonal MAX, `updateLocationAssets` accepts `assetQuantities` + per-row qty-edit branch + strict-available re-validator, `updateAsset` accepts `newLocationQuantity` + validation, location manage-assets RowComponent renders the qty input (mirror of kit picker), asset-overview dialog grows a qty input + multi-placement warning. Scan drawer + bulk dialog + mobile API kept on the full-pool default (multi-placement is a separate UX call deferred to post-4c).
 
 **Mobile API**
 
@@ -850,7 +850,7 @@ Generic axis-parameterized `MoveUnitsDialog` component (`location | kit | place-
 - Bulk operations awareness of asset types.
 - **Rebalance kit allocation when assigning operator custody on a kit-allocated qty-tracked asset.** Today (Phase 3d-Polish): if all units of a qty-tracked asset are kit-allocated, the asset's Custody Breakdown Assign button is disabled (no free pool). Once the rebalance flow is built, assigning N units to an operator while units are kit-allocated should automatically decrement the kit's `Custody.quantity` by N, emit a `CUSTODY_RELEASED` event for the kit row, and emit `CUSTODY_ASSIGNED` for the new operator row in a single transaction. Edge case to design: kit row hits 0 — delete the row vs. keep at 0 (probably delete + emit a final `CUSTODY_RELEASED` for the residual).
 - **Review the in-kit informational note in `QuantityCustodyDialog`** once the rebalance feature above ships. Currently the dialog renders: _"This asset is part of kit X. Operator custody you assign here is tracked separately from the kit's allocation — the kit's 'in kit' count is unaffected."_ That copy is mechanically accurate today (operator assign creates a new row; kit row is untouched). Once Phase 4 introduces the kit-decrement behaviour, the second clause becomes wrong — the kit's count _will_ be reduced. Update the copy to a yellow warning: _"This will move N {unit} from {kit-name}'s allocation to the team member you select."_ See `apps/webapp/app/components/assets/quantity-custody-dialog.tsx`.
-- **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. The verification scaffold (`TESTING-REPORTS.md` at the worktree root) is ready to run once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).
+- **End-to-end reports verification — gated on Phase 4 schema settling.** Main's PR #2495 introduced 10 reports and a `seed-reporting-demo` script; we ported the affected helpers through the Phase 2 / 3a / 3d migrations across feat-quantities and merged the high-risk overdue-items KPI math in `197b51c8c`. We have NOT walked all 10 reports against live seeded data yet, because Phase 4 work below (kit + location qty changes) will reshape the data flow again and force a second walkthrough. Verification is still owed once Phase 4 schema is stable. Two seed-script bugs surfaced during deferred-verification setup were already fixed in `3f9a521f9`: `completedAt` jitter on COMPLETE/ARCHIVED bookings (was always exactly `to`, making Booking Compliance 100%) and `ONGOING_OVERDUE` outcome mapped to status `OVERDUE` (was `ONGOING`, making Overdue Items return zero rows).
 
 **Phase 4e — Quantity-aware notes + activity events — DONE (2026-05-31; validated end-to-end 2026-06-03; booking-notes tail closed 2026-06-15)**
 
@@ -866,7 +866,7 @@ phrasing + event meta byte-for-byte unchanged. Quantity always sourced from the 
 `BookingAsset.quantity`), never `Asset.quantity`. No new `ActivityAction` enum
 values — events get richer `meta` only.
 
-The end-to-end testing walkthrough (`TESTING-PHASE-4E.md` §0–§7 ticked) surfaced
+The end-to-end testing walkthrough surfaced
 seven sweep gaps + two structural bugs not caught by typecheck — all fixed before
 PR review: orthogonal-axes trigger filter (AssetLocation sum was double-counting
 kit-driven rows), Custody partial-unique split for operator vs kit overlap,
@@ -919,8 +919,8 @@ the affected unit count.
 > **Post-Phase-4 cleanup backlog (re-pick up once the Phase 4 schema is stable):**
 >
 > - **Sub-phase 3e — Calendar + Polish.** Calendar tooltip quantity info, multi-bookings-on-same-pool edge cases, overdue handling polish.
-> - **Sub-phase 3d follow-ups.** Bulk-create N assets per `AssetModel`, `AssetModel` CSV import round-trip (`createAssetModelsIfNotExists` helper), asset index group-by-model view. Detailed scope in `CLAUDE-CONTEXT.md`.
-> - **Reports end-to-end verification** (see bullet above) — uses `TESTING-REPORTS.md` scaffold.
+> - **Sub-phase 3d follow-ups.** Bulk-create N assets per `AssetModel`, `AssetModel` CSV import round-trip (`createAssetModelsIfNotExists` helper), asset index group-by-model view.
+> - **Reports end-to-end verification** (see bullet above).
 
 > **Deferred post-launch:** Consumption dashboard (consumption rate, top consumed items, cost tracking) — see Decision #3.
 
