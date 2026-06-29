@@ -16,6 +16,10 @@ import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import {
   BULK_CREATE_MAX,
+  archiveAsset,
+  bulkArchiveAssets,
+  bulkUnarchiveAssets,
+  unarchiveAsset,
   bulkAssignAssetTags,
   bulkCheckOutAssets,
   bulkCreateAssetsFromModel,
@@ -2682,5 +2686,237 @@ describe("getAssets search fallback", () => {
     expect(secondWhere.OR).toContainEqual({
       custody: { some: { teamMemberId: { in: ["tm-1"] } } },
     });
+  });
+});
+
+describe("archiveAsset", () => {
+  const mockFindFirst = db.asset.findFirst as ReturnType<typeof vitest.fn>;
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("archives an available individual asset and emits ASSET_ARCHIVED in the tx", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+    });
+
+    // Atomic guard: the WHERE re-asserts every precondition.
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "a1",
+          organizationId: "org-1",
+          type: "INDIVIDUAL",
+          status: "AVAILABLE",
+          archivedAt: null,
+        }),
+        data: expect.objectContaining({ archivedAt: expect.any(Date) }),
+      })
+    );
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_ARCHIVED",
+        entityType: "ASSET",
+        entityId: "a1",
+        assetId: "a1",
+        actorUserId: "u1",
+        organizationId: "org-1",
+      }),
+      expect.anything()
+    );
+    expect(result.id).toBe("a1");
+  });
+
+  it("throws 404 when the asset is not in the workspace", async () => {
+    mockFindFirst.mockResolvedValue(null);
+    await expect(
+      archiveAsset({ id: "x", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 404 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws 409 when already archived", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: new Date(),
+    });
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks quantity-tracked assets (v1 INDIVIDUAL-only)", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "QUANTITY_TRACKED",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks assets that are checked out or in custody", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "CHECKED_OUT",
+      archivedAt: null,
+    });
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("throws 409 and skips the event when the atomic guard matches nothing (raced)", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(mockRecordEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("unarchiveAsset", () => {
+  const mockFindFirst = db.asset.findFirst as ReturnType<typeof vitest.fn>;
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
+  const mockRecordEvent = recordEvent as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reinstates an archived asset and emits ASSET_UNARCHIVED (status untouched)", async () => {
+    mockFindFirst.mockResolvedValue({ id: "a1", archivedAt: new Date() });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await unarchiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+    });
+
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "a1",
+          organizationId: "org-1",
+          archivedAt: { not: null },
+        }),
+        data: { archivedAt: null },
+      })
+    );
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a1" }),
+      expect.anything()
+    );
+    expect(result.id).toBe("a1");
+  });
+
+  it("throws 409 when the asset is not archived", async () => {
+    mockFindFirst.mockResolvedValue({ id: "a1", archivedAt: null });
+    await expect(
+      unarchiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkArchiveAssets", () => {
+  const mockFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("archives only eligible assets, reports skipped, and emits one event each", async () => {
+    // Two of three selected are eligible; the third is filtered out by the
+    // eligibility query (e.g. checked out / quantity-tracked / already archived).
+    mockFindMany.mockResolvedValue([{ id: "a1" }, { id: "a2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const result = await bulkArchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2", "a3"],
+      settings: {} as never,
+      actorUserId: "u1",
+    });
+
+    expect(result).toEqual({ archivedCount: 2, skippedCount: 1 });
+    expect(mockRecordEvents).toHaveBeenCalledTimes(1);
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a1" }),
+      expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a2" }),
+    ]);
+  });
+
+  it("no-ops (no event, all skipped) when nothing is eligible", async () => {
+    mockFindMany.mockResolvedValue([]);
+
+    const result = await bulkArchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2"],
+      settings: {} as never,
+    });
+
+    expect(result).toEqual({ archivedCount: 0, skippedCount: 2 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkUnarchiveAssets", () => {
+  const mockFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reinstates eligible archived assets and emits one ASSET_UNARCHIVED each", async () => {
+    mockFindMany.mockResolvedValue([{ id: "a1" }, { id: "a2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const result = await bulkUnarchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2"],
+      settings: {} as never,
+    });
+
+    expect(result).toEqual({ unarchivedCount: 2, skippedCount: 0 });
+    const events = mockRecordEvents.mock.calls[0][0];
+    expect(events).toEqual([
+      expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a1" }),
+      expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
+    ]);
   });
 });

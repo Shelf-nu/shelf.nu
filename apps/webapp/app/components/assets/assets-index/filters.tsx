@@ -18,6 +18,7 @@ import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bo
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
+import { ArchivedViewToggle } from "./archived-view-toggle";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
 import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
@@ -54,7 +55,14 @@ export function AssetIndexFilters({
     return (
       <Filters
         slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "left-of-search": (
+            <div className="flex items-center gap-2">
+              <StatusFilter statusItems={AssetStatus} />
+              {/* Global Active/Archived/All dimension, separate from the
+                  per-status filter above (issue #382). */}
+              <ArchivedViewToggle />
+            </div>
+          ),
           "right-of-search": (
             <div className="flex items-center gap-2">
               <SortBy
@@ -184,6 +192,8 @@ function AdvancedAssetIndexFilters() {
         "left-of-search": <AdvancedFilteringAndSorting />,
         "right-of-search": (
           <div className="flex items-center gap-2">
+            {/* Active/Archived/All view dimension (issue #382). */}
+            <ArchivedViewToggle />
             <AvailabilityViewToggle modeIsSimple={false} />
           </div>
         ),

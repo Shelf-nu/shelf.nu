@@ -90,6 +90,7 @@ export type CustodyEventInput = BaseEventInput & {
 export type AssetLifecycleAction =
   | "ASSET_CREATED"
   | "ASSET_ARCHIVED"
+  | "ASSET_UNARCHIVED"
   | "ASSET_DELETED";
 
 export type AssetLifecycleEventInput = BaseEventInput & {

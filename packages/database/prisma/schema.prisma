@@ -206,6 +206,12 @@ model Asset {
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  // Soft "out of view" state, orthogonal to `status` (which stays the live
+  // AVAILABLE/IN_CUSTODY/CHECKED_OUT custody/booking state). Null = active;
+  // non-null = archived (hidden from default lists, not bookable/custody-able,
+  // reinstatable). Kept as a timestamp (not a bool) for when-archived
+  // provenance, mirroring `Booking.autoArchivedAt`.
+  archivedAt          DateTime?   @db.Timestamptz(3)
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)
@@ -272,6 +278,8 @@ model Asset {
   // Indexes for optimization of queries
   @@index([organizationId, title, status, availableToBook], name: "Asset_organizationId_compound_idx")
   @@index([status, organizationId], name: "Asset_status_organizationId_idx")
+  // Keeps the default "active assets" filter (archivedAt IS NULL) on an index scan
+  @@index([organizationId, archivedAt], name: "Asset_organizationId_archivedAt_idx")
   @@index([createdAt, organizationId], name: "Asset_createdAt_organizationId_idx")
   @@index([valuation, organizationId], name: "Asset_valuation_organizationId_idx")
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
@@ -2276,6 +2284,7 @@ enum ActivityAction {
   ASSET_CUSTOM_FIELD_CHANGED
   ASSET_PREFERRED_BARCODE_CHANGED
   ASSET_ARCHIVED
+  ASSET_UNARCHIVED
   ASSET_DELETED
 
   // Custody

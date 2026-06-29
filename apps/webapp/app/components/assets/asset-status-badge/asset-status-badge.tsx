@@ -41,6 +41,7 @@ import {
 } from "../../shared/hover-card";
 import { UnavailableBadge } from "../../shared/unavailable-badge";
 import When from "../../when/when";
+import { ArchivedBadge } from "../archived-badge";
 
 export function AssetStatusBadge({
   id,
@@ -48,10 +49,18 @@ export function AssetStatusBadge({
   suppressQtyAware = false,
   availableToBook = true,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: ExtendedAssetStatus;
   availableToBook: boolean;
+  /**
+   * When `true`, renders an "Archived" chip alongside the status badge. The
+   * asset's live status is still shown (archiving is orthogonal to status),
+   * so a historical/completed booking row reads e.g. "Available · Archived".
+   * Defaults to `false` so existing callers are unaffected.
+   */
+  isArchived?: boolean;
   /**
    * Booking-row escape hatch for the qty-aware treatment. When `true`
    * AND the asset is `QUANTITY_TRACKED`, the badge:
@@ -211,6 +220,7 @@ export function AssetStatusBadge({
         {!availableToBook && (
           <UnavailableBadge title="This asset is marked as unavailable for bookings" />
         )}
+        {isArchived && <ArchivedBadge />}
       </span>
     );
   }
@@ -228,6 +238,7 @@ export function AssetStatusBadge({
           {!availableToBook && (
             <UnavailableBadge title="This asset is marked as unavailable for bookings" />
           )}
+          {isArchived && <ArchivedBadge />}
         </span>
       </HoverCardTrigger>
 

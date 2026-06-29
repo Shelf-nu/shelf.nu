@@ -9953,6 +9953,29 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
 
+  // Archived assets can't be added to a booking, even via scan (issue #382).
+  // Pickers hide them, but the scanner takes raw ids so the server enforces it.
+  if (allScannedAssetIds.length > 0) {
+    const archivedScanned = await tx.asset.findMany({
+      where: {
+        id: { in: allScannedAssetIds },
+        organizationId,
+        archivedAt: { not: null },
+      },
+      select: { id: true },
+    });
+    if (archivedScanned.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some scanned assets are archived and can't be added to a booking. Reinstate them first.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
   /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
    * when any scanned asset (standalone OR kit-driven) is already RESERVED
@@ -10390,7 +10413,10 @@ export async function getAvailableAssetsIdsForBooking(
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
       // cannot resolve / attach assets that live in another workspace.
-      where: { id: { in: assetIds }, organizationId },
+      // Archived assets (archivedAt set) are excluded so they can't be booked,
+      // even via a direct/crafted add — they're hidden from pickers but the
+      // server must enforce it too (issue #382).
+      where: { id: { in: assetIds }, organizationId, archivedAt: null },
       select: {
         status: true,
         id: true,

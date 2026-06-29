@@ -42,9 +42,23 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false
+  availableToBookOnly = false,
+  /**
+   * Active/Archived/All view dimension (orthogonal to the per-status filter).
+   * Defaults to "active" so the advanced (raw-SQL) index hides archived assets
+   * just like the simple index, unless the caller opts in. See issue #382.
+   */
+  archivedFilter: "active" | "archived" | "all" = "active"
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
+
+  // Archived dimension. Kept here (not in `filters`) because it is a global
+  // view toggle, not a per-column advanced filter.
+  if (archivedFilter === "active") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NULL`;
+  } else if (archivedFilter === "archived") {
+    whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NOT NULL`;
+  }
 
   if (availableToBookOnly) {
     whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;

@@ -21,10 +21,12 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
+  archiveAsset,
   deleteAsset,
   deleteOtherImages,
   getAsset,
   relinkAssetQrCode,
+  unarchiveAsset,
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
@@ -275,6 +277,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       z.object({
         intent: z.enum([
           "delete",
+          "archive",
+          "reinstate",
           "relink-qr-code",
           "set-reminder",
           "add-barcode",
@@ -284,6 +288,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
+      // Asset has no dedicated `archive` PermissionAction (it is granted only to
+      // bookings/audits); archiving is a state mutation, so gate it on `update`.
+      archive: PermissionAction.update,
+      reinstate: PermissionAction.update,
       "relink-qr-code": PermissionAction.update,
       "set-reminder": PermissionAction.update,
       "add-barcode": PermissionAction.update,
@@ -322,6 +330,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return redirect("/assets");
+      }
+
+      case "archive": {
+        await archiveAsset({ id, organizationId, actorUserId: userId });
+
+        sendNotification({
+          title: "Asset archived",
+          message:
+            "The asset is hidden from your lists and can't be booked. You can reinstate it any time.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "reinstate": {
+        await unarchiveAsset({ id, organizationId, actorUserId: userId });
+
+        sendNotification({
+          title: "Asset reinstated",
+          message: "The asset is active again and available to book.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       case "relink-qr-code": {
