@@ -6,6 +6,8 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
+  shapeMobileAssetResponse,
+  shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -61,7 +63,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           assetId: asset.id,
           kitId: null,
           organizationId,
-          asset,
+          // Flatten pivot relations (assetKits/assetLocations/custody) into the
+          // legacy flat shape (kit/kitId/location/custody) the companion expects.
+          asset: shapeMobileAssetResponse(asset),
           kit: null,
         },
       });
@@ -142,8 +146,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         assetId: qr.assetId,
         kitId: qr.kitId,
         organizationId: qr.organizationId,
-        asset,
-        kit,
+        // Flatten pivot relations (assetKits/assetLocations/custody) into the
+        // legacy flat shape (kit/kitId/location/custody) the companion expects.
+        asset: asset ? shapeMobileAssetResponse(asset) : null,
+        kit: shapeMobileKitResponse(kit),
       },
     });
   } catch (cause) {

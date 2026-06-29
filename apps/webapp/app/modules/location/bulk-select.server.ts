@@ -6,7 +6,8 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 
 /**
  * Resolves asset IDs for bulk location operations.
- * Handles ALL_SELECTED_KEY expansion using asset filters + locationId.
+ * Handles ALL_SELECTED_KEY expansion using asset filters + the
+ * `AssetLocation` pivot (Phase 4b) to scope to a single location.
  */
 export async function resolveLocationAssetIds({
   ids,
@@ -32,7 +33,8 @@ export async function resolveLocationAssetIds({
   const allAssets = await db.asset.findMany({
     where: {
       ...assetsWhere,
-      locationId,
+      // Match assets that have an `AssetLocation` pivot row at this location.
+      assetLocations: { some: { locationId } },
     },
     select: { id: true },
   });

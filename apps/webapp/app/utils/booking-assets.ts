@@ -5,6 +5,24 @@ import type { PartialCheckinDetailsType } from "~/modules/booking/service.server
  * Minimal asset shape these booking-context helpers need: an `id` and a raw
  * `status` string. The index signature lets callers pass richer asset objects
  * (e.g. Prisma rows) without widening every call site.
+ *
+ * Pivot-derived callers (post `BookingAsset` pivot introduction): when iterating
+ * a booking's `bookingAssets` relation, flatten each row to a denormalized
+ * object before passing it here, e.g.:
+ *
+ * ```ts
+ * const assetsList = booking.bookingAssets.map((ba) => ({
+ *   ...ba.asset,
+ *   bookingAssetId: ba.id,
+ *   bookedQuantity: ba.quantity,
+ *   kitId: ba.kitId ?? ba.asset.kitId ?? null,
+ *   kit: ba.kit ?? ba.asset.kit ?? null,
+ * }));
+ * ```
+ *
+ * The flattened entries satisfy `AssetWithStatus` via `id`/`status` and the
+ * pivot-only fields (`bookingAssetId`, `bookedQuantity`, etc.) ride along
+ * through the open index signature — no type widening required.
  */
 export type AssetWithStatus = {
   id: string;
@@ -25,11 +43,34 @@ export type KitWithStatus = {
 };
 
 /**
- * Asset status as surfaced in a booking context: the persisted {@link AssetStatus}
- * plus the synthetic `"PARTIALLY_CHECKED_IN"` state, which only exists relative
- * to a specific booking and is never stored on the asset itself.
+ * Booking-context status extensions beyond the raw Prisma `AssetStatus`:
+ *
+ * - `PARTIALLY_CHECKED_IN` — INDIVIDUAL-asset flow OR a fully-reconciled
+ *   QUANTITY_TRACKED row (`dispositioned >= booked` for THIS row). Rendered
+ *   as "Already checked in" (blue). Synthetic — only meaningful relative
+ *   to a specific booking and never stored on the asset itself.
+ * - `PARTIALLY_CHECKED_IN_QTY` — legacy Phase 3c label. Kept for callers
+ *   that need the "Partially checked in" wording. Rendered amber.
+ * - `PARTIALLY_CHECKED_OUT_QTY` — QUANTITY_TRACKED, this row has SOME
+ *   units dispositioned but `remaining > 0`. Rendered as "Partially
+ *   checked out" (violet) to emphasise that work is still outstanding.
+ *   Booking rows use this in preference to `PARTIALLY_CHECKED_IN_QTY`
+ *   so the user sees "still partly out" rather than "already partly in".
+ * - `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` — QUANTITY_TRACKED, this row
+ *   has had SOME units progressively checked out (`checkedOutQuantity > 0`)
+ *   but NO units returned/consumed/lost/damaged yet
+ *   (`dispositionedQuantity === 0`). Rendered as "Partially checked out"
+ *   (amber) to mirror the legacy `PARTIALLY_CHECKED_IN_QTY` "action
+ *   required" tone — the OUT-side equivalent. Distinct from
+ *   `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway") which fires
+ *   once disposition has started.
  */
-export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
+export type ExtendedAssetStatus =
+  | AssetStatus
+  | "PARTIALLY_CHECKED_IN"
+  | "PARTIALLY_CHECKED_IN_QTY"
+  | "PARTIALLY_CHECKED_OUT_QTY"
+  | "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN";
 
 /**
  * Kit status as surfaced in a booking context: the persisted {@link KitStatus}
@@ -39,14 +80,21 @@ export type ExtendedAssetStatus = AssetStatus | "PARTIALLY_CHECKED_IN";
 export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
 
 /**
- * Context-aware asset status resolver for booking operations
+ * Context-aware asset status resolver for booking operations.
  *
  * Determines the effective status of an asset within a booking context:
- * - If asset has partial check-in details AND booking is ONGOING/OVERDUE -> PARTIALLY_CHECKED_IN
- * - If asset has partial check-in details AND booking is COMPLETE -> AVAILABLE
- * - Otherwise -> original database status
+ * - INDIVIDUAL asset, partial check-in + booking ONGOING/OVERDUE → PARTIALLY_CHECKED_IN
+ * - INDIVIDUAL asset, otherwise → raw `Asset.status`
  *
- * This ensures consistent logic across validation, display, and business operations
+ * QUANTITY_TRACKED assets need a different treatment for DRAFT/RESERVED
+ * bookings. The global `Asset.status` (e.g. `CHECKED_OUT`) can reflect
+ * state from a *different* active booking or stale data from a prior
+ * cancellation — neither is relevant to a DRAFT/RESERVED row in the
+ * current booking, and surfacing "Checked out" there is misleading
+ * ("this booking hasn't checked anything out yet"). So for qty-tracked
+ * assets we hard-override to `AVAILABLE` when the booking is
+ * DRAFT/RESERVED, letting the row focus on this booking's own progress
+ * (reserved qty, disposition indicator) rather than global pool state.
  */
 export function getBookingContextAssetStatus(
   asset: AssetWithStatus,
@@ -64,6 +112,21 @@ export function getBookingContextAssetStatus(
     ["ONGOING", "OVERDUE"].includes(bookingStatus)
   ) {
     return "PARTIALLY_CHECKED_IN";
+  }
+
+  /**
+   * QUANTITY_TRACKED + DRAFT/RESERVED: the per-row badge should reflect
+   * *this* booking's state, not the shared pool's. "Checked out" leaking
+   * in from a prior booking (or from stale data) is noise at best and
+   * incorrect at worst. Force AVAILABLE; the qty progress indicator
+   * elsewhere in the row surfaces whatever real signal exists.
+   */
+  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
+  if (
+    isQtyTracked &&
+    (bookingStatus === "DRAFT" || bookingStatus === "RESERVED")
+  ) {
+    return AssetStatus.AVAILABLE;
   }
 
   return asset.status as AssetStatus;
@@ -128,21 +191,63 @@ export function isAssetCheckableIn(
 /**
  * Whether a selected asset is eligible to be CHECKED OUT for this booking.
  *
- * An asset can be checked out only when it is still booked — i.e. NOT already
- * checked out. "Already checked out" means its id is in the booking's
- * per-booking partial-checkout records OR its own status is CHECKED_OUT. This
- * mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
+ * Two flavours of eligibility, decided by the asset's tracking type:
  *
- * @param asset - The selected asset (needs `id` and `status`).
+ * - **INDIVIDUAL** (and the legacy fallback): binary. An asset can be checked
+ *   out only when it is still booked — i.e. NOT already checked out. "Already
+ *   checked out" means its id is in the booking's per-booking partial-checkout
+ *   records OR its own status is CHECKED_OUT.
+ * - **QUANTITY_TRACKED** with a `remainingByAssetId` map supplied: top-off
+ *   aware. The asset stays eligible as long as it still has units remaining
+ *   for THIS booking (`remaining > 0`), even if some units have already been
+ *   checked out (the "partially checked out, top up the rest" case). When the
+ *   map is omitted or doesn't contain this asset's id, falls back to the
+ *   binary check — legacy loaders that don't yet plumb the remaining map keep
+ *   their existing behaviour.
+ *
+ * Mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
+ * Keeping the QT branch HERE (in one helper) is deliberate: list-bulk-actions
+ * dropdown, the bulk partial-checkout dialog, and any future consumer all go
+ * through one source of truth — no duplicated `type === "QUANTITY_TRACKED"`
+ * checks scattered across call sites.
+ *
+ * NOTE: there is intentionally no QT branch on the check-IN side; check-in
+ * eligibility is fully driven by `partialCheckinDetails` (consumed by
+ * {@link isAssetCheckableIn} via {@link isAssetCheckedOutInBooking}), which
+ * already covers the QUANTITY_TRACKED semantics correctly.
+ *
+ * @param asset - The selected asset (needs `id` and `status`). May also carry
+ *   `type` so the QT branch can recognise it.
  * @param checkedOutAssetIds - Ids already checked out for this booking. A Set
  *   (not array) keeps membership O(1) across a large selection — matching the
  *   dialog's existing `checkedOutIdsSet`.
+ * @param options.remainingByAssetId - Optional map of `assetId -> remaining
+ *   units` for the current booking. When supplied for a QUANTITY_TRACKED
+ *   asset, eligibility becomes `remaining > 0` instead of the binary check —
+ *   so a partially-checked-out QT row stays eligible until every booked unit
+ *   has been dispositioned. When the map is undefined (legacy callers) or the
+ *   asset is missing from it, the binary fallback runs.
  * @returns `true` if the asset can be checked out.
  */
 export function isAssetCheckableOut(
   asset: AssetWithStatus,
-  checkedOutAssetIds: Set<string>
+  checkedOutAssetIds: Set<string>,
+  options?: { remainingByAssetId?: Record<string, number> }
 ): boolean {
+  // QUANTITY_TRACKED + caller supplied the remaining map for this asset:
+  // top-off eligibility — stay actionable while units remain for this booking.
+  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
+  if (
+    isQtyTracked &&
+    options?.remainingByAssetId &&
+    asset.id in options.remainingByAssetId
+  ) {
+    return (options.remainingByAssetId[asset.id] ?? 0) > 0;
+  }
+
+  // INDIVIDUAL (or QT without the map): binary fallback — preserves the
+  // pre-existing behaviour for every legacy loader that hasn't been updated
+  // to plumb the remaining map through yet.
   return !(
     checkedOutAssetIds.has(asset.id) || asset.status === AssetStatus.CHECKED_OUT
   );
@@ -307,13 +412,38 @@ export function getBookingContextKitStatus(
   const kitAssetsInBooking =
     kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
 
-  // Check if ALL kit assets in booking are partially checked in
+  /**
+   * "All checked in" needs per-row awareness for QUANTITY_TRACKED kit
+   * members. `partialCheckinDetails` is keyed by `assetId` and only
+   * surfaces an asset when it's fully reconciled across the whole
+   * booking — but with Polish-6 multi-row slices a qty-tracked member
+   * can have its kit-driven slice fully reconciled (the only slice
+   * relevant to this kit) while a parallel standalone slice still has
+   * outstanding units. Fall back to per-row `bookedQuantity` vs
+   * `dispositionedQuantity` when those are available on the asset.
+   * INDIVIDUAL members keep the original `partialCheckinDetails` check.
+   */
   const allAssetsCheckedIn =
     kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
+    kitAssetsInBooking.every((asset) => {
+      const a = asset as AssetWithStatus & {
+        type?: string;
+        bookedQuantity?: number;
+        dispositionedQuantity?: number;
+      };
+      if (a.type === "QUANTITY_TRACKED") {
+        const booked = a.bookedQuantity ?? 0;
+        const dispositioned = a.dispositionedQuantity ?? 0;
+        return booked > 0 && dispositioned >= booked;
+      }
+      return Boolean(partialCheckinDetails[asset.id]);
+    });
 
+  // why: kit-level partial-checkout rollup is deferred — per-asset rows under
+  // the kit already surface the new state via list-asset-content; surfacing it
+  // at the kit header would require a separate `checkedOutByAsset` plumbing
+  // through getBookingContextKitStatus and a new ExtendedKitStatus member,
+  // neither of which is needed for the immediate UX gap.
   // Only show as PARTIALLY_CHECKED_IN for active bookings
   // For COMPLETE bookings, kits should show as AVAILABLE
   if (
@@ -358,22 +488,13 @@ export function isKitPartiallyCheckedIn(
   bookingAssetIds: Set<string>,
   bookingStatus: string
 ): boolean {
-  const kitAssetsInBooking =
-    kit.assets?.filter((asset) => bookingAssetIds.has(asset.id)) || [];
-
-  // Check if ALL kit assets in booking are checked in
-  const allAssetsCheckedIn =
-    kitAssetsInBooking.length > 0 &&
-    kitAssetsInBooking.every((asset) =>
-      Boolean(partialCheckinDetails[asset.id])
-    );
-
-  if (!allAssetsCheckedIn) {
-    return false;
-  }
-
-  // Only consider as "partially checked in" for active bookings
-  return ["ONGOING", "OVERDUE"].includes(bookingStatus);
+  const contextStatus = getBookingContextKitStatus(
+    kit,
+    partialCheckinDetails,
+    bookingAssetIds,
+    bookingStatus
+  );
+  return contextStatus === "PARTIALLY_CHECKED_IN";
 }
 
 /**

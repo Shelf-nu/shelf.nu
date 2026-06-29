@@ -6,6 +6,8 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
+  shapeMobileAssetResponse,
+  shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -94,10 +96,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         assetId: barcode.assetId,
         kitId: barcode.kitId,
         organizationId,
-        asset: barcode.asset ?? null,
+        // Flatten the Phase-4a/4b pivot rows (assetKits/assetLocations/custody)
+        // back into the legacy flat shape the in-App-Store companion expects.
+        // Mirrors qr.$qrId.ts. See MOBILE_ASSET_SELECT for the why.
+        asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it (previously fetched but dropped from the response).
-        kit: barcode.kit ?? null,
+        // shapeMobileKitResponse handles null pass-through.
+        kit: shapeMobileKitResponse(barcode.kit ?? null),
       },
     });
   } catch (cause) {

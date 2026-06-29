@@ -86,7 +86,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
         },
         include: {
-          assets: { select: { id: true } },
+          // `@@unique([assetId, locationId])` guarantees one row per asset
+          // at this location, so the AssetLocation row count equals the
+          // number of distinct assets placed here.
+          assetLocations: { select: { assetId: true } },
           kits: { select: { id: true } },
         },
       })
@@ -205,7 +208,7 @@ export default function ManageLocationKits() {
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
-  const totalAssetsSelected = location.assets.length;
+  const totalAssetsSelected = location.assetLocations.length;
   const locationKitsCount = location.kits.length;
   const hasUnsavedChanges = selectedBulkItemsCount !== locationKitsCount;
 

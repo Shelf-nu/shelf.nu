@@ -281,12 +281,14 @@ describe("buildCsvExportDataFromAssets", () => {
         valuation: 1234.5,
         availableToBook: true,
         createdAt: new Date("2024-01-02T03:04:05Z"),
-        custody: {
-          custodian: {
-            name: "Fallback Name",
-            user: { firstName: "Jane", lastName: "Doe" },
+        custody: [
+          {
+            custodian: {
+              name: "Fallback Name",
+              user: { firstName: "Jane", lastName: "Doe" },
+            },
           },
-        },
+        ],
         customFields: [
           {
             customField: { name: "isInsured" },
@@ -422,7 +424,10 @@ describe("buildCsvExportDataFromBookings", () => {
       },
       description: "Studio session",
       tags: [{ name: "commercial" }],
-      assets: [{ title: "Primary Asset" }, { title: "Secondary Asset" }],
+      bookingAssets: [
+        { asset: { title: "Primary Asset" } },
+        { asset: { title: "Secondary Asset" } },
+      ],
     };
 
     const [headers, bookingRow, assetRow] = buildCsvExportDataFromBookings(
@@ -483,9 +488,16 @@ describe("buildCsvExportDataFromBookings", () => {
       custodianUser: null,
       description: "",
       tags: [],
-      assets: [
-        { id: "asset-returned", title: "Returned Camera" },
-        { id: "asset-out", title: "Still-Out Tripod" },
+      // why: bookings carry their assets via the `BookingAsset` pivot
+      // (one row per slice, with a per-slice `quantity`) post-3a, so the
+      // CSV builder feeds off `booking.bookingAssets[].asset` not the
+      // legacy direct `assets` relation.
+      bookingAssets: [
+        {
+          quantity: 1,
+          asset: { id: "asset-returned", title: "Returned Camera" },
+        },
+        { quantity: 1, asset: { id: "asset-out", title: "Still-Out Tripod" } },
       ],
     };
 

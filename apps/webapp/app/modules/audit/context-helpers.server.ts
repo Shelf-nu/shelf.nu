@@ -135,7 +135,7 @@ export async function getAssetsForLocationContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      locationId: { in: locationIds },
+      assetLocations: { some: { locationId: { in: locationIds } } },
     },
     select: {
       id: true,
@@ -166,7 +166,7 @@ export async function getAssetsForKitContext({
   const assets = await db.asset.findMany({
     where: {
       organizationId,
-      kitId,
+      assetKits: { some: { kitId } },
     },
     select: {
       id: true,
@@ -198,8 +198,10 @@ export async function getAssetsForUserContext({
     where: {
       organizationId,
       custody: {
-        custodian: {
-          userId: custodianUserId,
+        some: {
+          custodian: {
+            userId: custodianUserId,
+          },
         },
       },
     },
@@ -248,20 +250,30 @@ export async function resolveAssetIdsForLocationSelection({
 
   if (locationIds.includes(ALL_SELECTED_KEY)) {
     // "Select all" — match assets whose location satisfies the SAME filter the
-    // user sees on the Locations list. A relation filter keeps this one query
-    // (no separate location lookup, no giant IN list). Assets with no location
-    // are naturally excluded, which matches the explicit-selection semantics.
+    // user sees on the Locations list. Post-pivot, asset placement lives on the
+    // `AssetLocation` pivot, so the relation filter goes through `assetLocations`
+    // with a nested `location` where-clause.
     assetWhere = {
       organizationId,
-      location: getLocationsWhereInput({ organizationId, currentSearchParams }),
+      assetLocations: {
+        some: {
+          location: getLocationsWhereInput({
+            organizationId,
+            currentSearchParams,
+          }),
+        },
+      },
     };
   } else {
     // Explicit selection from request input — prove org ownership before use,
-    // then scope by the deduped IDs (schema guarantees at least one).
+    // then scope by the deduped IDs (schema guarantees at least one). Asset →
+    // location lookup goes via the `AssetLocation` pivot post-4b.
     await assertLocationsBelongToOrg({ locationIds, organizationId });
     assetWhere = {
       organizationId,
-      locationId: { in: [...new Set(locationIds)] },
+      assetLocations: {
+        some: { locationId: { in: [...new Set(locationIds)] } },
+      },
     };
   }
 
@@ -321,20 +333,26 @@ export async function resolveAssetIdsForKitSelection({
 
   if (kitIds.includes(ALL_SELECTED_KEY)) {
     // "Select all" — match assets whose kit satisfies the SAME filter the user
-    // sees on the Kits list. A relation filter keeps this one query (no separate
-    // kit lookup, no giant IN list). Assets with no kit are naturally excluded,
-    // which matches the explicit-selection semantics.
+    // sees on the Kits list. Post-pivot, asset → kit lookup goes via the
+    // `AssetKit` pivot; surface the kit filter through the pivot relation.
     assetWhere = {
       organizationId,
-      kit: getKitsWhereInput({ organizationId, currentSearchParams }),
+      assetKits: {
+        some: {
+          kit: getKitsWhereInput({ organizationId, currentSearchParams }),
+        },
+      },
     };
   } else {
     // Explicit selection from request input — prove org ownership before use,
-    // then scope by the deduped IDs (schema guarantees at least one).
+    // then scope by the deduped IDs (schema guarantees at least one). Post-pivot
+    // the asset → kit join uses the `AssetKit` pivot.
     await assertKitsBelongToOrg({ kitIds, organizationId });
     assetWhere = {
       organizationId,
-      kitId: { in: [...new Set(kitIds)] },
+      assetKits: {
+        some: { kitId: { in: [...new Set(kitIds)] } },
+      },
     };
   }
 

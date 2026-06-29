@@ -69,7 +69,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           image: true,
           imageExpiration: true,
-          _count: { select: { assets: true } },
+          // Kits link to assets via the `AssetKit` pivot model — count that
+          // relation, then re-key to `assets` below so the mobile companion's
+          // existing API contract (`_count.assets`) is preserved.
+          _count: { select: { assetKits: true } },
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
           custody: {
@@ -85,8 +88,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.kit.count({ where }),
     ]);
 
+    // Re-shape `_count.assetKits` → `_count.assets` so the response matches
+    // the contract the companion app already consumes (see
+    // `apps/companion/lib/api/types.ts` Kit shape).
+    const kitsForResponse = kits.map(({ _count, ...rest }) => ({
+      ...rest,
+      _count: { assets: _count.assetKits },
+    }));
+
     return data({
-      kits,
+      kits: kitsForResponse,
       page,
       perPage,
       totalCount,

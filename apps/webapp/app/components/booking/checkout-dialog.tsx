@@ -29,6 +29,14 @@ type CheckoutDialogProps = {
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
   /**
+   * Optional className override for the trigger button. Defaults to the
+   * variant-aware composition below (`"grow"` for the default variant,
+   * full-width link styling for `"dropdown"`). Embedded contexts (e.g. the
+   * fulfil-and-checkout drawer) can pass a narrower class so the button
+   * doesn't stretch oddly when its sibling buttons aren't also `grow`.
+   */
+  triggerClassName?: string;
+  /**
    * The form `intent` submitted with the checkout. Defaults to the full-booking
    * `"checkOut"` flow. The bulk partial-checkout dialog passes
    * `"partial-checkout"` so that an early checkout of the SELECTED assets routes
@@ -63,6 +71,7 @@ export default function CheckoutDialog({
   booking,
   portalContainer,
   formId,
+  triggerClassName,
   intent = "checkOut",
   label = "Check Out",
   variant = "default",
@@ -74,12 +83,18 @@ export default function CheckoutDialog({
 
   /** Shared trigger styling so the dropdown row matches the check-in dropdown */
   const isDropdown = variant === "dropdown";
-  const triggerClassName = tw(
+  /**
+   * Default trigger styling computed from `variant`. Callers can override the
+   * entire class via the `triggerClassName` prop (e.g. the fulfil-and-checkout
+   * drawer narrows the button so it doesn't stretch oddly next to siblings).
+   */
+  const computedTriggerClassName = tw(
     "whitespace-nowrap",
     isDropdown
       ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
       : "grow"
   );
+  const resolvedTriggerClassName = triggerClassName ?? computedTriggerClassName;
   /** Dropdown rows pair the label with an icon; the default trigger is text-only */
   const triggerContent = isDropdown ? (
     <span className="flex items-center gap-2">
@@ -93,7 +108,7 @@ export default function CheckoutDialog({
     return (
       <Button
         disabled={disabled}
-        className={triggerClassName}
+        className={resolvedTriggerClassName}
         size={isDropdown ? undefined : "sm"}
         type="submit"
         name="intent"
@@ -112,7 +127,7 @@ export default function CheckoutDialog({
       <AlertDialogTrigger asChild>
         <Button
           disabled={disabled}
-          className={triggerClassName}
+          className={resolvedTriggerClassName}
           size={isDropdown ? undefined : "sm"}
           type="button"
           variant={isDropdown ? "link" : "primary"}
