@@ -312,6 +312,13 @@ export type BookingLifecycleProgress = {
  * to Returned; QT rows that were never out stay Booked. By construction the
  * Partial and Checked-out buckets are 0 at COMPLETE/ARCHIVED.
  *
+ * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED) no checkout has happened
+ * in THIS booking — only ONGOING/OVERDUE own a live checkout — so every unit is
+ * forced into the Booked bucket. This prevents the global asset `status` (which
+ * may be CHECKED_OUT because the asset is out in a DIFFERENT booking — e.g.
+ * after duplicating an ongoing booking, or reserving an asset that's checked out
+ * elsewhere for a future window) from leaking into this booking's progress bar.
+ *
  * @returns bucket counts (Booked / Partial / CheckedOut / Returned),
  *   checkout/check-in progress counts + percentages, and convenience flags.
  */
@@ -340,6 +347,22 @@ export function calculateBookingLifecycleProgress({
   const isFinal =
     bookingStatus === BookingStatus.COMPLETE ||
     bookingStatus === BookingStatus.ARCHIVED;
+  // Only ONGOING/OVERDUE bookings own a live checkout, so only there is an
+  // asset's global `status === CHECKED_OUT` attributable to THIS booking
+  // (conflict detection guarantees an asset can't be live-checked-out in two
+  // overlapping bookings). Every pre-checkout state — DRAFT, RESERVED, CANCELLED
+  // — has never had any of its own assets checked out: progressive checkout's
+  // first scan already flips RESERVED → ONGOING, and a cancelled booking has
+  // released its assets. Their assets may still read CHECKED_OUT because they're
+  // physically out in a DIFFERENT booking (e.g. after duplicating an ongoing
+  // booking into a fresh DRAFT, or reserving an asset for a future window while
+  // it's checked out elsewhere now). Force every unit to Booked so cross-booking
+  // status never leaks into this booking's progress bar. (COMPLETE/ARCHIVED is
+  // handled separately below via `checkedOutAssetIds`, not live status.)
+  const isPreCheckout =
+    bookingStatus === BookingStatus.DRAFT ||
+    bookingStatus === BookingStatus.RESERVED ||
+    bookingStatus === BookingStatus.CANCELLED;
 
   // An asset "was actually checked out" iff it has a checkout record. When no
   // records exist at all (empty array), every asset was checked out.
@@ -404,6 +427,14 @@ export function calculateBookingLifecycleProgress({
     return individualBucketOf(a);
   };
 
+  // Pre-checkout bookings (DRAFT/RESERVED/CANCELLED): force every unit to
+  // Booked, ignoring the global asset status that may belong to another
+  // booking (main fix merged 2026-06-29). Skips main's `: isFinal ?
+  // finalBucketOf : bucketOf` arm because HEAD's `bucketOf` is the QT-aware
+  // dispatcher that already handles the isFinal case inside qtyBucketOf and
+  // individualBucketOf — no separate finalBucketOf is defined here.
+  const resolveBucket = isPreCheckout ? (): "booked" => "booked" : bucketOf;
+
   let booked = 0;
   let partial = 0;
   let checkedOut = 0;
@@ -418,11 +449,11 @@ export function calculateBookingLifecycleProgress({
   };
 
   if (!countKitsAsSingleUnit) {
-    for (const a of bookingAssets) tally(bucketOf(a));
+    for (const a of bookingAssets) tally(resolveBucket(a));
   } else {
     // Standalone rows always bucket per-asset (no kit collapse to consider).
     for (const a of bookingAssets.filter((x) => x.kitId === null)) {
-      tally(bucketOf(a));
+      tally(resolveBucket(a));
     }
     const kitGroups = new Map<string, LifecycleAsset[]>();
     for (const a of bookingAssets) {
@@ -432,7 +463,7 @@ export function calculateBookingLifecycleProgress({
       else kitGroups.set(a.kitId, [a]);
     }
     for (const group of kitGroups.values()) {
-      const buckets = new Set(group.map(bucketOf));
+      const buckets = new Set(group.map(resolveBucket));
       // Any partial member promotes the whole kit to Partial — a kit with a
       // mid-flight QT member is itself mid-flight regardless of its peers.
       if (buckets.has("partial")) {
