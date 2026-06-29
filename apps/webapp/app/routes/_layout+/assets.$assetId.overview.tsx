@@ -81,6 +81,7 @@ import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
@@ -1220,6 +1221,36 @@ export default function AssetOverview() {
                   />
                 )}
               />
+
+              {/* QT-aware: shows total value (per-unit × quantity) below the
+                  per-unit Value row. Hidden for INDIVIDUAL assets and QT with
+                  qty=1 where it would be redundant. */}
+              {isQuantityTracked(asset) &&
+              asset.valuation != null &&
+              (asset.quantity ?? 1) > 1
+                ? (() => {
+                    const breakdown = formatAssetValueWithBreakdown(asset, {
+                      currency: asset.organization.currency,
+                      locale,
+                    });
+                    return (
+                      <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                        <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                          Total value
+                        </span>
+                        <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                          {breakdown.total}
+                          {breakdown.unit && breakdown.suffix ? (
+                            <span className="text-gray-500">
+                              {" "}
+                              ({breakdown.unit} {breakdown.suffix})
+                            </span>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })()
+                : null}
 
               {asset?.assetModel ? (
                 <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
