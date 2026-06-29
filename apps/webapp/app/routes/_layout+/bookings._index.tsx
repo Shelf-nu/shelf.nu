@@ -589,8 +589,17 @@ const ListBookingsContent = ({
     };
   }>;
 }) => {
+  // Defensive `?? []` against a Sentry-observed crash (SHELF-WEBAPP-1NW):
+  // a single client-side render hit `item.bookingAssets` as undefined and
+  // tripped the `.some(...)` call, breaking the row through the error
+  // boundary. The component's prop type declares `bookingAssets` as
+  // required and the loader always selects it, so the undefined was either
+  // a stale-bundle / hydration mismatch in the deploy window or an as-yet
+  // unidentified loader edge case. The empty-array fallback turns a hard
+  // crash into a safe degraded render (the row simply shows "no
+  // unavailable assets" instead of crashing).
   const hasUnavaiableAssets =
-    item.bookingAssets.some(
+    (item.bookingAssets ?? []).some(
       (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
