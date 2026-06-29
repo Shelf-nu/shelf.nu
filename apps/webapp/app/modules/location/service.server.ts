@@ -179,7 +179,8 @@ export async function getLocation(
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Build where object for querying related assets */
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    // Hide archived assets from a location's asset list (issue #382).
+    const assetsWhere: Prisma.AssetWhereInput = { archivedAt: null };
 
     if (search) {
       assetsWhere.title = {

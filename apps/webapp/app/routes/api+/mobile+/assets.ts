@@ -48,6 +48,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const where: Record<string, unknown> = {
       organizationId,
+      // Hide archived assets from the mobile list (parity with the web index
+      // default; issue #382). The mobile app has no archived view yet.
+      archivedAt: null,
       // Match on title OR sequentialId (SAM id, e.g. "SAM-0001"). When the
       // workspace display preference is SAM, every asset row shows its SAM id,
       // so a user typing that number must be able to find it here. Mirrors the
