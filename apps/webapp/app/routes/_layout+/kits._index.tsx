@@ -488,7 +488,9 @@ function ListContent({
                 <KitStatusBadge
                   status={item.status}
                   availableToBook={
-                    !item.assetKits.some((ak) => !ak.asset.availableToBook)
+                    !(item.assetKits ?? []).some(
+                      (ak) => !ak.asset.availableToBook
+                    )
                   }
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

@@ -33,7 +33,12 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
-        availableToBook: item.assetKits.some((ak) => ak.asset.availableToBook),
+        // why: assetKits is typed as always-present from the loader, but at least
+        // one production crash shows a runtime-undefined edge case. Empty array is
+        // a safe stand-in — an empty kit has nothing available to book.
+        availableToBook: (item.assetKits ?? []).some(
+          (ak) => ak.asset.availableToBook
+        ),
       },
     }));
 
@@ -43,7 +48,7 @@ export function useKitAvailabilityData(items: Items) {
     const allBookings = new Map();
 
     items.forEach((kit) => {
-      kit.assetKits.forEach((ak) => {
+      (kit.assetKits ?? []).forEach((ak) => {
         const asset = ak.asset;
         if ("bookingAssets" in asset && asset.bookingAssets) {
           // Cast through `unknown` because the kits._index loader passes
