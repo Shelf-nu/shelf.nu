@@ -453,9 +453,9 @@ const ConditionalActionsDropdown = () => {
                         className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
                         width="full"
                         disabled={
-                          archivedActionDisabled ||
-                          assetIsCheckedOut ||
-                          assetIsPartOfUnavailableKit
+                          // Archived assets can still be permanently deleted
+                          // (along with Reinstate, the only allowed actions).
+                          assetIsCheckedOut || assetIsPartOfUnavailableKit
                         }
                       >
                         Delete

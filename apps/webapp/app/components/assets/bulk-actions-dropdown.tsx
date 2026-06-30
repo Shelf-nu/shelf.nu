@@ -458,13 +458,14 @@ function ConditionalDropdown() {
                   label="Delete"
                   onClick={closeMenu}
                   disabled={
-                    archivedBulkDisabled ||
-                    (someAssetCheckedOut
+                    // Archived assets can still be permanently deleted in bulk
+                    // (Delete + Reinstate are the only allowed bulk actions).
+                    someAssetCheckedOut
                       ? {
                           reason:
                             "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
                         }
-                      : isLoading)
+                      : isLoading
                   }
                 />
               </DropdownMenuItem>
