@@ -487,6 +487,24 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.hasPartialCheckins).toBe(false);
   });
 
+  it("qty asset quick-checked-out — CHECKED_OUT status with no progressive records → CheckedOut", () => {
+    // A quick / all-at-once checkout sets the asset status to CHECKED_OUT but
+    // writes NO PartialBookingCheckout rows, so `checkedOutQuantity` stays 0.
+    // The bucketer must trust the live CHECKED_OUT status as "all booked units
+    // out" (mirrors individualBucketOf) — otherwise the row reads as Booked.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [QT("gloves", 100, 0, 0, null, AssetStatus.CHECKED_OUT)],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: [],
+      bookingStatus: BookingStatus.ONGOING,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.bookedCount).toBe(0);
+    expect(p.partialCount).toBe(0);
+    expect(p.checkedOutCount).toBe(1);
+    expect(p.returnedCount).toBe(0);
+  });
+
   it("qty asset with partial checkout AND partial returns — still Partial (one asset, one bucket)", () => {
     // C=5, D=2, B=50. D >= B? no. C >= B? no. 0 < C < B → Partial.
     // The row collapses to a single bucket — the asset is mid-flight.
@@ -556,6 +574,22 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.checkinProgressPercentage).toBe(100);
   });
 
+  it("COMPLETE booking with a quick-checked-out QT row (no records) → Returned", () => {
+    // A quick checkout leaves no PartialBookingCheckout rows, so an empty
+    // checkedOutAssetIds means everything was checked out. The QT row (C=0)
+    // must still collapse to Returned at COMPLETE, mirroring INDIVIDUAL rows
+    // (which use `wasCheckedOut`). Before the fix it read as Booked.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [QT("gloves", 100, 0, 0)],
+      checkedInAssetIds: ["gloves"],
+      checkedOutAssetIds: [],
+      bookingStatus: BookingStatus.COMPLETE,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.returnedCount).toBe(1);
+    expect(p.bookedCount).toBe(0);
+  });
+
   it("qty asset with two slices (kit-driven + standalone) — each slice is its own asset count", () => {
     // Slice 1: QT in K1, 0 < C(2) < B(5) → Partial.
     // Slice 2: QT standalone, C=0, D=0 → Booked.
@@ -613,6 +647,46 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.checkedOutCount).toBe(0);
     expect(p.returnedCount).toBe(0);
     expect(p.countMode).toBe("units");
+  });
+
+  it("unit mode: kit with a quick-checked-out QT member + checked-out individuals → kit Fully out", () => {
+    // Reproduces the booking-overview bug: a kit whose QT member was quick
+    // checked out (status CHECKED_OUT, checkedOutQuantity 0) alongside fully
+    // checked-out INDIVIDUAL members must collapse to ONE Fully-out unit. Before
+    // the fix the QT member read as Booked, so the kit's members disagreed and
+    // the kit fell through to Booked (the "1 item not checked out" symptom).
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        QT("gloves", 100, 0, 0, "KIT", AssetStatus.CHECKED_OUT),
+        {
+          id: "individual-asset",
+          kitId: "KIT",
+          status: AssetStatus.CHECKED_OUT,
+          assetType: AssetType.INDIVIDUAL,
+        },
+        {
+          id: "saradomin",
+          kitId: "KIT",
+          status: AssetStatus.CHECKED_OUT,
+          assetType: AssetType.INDIVIDUAL,
+        },
+        {
+          id: "standalone",
+          kitId: null,
+          status: AssetStatus.CHECKED_OUT,
+          assetType: AssetType.INDIVIDUAL,
+        },
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: [],
+      bookingStatus: BookingStatus.ONGOING,
+      countKitsAsSingleUnit: true,
+    });
+    expect(p.totalUnits).toBe(2); // 1 kit unit + 1 standalone
+    expect(p.checkedOutCount).toBe(2); // kit fully out + standalone
+    expect(p.bookedCount).toBe(0);
+    expect(p.partialCount).toBe(0);
+    expect(p.returnedCount).toBe(0);
   });
 
   it("unit mode with an INDIVIDUAL-only kit — kit-as-1-unit collapse still applies (regression guard)", () => {

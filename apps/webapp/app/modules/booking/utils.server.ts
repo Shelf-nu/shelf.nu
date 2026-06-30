@@ -406,14 +406,33 @@ export function calculateBookingLifecycleProgress({
    * At COMPLETE/ARCHIVED, rows where any units were ever checked out collapse
    * to Returned; rows that were never out stay Booked. Partial and CheckedOut
    * are unreachable in the final branch by construction.
+   *
+   * QUICK-CHECKOUT CAVEAT: `checkedOutQuantity` (C) is sourced ONLY from
+   * `PartialBookingCheckout` rows (progressive checkout). A quick / all-at-once
+   * checkout writes NO such rows yet sets the asset `status` to CHECKED_OUT, so
+   * C stays 0 even though every booked unit is physically out. Relying on C
+   * alone would mis-bucket such a row as Booked. We therefore also consult the
+   * asset status (live branch) and `wasCheckedOut` (final branch), exactly like
+   * {@link individualBucketOf} — a CHECKED_OUT QT row is fully out; a final-state
+   * QT row that was ever checked out is Returned.
    */
   const qtyBucketOf = (a: LifecycleAsset): Bucket => {
     const B = Math.max(0, a.bookedQuantity ?? 0);
-    const C = Math.max(0, a.checkedOutQuantity ?? 0);
+    let C = Math.max(0, a.checkedOutQuantity ?? 0);
     const D = Math.max(0, a.dispositionedQuantity ?? 0);
+    // Quick checkout: a live CHECKED_OUT status (attributable to THIS booking —
+    // pre-checkout states are forced to Booked before this runs) means all
+    // booked units are out, even with no progressive records. Only ever raises
+    // C toward B, so progressive partial counts (status AVAILABLE) are untouched.
+    if (!isFinal && a.status === AssetStatus.CHECKED_OUT && D === 0 && C < B) {
+      C = B;
+    }
     if (isFinal) {
-      // Any units ever checked out → Returned; otherwise still Booked.
-      return C > 0 ? "returned" : "booked";
+      // Any units ever checked out → Returned; otherwise still Booked. A pure
+      // quick checkout leaves no records (C=0), so honor `wasCheckedOut` too
+      // (empty checkedOutAssetIds ⇒ everything was checked out), mirroring the
+      // INDIVIDUAL final branch.
+      return C > 0 || wasCheckedOut(a.id) ? "returned" : "booked";
     }
     if (B > 0 && D >= B) return "returned";
     if (B > 0 && C >= B && D < B) return "checkedOut";
