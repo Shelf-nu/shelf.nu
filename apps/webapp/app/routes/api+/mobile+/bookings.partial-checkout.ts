@@ -4,6 +4,7 @@ import {
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -44,6 +45,8 @@ export async function action({ request }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.checkout,
     });
+
+    await assertMobileCanUseBookings(organizationId);
 
     const body = await request.json();
     const { bookingId, assetIds, checkouts, timeZone } = z

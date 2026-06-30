@@ -30,6 +30,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
+  assertMobileCanUseBookings: vi.fn(),
 }));
 
 // why: external service — we mock the booking checkout to avoid database calls
@@ -59,6 +60,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
@@ -104,6 +106,7 @@ describe("POST /api/mobile/bookings/checkout", () => {
       from: BOOKING_FROM,
       to: BOOKING_TO,
     });
+    (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
   });
 
   it("should checkout a booking and pass its window so the conflict guard fires", async () => {

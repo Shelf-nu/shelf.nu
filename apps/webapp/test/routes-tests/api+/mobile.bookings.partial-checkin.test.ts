@@ -31,6 +31,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
+  assertMobileCanUseBookings: vi.fn(),
 }));
 
 // why: external service — we mock partial checkin to avoid database calls
@@ -69,6 +70,7 @@ import {
   requireOrganizationAccess,
   requireMobilePermission,
   getMobileUserContext,
+  assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { partialCheckinBooking } from "~/modules/booking/service.server";
 import { db } from "~/database/db.server";
@@ -109,6 +111,7 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
 
     // Org-scoped booking lookup + eligibility added by the check-in hardening.
     (getMobileUserContext as any).mockResolvedValue({ role: "OWNER" });
