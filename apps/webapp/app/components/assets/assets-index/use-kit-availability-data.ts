@@ -33,12 +33,14 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
-        // why: assetKits is typed as always-present from the loader, but at least
-        // one production crash shows a runtime-undefined edge case. Empty array is
-        // a safe stand-in — an empty kit has nothing available to book.
-        availableToBook: (item.assetKits ?? []).some(
-          (ak) => ak.asset.availableToBook
-        ),
+        // why: match the list view's semantic in kits._index.tsx — a kit is
+        // bookable only when ALL slices are bookable (booking reserves the
+        // whole kit). Undefined assetKits is treated as not-bookable since we
+        // can't verify the slices.
+        availableToBook:
+          item.assetKits == null
+            ? false
+            : !item.assetKits.some((ak) => !ak.asset.availableToBook),
       },
     }));
 
