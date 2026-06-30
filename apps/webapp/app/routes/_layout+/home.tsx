@@ -94,10 +94,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // Cookie
       cookieResult,
     ] = await Promise.all([
-      // 1a. Asset count + total valuation
+      // 1a. Asset count + total valuation. Archived assets are excluded from
+      // dashboard inventory metrics (issue #382) — the dashboard reflects
+      // active inventory, mirroring the default-hide on the asset index.
       db.asset
         .aggregate({
-          where: { organizationId },
+          where: { organizationId, archivedAt: null },
           _count: { _all: true },
           _sum: { valuation: true },
         })
@@ -112,13 +114,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // 1a. Count of assets with known valuation
       db.asset.count({
-        where: { organizationId, valuation: { not: null } },
+        where: { organizationId, valuation: { not: null }, archivedAt: null },
       }),
 
       // 1b. Assets grouped by status
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null },
         _count: { _all: true },
       }),
 
@@ -128,13 +130,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                COUNT(*)::int AS assets_created
         FROM "Asset"
         WHERE "organizationId" = ${organizationId}
+          AND "archivedAt" IS NULL
           AND "createdAt" >= ${twelveMonthsAgo}
         GROUP BY 1
         ORDER BY 1`,
 
       // 1c. Baseline count (assets before the 12-month window)
       db.asset.count({
-        where: { organizationId, createdAt: { lt: twelveMonthsAgo } },
+        where: {
+          organizationId,
+          archivedAt: null,
+          createdAt: { lt: twelveMonthsAgo },
+        },
       }),
 
       // 1d. Team members with direct custody counts
@@ -215,10 +222,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 1e. Newest 5 assets
+      // 1e. Newest 5 assets (exclude archived — issue #382)
       db.asset
         .findMany({
-          where: { organizationId },
+          where: { organizationId, archivedAt: null },
           orderBy: { createdAt: "desc" },
           take: 5,
           include: {

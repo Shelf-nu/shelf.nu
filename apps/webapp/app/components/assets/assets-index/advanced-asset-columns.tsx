@@ -225,6 +225,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -383,11 +384,13 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -396,6 +399,7 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        isArchived={isArchived}
       />
     </Td>
   );

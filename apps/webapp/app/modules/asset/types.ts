@@ -185,6 +185,7 @@ export type AdvancedIndexAsset = Pick<
   | "quantity"
   | "unitOfMeasure"
   | "availableToBook"
+  | "archivedAt"
 > & {
   qrId: string; // QR code will always be available
   assetModelId?: string | null;

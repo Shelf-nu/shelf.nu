@@ -49,8 +49,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       overdueBookingsResult,
       activeAudits,
     ] = await Promise.all([
-      // KPI: Total assets
-      db.asset.count({ where: { organizationId } }),
+      // KPI: Total assets (active only — archived excluded, issue #382)
+      db.asset.count({ where: { organizationId, archivedAt: null } }),
 
       // KPI: Categories
       db.category.count({ where: { organizationId } }),
@@ -63,10 +63,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { organizationId, deletedAt: null },
       }),
 
-      // Assets by status
+      // Assets by status (active inventory only — archived excluded)
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null },
         _count: { id: true },
       }),
 
@@ -86,9 +86,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 5 newest assets
+      // 5 newest assets (exclude archived — issue #382)
       db.asset.findMany({
-        where: { organizationId },
+        where: { organizationId, archivedAt: null },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {

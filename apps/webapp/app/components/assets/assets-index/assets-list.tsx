@@ -322,6 +322,7 @@ export const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                   asset={item}
+                  isArchived={!!item.archivedAt}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
