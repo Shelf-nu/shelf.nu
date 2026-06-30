@@ -125,6 +125,9 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
+          // Archived assets keep showing in bookings they're already part of,
+          // flagged with the "Archived" badge (issue #382).
+          archivedAt: true,
           valuation: true,
           // Asset-code resolution fields — see `app/modules/barcode/display.ts`
           // for the canonical select shape. Tight `take: 1` + narrow `select`

@@ -14,11 +14,13 @@
  * @see {@link file://./asset-status-badge/asset-status-badge.tsx}
  */
 
+import { ArchiveIcon } from "lucide-react";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { Badge } from "../shared/badge";
 
 /**
- * Renders the gray "Archived" chip.
+ * Renders the calm, gray "Archived" chip (icon + label) used as the single
+ * status signal for an archived asset.
  *
  * @param props.className - Optional extra classes forwarded to the Badge.
  */
@@ -30,7 +32,10 @@ export function ArchivedBadge({ className }: { className?: string }) {
       withDot={false}
       className={className}
     >
-      Archived
+      <span className="flex items-center gap-1">
+        <ArchiveIcon className="size-3" aria-hidden />
+        Archived
+      </span>
     </Badge>
   );
 }

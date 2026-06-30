@@ -547,6 +547,7 @@ export default function AssetDetailsPage() {
               status={asset.status}
               availableToBook={asset.availableToBook}
               asset={asset}
+              isArchived={!!asset.archivedAt}
             />
           </div>
         }

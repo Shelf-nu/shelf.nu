@@ -252,6 +252,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                   status={item.status}
                   availableToBook={item.availableToBook}
                   asset={item}
+                  isArchived={!!item.archivedAt}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>

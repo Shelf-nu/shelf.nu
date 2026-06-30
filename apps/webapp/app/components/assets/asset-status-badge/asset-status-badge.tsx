@@ -144,6 +144,18 @@ export function AssetStatusBadge({
   }, [data, status]);
 
   /**
+   * Archived dominates the status display. When an asset is archived we show a
+   * single, calm "Archived" badge and suppress the live status + the
+   * "unavailable for bookings" indicator: the asset can't be booked or used
+   * while archived, so surfacing its underlying status (e.g. "Available")
+   * alongside would be misleading and force the reader to reconcile two states.
+   * One clear signal, everywhere the asset appears (issue #382).
+   */
+  if (isArchived) {
+    return <ArchivedBadge />;
+  }
+
+  /**
    * For quantity-tracked assets, render the qty-aware branch even before
    * the lazy fetch resolves. The label falls back to the asset's bare
    * status until the breakdown lands; on resolve, "Checked out" may refine
@@ -220,7 +232,6 @@ export function AssetStatusBadge({
         {!availableToBook && (
           <UnavailableBadge title="This asset is marked as unavailable for bookings" />
         )}
-        {isArchived && <ArchivedBadge />}
       </span>
     );
   }
@@ -238,7 +249,6 @@ export function AssetStatusBadge({
           {!availableToBook && (
             <UnavailableBadge title="This asset is marked as unavailable for bookings" />
           )}
-          {isArchived && <ArchivedBadge />}
         </span>
       </HoverCardTrigger>
 

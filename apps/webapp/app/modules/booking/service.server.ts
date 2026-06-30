@@ -7898,6 +7898,7 @@ export async function getBookings(params: {
                   custody: true,
                   availableToBook: true,
                   status: true,
+                  archivedAt: true,
                   mainImage: true,
                   thumbnailImage: true,
                   mainImageExpiration: true,

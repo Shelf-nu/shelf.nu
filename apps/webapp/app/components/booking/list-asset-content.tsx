@@ -405,6 +405,7 @@ export default function ListAssetContent({
                     status={contextStatus}
                     availableToBook={item.availableToBook}
                     asset={item}
+                    isArchived={!!item.archivedAt}
                     // For QT rows the resolved `contextStatus` already encodes
                     // the booking-context truth (AVAILABLE via
                     // `getBookingContextAssetStatus` for DRAFT/RESERVED, or

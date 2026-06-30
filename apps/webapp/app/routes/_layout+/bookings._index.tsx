@@ -523,6 +523,7 @@ const ListBookingsContent = ({
               availableToBook: true;
               custody: true;
               status: true;
+              archivedAt: true;
               mainImage: true;
               thumbnailImage: true;
               mainImageExpiration: true;
