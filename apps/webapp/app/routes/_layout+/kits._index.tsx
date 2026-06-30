@@ -487,10 +487,13 @@ function ListContent({
               <div className="flex flex-wrap items-center gap-2">
                 <KitStatusBadge
                   status={item.status}
+                  // why: undefined assetKits ≠ empty kit — we don't know what's in it,
+                  // so default to not-available (matches the calendar view's semantic
+                  // in use-kit-availability-data.ts).
                   availableToBook={
-                    !(item.assetKits ?? []).some(
-                      (ak) => !ak.asset.availableToBook
-                    )
+                    item.assetKits == null
+                      ? false
+                      : !item.assetKits.some((ak) => !ak.asset.availableToBook)
                   }
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

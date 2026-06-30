@@ -28,12 +28,15 @@ export function resolveUserDisplayName(
  *  Null-safe — returns "" when teamMember is null/undefined.
  */
 export const resolveTeamMemberName = (
-  teamMember: {
-    name: string;
-    user?: Partial<
-      Pick<User, "displayName" | "firstName" | "lastName" | "email">
-    > | null;
-  },
+  teamMember:
+    | {
+        name: string;
+        user?: Partial<
+          Pick<User, "displayName" | "firstName" | "lastName" | "email">
+        > | null;
+      }
+    | null
+    | undefined,
   includeEmail?: boolean
 ): string => {
   if (!teamMember) return "";
