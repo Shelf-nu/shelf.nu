@@ -179,8 +179,11 @@ export async function getLocation(
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
     /** Build where object for querying related assets */
-    // Hide archived assets from a location's asset list (issue #382).
-    const assetsWhere: Prisma.AssetWhereInput = { archivedAt: null };
+    // Archived assets stay VISIBLE here, shown with an "Archived" badge (issue
+    // #382). A location is a place the asset is accessed, so per the
+    // calm-state-visible-everywhere rule we surface it rather than hide it. The
+    // count below is unfiltered too, so the list and the count stay consistent.
+    const assetsWhere: Prisma.AssetWhereInput = {};
 
     if (search) {
       assetsWhere.title = {

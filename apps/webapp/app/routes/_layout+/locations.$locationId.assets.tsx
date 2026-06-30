@@ -590,6 +590,7 @@ const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  isArchived={!!item.archivedAt}
                   asset={item}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

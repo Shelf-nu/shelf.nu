@@ -1268,6 +1268,20 @@ interface IdleAssetsArgs {
 }
 
 /**
+ * Current-inventory snapshot reports (Idle, Distribution, Inventory) count only
+ * ACTIVE assets, so their numbers line up with the dashboard's active-inventory
+ * view (issue #382). Archived assets are out of circulation, so a "what do I
+ * have / how is it distributed / what's idle" snapshot must exclude them.
+ *
+ * Historical / timeframe reports (Activity, Utilization, Top Booked) deliberately
+ * do NOT apply this: an asset's past usage inside a window is real even after the
+ * asset is later archived, so those still include archived assets.
+ */
+const ACTIVE_INVENTORY_ASSET_FILTER: Prisma.AssetWhereInput = {
+  archivedAt: null,
+};
+
+/**
  * Generate the Idle Assets report (R4).
  *
  * Identifies assets that haven't been booked or checked out recently.
@@ -1295,9 +1309,10 @@ export async function idleAssetsReport(
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - idleThresholdDays);
 
-    // Build asset where clause
+    // Build asset where clause (active inventory only — issue #382)
     const assetWhere: Prisma.AssetWhereInput = {
       organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
     };
 
     if (categoryId) {
@@ -2697,7 +2712,7 @@ async function computeDistributionByCategory(
 ): Promise<AssetDistributionRow[]> {
   const assets = await db.asset.groupBy({
     by: ["categoryId"],
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     _count: { id: true },
     _sum: { valuation: true },
   });
@@ -2739,7 +2754,7 @@ async function computeDistributionByLocation(
   // contribute to several buckets; assets with no pivot rows fall into
   // "No Location".
   const assets = await db.asset.findMany({
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     select: {
       id: true,
       valuation: true,
@@ -2807,7 +2822,7 @@ async function computeDistributionByStatus(
 ): Promise<AssetDistributionRow[]> {
   const assets = await db.asset.groupBy({
     by: ["status"],
-    where: { organizationId },
+    where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
     _count: { id: true },
     _sum: { valuation: true },
   });
@@ -2837,9 +2852,11 @@ async function computeDistributionKpis(
 ): Promise<ReportKpi[]> {
   const [totalAssets, totalValue, categoryCount, locationCount] =
     await Promise.all([
-      db.asset.count({ where: { organizationId } }),
+      db.asset.count({
+        where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
+      }),
       db.asset.aggregate({
-        where: { organizationId },
+        where: { organizationId, ...ACTIVE_INVENTORY_ASSET_FILTER },
         _sum: { valuation: true },
       }),
       db.category.count({ where: { organizationId } }),
@@ -2924,8 +2941,11 @@ export async function assetInventoryReport(
   const startTime = performance.now();
 
   try {
-    // Build where clause
-    const where: Prisma.AssetWhereInput = { organizationId };
+    // Build where clause (active inventory only — issue #382)
+    const where: Prisma.AssetWhereInput = {
+      organizationId,
+      ...ACTIVE_INVENTORY_ASSET_FILTER,
+    };
 
     if (categoryIds && categoryIds.length > 0) {
       where.categoryId = { in: categoryIds };

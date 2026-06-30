@@ -1,8 +1,12 @@
+import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
 import {
+  applyArchivedFilter,
   compareCustomFieldValues,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
   getCustomFieldUpdateNoteContent,
   getKitLocationUpdateNoteContent,
   getLocationUpdateNoteContent,
@@ -837,5 +841,77 @@ describe("getKitLocationUpdateNoteContent", () => {
     expect(result).toContain("removed 50 units from");
     expect(result).toContain("Office A");
     expect(result.endsWith("via parent kit removal.")).toBe(true);
+  });
+});
+
+/**
+ * Regression guard for the archived-asset default (issue #382).
+ *
+ * Archived visibility is enforced by an EXPLICIT per-query filter that defaults
+ * to "active" (hide archived) at the list/index chokepoints — deliberately NOT
+ * a global Prisma extension. These tests lock that default so a future refactor
+ * can't silently flip the chokepoints to leak archived assets into active lists.
+ */
+describe("getArchivedFilterFromParams", () => {
+  it("defaults to 'active' when the archived param is absent", () => {
+    expect(getArchivedFilterFromParams(new URLSearchParams())).toBe("active");
+  });
+
+  it("defaults to 'active' for an unrecognized archived value", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=bogus"))
+    ).toBe("active");
+  });
+
+  it("returns 'archived' / 'all' only when explicitly requested", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=archived"))
+    ).toBe("archived");
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=all"))
+    ).toBe("all");
+  });
+});
+
+describe("applyArchivedFilter", () => {
+  it("hides archived assets for the 'active' default (archivedAt: null)", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "active");
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("shows only archived assets for 'archived' (archivedAt: { not: null })", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "archived");
+    expect(where.archivedAt).toEqual({ not: null });
+  });
+
+  it("leaves the archived dimension unconstrained for 'all'", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "all");
+    expect(where.archivedAt).toBeUndefined();
+  });
+});
+
+describe("getAssetsWhereInput archived default", () => {
+  it("hides archived assets when there are no search params at all", () => {
+    const where = getAssetsWhereInput({ organizationId: "org-1" });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("hides archived assets when params exist but 'archived' is unset", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "category=cat-1",
+    });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("includes archived assets only when explicitly asked (archived=all)", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "archived=all",
+    });
+    expect(where.archivedAt).toBeUndefined();
   });
 });
