@@ -109,6 +109,9 @@ vitest.mock("~/database/db.server", () => ({
           Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
         );
       }),
+      // why: addScannedAssetsToBookingWithinTx counts archived scanned assets
+      // (issue #382 guard). Default 0 = none archived, so happy-path scans pass.
+      count: vitest.fn().mockResolvedValue(0),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       update: vitest.fn().mockResolvedValue({}),
     },

@@ -18,6 +18,8 @@ const dbMocks = vi.hoisted(() => {
     asset: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: action counts archived assets to block custody on them (issue #382).
+      count: vi.fn().mockResolvedValue(0),
     },
     teamMember: {
       findMany: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock("~/database/db.server", () => ({
     asset: {
       findUnique: dbMocks.asset.findUnique,
       update: dbMocks.asset.update,
+      count: dbMocks.asset.count,
     },
     teamMember: {
       findMany: dbMocks.teamMember.findMany,

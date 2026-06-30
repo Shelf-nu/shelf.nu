@@ -259,11 +259,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     // Archived assets can't be assigned custody (issue #382). Guard the action
     // too (not just the loader) so a crafted POST can't bypass the redirect.
-    const targetAsset = await db.asset.findFirst({
-      where: { id: assetId, organizationId },
-      select: { archivedAt: true },
+    const archivedAssetCount = await db.asset.count({
+      where: { id: assetId, organizationId, archivedAt: { not: null } },
     });
-    if (targetAsset?.archivedAt) {
+    if (archivedAssetCount > 0) {
       throw new ShelfError({
         cause: null,
         title: "Asset is archived",

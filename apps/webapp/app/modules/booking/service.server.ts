@@ -9956,15 +9956,14 @@ async function addScannedAssetsToBookingWithinTx(
   // Archived assets can't be added to a booking, even via scan (issue #382).
   // Pickers hide them, but the scanner takes raw ids so the server enforces it.
   if (allScannedAssetIds.length > 0) {
-    const archivedScanned = await tx.asset.findMany({
+    const archivedScannedCount = await tx.asset.count({
       where: {
         id: { in: allScannedAssetIds },
         organizationId,
         archivedAt: { not: null },
       },
-      select: { id: true },
     });
-    if (archivedScanned.length > 0) {
+    if (archivedScannedCount > 0) {
       throw new ShelfError({
         cause: null,
         message:
