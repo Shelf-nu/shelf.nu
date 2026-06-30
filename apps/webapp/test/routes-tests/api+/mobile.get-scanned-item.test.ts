@@ -46,6 +46,21 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
     location: { select: { name: true } },
   },
   MOBILE_KIT_SELECT: { id: true, name: true },
+  // why: the whole module is mocked to keep Supabase out of these tests, so the
+  // pure shape helpers must be provided too. These mirror the real ones (flatten
+  // the quantities pivot shape into the flat shape the companion expects).
+  shapeMobileAssetResponse: (asset: any) => {
+    const { assetKits, assetLocations, custody, ...rest } = asset;
+    const kit = assetKits[0]?.kit ?? null;
+    return {
+      ...rest,
+      kitId: kit?.id ?? null,
+      kit,
+      location: assetLocations[0]?.location ?? null,
+      custody: custody[0] ?? null,
+    };
+  },
+  shapeMobileKitResponse: (kit: any) => kit ?? null,
 }));
 
 // why: external database — we don't want to hit the real database in tests
@@ -80,13 +95,18 @@ import { db } from "~/database/db.server";
 import { createScan } from "~/modules/scan/service.server";
 
 const mockUser = { id: "user-1", email: "test@example.com" };
+// quantities pivot shape (flattened back to the legacy flat shape the companion
+// expects by shapeMobileAssetResponse).
 const mockAsset = {
   id: "asset-1",
   title: "Test Laptop",
   status: "AVAILABLE",
   mainImage: null,
+  availableToBook: true,
   category: { name: "Electronics" },
-  location: { name: "Office A" },
+  assetKits: [],
+  assetLocations: [{ location: { id: "loc-1", name: "Office A" } }],
+  custody: [],
 };
 const mockQr = {
   id: "qr-1",

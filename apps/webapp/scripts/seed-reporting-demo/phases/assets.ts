@@ -101,12 +101,24 @@ export async function runAssetsPhase(
         description: initialDescription,
         valuation,
         categoryId,
-        locationId,
         userId: ctx.ownerUserId,
         organizationId: ctx.orgId,
         status: "AVAILABLE",
         createdAt,
         tags: { connect: tagIdsToConnect.map((id) => ({ id })) },
+        // location is now a pivot. Seed assets are INDIVIDUAL
+        // (quantity 1), so create at most one pivot row.
+        ...(locationId
+          ? {
+              assetLocations: {
+                create: {
+                  locationId,
+                  organizationId: ctx.orgId,
+                  quantity: 1,
+                },
+              },
+            }
+          : {}),
       },
       select: { id: true },
     });

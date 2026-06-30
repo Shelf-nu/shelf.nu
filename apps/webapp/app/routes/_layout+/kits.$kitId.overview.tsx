@@ -1,4 +1,4 @@
-import type { Asset, Barcode } from "@prisma/client";
+import type { Barcode } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { z } from "zod";
@@ -29,7 +29,6 @@ type KitWithOptionalBarcodes = ReturnType<
   typeof useLoaderData<typeof loader>
 >["kit"] & {
   barcodes?: Pick<Barcode, "id" | "type" | "value">[];
-  assets?: Pick<Asset, "valuation">[];
 };
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -89,13 +88,13 @@ export const handle = {
 export default function KitOverview() {
   const { kit, currentOrganization, locale } = useLoaderData<typeof loader>();
   const { canUseBarcodes } = useBarcodePermissions();
-  const totalValue =
-    ("assets" in kit &&
-      kit?.assets?.reduce(
-        (total, asset) => total + (asset.valuation ?? 0),
-        0
-      )) ||
-    0;
+  // Multiplies per-unit `valuation` by `AssetKit.quantity` — units of
+  // this asset *in this kit*, not workspace stock. A QT asset stocked
+  // at 100 with 5 in this kit contributes `valuation × 5`, not × 100.
+  const totalValue = kit.assetKits.reduce(
+    (total, ak) => total + (ak.asset.valuation ?? 0) * (ak.quantity ?? 1),
+    0
+  );
 
   return (
     <Card className="mt-0 px-[-4] py-[-5] md:border">

@@ -29,7 +29,9 @@ import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
+import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import { AssetCodeBadge } from "../asset-code-badge";
@@ -104,6 +106,7 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
+      <Th>Quantity</Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -192,6 +195,7 @@ export const AssetsList = ({
                             availableToBook={
                               resource.extendedProps?.availableToBook
                             }
+                            asset={resource.extendedProps}
                           />
                           <CategoryBadge
                             category={resource.extendedProps?.category}
@@ -241,7 +245,16 @@ export const ListAssetContent = ({
   bulkActions?: ReactNode;
   isUserPage?: boolean;
 }) => {
-  const { category, tags, custody, location, kit } = item;
+  const { category, tags, custody: custodyArray } = item;
+  // Render only the single primary-location badge in the list column —
+  // a qty-tracked asset can sit at multiple locations via AssetLocation.
+  const location = getPrimaryLocation(item);
+  const kit = item.assetKits?.[0]?.kit ?? null;
+  const {
+    primary: primaryCustody,
+    others: otherCustodians,
+    total: totalCustodians,
+  } = formatCustodyList(custodyArray);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
     ? resolveDisplayCode({ entity: item, organization: currentOrganization })
@@ -308,6 +321,7 @@ export const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  asset={item}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
@@ -329,10 +343,50 @@ export const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={!isUserPage}>
         <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
-          ) : (
+          {!primaryCustody || totalCustodians === 0 ? (
             <EmptyTableValue />
+          ) : (
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="inline-flex min-w-0 items-center">
+                <TeamMemberBadge teamMember={primaryCustody.custodian} />
+                {primaryCustody.quantity && primaryCustody.quantity > 1 ? (
+                  <span className="ml-1 shrink-0 text-gray-500">
+                    ({primaryCustody.quantity})
+                  </span>
+                ) : null}
+              </span>
+              {otherCustodians.length > 0 ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        +{otherCustodians.length} more
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <ul className="flex flex-col gap-1 text-sm">
+                        {[primaryCustody, ...otherCustodians].map((entry) => {
+                          const name = entry.custodian?.name ?? "Unknown";
+                          const qty = entry.quantity;
+                          // why: Custody rows carry their own `id`; fall back
+                          // to a name+qty composite only when missing (the
+                          // upstream `formatCustodyList` type is generic, so
+                          // TS can't prove `id` is present without a cast).
+                          const key =
+                            (entry as { id?: string }).id ?? `${name}-${qty}`;
+                          return (
+                            <li key={key}>
+                              {name}
+                              {qty && qty > 1 ? ` (${qty})` : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </span>
           )}
         </Td>
       </When>
@@ -348,6 +402,18 @@ export const ListAssetContent = ({
               childCount: location._count?.children ?? 0,
             }}
           />
+        ) : (
+          <EmptyTableValue />
+        )}
+      </Td>
+
+      {/* Quantity */}
+      <Td>
+        {isQuantityTracked(item) && item.quantity != null ? (
+          <span>
+            {item.quantity}
+            {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
+          </span>
         ) : (
           <EmptyTableValue />
         )}

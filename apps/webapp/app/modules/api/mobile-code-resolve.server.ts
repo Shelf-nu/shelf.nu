@@ -26,6 +26,8 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
+  shapeMobileAssetResponse,
+  shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { getParams } from "~/utils/http.server";
 import { parseSequentialId } from "~/utils/sequential-id";
@@ -102,7 +104,9 @@ export async function resolveMobileScannedCode({
         assetId: asset.id,
         kitId: null,
         organizationId,
-        asset,
+        // Flatten the new pivot shape (assetKits/assetLocations/custody) into
+        // the legacy flat shape the companion expects (quantities restructure).
+        asset: shapeMobileAssetResponse(asset),
         kit: null,
       },
     };
@@ -145,23 +149,23 @@ export async function resolveMobileScannedCode({
 
   // Now fetch the full data (only after authorization passes), scoped to
   // qr.organizationId (proven above: non-null and the caller is a member).
-  let asset: unknown = null;
-  if (qr.assetId) {
-    asset = await db.asset.findFirst({
-      where: { id: qr.assetId, organizationId: qr.organizationId },
-      select: MOBILE_ASSET_SELECT,
-    });
-  }
+  // Use ternaries so Prisma's result type flows to the shape helpers.
+  const asset = qr.assetId
+    ? await db.asset.findFirst({
+        where: { id: qr.assetId, organizationId: qr.organizationId },
+        select: MOBILE_ASSET_SELECT,
+      })
+    : null;
 
   // Kit-linked QR: return the kit so the scanner can batch-operate on it
   // (web parity — all web scanner drawers accept kits).
-  let kit: unknown = null;
-  if (!qr.assetId && qr.kitId) {
-    kit = await db.kit.findFirst({
-      where: { id: qr.kitId, organizationId: qr.organizationId },
-      select: MOBILE_KIT_SELECT,
-    });
-  }
+  const kit =
+    !qr.assetId && qr.kitId
+      ? await db.kit.findFirst({
+          where: { id: qr.kitId, organizationId: qr.organizationId },
+          select: MOBILE_KIT_SELECT,
+        })
+      : null;
 
   return {
     ok: true,
@@ -171,8 +175,10 @@ export async function resolveMobileScannedCode({
       assetId: qr.assetId,
       kitId: qr.kitId,
       organizationId: qr.organizationId,
-      asset,
-      kit,
+      // Flatten the new pivot shape (assetKits/assetLocations/custody) into the
+      // legacy flat shape the companion expects (quantities restructure).
+      asset: asset ? shapeMobileAssetResponse(asset) : null,
+      kit: shapeMobileKitResponse(kit),
     },
   };
 }

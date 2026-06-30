@@ -22,7 +22,8 @@
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
 import z from "zod";
@@ -50,14 +51,106 @@ import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 
 /**
+ * Per-row checkout disposition for a single qty-tracked BookingAsset slice.
+ * Mirrors the scanner drawer's `checkouts` payload so the server action can
+ * accept either entrypoint with the same parser. `bookingAssetId` is required
+ * because the same `assetId` may have multiple slices (standalone +
+ * kit-driven) and the qty must be attributed to the exact slice.
+ *
+ * `quantity` arrives as a string from the form input and is coerced to a
+ * positive integer (`min(1)`) so server-side validation rejects empty
+ * submissions consistent with the singular check-out flow.
+ */
+export const checkoutDispositionSchema = z.object({
+  assetId: z.string(),
+  bookingAssetId: z.string(),
+  quantity: z.coerce.number().int().min(1),
+});
+
+/**
+ * JSON-encoded array of per-row qty-tracked checkout dispositions, supplied
+ * alongside `assetIds[]` for INDIVIDUAL back-compat. Empty / missing string
+ * coerces to `[]` so legacy (INDIVIDUAL-only) submissions remain valid.
+ */
+const checkoutsJsonField = z
+  .string()
+  .optional()
+  .transform((raw) => {
+    if (!raw) return [] as z.infer<typeof checkoutDispositionSchema>[];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return z.array(checkoutDispositionSchema).parse(parsed);
+    } catch {
+      return [] as z.infer<typeof checkoutDispositionSchema>[];
+    }
+  });
+
+/**
  * Validation schema for the bulk partial checkout action. At least one asset
  * id must be supplied — the action rejects empty submissions.
+ *
+ * `checkouts` carries per-slice qty dispositions for QUANTITY_TRACKED assets
+ * (JSON-encoded). INDIVIDUAL assets continue to flow through `assetIds[]`
+ * for back-compat with the existing service entrypoint.
  */
 export const BulkPartialCheckoutSchema = z.object({
   assetIds: z
     .array(z.string())
     .min(1, "Please select at least one asset to check out."),
+  checkouts: checkoutsJsonField,
 });
+
+/**
+ * Per-row qty picker for a single QUANTITY_TRACKED slice. Mirrors the
+ * partial-check-IN drawer's `QuantityDispositionBlock` layout but collapses
+ * to a single "Checked out" input — checkout has no Lost/Damaged/Consumed
+ * split, just "how many units leave the pool now". The input clamps to
+ * `[1..max]` via DOM attrs; the parent component additionally clamps the
+ * serialized payload defensively.
+ *
+ * Hoisted to module scope so `flexRender`-style re-mount churn never
+ * unmounts the input mid-edit (see `.claude/rules/react-render-stability.md`).
+ *
+ * @param props.bookingAssetId - Pivot slice id, used as the dispatch key
+ * @param props.max - Booked qty for this slice (upper bound for the input)
+ * @param props.value - Current input string (controlled)
+ * @param props.onChange - Setter forwarded to the parent's state map
+ */
+function CheckoutQtyInput({
+  bookingAssetId,
+  max,
+  value,
+  onChange,
+}: {
+  bookingAssetId: string;
+  max: number;
+  value: string;
+  onChange: (bookingAssetId: string, next: string) => void;
+}) {
+  return (
+    <label className="ml-auto flex items-center gap-2">
+      <span className="text-xs font-medium text-gray-700">Checked out</span>
+      <input
+        type="number"
+        min={1}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(bookingAssetId, e.target.value)}
+        inputMode="numeric"
+        aria-label="Checkout quantity"
+        className={tw(
+          "w-14 rounded-md border border-gray-200 px-2 py-1 text-right text-sm tabular-nums text-gray-900",
+          "focus:outline-none focus:ring-1 focus:ring-primary-500",
+          "[appearance:textfield]",
+          "[&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none",
+          "[&::-webkit-outer-spin-button]:appearance-none"
+        )}
+      />
+      <span className="text-xs tabular-nums text-gray-500">of {max}</span>
+    </label>
+  );
+}
 
 /**
  * Bulk partial checkout dialog.
@@ -74,35 +167,114 @@ export default function BulkPartialCheckoutDialog({
   setOpen: (open: boolean) => void;
 }) {
   const disabled = useDisabled();
-  const { booking, checkedOutAssetIds } =
+  const { booking, checkedOutAssetIds, remainingToCheckOutByAsset } =
     useLoaderData<BookingPageLoaderData>();
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
-  // Ids already checked out for THIS booking (partial-checkout records). Used
-  // by the shared `isAssetCheckableOut` predicate below.
-  const checkedOutIdsSet = new Set(checkedOutAssetIds || []);
-
-  // Flatten/enrich the selection via the SHARED resolver, then keep kits + the
-  // assets that are still booked (not already checked out).
-  const flattenedItems = flattenSelectedBookingItems(
-    rawSelectedItems,
-    booking.assets
+  // Denormalised, deduplicated asset list derived from the bookingAssets
+  // pivot. `booking.assets` no longer exists post-pivot, so we project the
+  // pivot rows down to one entry per asset id for `flattenSelectedBookingItems`
+  // (which keys lookups by asset id and merges fields into the selection).
+  // We spread the pivot's per-row fields onto each entry — `bookingAssetId`,
+  // `bookedQuantity`, plus the row-level `kit`/`kitId` resolved through the
+  // BookingAsset's `assetKitId` — so the flattened selection downstream has
+  // everything the qty picker and kit-grouping renderer need. Deduping by
+  // asset.id mirrors the lookup-by-id contract `flattenSelectedBookingItems`
+  // expects (later slices for the same asset are dropped). Memoised so its
+  // reference stays stable across renders while `booking.bookingAssets`
+  // doesn't change — without this, the enriched-selection array would churn
+  // → `qtySlices` would recompute → its consumer `useEffect` (which calls
+  // `setQtyByBookingAssetId`) would fire on every render and trip React's
+  // max-update-depth guard.
+  const assetsList = useMemo<AssetWithStatus[]>(
+    () => [
+      ...new Map(
+        booking.bookingAssets.map((ba) => {
+          // Post-Phase-4a pivot: kit membership lives on `asset.assetKits[]`,
+          // not on `asset.kit` directly. When the row was booked under a
+          // specific kit slice, match it via `ba.assetKitId` so kit-driven
+          // rows surface `{ kit, kitId }` and standalone rows leave both
+          // null.
+          const matchedAssetKit = ba.assetKitId
+            ? ba.asset.assetKits?.find((ak) => ak.id === ba.assetKitId) ?? null
+            : null;
+          return [
+            ba.asset.id,
+            {
+              ...ba.asset,
+              bookingAssetId: ba.id,
+              // `?? 1` mirrors the overview loader's projection — defends
+              // against partial fixtures (component tests sometimes omit
+              // BookingAsset.quantity) so spreading this object doesn't
+              // overwrite a caller-supplied bookedQuantity with `undefined`.
+              bookedQuantity: ba.quantity ?? 1,
+              kitId: matchedAssetKit?.kitId ?? null,
+              kit: matchedAssetKit?.kit ?? null,
+            },
+          ];
+        })
+      ).values(),
+    ],
+    [booking.bookingAssets]
   );
-  const selectedItems = flattenedItems.filter((item) => {
-    if (item.type === "kit" || (item.name && item._count)) return true;
-    return isAssetCheckableOut(item as AssetWithStatus, checkedOutIdsSet);
-  });
+
+  // Set of asset ids already checked out for THIS booking (partial-checkout
+  // records). Asset `status === CHECKED_OUT` is checked separately by the
+  // shared `isAssetCheckableOut` helper.
+  const checkedOutIdsSet = useMemo(
+    () => new Set(checkedOutAssetIds || []),
+    [checkedOutAssetIds]
+  );
+
+  /**
+   * Per-asset remaining-to-check-out lookup, sourced from the loader. For
+   * QUANTITY_TRACKED assets this is `sum(bookedQuantity) - sum(checkedOutQuantity)`
+   * across every slice the asset has on this booking. An asset is "fully
+   * out" only when its value reaches 0; while > 0 the user can still top
+   * off the remaining units via this dialog. Passed into the SHARED
+   * `isAssetCheckableOut` predicate so the dropdown, this dialog, and any
+   * future consumer all agree on top-off eligibility.
+   */
+  const remainingByAssetId = useMemo(
+    () => remainingToCheckOutByAsset ?? {},
+    [remainingToCheckOutByAsset]
+  );
+
+  // Flatten/enrich the selection via the SHARED resolver (single source of
+  // truth with the dropdown and check-in dialog), then keep kits + the assets
+  // that are still actionable. The QT-aware branch lives inside
+  // `isAssetCheckableOut` via the `remainingByAssetId` option — collapsing
+  // our previous inline branch into one helper.
+  const flattenedItems = useMemo(
+    () => flattenSelectedBookingItems(rawSelectedItems, assetsList),
+    [rawSelectedItems, assetsList]
+  );
+  const selectedItems = useMemo(
+    () =>
+      flattenedItems.filter((item) => {
+        if (item.type === "kit" || (item.name && item._count)) return true;
+        return isAssetCheckableOut(item as AssetWithStatus, checkedOutIdsSet, {
+          remainingByAssetId,
+        });
+      }),
+    [flattenedItems, checkedOutIdsSet, remainingByAssetId]
+  );
 
   /** Use state instead of ref so the component re-renders once the form
    * mounts — this guarantees portalContainer is the real DOM node
    * when the user opens the early-checkout dialog. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
 
-  // Still-booked assets in the booking (asset-scoped) for final-checkout
-  // detection — unaffected by the kits-as-single-unit setting.
-  const remainingBookedAssets = booking.assets.filter((asset) =>
-    isAssetCheckableOut(asset, checkedOutIdsSet)
+  // Determine whether this is a FINAL checkout: the assets being checked out
+  // equal ALL still-Booked assets in the booking. Iterates the deduped
+  // `assetsList` (post-pivot — `booking.assets` no longer exists) and runs
+  // the same shared predicate as the selection filter so dropdown, dialog,
+  // and final-checkout detection all agree, including QT top-off semantics.
+  const remainingBookedAssets = assetsList.filter((asset) =>
+    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet, {
+      remainingByAssetId,
+    })
   );
 
   // Count only individual assets (exclude kit IDs), deduped, for final-checkout
@@ -179,10 +351,174 @@ export default function BulkPartialCheckoutDialog({
   // No assets remain to check out — disable the submit affordance.
   const noAssetsToCheckOut = selectedAssetIds.length === 0;
 
-  // Assets dropped from the selection because they are already checked out.
+  // Assets dropped from the selection because they are already (fully)
+  // checked out. The QT helper still keeps tops-off rows in `selectedItems`,
+  // so this only counts INDIVIDUAL assets that the predicate rejected and
+  // QT rows with `remaining <= 0`. Sourced from `flattenedItems` so we
+  // include every selected asset id once before the eligibility filter.
   const skippedCount =
     new Set(flattenedItems.filter((i) => i.title && !i._count).map((i) => i.id))
       .size - selectedAssetIds.length;
+
+  /**
+   * Narrow shape we read off each selected QUANTITY_TRACKED row when rendering
+   * the qty picker. Pulled from `enrichedItems` in the overview loader (the
+   * row data the selection atom holds): `bookingAssetId` keys the pivot
+   * slice, `bookedQuantity` is the slice's booked units, `checkedOutQuantity`
+   * is what the slice has already shipped. `type` discriminates
+   * QUANTITY_TRACKED vs INDIVIDUAL (the latter falls back to the original
+   * `assetIds[]` flow with no qty input).
+   */
+  type QtySliceFields = {
+    id: string;
+    bookingAssetId?: string;
+    bookedQuantity?: number;
+    checkedOutQuantity?: number;
+    type?: AssetType;
+  };
+
+  /**
+   * Collect every QUANTITY_TRACKED slice surviving the upstream filter and
+   * compute a per-slice `remaining` (booked − already-checked-out). The same
+   * `assetId` may have multiple slices in this list (standalone + kit-driven
+   * multi-row), so after the naive per-row subtraction we walk slices in
+   * stable order and cap the cumulative `remaining` for each `assetId` at
+   * the loader's asset-level `remainingByAssetId[assetId]`. Without that
+   * cap two rows could each advertise their own per-row remaining and
+   * together over-claim at the asset level — the server clamps anyway but
+   * the UI would be misleading. Slices with `remaining <= 0` are skipped
+   * (already fully covered by prior checkouts).
+   */
+  const qtySlices = useMemo(() => {
+    const slices: Array<{
+      assetId: string;
+      bookingAssetId: string;
+      remaining: number;
+    }> = [];
+    // Track how much asset-level remaining we have left to distribute across
+    // this asset's slices (greedy: fill earlier slices first).
+    const assetRemainingLeft = new Map<string, number>();
+    for (const item of selectedItems) {
+      const row = item as QtySliceFields & {
+        title?: string;
+        _count?: unknown;
+      };
+      // Skip kit grouping rows — they have `_count` and no `title`.
+      if (!row.title || row._count) continue;
+      if (row.type !== AssetType.QUANTITY_TRACKED) continue;
+      if (!row.bookingAssetId) continue;
+
+      const booked = Math.max(0, row.bookedQuantity ?? 0);
+      const checkedOut = Math.max(0, row.checkedOutQuantity ?? 0);
+      const sliceRemaining = Math.max(0, booked - checkedOut);
+      if (sliceRemaining <= 0) continue;
+
+      // Cap the slice's remaining by what's still unallocated at the
+      // asset level. Fall back to the per-slice value when the loader
+      // didn't expose an entry for this asset (defensive — shouldn't
+      // happen because the loader builds the map for every QT row).
+      const assetCap =
+        assetRemainingLeft.get(row.id) ??
+        (row.id in remainingByAssetId
+          ? Math.max(0, remainingByAssetId[row.id])
+          : sliceRemaining);
+      const allocated = Math.min(sliceRemaining, assetCap);
+      if (allocated <= 0) continue;
+
+      assetRemainingLeft.set(row.id, assetCap - allocated);
+      slices.push({
+        assetId: row.id,
+        bookingAssetId: row.bookingAssetId,
+        remaining: allocated,
+      });
+    }
+    return slices;
+  }, [selectedItems, remainingByAssetId]);
+
+  /**
+   * Per-slice qty input state, keyed by `bookingAssetId`. String values mirror
+   * the underlying `<input type="number">` (empty allowed mid-edit) and are
+   * coerced + validated by `checkoutDispositionSchema` server-side. Defaults
+   * to the slice's `remaining` (booked − already-checked-out, capped by the
+   * asset-level remaining) so the default tops off whatever is still
+   * outstanding without over-committing.
+   */
+  const [qtyByBookingAssetId, setQtyByBookingAssetId] = useState<
+    Record<string, string>
+  >({});
+
+  // Seed defaults whenever the slice set changes (dialog open, selection
+  // change, revalidation). Only sets keys we don't already have a value
+  // for — preserving in-progress edits across re-renders.
+  useEffect(() => {
+    setQtyByBookingAssetId((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const slice of qtySlices) {
+        if (!(slice.bookingAssetId in next)) {
+          // Seed to the remaining units this slice can still ship. The
+          // upstream filter now KEEPS partially-checked-out QT assets, so
+          // `remaining` (not raw `bookedQuantity`) is the correct cap.
+          next[slice.bookingAssetId] = String(slice.remaining);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [qtySlices]);
+
+  /**
+   * Serialized payload for the hidden `checkouts` field. Mirrors the scanner
+   * drawer's shape: `{ assetId, bookingAssetId, quantity }` per slice. Empty
+   * / zero qty entries are dropped so the server only acts on positive
+   * dispositions.
+   */
+  const checkoutsPayload = useMemo(
+    () =>
+      qtySlices
+        .map((slice) => {
+          const raw = qtyByBookingAssetId[slice.bookingAssetId] ?? "";
+          const qty = Number(raw);
+          if (!Number.isFinite(qty) || qty <= 0) return null;
+          return {
+            assetId: slice.assetId,
+            bookingAssetId: slice.bookingAssetId,
+            // Clamp to the slice's remaining units, not raw booked qty —
+            // anything above `remaining` would over-claim against prior
+            // checkouts (the server also clamps; this keeps the wire
+            // payload honest).
+            quantity: Math.min(qty, slice.remaining),
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null),
+    [qtySlices, qtyByBookingAssetId]
+  );
+
+  /**
+   * Quick lookup so the row JSX can decide whether to render a qty input.
+   * Exposes the slice's `remaining` (not raw booked qty) so the input
+   * `max` and the "of N" label both reflect what's still outstanding for
+   * this slice after prior partial checkouts.
+   */
+  const qtySliceByBookingAssetId = useMemo(() => {
+    const map = new Map<string, { remaining: number; assetId: string }>();
+    for (const slice of qtySlices) {
+      map.set(slice.bookingAssetId, {
+        remaining: slice.remaining,
+        assetId: slice.assetId,
+      });
+    }
+    return map;
+  }, [qtySlices]);
+
+  /**
+   * Stable per-row qty change handler. Passed to the hoisted `CheckoutQtyInput`
+   * so each row update only touches its own key — preserves input identity
+   * across re-renders even as the surrounding list reshuffles.
+   */
+  const handleQtyChange = (bookingAssetId: string, next: string) => {
+    setQtyByBookingAssetId((prev) => ({ ...prev, [bookingAssetId]: next }));
+  };
 
   return (
     <DialogPortal>
@@ -222,6 +558,16 @@ export default function BulkPartialCheckoutDialog({
               value={assetId}
             />
           ))}
+
+          {/* Per-slice qty-tracked checkouts, JSON-encoded. Mirrors the
+              scanner drawer's `checkouts` payload so the service can
+              consume either entrypoint with one parser. INDIVIDUAL assets
+              keep flowing through `assetIds[]` above for back-compat. */}
+          <input
+            type="hidden"
+            name="checkouts"
+            value={JSON.stringify(checkoutsPayload)}
+          />
 
           {skippedCount > 0 && (
             <p className="mb-3 rounded border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800">
@@ -282,9 +628,80 @@ export default function BulkPartialCheckoutDialog({
 
                       {/* Kit assets */}
                       <ul className="ml-6 mt-2 space-y-1">
-                        {kitAssets.map((asset: any) => (
+                        {kitAssets.map((asset: any) => {
+                          // QUANTITY_TRACKED kit-asset rows get an inline qty
+                          // picker. The bookingAssetId is the dispatch key —
+                          // a single assetId can have multiple kit-driven
+                          // slices in this list (Polish-6 multi-row).
+                          const bookingAssetId: string | undefined =
+                            asset.bookingAssetId;
+                          const qtyInfo = bookingAssetId
+                            ? qtySliceByBookingAssetId.get(bookingAssetId)
+                            : undefined;
+                          return (
+                            <li
+                              key={
+                                bookingAssetId
+                                  ? `${asset.id}-${bookingAssetId}`
+                                  : asset.id
+                              }
+                              className="flex items-center gap-2 text-sm text-gray-700"
+                            >
+                              <AssetImage
+                                className="size-5"
+                                asset={{
+                                  id: asset.id,
+                                  thumbnailImage: asset.thumbnailImage,
+                                  mainImage: asset.mainImage,
+                                  mainImageExpiration:
+                                    asset.mainImageExpiration,
+                                }}
+                                alt={`${asset.title} main image`}
+                              />
+                              <span className="font-medium">{asset.title}</span>
+                              {asset.category && (
+                                <span className="text-gray-500">
+                                  {" "}
+                                  ({asset.category.name})
+                                </span>
+                              )}
+                              {qtyInfo && bookingAssetId ? (
+                                <CheckoutQtyInput
+                                  bookingAssetId={bookingAssetId}
+                                  max={qtyInfo.remaining}
+                                  value={
+                                    qtyByBookingAssetId[bookingAssetId] ?? ""
+                                  }
+                                  onChange={handleQtyChange}
+                                />
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+
+                  {/* Individual assets (not part of kits) */}
+                  {individualAssets.length > 0 && (
+                    <ul className="space-y-1">
+                      {individualAssets.map((asset: any) => {
+                        // Render a qty input only for QUANTITY_TRACKED
+                        // standalone slices. INDIVIDUAL rows render exactly
+                        // as before — they're served by the `assetIds[]`
+                        // back-compat path with implicit qty = 1.
+                        const bookingAssetId: string | undefined =
+                          asset.bookingAssetId;
+                        const qtyInfo = bookingAssetId
+                          ? qtySliceByBookingAssetId.get(bookingAssetId)
+                          : undefined;
+                        return (
                           <li
-                            key={asset.id}
+                            key={
+                              bookingAssetId
+                                ? `${asset.id}-${bookingAssetId}`
+                                : asset.id
+                            }
                             className="flex items-center gap-2 text-sm text-gray-700"
                           >
                             <AssetImage
@@ -304,39 +721,19 @@ export default function BulkPartialCheckoutDialog({
                                 ({asset.category.name})
                               </span>
                             )}
+                            {qtyInfo && bookingAssetId ? (
+                              <CheckoutQtyInput
+                                bookingAssetId={bookingAssetId}
+                                max={qtyInfo.remaining}
+                                value={
+                                  qtyByBookingAssetId[bookingAssetId] ?? ""
+                                }
+                                onChange={handleQtyChange}
+                              />
+                            ) : null}
                           </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-
-                  {/* Individual assets (not part of kits) */}
-                  {individualAssets.length > 0 && (
-                    <ul className="space-y-1">
-                      {individualAssets.map((asset: any) => (
-                        <li
-                          key={asset.id}
-                          className="flex items-center gap-2 text-sm text-gray-700"
-                        >
-                          <AssetImage
-                            className="size-5"
-                            asset={{
-                              id: asset.id,
-                              thumbnailImage: asset.thumbnailImage,
-                              mainImage: asset.mainImage,
-                              mainImageExpiration: asset.mainImageExpiration,
-                            }}
-                            alt={`${asset.title} main image`}
-                          />
-                          <span className="font-medium">{asset.title}</span>
-                          {asset.category && (
-                            <span className="text-gray-500">
-                              {" "}
-                              ({asset.category.name})
-                            </span>
-                          )}
-                        </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
